@@ -1,6 +1,6 @@
 use crate::error::CompositorError;
 use crate::node::NodeRegistry;
-use crate::types::ParamValue;
+use crate::types::{ParamValue, ValueType};
 use slotmap::{new_key_type, SlotMap};
 use std::collections::{HashMap, HashSet};
 
@@ -31,6 +31,10 @@ pub struct Graph {
     pub nodes: SlotMap<NodeId, NodeInstance>,
     pub connections: Vec<Connection>,
     dirty_nodes: HashSet<NodeId>,
+}
+
+pub fn types_compatible(from: &ValueType, to: &ValueType) -> bool {
+    from == to || (*from == ValueType::Field && *to == ValueType::Image)
 }
 
 impl Graph {
@@ -133,7 +137,7 @@ impl Graph {
                 port_name: to_port.to_string(),
             })?;
 
-        if from_port_spec.ty != to_port_spec.ty {
+        if !types_compatible(&from_port_spec.ty, &to_port_spec.ty) {
             return Err(CompositorError::TypeMismatch {
                 expected: format!("{:?}", to_port_spec.ty),
                 got: format!("{:?}", from_port_spec.ty),
@@ -257,6 +261,8 @@ mod tests {
     };
     use std::any::Any;
     use std::collections::HashMap;
+    use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
 
     fn create_test_registry() -> NodeRegistry {
@@ -334,8 +340,13 @@ mod tests {
             self.spec.clone()
         }
 
-        fn evaluate(&self, _ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-            Ok(HashMap::new())
+        fn evaluate<'a>(
+            &'a self,
+            _ctx: &'a EvalContext<'a>,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<HashMap<String, Value>, CompositorError>> + Send + 'a>,
+        > {
+            Box::pin(async move { Ok(HashMap::new()) })
         }
 
         fn as_any(&self) -> &dyn Any {

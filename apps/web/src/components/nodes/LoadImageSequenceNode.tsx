@@ -8,6 +8,7 @@ import {
   NodeSection,
   NodeStatus,
 } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
@@ -106,7 +107,7 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
   const dirBasename = directory ? directory.split('/').filter(Boolean).pop() || directory : '';
 
   return (
-    <BaseNode {...props} data={data}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon('load_image_sequence', 'Input')}>
       <NodeSection>
         <NodeButton
           onClick={handleBrowse}

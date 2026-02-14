@@ -6,6 +6,8 @@ members = [
     "crates/compositor-nodes-std",
     "crates/compositor-wasm",
     "crates/compositor-runtime",
+    "crates/compositor-ocio-sys",
+    "crates/compositor-ocio",
     "apps/tauri/src-tauri",
 ]
 

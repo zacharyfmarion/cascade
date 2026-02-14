@@ -4,7 +4,7 @@
 
 ### Rust Backend
 - [x] Cargo workspace with 6 crates (compositor-core, compositor-nodes-std, compositor-gpu, compositor-wasm, compositor-runtime, compositor-tauri)
-- [x] Image type with f16 RGBA linear color space (`Arc<Vec<f16>>` for cheap cloning)
+- [x] Image type with f32 RGBA linear color space (`Arc<Vec<f32>>` for cheap cloning)
 - [x] sRGB <-> linear color space conversion (correct gamma transfer functions)
 - [x] DAG graph with SlotMap-based NodeId, cycle detection, type-safe connections, dirty propagation
 - [x] Pull-based evaluator with per-output caching (CacheKey: frame_time + param_revision + upstream_hash)
@@ -16,7 +16,7 @@
 - [x] 35 passing tests (22 unit + 3 integration + 7 GPU + 3 script compile flow), 0 warnings
 - [x] Rayon parallelism for all per-pixel node processing
 - [x] Parallel sRGB→u8 conversion with 4096-entry LUT
-- [x] Parallel sRGB u8→linear f16 with 256-entry LUT in LoadImage
+- [x] Parallel sRGB u8→linear f32 with 256-entry LUT in LoadImage
 
 ### GPU Compute Shader System (`compositor-gpu` crate)
 - [x] `GpuContext`: wgpu device/queue initialization with `HighPerformance` + `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`
@@ -126,7 +126,7 @@
 - [x] rAF throttling: `requestAnimationFrame` instead of `setTimeout(50ms)`
 - [x] Fire-and-forget setParamLive: no blocking awaits in slider hot path
 - [x] Parallel sRGB→u8 conversion with 4096-entry LUT (main bottleneck)
-- [x] Parallel sRGB u8→linear f16 with 256-entry LUT in LoadImage
+- [x] Parallel sRGB u8→linear f32 with 256-entry LUT in LoadImage
 - [x] All pixel processing uses Rayon `par_chunks_exact_mut(4)`
 - [x] GaussianBlur: 3-pass box blur approximation, parallel H/V passes, sigma=0 passthrough
 
@@ -196,7 +196,7 @@
 
 | Decision | Chosen | Rationale |
 |----------|--------|-----------|
-| Internal pixel format | f16 RGBA linear | Half the memory of f32; sufficient precision for compositing; linear space for physical accuracy |
+| Internal pixel format | f32 RGBA linear | Native CPU ALU width on x86-64 (no f16↔f32 conversion overhead); linear space for physical accuracy; f16 used only at GPU I/O boundaries |
 | Graph storage | SlotMap | O(1) insert/remove, stable handles that survive deletions, cache-friendly |
 | Evaluation strategy | Pull-based from viewers | Only computes what's needed for display; unused branches are never evaluated |
 | Cache key strategy | frame_time + param_revision + upstream_hash | Content-addressable without hashing pixel data; upstream_hash captures transitive dependencies |

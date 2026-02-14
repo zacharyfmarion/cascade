@@ -45,15 +45,20 @@ const SPECIAL_NODE_TYPES: NodeTypes = {
 };
 
 const PORT_COLORS: Record<string, string> = {
-  Image: 'var(--port-image)',
-  Mask: 'var(--port-mask)',
-  Float: 'var(--port-float)',
-  Int: 'var(--port-int)',
-  Bool: 'var(--port-bool)',
-  Color: 'var(--port-color)',
-};
+   Image: 'var(--port-image)',
+   Mask: 'var(--port-mask)',
+   Float: 'var(--port-float)',
+   Int: 'var(--port-int)',
+   Bool: 'var(--port-bool)',
+   Color: 'var(--port-color)',
+   Field: 'var(--port-field)',
+ };
 
-const DEFAULT_EDGE_COLOR = 'var(--text-muted)';
+ function typesCompatible(from: string, to: string): boolean {
+   return from === to || (from === 'Field' && to === 'Image');
+ }
+
+ const DEFAULT_EDGE_COLOR = 'var(--text-muted)';
 
 interface ClipboardEntry {
   typeId: string;
@@ -184,24 +189,24 @@ export const NodeCanvas: React.FC = () => {
           const srcNode = pendingConnection.handleType === 'source' ? pendingConnection.nodeId : newId;
           const tgtNode = pendingConnection.handleType === 'source' ? newId : pendingConnection.nodeId;
 
-          if (pendingConnection.handleType === 'source') {
-            const srcStoreNode = nodesStore.get(pendingConnection.nodeId);
-            const srcSpec = srcStoreNode ? nodeSpecs.find(s => s.id === srcStoreNode.typeId) : null;
-            const srcOutput = srcSpec?.outputs.find(o => o.name === pendingConnection.handleId);
-            const matchingInput = srcOutput
-              ? newSpec.inputs.find(i => i.ty === srcOutput.ty) ?? newSpec.inputs[0]
-              : newSpec.inputs[0];
+           if (pendingConnection.handleType === 'source') {
+             const srcStoreNode = nodesStore.get(pendingConnection.nodeId);
+             const srcSpec = srcStoreNode ? nodeSpecs.find(s => s.id === srcStoreNode.typeId) : null;
+             const srcOutput = srcSpec?.outputs.find(o => o.name === pendingConnection.handleId);
+             const matchingInput = srcOutput
+               ? newSpec.inputs.find(i => typesCompatible(srcOutput.ty, i.ty)) ?? newSpec.inputs[0]
+               : newSpec.inputs[0];
 
             if (matchingInput) {
               await storeConnect(srcNode, pendingConnection.handleId, tgtNode, matchingInput.name);
             }
-          } else {
-            const tgtStoreNode = nodesStore.get(pendingConnection.nodeId);
-            const tgtSpec = tgtStoreNode ? nodeSpecs.find(s => s.id === tgtStoreNode.typeId) : null;
-            const tgtInput = tgtSpec?.inputs.find(i => i.name === pendingConnection.handleId);
-            const matchingOutput = tgtInput
-              ? newSpec.outputs.find(o => o.ty === tgtInput.ty) ?? newSpec.outputs[0]
-              : newSpec.outputs[0];
+           } else {
+             const tgtStoreNode = nodesStore.get(pendingConnection.nodeId);
+             const tgtSpec = tgtStoreNode ? nodeSpecs.find(s => s.id === tgtStoreNode.typeId) : null;
+             const tgtInput = tgtSpec?.inputs.find(i => i.name === pendingConnection.handleId);
+             const matchingOutput = tgtInput
+               ? newSpec.outputs.find(o => typesCompatible(o.ty, tgtInput.ty)) ?? newSpec.outputs[0]
+               : newSpec.outputs[0];
 
             if (matchingOutput) {
               await storeConnect(srcNode, matchingOutput.name, tgtNode, pendingConnection.handleId);
@@ -441,9 +446,9 @@ export const NodeCanvas: React.FC = () => {
           const srcOutPort = srcSpec.outputs.find(o => o.name === closestEdge!.sourceHandle);
           const tgtInPort = tgtSpec.inputs.find(i => i.name === closestEdge!.targetHandle);
 
-          if (srcOutPort && tgtInPort) {
-            const matchingInput = newNodeSpec.inputs.find(i => i.ty === srcOutPort.ty);
-            const matchingOutput = newNodeSpec.outputs.find(o => o.ty === tgtInPort.ty);
+           if (srcOutPort && tgtInPort) {
+             const matchingInput = newNodeSpec.inputs.find(i => typesCompatible(srcOutPort.ty, i.ty));
+             const matchingOutput = newNodeSpec.outputs.find(o => typesCompatible(o.ty, tgtInPort.ty));
 
             if (matchingInput && matchingOutput) {
               try {

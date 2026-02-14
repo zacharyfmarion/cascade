@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import type { NodeProps } from '@xyflow/react';
+import { Hexagon } from 'lucide-react';
 import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
 import { NodeSection } from './NodePrimitives';
@@ -28,7 +29,7 @@ export const GroupNodeComponent: React.FC<NodeProps> = (props) => {
     <BaseNode
       {...props}
       data={data}
-      headerIcon={<span style={{ fontSize: '0.7rem', opacity: 0.7 }}>⬡</span>}
+      headerIcon={<Hexagon size={12} />}
       headerTag="Group"
       onHeaderDoubleClick={handleDoubleClick}
     >

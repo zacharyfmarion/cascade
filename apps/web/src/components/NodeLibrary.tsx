@@ -1,23 +1,8 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { Search, ChevronDown, ChevronRight } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
 import type { NodeSpec } from '../store/types';
-import { FaImage, FaAdjust, FaEye, FaFilter, FaSearch, FaChevronDown, FaChevronRight, FaLayerGroup, FaExpandArrowsAlt, FaStar, FaMask, FaMicrochip, FaCalculator } from 'react-icons/fa';
-
-const getIconForCategory = (category: string) => {
-  switch (category) {
-    case 'Input': return <FaImage />;
-    case 'Output': return <FaEye />;
-    case 'Color': return <FaAdjust />;
-    case 'Filter': return <FaFilter />;
-    case 'Composite': return <FaLayerGroup />;
-    case 'Transform': return <FaExpandArrowsAlt />;
-    case 'Generator': return <FaStar />;
-    case 'Matte': return <FaMask />;
-    case 'GPU': return <FaMicrochip />;
-    case 'Utility': return <FaCalculator />;
-    default: return <FaImage />;
-  }
-};
+import { getNodeIcon, getCategoryIcon } from './nodes/nodeIcons';
 
 export const NodeLibrary: React.FC = () => {
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
@@ -72,7 +57,7 @@ export const NodeLibrary: React.FC = () => {
           borderRadius: '4px',
           padding: '4px 8px'
         }}>
-          <FaSearch style={{ color: 'var(--text-muted)', marginRight: '8px' }} />
+          <Search size={14} style={{ color: 'var(--text-muted)', marginRight: '8px', flexShrink: 0 }} />
           <input 
             type="text" 
             placeholder="Search nodes..." 
@@ -110,8 +95,11 @@ export const NodeLibrary: React.FC = () => {
                 marginBottom: '4px'
               }}
             >
-              {expanded[category] ? <FaChevronDown size={10} /> : <FaChevronRight size={10} />}
-              <span style={{ marginLeft: '6px' }}>{category.toUpperCase()}</span>
+              {expanded[category] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              <span style={{ marginLeft: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {getCategoryIcon(category)}
+                {category.toUpperCase()}
+              </span>
             </button>
             
             {expanded[category] && (
@@ -147,7 +135,7 @@ export const NodeLibrary: React.FC = () => {
                       display: 'flex',
                       alignItems: 'center'
                     }}>
-                      {getIconForCategory(spec.category)}
+                      {getNodeIcon(spec.id, spec.category)}
                     </div>
                     <div style={{ fontSize: '0.85rem' }}>{spec.display_name}</div>
                   </div>

@@ -1,7 +1,6 @@
 use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
-use rayon::prelude::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -23,31 +22,11 @@ impl Node for SolidColor {
             description: "Generate a solid color image".to_string(),
             inputs: vec![],
             outputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
+                name: "field".to_string(),
+                label: "Field".to_string(),
+                ty: ValueType::Field,
             }],
             params: vec![
-                ParamSpec {
-                    key: "width".to_string(),
-                    label: "Width".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1920),
-                    min: Some(1.0),
-                    max: Some(8192.0),
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
-                ParamSpec {
-                    key: "height".to_string(),
-                    label: "Height".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1080),
-                    min: Some(1.0),
-                    max: Some(8192.0),
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
                 ParamSpec {
                     key: "r".to_string(),
                     label: "Red".to_string(),
@@ -88,29 +67,76 @@ impl Node for SolidColor {
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
                 },
+                ParamSpec {
+                    key: "scale_x".to_string(),
+                    label: "Scale X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "scale_y".to_string(),
+                    label: "Scale Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_x".to_string(),
+                    label: "Offset X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_y".to_string(),
+                    label: "Offset Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "rotation".to_string(),
+                    label: "Rotation".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(0.0),
+                    max: Some(360.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
             ],
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let width = ctx.get_param_int("width")? as u32;
-        let height = ctx.get_param_int("height")? as u32;
-        let r = ctx.get_param_float("r")? as f32;
-        let g = ctx.get_param_float("g")? as f32;
-        let b = ctx.get_param_float("b")? as f32;
-        let a = ctx.get_param_float("a")? as f32;
-        let pixel_count = (width as usize) * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4).for_each(|out| {
-            out[0] = r;
-            out[1] = g;
-            out[2] = b;
-            out[3] = a;
-        });
-        let output = Image::from_f32_data(width, height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let transform = build_field_transform(ctx)?;
+            let r = ctx.get_param_float("r")? as f32;
+            let g = ctx.get_param_float("g")? as f32;
+            let b = ctx.get_param_float("b")? as f32;
+            let a = ctx.get_param_float("a")? as f32;
+            let field = Field::with_transform(move |_, _| [r, g, b, a], transform);
+            let mut outputs = HashMap::new();
+            outputs.insert("field".to_string(), Value::Field(field));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -139,31 +165,11 @@ impl Node for Noise {
             description: "Generate procedural noise".to_string(),
             inputs: vec![],
             outputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
+                name: "field".to_string(),
+                label: "Field".to_string(),
+                ty: ValueType::Field,
             }],
             params: vec![
-                ParamSpec {
-                    key: "width".to_string(),
-                    label: "Width".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1920),
-                    min: Some(1.0),
-                    max: Some(8192.0),
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
-                ParamSpec {
-                    key: "height".to_string(),
-                    label: "Height".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1080),
-                    min: Some(1.0),
-                    max: Some(8192.0),
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
                 ParamSpec {
                     key: "seed".to_string(),
                     label: "Seed".to_string(),
@@ -194,43 +200,90 @@ impl Node for Noise {
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
                 },
+                ParamSpec {
+                    key: "scale_x".to_string(),
+                    label: "Scale X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "scale_y".to_string(),
+                    label: "Scale Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_x".to_string(),
+                    label: "Offset X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_y".to_string(),
+                    label: "Offset Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "rotation".to_string(),
+                    label: "Rotation".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(0.0),
+                    max: Some(360.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
             ],
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let width = ctx.get_param_int("width")? as u32;
-        let height = ctx.get_param_int("height")? as u32;
-        let seed = ctx.get_param_int("seed")? as f32;
-        let monochrome = ctx.get_param_bool("monochrome")?;
-        let intensity = ctx.get_param_float("intensity")? as f32;
-        let width_usize = width as usize;
-        let pixel_count = width_usize * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = (i % width_usize) as f32;
-                let y = (i / width_usize) as f32;
-                if monochrome {
-                    let v = hash_noise(x, y, seed) * intensity;
-                    out[0] = v;
-                    out[1] = v;
-                    out[2] = v;
-                } else {
-                    let r = hash_noise(x, y, seed) * intensity;
-                    let g = hash_noise(x, y, seed + 1.0) * intensity;
-                    let b = hash_noise(x, y, seed + 2.0) * intensity;
-                    out[0] = r;
-                    out[1] = g;
-                    out[2] = b;
-                }
-                out[3] = 1.0;
-            });
-        let output = Image::from_f32_data(width, height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let transform = build_field_transform(ctx)?;
+            let seed = ctx.get_param_int("seed")? as f32;
+            let monochrome = ctx.get_param_bool("monochrome")?;
+            let intensity = ctx.get_param_float("intensity")? as f32;
+            let field = Field::with_transform(
+                move |u, v| {
+                    let noise_u = u * 1000.0;
+                    let noise_v = v * 1000.0;
+                    if monochrome {
+                        let value = hash_noise(noise_u, noise_v, seed) * intensity;
+                        [value, value, value, 1.0]
+                    } else {
+                        let r = hash_noise(noise_u, noise_v, seed) * intensity;
+                        let g = hash_noise(noise_u, noise_v, seed + 1.0) * intensity;
+                        let b = hash_noise(noise_u, noise_v, seed + 2.0) * intensity;
+                        [r, g, b, 1.0]
+                    }
+                },
+                transform,
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("field".to_string(), Value::Field(field));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -259,31 +312,11 @@ impl Node for Gradient {
             description: "Generate a gradient image".to_string(),
             inputs: vec![],
             outputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
+                name: "field".to_string(),
+                label: "Field".to_string(),
+                ty: ValueType::Field,
             }],
             params: vec![
-                ParamSpec {
-                    key: "width".to_string(),
-                    label: "Width".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1920),
-                    min: None,
-                    max: None,
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
-                ParamSpec {
-                    key: "height".to_string(),
-                    label: "Height".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1080),
-                    min: None,
-                    max: None,
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
                 ParamSpec {
                     key: "direction".to_string(),
                     label: "Direction".to_string(),
@@ -359,64 +392,105 @@ impl Node for Gradient {
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
                 },
+                ParamSpec {
+                    key: "scale_x".to_string(),
+                    label: "Scale X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "scale_y".to_string(),
+                    label: "Scale Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_x".to_string(),
+                    label: "Offset X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_y".to_string(),
+                    label: "Offset Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "rotation".to_string(),
+                    label: "Rotation".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(0.0),
+                    max: Some(360.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
             ],
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let width = ctx.get_param_int("width")? as u32;
-        let height = ctx.get_param_int("height")? as u32;
-        let direction = ctx.get_param_int("direction")?;
-        let start_r = ctx.get_param_float("start_r")? as f32;
-        let start_g = ctx.get_param_float("start_g")? as f32;
-        let start_b = ctx.get_param_float("start_b")? as f32;
-        let end_r = ctx.get_param_float("end_r")? as f32;
-        let end_g = ctx.get_param_float("end_g")? as f32;
-        let end_b = ctx.get_param_float("end_b")? as f32;
-        let width_usize = width as usize;
-        let pixel_count = width_usize * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        let denom_x = if width > 1 { (width - 1) as f32 } else { 1.0 };
-        let denom_y = if height > 1 { (height - 1) as f32 } else { 1.0 };
-        let cx = (width as f32 - 1.0) * 0.5;
-        let cy = (height as f32 - 1.0) * 0.5;
-        let max_dx = cx.max(width as f32 - 1.0 - cx);
-        let max_dy = cy.max(height as f32 - 1.0 - cy);
-        let max_dist = (max_dx * max_dx + max_dy * max_dy).sqrt();
-        let inv_max_dist = if max_dist > 0.0 { 1.0 / max_dist } else { 0.0 };
-        let two_pi = 2.0 * PI;
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = (i % width_usize) as f32;
-                let y = (i / width_usize) as f32;
-                let t = match direction {
-                    0 => x / denom_x,
-                    1 => y / denom_y,
-                    2 => {
-                        let dx = x - cx;
-                        let dy = y - cy;
-                        (dx * dx + dy * dy).sqrt() * inv_max_dist
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let transform = build_field_transform(ctx)?;
+            let direction = ctx.get_param_int("direction")?;
+            let start_r = ctx.get_param_float("start_r")? as f32;
+            let start_g = ctx.get_param_float("start_g")? as f32;
+            let start_b = ctx.get_param_float("start_b")? as f32;
+            let end_r = ctx.get_param_float("end_r")? as f32;
+            let end_g = ctx.get_param_float("end_g")? as f32;
+            let end_b = ctx.get_param_float("end_b")? as f32;
+            let max_dist = (0.5f32 * 0.5f32 * 2.0).sqrt();
+            let inv_max_dist = if max_dist > 0.0 { 1.0 / max_dist } else { 0.0 };
+            let two_pi = 2.0 * PI;
+            let field = Field::with_transform(
+                move |u, v| {
+                    let t = match direction {
+                        0 => u,
+                        1 => v,
+                        2 => {
+                            let dx = u - 0.5;
+                            let dy = v - 0.5;
+                            (dx * dx + dy * dy).sqrt() * inv_max_dist
+                        }
+                        3 => {
+                            let angle = (v - 0.5).atan2(u - 0.5);
+                            (angle + PI) / two_pi
+                        }
+                        _ => u,
                     }
-                    3 => {
-                        let angle = (y - cy).atan2(x - cx);
-                        (angle + PI) / two_pi
-                    }
-                    _ => x / denom_x,
-                }
-                .clamp(0.0, 1.0);
-                let r = lerp(start_r, end_r, t).clamp(0.0, 1.0);
-                let g = lerp(start_g, end_g, t).clamp(0.0, 1.0);
-                let b = lerp(start_b, end_b, t).clamp(0.0, 1.0);
-                out[0] = r;
-                out[1] = g;
-                out[2] = b;
-                out[3] = 1.0;
-            });
-        let output = Image::from_f32_data(width, height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+                    .clamp(0.0, 1.0);
+                    let r = lerp(start_r, end_r, t).clamp(0.0, 1.0);
+                    let g = lerp(start_g, end_g, t).clamp(0.0, 1.0);
+                    let b = lerp(start_b, end_b, t).clamp(0.0, 1.0);
+                    [r, g, b, 1.0]
+                },
+                transform,
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("field".to_string(), Value::Field(field));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -445,38 +519,18 @@ impl Node for Checkerboard {
             description: "Generate a checkerboard pattern".to_string(),
             inputs: vec![],
             outputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
+                name: "field".to_string(),
+                label: "Field".to_string(),
+                ty: ValueType::Field,
             }],
             params: vec![
-                ParamSpec {
-                    key: "width".to_string(),
-                    label: "Width".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1920),
-                    min: None,
-                    max: None,
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
-                ParamSpec {
-                    key: "height".to_string(),
-                    label: "Height".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1080),
-                    min: None,
-                    max: None,
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
                 ParamSpec {
                     key: "size".to_string(),
                     label: "Size".to_string(),
                     ty: ValueType::Int,
-                    default: ParamDefault::Int(64),
+                    default: ParamDefault::Int(8),
                     min: Some(1.0),
-                    max: Some(512.0),
+                    max: Some(128.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
                 },
@@ -540,43 +594,92 @@ impl Node for Checkerboard {
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
                 },
+                ParamSpec {
+                    key: "scale_x".to_string(),
+                    label: "Scale X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "scale_y".to_string(),
+                    label: "Scale Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_x".to_string(),
+                    label: "Offset X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_y".to_string(),
+                    label: "Offset Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "rotation".to_string(),
+                    label: "Rotation".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(0.0),
+                    max: Some(360.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
             ],
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let width = ctx.get_param_int("width")? as u32;
-        let height = ctx.get_param_int("height")? as u32;
-        let size = ctx.get_param_int("size")? as u32;
-        let color1_r = ctx.get_param_float("color1_r")? as f32;
-        let color1_g = ctx.get_param_float("color1_g")? as f32;
-        let color1_b = ctx.get_param_float("color1_b")? as f32;
-        let color2_r = ctx.get_param_float("color2_r")? as f32;
-        let color2_g = ctx.get_param_float("color2_g")? as f32;
-        let color2_b = ctx.get_param_float("color2_b")? as f32;
-        let width_usize = width as usize;
-        let pixel_count = width_usize * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = (i % width_usize) as u32;
-                let y = (i / width_usize) as u32;
-                let tile = ((x / size) + (y / size)) % 2;
-                let (r, g, b) = if tile == 0 {
-                    (color1_r, color1_g, color1_b)
-                } else {
-                    (color2_r, color2_g, color2_b)
-                };
-                out[0] = r;
-                out[1] = g;
-                out[2] = b;
-                out[3] = 1.0;
-            });
-        let output = Image::from_f32_data(width, height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let transform = build_field_transform(ctx)?;
+            let size = ctx.get_param_int("size")? as u32;
+            let color1_r = ctx.get_param_float("color1_r")? as f32;
+            let color1_g = ctx.get_param_float("color1_g")? as f32;
+            let color1_b = ctx.get_param_float("color1_b")? as f32;
+            let color2_r = ctx.get_param_float("color2_r")? as f32;
+            let color2_g = ctx.get_param_float("color2_g")? as f32;
+            let color2_b = ctx.get_param_float("color2_b")? as f32;
+            let field = Field::with_transform(
+                move |u, v| {
+                    let tile_x = (u * size as f32).floor() as u32;
+                    let tile_y = (v * size as f32).floor() as u32;
+                    let tile = (tile_x + tile_y) % 2;
+                    let (r, g, b) = if tile == 0 {
+                        (color1_r, color1_g, color1_b)
+                    } else {
+                        (color2_r, color2_g, color2_b)
+                    };
+                    [r, g, b, 1.0]
+                },
+                transform,
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("field".to_string(), Value::Field(field));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -605,31 +708,11 @@ impl Node for Shape {
             description: "Generate a shape mask".to_string(),
             inputs: vec![],
             outputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
+                name: "field".to_string(),
+                label: "Field".to_string(),
+                ty: ValueType::Field,
             }],
             params: vec![
-                ParamSpec {
-                    key: "width".to_string(),
-                    label: "Width".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1920),
-                    min: Some(1.0),
-                    max: Some(8192.0),
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
-                ParamSpec {
-                    key: "height".to_string(),
-                    label: "Height".to_string(),
-                    ty: ValueType::Int,
-                    default: ParamDefault::Int(1080),
-                    min: Some(1.0),
-                    max: Some(8192.0),
-                    step: Some(1.0),
-                    ui_hint: UiHint::NumberInput,
-                },
                 ParamSpec {
                     key: "shape".to_string(),
                     label: "Shape".to_string(),
@@ -714,81 +797,122 @@ impl Node for Shape {
                     step: None,
                     ui_hint: UiHint::Checkbox,
                 },
+                ParamSpec {
+                    key: "scale_x".to_string(),
+                    label: "Scale X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "scale_y".to_string(),
+                    label: "Scale Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.01),
+                    max: Some(100.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_x".to_string(),
+                    label: "Offset X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "offset_y".to_string(),
+                    label: "Offset Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-10.0),
+                    max: Some(10.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "rotation".to_string(),
+                    label: "Rotation".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(0.0),
+                    max: Some(360.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
             ],
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let width = ctx.get_param_int("width")? as u32;
-        let height = ctx.get_param_int("height")? as u32;
-        let shape = ctx.get_param_int("shape")?.clamp(0, 2);
-        let center_x = ctx.get_param_float("center_x")? as f32;
-        let center_y = ctx.get_param_float("center_y")? as f32;
-        let size_x = ctx.get_param_float("size_x")? as f32;
-        let size_y = ctx.get_param_float("size_y")? as f32;
-        let corner_radius = ctx.get_param_float("corner_radius")? as f32;
-        let feather = ctx.get_param_float("feather")? as f32;
-        let invert = ctx.get_param_bool("invert")?;
-        let width_usize = width as usize;
-        let pixel_count = width_usize * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        let w = width as f32;
-        let h = height as f32;
-        let cx = center_x * (w - 1.0);
-        let cy = center_y * (h - 1.0);
-        let rx = (size_x * w * 0.5).max(0.5);
-        let ry = (size_y * h * 0.5).max(0.5);
-        let min_dim = w.min(h).max(1.0);
-        let feather_px = feather * min_dim;
-        let mut corner_px = corner_radius * min_dim;
-        corner_px = corner_px.min(rx.min(ry));
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = (i % width_usize) as f32;
-                let y = (i / width_usize) as f32;
-                let dx = x - cx;
-                let dy = y - cy;
-                let sdf = match shape {
-                    0 => {
-                        let nx = dx / rx;
-                        let ny = dy / ry;
-                        (nx * nx + ny * ny).sqrt() - 1.0
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let transform = build_field_transform(ctx)?;
+            let shape = ctx.get_param_int("shape")?.clamp(0, 2);
+            let center_x = ctx.get_param_float("center_x")? as f32;
+            let center_y = ctx.get_param_float("center_y")? as f32;
+            let size_x = ctx.get_param_float("size_x")? as f32;
+            let size_y = ctx.get_param_float("size_y")? as f32;
+            let corner_radius = ctx.get_param_float("corner_radius")? as f32;
+            let feather = ctx.get_param_float("feather")? as f32;
+            let invert = ctx.get_param_bool("invert")?;
+            let half_size_x = (size_x * 0.5).max(f32::EPSILON);
+            let half_size_y = (size_y * 0.5).max(f32::EPSILON);
+            let corner_radius = corner_radius.min(half_size_x.min(half_size_y));
+            let feather = feather.max(0.0);
+            let field = Field::with_transform(
+                move |u, v| {
+                    let dx = u - center_x;
+                    let dy = v - center_y;
+                    let sdf = match shape {
+                        0 => {
+                            let nx = dx / half_size_x;
+                            let ny = dy / half_size_y;
+                            (nx * nx + ny * ny).sqrt() - 1.0
+                        }
+                        1 => {
+                            let bx = dx.abs() - half_size_x;
+                            let by = dy.abs() - half_size_y;
+                            let ax = bx.max(0.0);
+                            let ay = by.max(0.0);
+                            (ax * ax + ay * ay).sqrt() + bx.max(by).min(0.0)
+                        }
+                        _ => {
+                            let bx = dx.abs() - (half_size_x - corner_radius);
+                            let by = dy.abs() - (half_size_y - corner_radius);
+                            let ax = bx.max(0.0);
+                            let ay = by.max(0.0);
+                            (ax * ax + ay * ay).sqrt() + bx.max(by).min(0.0) - corner_radius
+                        }
+                    };
+                    let mut value = if feather > f32::EPSILON {
+                        1.0 - (sdf / feather).clamp(0.0, 1.0)
+                    } else if sdf <= 0.0 {
+                        1.0
+                    } else {
+                        0.0
+                    };
+                    if invert {
+                        value = 1.0 - value;
                     }
-                    1 => {
-                        let bx = dx.abs() - rx;
-                        let by = dy.abs() - ry;
-                        let ax = bx.max(0.0);
-                        let ay = by.max(0.0);
-                        (ax * ax + ay * ay).sqrt() + bx.max(by).min(0.0)
-                    }
-                    _ => {
-                        let bx = dx.abs() - (rx - corner_px);
-                        let by = dy.abs() - (ry - corner_px);
-                        let ax = bx.max(0.0);
-                        let ay = by.max(0.0);
-                        (ax * ax + ay * ay).sqrt() + bx.max(by).min(0.0) - corner_px
-                    }
-                };
-                let mut value = if feather_px > f32::EPSILON {
-                    1.0 - (sdf / feather_px).clamp(0.0, 1.0)
-                } else if sdf <= 0.0 {
-                    1.0
-                } else {
-                    0.0
-                };
-                if invert {
-                    value = 1.0 - value;
-                }
-                out[0] = value;
-                out[1] = value;
-                out[2] = value;
-                out[3] = 1.0;
-            });
-        let output = Image::from_f32_data(width, height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+                    [value, value, value, 1.0]
+                },
+                transform,
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("field".to_string(), Value::Field(field));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -798,6 +922,94 @@ impl Node for Shape {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+pub struct RasterizeField;
+
+impl RasterizeField {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for RasterizeField {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "rasterize_field".to_string(),
+            display_name: "Rasterize Field".to_string(),
+            category: "Generator".to_string(),
+            description: "Convert a field to an image at a specific resolution".to_string(),
+            inputs: vec![PortSpec {
+                name: "field".to_string(),
+                label: "Field".to_string(),
+                ty: ValueType::Field,
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "width".to_string(),
+                    label: "Width".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1920),
+                    min: Some(1.0),
+                    max: Some(8192.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
+                ParamSpec {
+                    key: "height".to_string(),
+                    label: "Height".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1080),
+                    min: Some(1.0),
+                    max: Some(8192.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let field = ctx.get_input_field("field")?;
+            let width = ctx.get_param_int("width")? as u32;
+            let height = ctx.get_param_int("height")? as u32;
+            let image = field.rasterize(width, height);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(image));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+fn build_field_transform(ctx: &EvalContext) -> Result<FieldTransform, CompositorError> {
+    let scale_x = ctx.get_param_float("scale_x")? as f32;
+    let scale_y = ctx.get_param_float("scale_y")? as f32;
+    let offset_x = ctx.get_param_float("offset_x")? as f32;
+    let offset_y = ctx.get_param_float("offset_y")? as f32;
+    let rotation = ctx.get_param_float("rotation")? as f32;
+    Ok(FieldTransform {
+        scale: [scale_x, scale_y],
+        offset: [offset_x, offset_y],
+        rotation: rotation.to_radians(),
+    })
 }
 
 fn hash_noise(x: f32, y: f32, seed: f32) -> f32 {

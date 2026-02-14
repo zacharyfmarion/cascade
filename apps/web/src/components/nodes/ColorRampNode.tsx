@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeDropdown, NodeButton, NodeSection } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue, ColorStop } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
@@ -135,7 +136,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
   const dropdownData = interpOptions?.ui_hint.type === 'Dropdown' ? interpOptions.ui_hint.data : ['Linear', 'Constant'];
 
   return (
-    <BaseNode {...props} data={data} minWidth="280px" maxWidth="320px">
+    <BaseNode {...props} data={data} minWidth="280px" maxWidth="320px" headerIcon={getNodeIcon('color_ramp', 'Color')}>
       <div
         className="nopan nodrag nowheel"
         style={{ userSelect: 'none' }}

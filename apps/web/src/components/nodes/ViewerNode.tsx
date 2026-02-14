@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeCanvas } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 
@@ -31,7 +32,7 @@ export const ViewerNode: React.FC<NodeProps> = (props) => {
   }, [result]);
 
   return (
-    <BaseNode {...props} data={data}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon('viewer', 'Output')}>
       <NodeCanvas canvasRef={canvasRef} hasResult={!!result} emptyText="No Output" height={100} />
     </BaseNode>
   );

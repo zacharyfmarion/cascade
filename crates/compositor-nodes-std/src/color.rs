@@ -1,5 +1,4 @@
-use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
 use std::any::Any;
@@ -63,42 +62,48 @@ impl Node for BrightnessContrast {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let brightness = ctx.get_param_float("brightness")? as f32;
-        let contrast = ctx.get_param_float("contrast")? as f32;
-        let pixel_count = image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let mut rgba = [
-                    image.data[idx],
-                    image.data[idx + 1],
-                    image.data[idx + 2],
-                    image.data[idx + 3],
-                ];
-                for c in 0..3 {
-                    let mut v = (rgba[c] - 0.5) * (1.0 + contrast) + 0.5;
-                    v += brightness;
-                    rgba[c] = v.clamp(0.0, 1.0);
-                }
-                out[0] = rgba[0];
-                out[1] = rgba[1];
-                out[2] = rgba[2];
-                out[3] = rgba[3];
-            });
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-            let original = ctx.get_input_image("image")?;
-            crate::mask_utils::apply_mask(original, &output, mask)
-        } else {
-            output
-        };
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let brightness = ctx.get_param_float("brightness")? as f32;
+            let contrast = ctx.get_param_float("contrast")? as f32;
+            let pixel_count = image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let mut rgba = [
+                        image.data[idx],
+                        image.data[idx + 1],
+                        image.data[idx + 2],
+                        image.data[idx + 3],
+                    ];
+                    for c in 0..3 {
+                        let mut v = (rgba[c] - 0.5) * (1.0 + contrast) + 0.5;
+                        v += brightness;
+                        rgba[c] = v.clamp(0.0, 1.0);
+                    }
+                    out[0] = rgba[0];
+                    out[1] = rgba[1];
+                    out[2] = rgba[2];
+                    out[3] = rgba[3];
+                });
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                let original = ctx.get_input_image("image")?;
+                crate::mask_utils::apply_mask(original, &output, mask)
+            } else {
+                output
+            };
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -167,42 +172,48 @@ impl Node for HueSaturation {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let hue_shift = ctx.get_param_float("hue")? as f32;
-        let sat_shift = ctx.get_param_float("saturation")? as f32;
-        let pixel_count = image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let r = image.data[idx];
-                let g = image.data[idx + 1];
-                let b = image.data[idx + 2];
-                let a = image.data[idx + 3];
-                let (mut h, mut s, l) = rgb_to_hsl(r, g, b);
-                h = (h + hue_shift) % 360.0;
-                if h < 0.0 {
-                    h += 360.0;
-                }
-                s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
-                let (nr, ng, nb) = hsl_to_rgb(h, s, l);
-                out[0] = nr;
-                out[1] = ng;
-                out[2] = nb;
-                out[3] = a;
-            });
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-            let original = ctx.get_input_image("image")?;
-            crate::mask_utils::apply_mask(original, &output, mask)
-        } else {
-            output
-        };
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let hue_shift = ctx.get_param_float("hue")? as f32;
+            let sat_shift = ctx.get_param_float("saturation")? as f32;
+            let pixel_count = image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let r = image.data[idx];
+                    let g = image.data[idx + 1];
+                    let b = image.data[idx + 2];
+                    let a = image.data[idx + 3];
+                    let (mut h, mut s, l) = rgb_to_hsl(r, g, b);
+                    h = (h + hue_shift) % 360.0;
+                    if h < 0.0 {
+                        h += 360.0;
+                    }
+                    s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
+                    let (nr, ng, nb) = hsl_to_rgb(h, s, l);
+                    out[0] = nr;
+                    out[1] = ng;
+                    out[2] = nb;
+                    out[3] = a;
+                });
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                let original = ctx.get_input_image("image")?;
+                crate::mask_utils::apply_mask(original, &output, mask)
+            } else {
+                output
+            };
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -260,45 +271,51 @@ impl Node for SeparateHsva {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let pixel_count = image.pixel_count();
-        let mut hue_data = vec![0.0f32; pixel_count * 4];
-        let mut saturation_data = vec![0.0f32; pixel_count * 4];
-        let mut value_data = vec![0.0f32; pixel_count * 4];
-        let mut alpha_data = vec![0.0f32; pixel_count * 4];
-        hue_data
-            .par_chunks_exact_mut(4)
-            .zip(saturation_data.par_chunks_exact_mut(4))
-            .zip(value_data.par_chunks_exact_mut(4))
-            .zip(alpha_data.par_chunks_exact_mut(4))
-            .enumerate()
-            .for_each(|(i, (((hue_out, sat_out), val_out), alpha_out))| {
-                let idx = i * 4;
-                let r = image.data[idx];
-                let g = image.data[idx + 1];
-                let b = image.data[idx + 2];
-                let a = image.data[idx + 3];
-                let (h, s, v) = rgb_to_hsv(r, g, b);
-                let hue = h / 360.0;
-                let outputs = [(hue_out, hue), (sat_out, s), (val_out, v), (alpha_out, a)];
-                for (out, value) in outputs {
-                    out[0] = value;
-                    out[1] = value;
-                    out[2] = value;
-                    out[3] = 1.0;
-                }
-            });
-        let hue_image = Image::from_f32_data(image.width, image.height, hue_data);
-        let saturation_image = Image::from_f32_data(image.width, image.height, saturation_data);
-        let value_image = Image::from_f32_data(image.width, image.height, value_data);
-        let alpha_image = Image::from_f32_data(image.width, image.height, alpha_data);
-        let mut outputs = HashMap::new();
-        outputs.insert("hue".to_string(), Value::Image(hue_image));
-        outputs.insert("saturation".to_string(), Value::Image(saturation_image));
-        outputs.insert("value".to_string(), Value::Image(value_image));
-        outputs.insert("alpha".to_string(), Value::Image(alpha_image));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let pixel_count = image.pixel_count();
+            let mut hue_data = vec![0.0f32; pixel_count * 4];
+            let mut saturation_data = vec![0.0f32; pixel_count * 4];
+            let mut value_data = vec![0.0f32; pixel_count * 4];
+            let mut alpha_data = vec![0.0f32; pixel_count * 4];
+            hue_data
+                .par_chunks_exact_mut(4)
+                .zip(saturation_data.par_chunks_exact_mut(4))
+                .zip(value_data.par_chunks_exact_mut(4))
+                .zip(alpha_data.par_chunks_exact_mut(4))
+                .enumerate()
+                .for_each(|(i, (((hue_out, sat_out), val_out), alpha_out))| {
+                    let idx = i * 4;
+                    let r = image.data[idx];
+                    let g = image.data[idx + 1];
+                    let b = image.data[idx + 2];
+                    let a = image.data[idx + 3];
+                    let (h, s, v) = rgb_to_hsv(r, g, b);
+                    let hue = h / 360.0;
+                    let outputs = [(hue_out, hue), (sat_out, s), (val_out, v), (alpha_out, a)];
+                    for (out, value) in outputs {
+                        out[0] = value;
+                        out[1] = value;
+                        out[2] = value;
+                        out[3] = 1.0;
+                    }
+                });
+            let hue_image = Image::from_f32_data(image.width, image.height, hue_data);
+            let saturation_image = Image::from_f32_data(image.width, image.height, saturation_data);
+            let value_image = Image::from_f32_data(image.width, image.height, value_data);
+            let alpha_image = Image::from_f32_data(image.width, image.height, alpha_data);
+            let mut outputs = HashMap::new();
+            outputs.insert("hue".to_string(), Value::Image(hue_image));
+            outputs.insert("saturation".to_string(), Value::Image(saturation_image));
+            outputs.insert("value".to_string(), Value::Image(value_image));
+            outputs.insert("alpha".to_string(), Value::Image(alpha_image));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -356,32 +373,38 @@ impl Node for CombineHsva {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let hue_image = ctx.get_input_image("hue")?;
-        let saturation_image = ctx.get_input_image("saturation")?;
-        let value_image = ctx.get_input_image("value")?;
-        let alpha_image = ctx.get_input_image("alpha")?;
-        let pixel_count = hue_image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let hue_luma = luminance_at(hue_image, idx);
-                let sat_luma = luminance_at(saturation_image, idx);
-                let val_luma = luminance_at(value_image, idx);
-                let alpha_luma = luminance_at(alpha_image, idx);
-                let h = hue_luma * 360.0;
-                let (r, g, b) = hsv_to_rgb(h, sat_luma, val_luma);
-                out[0] = r;
-                out[1] = g;
-                out[2] = b;
-                out[3] = alpha_luma;
-            });
-        let output = Image::from_f32_data(hue_image.width, hue_image.height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let hue_image = ctx.get_input_image("hue")?;
+            let saturation_image = ctx.get_input_image("saturation")?;
+            let value_image = ctx.get_input_image("value")?;
+            let alpha_image = ctx.get_input_image("alpha")?;
+            let pixel_count = hue_image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let hue_luma = luminance_at(hue_image, idx);
+                    let sat_luma = luminance_at(saturation_image, idx);
+                    let val_luma = luminance_at(value_image, idx);
+                    let alpha_luma = luminance_at(alpha_image, idx);
+                    let h = hue_luma * 360.0;
+                    let (r, g, b) = hsv_to_rgb(h, sat_luma, val_luma);
+                    out[0] = r;
+                    out[1] = g;
+                    out[2] = b;
+                    out[3] = alpha_luma;
+                });
+            let output = Image::from_f32_data(hue_image.width, hue_image.height, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -429,33 +452,39 @@ impl Node for Invert {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let pixel_count = image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let r = 1.0 - image.data[idx];
-                let g = 1.0 - image.data[idx + 1];
-                let b = 1.0 - image.data[idx + 2];
-                let a = image.data[idx + 3];
-                out[0] = r;
-                out[1] = g;
-                out[2] = b;
-                out[3] = a;
-            });
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-            let original = ctx.get_input_image("image")?;
-            crate::mask_utils::apply_mask(original, &output, mask)
-        } else {
-            output
-        };
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let pixel_count = image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let r = 1.0 - image.data[idx];
+                    let g = 1.0 - image.data[idx + 1];
+                    let b = 1.0 - image.data[idx + 2];
+                    let a = image.data[idx + 3];
+                    out[0] = r;
+                    out[1] = g;
+                    out[2] = b;
+                    out[3] = a;
+                });
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                let original = ctx.get_input_image("image")?;
+                crate::mask_utils::apply_mask(original, &output, mask)
+            } else {
+                output
+            };
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -631,36 +660,42 @@ impl Node for ColorRampNode {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let stops = ctx.get_param_color_ramp("stops")?;
-        let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
-        let mut sorted_stops = stops.clone();
-        sorted_stops.sort_by(|a, b| {
-            a.position
-                .partial_cmp(&b.position)
-                .unwrap_or(Ordering::Equal)
-        });
-        let pixel_count = image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let r = image.data[idx];
-                let g = image.data[idx + 1];
-                let b = image.data[idx + 2];
-                let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                let rgba = evaluate_color_ramp(&sorted_stops, luminance, interpolation);
-                out[0] = rgba[0];
-                out[1] = rgba[1];
-                out[2] = rgba[2];
-                out[3] = rgba[3];
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let stops = ctx.get_param_color_ramp("stops")?;
+            let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
+            let mut sorted_stops = stops.clone();
+            sorted_stops.sort_by(|a, b| {
+                a.position
+                    .partial_cmp(&b.position)
+                    .unwrap_or(Ordering::Equal)
             });
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let pixel_count = image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let r = image.data[idx];
+                    let g = image.data[idx + 1];
+                    let b = image.data[idx + 2];
+                    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                    let rgba = evaluate_color_ramp(&sorted_stops, luminance, interpolation);
+                    out[0] = rgba[0];
+                    out[1] = rgba[1];
+                    out[2] = rgba[2];
+                    out[3] = rgba[3];
+                });
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

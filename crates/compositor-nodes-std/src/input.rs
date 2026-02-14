@@ -1,5 +1,5 @@
 use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -94,17 +94,23 @@ impl Node for LoadImage {
         }
     }
 
-    fn evaluate(&self, _ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let guard = self
-            .image
-            .lock()
-            .map_err(|_| CompositorError::Other("Image mutex poisoned".to_string()))?;
-        let image = guard
-            .as_ref()
-            .ok_or_else(|| CompositorError::MissingInput("image_data".to_string()))?;
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(image.clone()));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        _ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let guard = self
+                .image
+                .lock()
+                .map_err(|_| CompositorError::Other("Image mutex poisoned".to_string()))?;
+            let image = guard
+                .as_ref()
+                .ok_or_else(|| CompositorError::MissingInput("image_data".to_string()))?;
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -236,17 +242,14 @@ impl LoadImageSequence {
         let normalized = normalize_pattern(pattern);
         let filename = normalized.replace("{frame}", &format_frame_number(frame, padding));
         let path = std::path::Path::new(dir).join(&filename);
-        let is_png = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.eq_ignore_ascii_case("png"))
-            .unwrap_or(false);
-
-        let (width, height, raw) = if is_png {
-            Self::decode_png_direct(&path)?
-        } else {
-            Self::decode_via_image(&path)?
-        };
+        let bytes = std::fs::read(&path).map_err(|e| {
+            CompositorError::Other(format!("Failed to read frame {}: {}", path.display(), e))
+        })?;
+        let decoded = image::load_from_memory(&bytes)
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let raw = rgba.as_raw();
         let lut = srgb_to_linear_lut();
         let pixel_count = (width as usize) * (height as usize);
         let mut data = vec![0.0f32; pixel_count * 4];
@@ -260,80 +263,6 @@ impl LoadImageSequence {
                 out[3] = raw[idx + 3] as f32 / 255.0;
             });
         Ok(Image::from_f32_data(width, height, data))
-    }
-
-    fn decode_png_direct(path: &std::path::Path) -> Result<(u32, u32, Vec<u8>), CompositorError> {
-        let file = std::fs::File::open(path).map_err(|e| {
-            CompositorError::Other(format!("Failed to read frame {}: {}", path.display(), e))
-        })?;
-        let decoder = png::Decoder::new(std::io::BufReader::new(file));
-        let mut reader = decoder
-            .read_info()
-            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
-
-        let mut buf = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
-        let info = reader
-            .next_frame(&mut buf)
-            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
-        buf.truncate(info.buffer_size());
-
-        let width = info.width;
-        let height = info.height;
-
-        let rgba = match (info.color_type, info.bit_depth) {
-            (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
-            (png::ColorType::Rgb, png::BitDepth::Eight) => {
-                let pixel_count = (width as usize) * (height as usize);
-                let mut rgba = vec![0u8; pixel_count * 4];
-                for i in 0..pixel_count {
-                    rgba[i * 4] = buf[i * 3];
-                    rgba[i * 4 + 1] = buf[i * 3 + 1];
-                    rgba[i * 4 + 2] = buf[i * 3 + 2];
-                    rgba[i * 4 + 3] = 255;
-                }
-                rgba
-            }
-            (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => {
-                let pixel_count = (width as usize) * (height as usize);
-                let mut rgba = vec![0u8; pixel_count * 4];
-                for i in 0..pixel_count {
-                    let g = buf[i * 2];
-                    rgba[i * 4] = g;
-                    rgba[i * 4 + 1] = g;
-                    rgba[i * 4 + 2] = g;
-                    rgba[i * 4 + 3] = buf[i * 2 + 1];
-                }
-                rgba
-            }
-            (png::ColorType::Grayscale, png::BitDepth::Eight) => {
-                let pixel_count = (width as usize) * (height as usize);
-                let mut rgba = vec![0u8; pixel_count * 4];
-                for i in 0..pixel_count {
-                    let g = buf[i];
-                    rgba[i * 4] = g;
-                    rgba[i * 4 + 1] = g;
-                    rgba[i * 4 + 2] = g;
-                    rgba[i * 4 + 3] = 255;
-                }
-                rgba
-            }
-            _ => {
-                return Self::decode_via_image(path);
-            }
-        };
-
-        Ok((width, height, rgba))
-    }
-
-    fn decode_via_image(path: &std::path::Path) -> Result<(u32, u32, Vec<u8>), CompositorError> {
-        let bytes = std::fs::read(path).map_err(|e| {
-            CompositorError::Other(format!("Failed to read frame {}: {}", path.display(), e))
-        })?;
-        let decoded = image::load_from_memory(&bytes)
-            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
-        let rgba = decoded.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        Ok((width, height, rgba.into_raw()))
     }
 }
 
@@ -375,39 +304,45 @@ impl Node for LoadImageSequence {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let dir_guard = self
-            .directory
-            .lock()
-            .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
-        let dir = dir_guard
-            .as_ref()
-            .ok_or_else(|| CompositorError::MissingInput("directory".to_string()))?
-            .clone();
-        drop(dir_guard);
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let dir_guard = self
+                .directory
+                .lock()
+                .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
+            let dir = dir_guard
+                .as_ref()
+                .ok_or_else(|| CompositorError::MissingInput("directory".to_string()))?
+                .clone();
+            drop(dir_guard);
 
-        let pattern = ctx
-            .get_param_string("pattern")
-            .unwrap_or("frame_{frame}.png");
-        let frame = ctx.frame_time.frame;
+            let pattern = ctx
+                .get_param_string("pattern")
+                .unwrap_or("frame_{frame}.png");
+            let frame = ctx.frame_time.frame;
 
-        let mut cache = self
-            .frame_cache
-            .lock()
-            .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+            let mut cache = self
+                .frame_cache
+                .lock()
+                .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
 
-        if let Some(image) = cache.get(frame) {
+            if let Some(image) = cache.get(frame) {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
+
+            let image = self.load_frame(&dir, pattern, frame)?;
+            cache.insert(frame, image.clone());
+
             let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(image.clone()));
-            return Ok(outputs);
-        }
-
-        let image = self.load_frame(&dir, pattern, frame)?;
-        cache.insert(frame, image.clone());
-
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(image));
-        Ok(outputs)
+            outputs.insert("image".to_string(), Value::Image(image));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

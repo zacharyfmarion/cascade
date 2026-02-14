@@ -13,6 +13,7 @@ import {
   NodeSection,
   NodeDisabledOverlay,
 } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
@@ -112,7 +113,7 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
   const dirBasename = outputDir ? outputDir.split('/').filter(Boolean).pop() || outputDir : '';
 
   return (
-    <BaseNode {...props} data={data}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon('export_image_sequence', 'Output')}>
       <NodeCanvas canvasRef={canvasRef} hasResult={!!result} />
 
       <NodeDisabledOverlay disabled={isRendering}>

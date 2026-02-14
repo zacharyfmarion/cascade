@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use ahash::AHasher;
 use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::{
     Image, NodeSpec, ParamDefault, ParamSpec, ParamValue, Value, ValueType,
 };
@@ -21,6 +21,12 @@ pub struct GpuKernelNode {
     wgsl_source: String,
     context: Arc<GpuContext>,
 }
+
+// SAFETY: Single-threaded on wasm32. See GpuContext safety comment.
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for GpuKernelNode {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for GpuKernelNode {}
 
 impl GpuKernelNode {
     pub fn from_manifest(
@@ -164,124 +170,131 @@ impl Node for GpuKernelNode {
         self.spec.clone()
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image_inputs = collect_image_inputs(&self.spec, ctx)?;
-        if image_inputs.is_empty() {
-            return Err(CompositorError::Other(
-                "GPU node needs image input".to_string(),
-            ));
-        }
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image_inputs = collect_image_inputs(&self.spec, ctx)?;
+            if image_inputs.is_empty() {
+                return Err(CompositorError::Other(
+                    "GPU node needs image input".to_string(),
+                ));
+            }
 
-        let width = image_inputs[0].width;
-        let height = image_inputs[0].height;
+            let width = image_inputs[0].width;
+            let height = image_inputs[0].height;
 
-        let mut hasher = AHasher::default();
-        hasher.write(self.wgsl_source.as_bytes());
-        let key = hasher.finish();
+            let mut hasher = AHasher::default();
+            hasher.write(self.wgsl_source.as_bytes());
+            let key = hasher.finish();
 
-        let pipeline = self
-            .build_pipeline(key, image_inputs.len().saturating_sub(1))
-            .map_err(CompositorError::Other)?;
+            let pipeline = self
+                .build_pipeline(key, image_inputs.len().saturating_sub(1))
+                .map_err(CompositorError::Other)?;
 
-        let mut input_views = Vec::new();
-        for image in &image_inputs {
-            let texture = create_storage_texture(
+            let mut input_views = Vec::new();
+            for image in &image_inputs {
+                let texture = create_storage_texture(
+                    &self.context.device,
+                    image.width,
+                    image.height,
+                    wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
+                );
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                upload_image(&self.context.queue, &texture, image)?;
+                input_views.push(view);
+            }
+
+            let output_texture = create_storage_texture(
                 &self.context.device,
-                image.width,
-                image.height,
-                wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
+                width,
+                height,
+                wgpu::TextureUsages::STORAGE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
             );
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            upload_image(&self.context.queue, &texture, image)?;
-            input_views.push(view);
-        }
+            let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let output_texture = create_storage_texture(
-            &self.context.device,
-            width,
-            height,
-            wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST,
-        );
-        let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let param_bytes = self.build_param_buffer(ctx)?;
-        let uniform_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("GpuKernelNode Uniforms"),
-            size: param_bytes.len() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.context
-            .queue
-            .write_buffer(&uniform_buffer, 0, &param_bytes);
-
-        let mut entries: Vec<wgpu::BindGroupEntry> = Vec::new();
-        entries.push(wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&input_views[0]),
-        });
-        entries.push(wgpu::BindGroupEntry {
-            binding: 1,
-            resource: wgpu::BindingResource::TextureView(&output_view),
-        });
-        entries.push(wgpu::BindGroupEntry {
-            binding: 2,
-            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                buffer: &uniform_buffer,
-                offset: 0,
-                size: NonZeroU64::new(param_bytes.len() as u64),
-            }),
-        });
-        for (i, view) in input_views.iter().skip(1).enumerate() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: 3 + i as u32,
-                resource: wgpu::BindingResource::TextureView(view),
+            let param_bytes = self.build_param_buffer(ctx)?;
+            let uniform_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("GpuKernelNode Uniforms"),
+                size: param_bytes.len() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-        }
-
-        let bind_group = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("GpuKernelNode BindGroup"),
-                layout: &pipeline.bind_group_layout,
-                entries: &entries,
-            });
-
-        let mut encoder =
             self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("GpuKernelNode Encoder"),
-                });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("GpuKernelNode ComputePass"),
-                timestamp_writes: None,
+                .queue
+                .write_buffer(&uniform_buffer, 0, &param_bytes);
+
+            let mut entries: Vec<wgpu::BindGroupEntry> = Vec::new();
+            entries.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&input_views[0]),
             });
-            pass.set_pipeline(&pipeline.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let x = (width + 15) / 16;
-            let y = (height + 15) / 16;
-            pass.dispatch_workgroups(x, y, 1);
-        }
-        self.context.queue.submit(Some(encoder.finish()));
+            entries.push(wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&output_view),
+            });
+            entries.push(wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &uniform_buffer,
+                    offset: 0,
+                    size: NonZeroU64::new(param_bytes.len() as u64),
+                }),
+            });
+            for (i, view) in input_views.iter().skip(1).enumerate() {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: 3 + i as u32,
+                    resource: wgpu::BindingResource::TextureView(view),
+                });
+            }
 
-        let output_image = read_texture_to_image(
-            &self.context.device,
-            &self.context.queue,
-            &output_texture,
-            width,
-            height,
-        )?;
+            let bind_group = self
+                .context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GpuKernelNode BindGroup"),
+                    layout: &pipeline.bind_group_layout,
+                    entries: &entries,
+                });
 
-        let mut outputs = HashMap::new();
-        if let Some(port) = self.spec.outputs.first() {
-            outputs.insert(port.name.clone(), Value::Image(output_image));
-        }
-        Ok(outputs)
+            let mut encoder =
+                self.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("GpuKernelNode Encoder"),
+                    });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("GpuKernelNode ComputePass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&pipeline.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                let x = (width + 15) / 16;
+                let y = (height + 15) / 16;
+                pass.dispatch_workgroups(x, y, 1);
+            }
+            self.context.queue.submit(Some(encoder.finish()));
+
+            let output_image = read_texture_to_image(
+                &self.context.device,
+                &self.context.queue,
+                &output_texture,
+                width,
+                height,
+            )
+            .await?;
+
+            let mut outputs = HashMap::new();
+            if let Some(port) = self.spec.outputs.first() {
+                outputs.insert(port.name.clone(), Value::Image(output_image));
+            }
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -343,7 +356,7 @@ fn upload_image(
     Ok(())
 }
 
-fn read_texture_to_image(
+async fn read_texture_to_image(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
@@ -389,13 +402,14 @@ fn read_texture_to_image(
     queue.submit(Some(encoder.finish()));
 
     let buffer_slice = buffer.slice(..);
-    let (sender, receiver) = std::sync::mpsc::channel();
+    let (sender, receiver) = flume::bounded(1);
     buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
         let _ = sender.send(result);
     });
     device.poll(wgpu::Maintain::Wait);
     receiver
-        .recv()
+        .recv_async()
+        .await
         .map_err(|e| CompositorError::Other(format!("Map receive error: {e}")))?
         .map_err(|e| CompositorError::Other(format!("Map error: {e:?}")))?;
 

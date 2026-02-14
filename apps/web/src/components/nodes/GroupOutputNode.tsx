@@ -6,7 +6,7 @@ import { useGraphStore } from '../../store/graphStore';
 import { getPortColor } from './BaseNode';
 import { AddPortForm, NodeButton } from './NodePrimitives';
 
-const VALUE_TYPES: ValueType[] = ['Image', 'Mask', 'Float', 'Int', 'Bool', 'Color'];
+const VALUE_TYPES: ValueType[] = ['Image', 'Mask', 'Float', 'Int', 'Bool', 'Color', 'Field'];
 
 export const GroupOutputNode: React.FC<NodeProps> = ({ data, selected }) => {
   const spec = data.spec as NodeSpec;
@@ -38,7 +38,7 @@ export const GroupOutputNode: React.FC<NodeProps> = ({ data, selected }) => {
     >
       <div
         className="base-node__header"
-        style={{ background: 'linear-gradient(135deg, #7d2d2d, #5c1a1a)' }}
+        style={{ background: 'var(--node-header-groupOutput)' }}
       >
         <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>◀</span>
         <span className="base-node__title">Group Output</span>

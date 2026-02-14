@@ -1,0 +1,9 @@
+[package]
+name = "compositor-ocio-sys"
+version = "0.1.0"
+edition = "2021"
+links = "opencolorio"
+
+[build-dependencies]
+cc = "1"
+pkg-config = "0.3"

@@ -161,7 +161,7 @@ export const Inspector: React.FC = () => {
               style={{
                 width: '100%',
                 padding: '8px 12px',
-                background: 'linear-gradient(135deg, #4a6fa5, #2d4a7d)',
+                background: 'var(--node-header-group)',
                 color: 'var(--text-primary)',
                 border: 'none',
                 borderRadius: 4,

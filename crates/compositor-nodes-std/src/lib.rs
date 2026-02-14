@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 pub mod blend;
 pub mod color;
+pub mod color_convert;
 pub mod color_ops;
 pub mod filter;
 pub mod filter_ops;
@@ -20,10 +21,11 @@ pub use blend::{AlphaOver, Blend};
 pub use color::{
     BrightnessContrast, ColorRampNode, CombineHsva, HueSaturation, Invert, SeparateHsva,
 };
+pub use color_convert::ColorConvert;
 pub use color_ops::{ChannelShuffle, ColorBalance, Curves, Gamma, Levels, Posterize, Threshold};
 pub use filter::GaussianBlur;
-pub use filter_ops::{Dilate, EdgeDetect, Erode, Median, Sharpen};
-pub use generate::{Checkerboard, Gradient, Noise, SolidColor};
+pub use filter_ops::{Dilate, EdgeDetect, Erode, Kuwahara, Median, Sharpen};
+pub use generate::{Checkerboard, Gradient, Noise, RasterizeField, SolidColor};
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
 pub use matte::{ChromaKey, ExtractChannel, Premultiply, SetAlpha, Unpremultiply};
@@ -39,6 +41,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("viewer", || Arc::new(Viewer::new()));
 
     // Color
+    registry.register("color_convert", || Arc::new(ColorConvert::new()));
     registry.register(
         "brightness_contrast",
         || Arc::new(BrightnessContrast::new()),
@@ -66,6 +69,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("dilate", || Arc::new(Dilate::new()));
     registry.register("erode", || Arc::new(Erode::new()));
     registry.register("median", || Arc::new(Median::new()));
+    registry.register("kuwahara", || Arc::new(Kuwahara::new()));
 
     // Composite
     registry.register("blend", || Arc::new(Blend::new()));
@@ -84,6 +88,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("noise", || Arc::new(Noise::new()));
     registry.register("gradient", || Arc::new(Gradient::new()));
     registry.register("checkerboard", || Arc::new(Checkerboard::new()));
+    registry.register("rasterize_field", || Arc::new(RasterizeField::new()));
 
     // Matte
     registry.register("premultiply", || Arc::new(Premultiply::new()));

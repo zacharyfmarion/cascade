@@ -28,11 +28,12 @@ compositor/
 ## 3. Core Architecture (Rust)
 
 ### Image Format
-- Internal format: f16 RGBA linear color space
-- `Image { width: u32, height: u32, data: Arc<Vec<f16>> }`
+- Internal format: f32 RGBA linear color space
+- `Image { width: u32, height: u32, data: Arc<Vec<f32>> }`
 - `Arc` enables cheap cloning through the graph — images are immutable once created
 - All processing happens in linear color space for physical accuracy
-- Color pipeline: sRGB u8 (file) → linear f16 (on load via sRGB transfer function) → processing → linear f16 → sRGB u8 (on display via inverse transfer function)
+- Color pipeline: sRGB u8 (file) → linear f32 (on load via sRGB transfer function) → processing → linear f32 → sRGB u8 (on display via inverse transfer function)
+- f16 is used only at GPU I/O boundaries (`to_f16_bytes()` / `from_f16_data()`) for wgpu texture upload/readback
 
 ### Graph (graph.rs)
 - `NodeId`: SlotMap key type — stable handles that survive deletions
@@ -89,8 +90,8 @@ pub trait Node: Send + Sync + Any {
 
 | Node | Category | Inputs | Outputs | Params | Notes |
 |------|----------|--------|---------|--------|-------|
-| LoadImage | Input | — | image (Image) | image_data (Hidden) | Mutex-wrapped state; set_image_data() decodes PNG/JPEG/BMP/WebP via `image` crate, converts sRGB u8 → linear f16 |
-| Viewer | Output | image (Image) | display (Image) | — | Passthrough; image_to_rgba8() converts linear f16 → sRGB u8 for display |
+| LoadImage | Input | — | image (Image) | image_data (Hidden) | Mutex-wrapped state; set_image_data() decodes PNG/JPEG/BMP/WebP via `image` crate, converts sRGB u8 → linear f32 |
+| Viewer | Output | image (Image) | display (Image) | — | Passthrough; image_to_rgba8() converts linear f32 → sRGB u8 for display |
 | BrightnessContrast | Color | image (Image) | image (Image) | brightness [-1,1], contrast [-1,1] | Per-pixel: v = (v - 0.5) * (1 + contrast) + 0.5 + brightness, clamped |
 | HueSaturation | Color | image (Image) | image (Image) | hue [-180°,180°], saturation [-1,1] | RGB→HSL, shift hue/sat, HSL→RGB |
 | Invert | Color | image (Image) | image (Image) | — | Per-channel: 1.0 - value (alpha preserved) |
@@ -188,7 +189,7 @@ User drops image file
     → wasmEngine.loadImageData(nodeId, data)
       → LoadImage.set_image_data(bytes)
         → image crate decodes PNG/JPEG/BMP/WebP
-        → sRGB u8 → linear f16 conversion per pixel
+        → sRGB u8 → linear f32 conversion per pixel
         → stored in Mutex<Option<Image>>
     → triggerAllViewers()
       → for each viewer node:
@@ -203,7 +204,7 @@ User drops image file
                 → node.evaluate(ctx) → HashMap<String, Value>
                 → store outputs in cache
             → return Viewer's "display" output
-          → Viewer::image_to_rgba8(image) — linear f16 → sRGB u8
+          → Viewer::image_to_rgba8(image) — linear f32 → sRGB u8
           → return Vec<u8> to JS
         → create RenderResult { nodeId, width, height, pixels: Uint8ClampedArray }
         → store in renderResults Map
@@ -229,8 +230,8 @@ User drops image file
 ## 9. Performance Considerations
 
 ### Current Optimizations
-- f16 format: half the memory of f32 with sufficient precision for compositing
-- Arc<Vec<f16>>: cheap clone through graph (reference counted, no deep copy)
+- f32 format: native CPU ALU width — no conversion overhead on x86-64 (f16 requires F16C convert instructions, no native f16 arithmetic)
+- Arc<Vec<f32>>: cheap clone through graph (reference counted, no deep copy)
 - Per-output caching: unchanged subgraphs are never re-evaluated
 - Content-based cache keys: upstream_hash captures the full upstream state
 - Separable Gaussian blur: O(n·k) per pass instead of O(n·k²) for 2D kernel

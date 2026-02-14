@@ -1,5 +1,4 @@
-use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
 use std::any::Any;
@@ -69,21 +68,27 @@ impl Node for Resize {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let width = ctx.get_param_int("width")?.clamp(1, 8192) as u32;
-        let height = ctx.get_param_int("height")?.clamp(1, 8192) as u32;
-        let filter = ctx.get_param_int("filter")?.clamp(0, 2) as i32;
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let width = ctx.get_param_int("width")?.clamp(1, 8192) as u32;
+            let height = ctx.get_param_int("height")?.clamp(1, 8192) as u32;
+            let filter = ctx.get_param_int("filter")?.clamp(0, 2) as i32;
 
-        let output = match filter {
-            0 => resize_nearest(image, width, height),
-            1 => resize_bilinear(image, width, height),
-            _ => resize_bicubic(image, width, height),
-        };
+            let output = match filter {
+                0 => resize_nearest(image, width, height),
+                1 => resize_bilinear(image, width, height),
+                _ => resize_bicubic(image, width, height),
+            };
 
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -165,46 +170,52 @@ impl Node for Crop {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let x = ctx.get_param_int("x")?;
-        let y = ctx.get_param_int("y")?;
-        let width = ctx.get_param_int("width")?;
-        let height = ctx.get_param_int("height")?;
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let x = ctx.get_param_int("x")?;
+            let y = ctx.get_param_int("y")?;
+            let width = ctx.get_param_int("width")?;
+            let height = ctx.get_param_int("height")?;
 
-        let src_w = image.width as i64;
-        let src_h = image.height as i64;
-        let max_x = (src_w - 1).max(0);
-        let max_y = (src_h - 1).max(0);
-        let start_x = x.clamp(0, max_x);
-        let start_y = y.clamp(0, max_y);
-        let max_width = (src_w - start_x).max(1);
-        let max_height = (src_h - start_y).max(1);
-        let out_w = width.clamp(1, max_width) as u32;
-        let out_h = height.clamp(1, max_height) as u32;
+            let src_w = image.width as i64;
+            let src_h = image.height as i64;
+            let max_x = (src_w - 1).max(0);
+            let max_y = (src_h - 1).max(0);
+            let start_x = x.clamp(0, max_x);
+            let start_y = y.clamp(0, max_y);
+            let max_width = (src_w - start_x).max(1);
+            let max_height = (src_h - start_y).max(1);
+            let out_w = width.clamp(1, max_width) as u32;
+            let out_h = height.clamp(1, max_height) as u32;
 
-        let out_w_usize = out_w as usize;
-        let out_h_usize = out_h as usize;
-        let src_w_usize = src_w as usize;
-        let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let px = i % out_w_usize;
-                let py = i / out_w_usize;
-                let sx = start_x as usize + px;
-                let sy = start_y as usize + py;
-                let idx = (sy * src_w_usize + sx) * 4;
-                out[0] = image.data[idx];
-                out[1] = image.data[idx + 1];
-                out[2] = image.data[idx + 2];
-                out[3] = image.data[idx + 3];
-            });
+            let out_w_usize = out_w as usize;
+            let out_h_usize = out_h as usize;
+            let src_w_usize = src_w as usize;
+            let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let px = i % out_w_usize;
+                    let py = i / out_w_usize;
+                    let sx = start_x as usize + px;
+                    let sy = start_y as usize + py;
+                    let idx = (sy * src_w_usize + sx) * 4;
+                    out[0] = image.data[idx];
+                    out[1] = image.data[idx + 1];
+                    out[2] = image.data[idx + 2];
+                    out[3] = image.data[idx + 3];
+                });
 
-        let output = Image::from_f32_data(out_w, out_h, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let output = Image::from_f32_data(out_w, out_h, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -266,31 +277,37 @@ impl Node for Flip {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let horizontal = ctx.get_param_bool("horizontal")?;
-        let vertical = ctx.get_param_bool("vertical")?;
-        let width = image.width as usize;
-        let height = image.height as usize;
-        let mut data = vec![0.0f32; width * height * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = i % width;
-                let y = i / width;
-                let sx = if horizontal { width - 1 - x } else { x };
-                let sy = if vertical { height - 1 - y } else { y };
-                let idx = (sy * width + sx) * 4;
-                out[0] = image.data[idx];
-                out[1] = image.data[idx + 1];
-                out[2] = image.data[idx + 2];
-                out[3] = image.data[idx + 3];
-            });
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let horizontal = ctx.get_param_bool("horizontal")?;
+            let vertical = ctx.get_param_bool("vertical")?;
+            let width = image.width as usize;
+            let height = image.height as usize;
+            let mut data = vec![0.0f32; width * height * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let x = i % width;
+                    let y = i / width;
+                    let sx = if horizontal { width - 1 - x } else { x };
+                    let sy = if vertical { height - 1 - y } else { y };
+                    let idx = (sy * width + sx) * 4;
+                    out[0] = image.data[idx];
+                    out[1] = image.data[idx + 1];
+                    out[2] = image.data[idx + 2];
+                    out[3] = image.data[idx + 3];
+                });
 
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -352,88 +369,95 @@ impl Node for Rotate {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let angle = ctx.get_param_float("angle")? as f32;
-        let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let angle = ctx.get_param_float("angle")? as f32;
+            let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
 
-        if angle.abs() < 0.0001 {
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(image.clone()));
-            return Ok(outputs);
-        }
+            if angle.abs() < 0.0001 {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
 
-        let rad = angle.to_radians();
-        let cos = rad.cos();
-        let sin = rad.sin();
-        let in_w = image.width as f32;
-        let in_h = image.height as f32;
-        let cx = (in_w - 1.0) * 0.5;
-        let cy = (in_h - 1.0) * 0.5;
-        let corners = [
-            (0.0, 0.0),
-            (in_w - 1.0, 0.0),
-            (in_w - 1.0, in_h - 1.0),
-            (0.0, in_h - 1.0),
-        ];
-        let mut min_x = f32::INFINITY;
-        let mut max_x = f32::NEG_INFINITY;
-        let mut min_y = f32::INFINITY;
-        let mut max_y = f32::NEG_INFINITY;
-        for (x, y) in corners {
-            let dx = x - cx;
-            let dy = y - cy;
-            let rx = dx * cos - dy * sin;
-            let ry = dx * sin + dy * cos;
-            min_x = min_x.min(rx);
-            max_x = max_x.max(rx);
-            min_y = min_y.min(ry);
-            max_y = max_y.max(ry);
-        }
-        let out_w = ((max_x - min_x).ceil() as i32 + 1).max(1) as u32;
-        let out_h = ((max_y - min_y).ceil() as i32 + 1).max(1) as u32;
+            let rad = angle.to_radians();
+            let cos = rad.cos();
+            let sin = rad.sin();
+            let in_w = image.width as f32;
+            let in_h = image.height as f32;
+            let cx = (in_w - 1.0) * 0.5;
+            let cy = (in_h - 1.0) * 0.5;
+            let corners = [
+                (0.0, 0.0),
+                (in_w - 1.0, 0.0),
+                (in_w - 1.0, in_h - 1.0),
+                (0.0, in_h - 1.0),
+            ];
+            let mut min_x = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            for (x, y) in corners {
+                let dx = x - cx;
+                let dy = y - cy;
+                let rx = dx * cos - dy * sin;
+                let ry = dx * sin + dy * cos;
+                min_x = min_x.min(rx);
+                max_x = max_x.max(rx);
+                min_y = min_y.min(ry);
+                max_y = max_y.max(ry);
+            }
+            let out_w = ((max_x - min_x).ceil() as i32 + 1).max(1) as u32;
+            let out_h = ((max_y - min_y).ceil() as i32 + 1).max(1) as u32;
 
-        let out_w_usize = out_w as usize;
-        let out_h_usize = out_h as usize;
-        let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = (i % out_w_usize) as f32;
-                let y = (i / out_w_usize) as f32;
-                let rx = x + min_x;
-                let ry = y + min_y;
-                let src_x = rx * cos + ry * sin + cx;
-                let src_y = -rx * sin + ry * cos + cy;
+            let out_w_usize = out_w as usize;
+            let out_h_usize = out_h as usize;
+            let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let x = (i % out_w_usize) as f32;
+                    let y = (i / out_w_usize) as f32;
+                    let rx = x + min_x;
+                    let ry = y + min_y;
+                    let src_x = rx * cos + ry * sin + cx;
+                    let src_y = -rx * sin + ry * cos + cy;
 
-                if filter == 0 {
-                    let sx = src_x.round() as i32;
-                    let sy = src_y.round() as i32;
-                    if sx >= 0 && sy >= 0 && sx < image.width as i32 && sy < image.height as i32 {
-                        let idx = (sy as usize * image.width as usize + sx as usize) * 4;
-                        out[0] = image.data[idx];
-                        out[1] = image.data[idx + 1];
-                        out[2] = image.data[idx + 2];
-                        out[3] = image.data[idx + 3];
+                    if filter == 0 {
+                        let sx = src_x.round() as i32;
+                        let sy = src_y.round() as i32;
+                        if sx >= 0 && sy >= 0 && sx < image.width as i32 && sy < image.height as i32
+                        {
+                            let idx = (sy as usize * image.width as usize + sx as usize) * 4;
+                            out[0] = image.data[idx];
+                            out[1] = image.data[idx + 1];
+                            out[2] = image.data[idx + 2];
+                            out[3] = image.data[idx + 3];
+                        } else {
+                            out[0] = 0.0;
+                            out[1] = 0.0;
+                            out[2] = 0.0;
+                            out[3] = 0.0;
+                        }
                     } else {
-                        out[0] = 0.0;
-                        out[1] = 0.0;
-                        out[2] = 0.0;
-                        out[3] = 0.0;
+                        let rgba = sample_bilinear_zero(image, src_x, src_y);
+                        out[0] = rgba[0];
+                        out[1] = rgba[1];
+                        out[2] = rgba[2];
+                        out[3] = rgba[3];
                     }
-                } else {
-                    let rgba = sample_bilinear_zero(image, src_x, src_y);
-                    out[0] = rgba[0];
-                    out[1] = rgba[1];
-                    out[2] = rgba[2];
-                    out[3] = rgba[3];
-                }
-            });
+                });
 
-        let output = Image::from_f32_data(out_w, out_h, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let output = Image::from_f32_data(out_w, out_h, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -495,40 +519,46 @@ impl Node for Translate {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let shift_x = ctx.get_param_int("x")?.clamp(-8192, 8192) as i32;
-        let shift_y = ctx.get_param_int("y")?.clamp(-8192, 8192) as i32;
-        let width = image.width as usize;
-        let height = image.height as usize;
-        let w_i32 = image.width as i32;
-        let h_i32 = image.height as i32;
-        let mut data = vec![0.0f32; width * height * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let x = (i % width) as i32;
-                let y = (i / width) as i32;
-                let sx = x - shift_x;
-                let sy = y - shift_y;
-                if sx >= 0 && sy >= 0 && sx < w_i32 && sy < h_i32 {
-                    let idx = (sy as usize * width + sx as usize) * 4;
-                    out[0] = image.data[idx];
-                    out[1] = image.data[idx + 1];
-                    out[2] = image.data[idx + 2];
-                    out[3] = image.data[idx + 3];
-                } else {
-                    out[0] = 0.0;
-                    out[1] = 0.0;
-                    out[2] = 0.0;
-                    out[3] = 0.0;
-                }
-            });
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let shift_x = ctx.get_param_int("x")?.clamp(-8192, 8192) as i32;
+            let shift_y = ctx.get_param_int("y")?.clamp(-8192, 8192) as i32;
+            let width = image.width as usize;
+            let height = image.height as usize;
+            let w_i32 = image.width as i32;
+            let h_i32 = image.height as i32;
+            let mut data = vec![0.0f32; width * height * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let x = (i % width) as i32;
+                    let y = (i / width) as i32;
+                    let sx = x - shift_x;
+                    let sy = y - shift_y;
+                    if sx >= 0 && sy >= 0 && sx < w_i32 && sy < h_i32 {
+                        let idx = (sy as usize * width + sx as usize) * 4;
+                        out[0] = image.data[idx];
+                        out[1] = image.data[idx + 1];
+                        out[2] = image.data[idx + 2];
+                        out[3] = image.data[idx + 3];
+                    } else {
+                        out[0] = 0.0;
+                        out[1] = 0.0;
+                        out[2] = 0.0;
+                        out[3] = 0.0;
+                    }
+                });
 
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -859,89 +889,95 @@ impl Node for Transform2D {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let tx = ctx.get_param_float("translate_x")? as f32;
-        let ty_val = ctx.get_param_float("translate_y")? as f32;
-        let rotate_deg = ctx.get_param_float("rotate")? as f32;
-        let sx = ctx.get_param_float("scale_x")? as f32;
-        let sy = ctx.get_param_float("scale_y")? as f32;
-        let pivot_x = ctx.get_param_float("pivot_x")? as f32;
-        let pivot_y = ctx.get_param_float("pivot_y")? as f32;
-        let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let tx = ctx.get_param_float("translate_x")? as f32;
+            let ty_val = ctx.get_param_float("translate_y")? as f32;
+            let rotate_deg = ctx.get_param_float("rotate")? as f32;
+            let sx = ctx.get_param_float("scale_x")? as f32;
+            let sy = ctx.get_param_float("scale_y")? as f32;
+            let pivot_x = ctx.get_param_float("pivot_x")? as f32;
+            let pivot_y = ctx.get_param_float("pivot_y")? as f32;
+            let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
 
-        let is_identity = tx.abs() < 0.0001
-            && ty_val.abs() < 0.0001
-            && rotate_deg.abs() < 0.0001
-            && (sx - 1.0).abs() < 0.0001
-            && (sy - 1.0).abs() < 0.0001;
+            let is_identity = tx.abs() < 0.0001
+                && ty_val.abs() < 0.0001
+                && rotate_deg.abs() < 0.0001
+                && (sx - 1.0).abs() < 0.0001
+                && (sy - 1.0).abs() < 0.0001;
 
-        if is_identity {
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(image.clone()));
-            return Ok(outputs);
-        }
+            if is_identity {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
 
-        let in_w = image.width as f32;
-        let in_h = image.height as f32;
-        let px = pivot_x * (in_w - 1.0);
-        let py = pivot_y * (in_h - 1.0);
+            let in_w = image.width as f32;
+            let in_h = image.height as f32;
+            let px = pivot_x * (in_w - 1.0);
+            let py = pivot_y * (in_h - 1.0);
 
-        let rad = rotate_deg.to_radians();
-        let cos_a = rad.cos();
-        let sin_a = rad.sin();
+            let rad = rotate_deg.to_radians();
+            let cos_a = rad.cos();
+            let sin_a = rad.sin();
 
-        let inv_sx = if sx.abs() > 0.0001 { 1.0 / sx } else { 1.0 };
-        let inv_sy = if sy.abs() > 0.0001 { 1.0 / sy } else { 1.0 };
+            let inv_sx = if sx.abs() > 0.0001 { 1.0 / sx } else { 1.0 };
+            let inv_sy = if sy.abs() > 0.0001 { 1.0 / sy } else { 1.0 };
 
-        let out_w = image.width;
-        let out_h = image.height;
-        let out_w_usize = out_w as usize;
-        let out_h_usize = out_h as usize;
+            let out_w = image.width;
+            let out_h = image.height;
+            let out_w_usize = out_w as usize;
+            let out_h_usize = out_h as usize;
 
-        let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let ox = (i % out_w_usize) as f32;
-                let oy = (i / out_w_usize) as f32;
+            let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let ox = (i % out_w_usize) as f32;
+                    let oy = (i / out_w_usize) as f32;
 
-                let dx = ox - px - tx;
-                let dy = oy - py - ty_val;
+                    let dx = ox - px - tx;
+                    let dy = oy - py - ty_val;
 
-                let rx = (dx * cos_a + dy * sin_a) * inv_sx;
-                let ry = (-dx * sin_a + dy * cos_a) * inv_sy;
+                    let rx = (dx * cos_a + dy * sin_a) * inv_sx;
+                    let ry = (-dx * sin_a + dy * cos_a) * inv_sy;
 
-                let src_x = rx + px;
-                let src_y = ry + py;
+                    let src_x = rx + px;
+                    let src_y = ry + py;
 
-                if filter == 0 {
-                    let sx_i = src_x.round() as i32;
-                    let sy_i = src_y.round() as i32;
-                    if sx_i >= 0
-                        && sy_i >= 0
-                        && sx_i < image.width as i32
-                        && sy_i < image.height as i32
-                    {
-                        let idx = (sy_i as usize * image.width as usize + sx_i as usize) * 4;
-                        out[0] = image.data[idx];
-                        out[1] = image.data[idx + 1];
-                        out[2] = image.data[idx + 2];
-                        out[3] = image.data[idx + 3];
+                    if filter == 0 {
+                        let sx_i = src_x.round() as i32;
+                        let sy_i = src_y.round() as i32;
+                        if sx_i >= 0
+                            && sy_i >= 0
+                            && sx_i < image.width as i32
+                            && sy_i < image.height as i32
+                        {
+                            let idx = (sy_i as usize * image.width as usize + sx_i as usize) * 4;
+                            out[0] = image.data[idx];
+                            out[1] = image.data[idx + 1];
+                            out[2] = image.data[idx + 2];
+                            out[3] = image.data[idx + 3];
+                        }
+                    } else {
+                        let rgba = sample_bilinear_zero(image, src_x, src_y);
+                        out[0] = rgba[0];
+                        out[1] = rgba[1];
+                        out[2] = rgba[2];
+                        out[3] = rgba[3];
                     }
-                } else {
-                    let rgba = sample_bilinear_zero(image, src_x, src_y);
-                    out[0] = rgba[0];
-                    out[1] = rgba[1];
-                    out[2] = rgba[2];
-                    out[3] = rgba[3];
-                }
-            });
+                });
 
-        let output = Image::from_f32_data(out_w, out_h, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            let output = Image::from_f32_data(out_w, out_h, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

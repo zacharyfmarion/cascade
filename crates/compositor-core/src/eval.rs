@@ -34,7 +34,7 @@ impl Evaluator {
         }
     }
 
-    pub fn evaluate(
+    pub async fn evaluate(
         &mut self,
         graph: &mut Graph,
         registry: &NodeRegistry,
@@ -108,7 +108,7 @@ impl Evaluator {
                 color_management,
             };
             let start = Instant::now();
-            let outputs = node.evaluate(&ctx)?;
+            let outputs = node.evaluate(&ctx).await?;
             let elapsed = start.elapsed();
             node_timings.insert(node_id, elapsed);
             for output in spec.outputs.iter() {
@@ -235,8 +235,9 @@ impl Default for Evaluator {
 mod tests {
     use super::*;
     use crate::color::BuiltinColorManagement;
-    use crate::node::EvalContext;
+    use crate::node::{EvalContext, NodeFuture};
     use crate::types::{Image, PortSpec, ValueType};
+    use pollster::block_on;
     use std::any::Any;
     use std::sync::Arc;
 
@@ -256,10 +257,16 @@ mod tests {
             self.spec.clone()
         }
 
-        fn evaluate(&self, _ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-            let mut outputs = HashMap::new();
-            outputs.insert("output".to_string(), self.output.clone());
-            Ok(outputs)
+        fn evaluate<'a>(
+            &'a self,
+            _ctx: &'a EvalContext<'a>,
+        ) -> NodeFuture<'a>
+        {
+            Box::pin(async move {
+                let mut outputs = HashMap::new();
+                outputs.insert("output".to_string(), self.output.clone());
+                Ok(outputs)
+            })
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -389,7 +396,7 @@ mod tests {
             )),
         );
 
-        let result = evaluator.evaluate(
+        let result = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -397,7 +404,7 @@ mod tests {
             "output",
             FrameTime { frame: 0 },
             &cm,
-        );
+        ));
 
         assert!(result.is_ok());
         let eval_result = result.unwrap();
@@ -439,7 +446,7 @@ mod tests {
 
         let frame_time = FrameTime { frame: 0 };
 
-        let result1 = evaluator.evaluate(
+        let result1 = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -447,12 +454,12 @@ mod tests {
             "output",
             frame_time,
             &cm,
-        );
+        ));
         assert!(result1.is_ok());
 
         let cache_size_before = evaluator.cache.len();
 
-        let result2 = evaluator.evaluate(
+        let result2 = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -460,7 +467,7 @@ mod tests {
             "output",
             frame_time,
             &cm,
-        );
+        ));
         assert!(result2.is_ok());
 
         let cache_size_after = evaluator.cache.len();
@@ -510,7 +517,7 @@ mod tests {
 
         let frame_time = FrameTime { frame: 0 };
 
-        let result1 = evaluator.evaluate(
+        let result1 = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -518,7 +525,7 @@ mod tests {
             "output",
             frame_time,
             &cm,
-        );
+        ));
         assert!(result1.is_ok());
 
         let processor_node = graph.nodes.get(processor_id).unwrap();
@@ -530,7 +537,7 @@ mod tests {
         let revision_after = processor_node.param_revision;
         assert!(revision_after > revision_before);
 
-        let result2 = evaluator.evaluate(
+        let result2 = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -538,7 +545,7 @@ mod tests {
             "output",
             frame_time,
             &cm,
-        );
+        ));
         assert!(result2.is_ok());
     }
 
@@ -560,7 +567,7 @@ mod tests {
             )),
         );
 
-        let result = evaluator.evaluate(
+        let result = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -568,7 +575,7 @@ mod tests {
             "output",
             FrameTime { frame: 0 },
             &cm,
-        );
+        ));
 
         assert!(result.is_ok());
         let eval_result = result.unwrap();
@@ -611,7 +618,7 @@ mod tests {
         let frame_time_1 = FrameTime { frame: 0 };
         let frame_time_2 = FrameTime { frame: 1 };
 
-        let result1 = evaluator.evaluate(
+        let result1 = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -619,12 +626,12 @@ mod tests {
             "output",
             frame_time_1,
             &cm,
-        );
+        ));
         assert!(result1.is_ok());
 
         let cache_size_frame_1 = evaluator.cache.len();
 
-        let result2 = evaluator.evaluate(
+        let result2 = block_on(evaluator.evaluate(
             &mut graph,
             &registry,
             &node_instances,
@@ -632,7 +639,7 @@ mod tests {
             "output",
             frame_time_2,
             &cm,
-        );
+        ));
         assert!(result2.is_ok());
 
         let cache_size_frame_2 = evaluator.cache.len();

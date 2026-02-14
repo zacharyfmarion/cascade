@@ -40,6 +40,12 @@ export async function initWasmEngine(): Promise<void> {
   initPromise = (async () => {
     await init();
     engine = new Engine();
+    try {
+      await engine.init_gpu();
+      console.log('[WASM] GPU initialized successfully');
+    } catch (e) {
+      console.warn('[WASM] GPU initialization failed (GPU nodes will be unavailable):', e);
+    }
   })();
   return initPromise;
 }
@@ -92,16 +98,14 @@ export class WasmEngine implements EngineBridge {
     }
   }
 
-  renderViewer(viewerNodeId: string, frame: number): RenderResult | null {
+  async renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
     console.log(`[WASM] renderViewer nodeId=${viewerNodeId} frame=${frame}`);
     try {
-      const pixels = this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
+      const pixels = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
       
       try {
         const timingsRaw = this.getEngine().get_last_render_timings();
         if (timingsRaw) {
-          // serde_wasm_bindgen serializes HashMap as a JS Map, not a plain object.
-          // Convert to a plain Record so Object.entries() works downstream.
           if (timingsRaw instanceof Map) {
             const obj: Record<string, number> = {};
             (timingsRaw as Map<string, number>).forEach((v, k) => { obj[k] = v; });
@@ -117,7 +121,7 @@ export class WasmEngine implements EngineBridge {
       console.log(`[WASM] renderViewer pixels=${pixels ? pixels.length : 'null'}`);
       if (!pixels || pixels.length === 0) return null;
 
-      const dims = this.getEngine().get_render_dimensions(viewerNodeId, BigInt(frame));
+      const dims = await this.getEngine().get_render_dimensions(viewerNodeId, BigInt(frame));
       console.log(`[WASM] renderViewer dims=`, dims);
       if (!dims) return null;
 
@@ -151,18 +155,18 @@ export class WasmEngine implements EngineBridge {
     this.getEngine().import_graph(graph);
   }
 
-  registerGpuKernel(manifestJson: string): NodeSpec {
-    console.warn('[WASM] registerGpuKernel not supported', manifestJson);
-    throw new Error('GPU kernels are not supported in WASM');
+  registerGpuKernel(_manifestJson: string): NodeSpec {
+    throw new Error('Dynamic GPU kernel registration not yet supported in WASM');
   }
 
-  compileScriptNode(_nodeId: string, _manifestJson: string): NodeSpec {
-    throw new Error("GPU Script compilation not supported in WASM mode");
+  compileScriptNode(nodeId: string, manifestJson: string): NodeSpec {
+    const result = this.getEngine().compile_script_node(nodeId, manifestJson);
+    return result as NodeSpec;
   }
 
-  exportImage(nodeId: string, frame: number): Promise<Uint8Array> {
-    const bytes = this.getEngine().export_image(nodeId, BigInt(frame));
-    return Promise.resolve(new Uint8Array(bytes));
+  async exportImage(nodeId: string, frame: number): Promise<Uint8Array> {
+    const bytes = await this.getEngine().export_image(nodeId, BigInt(frame));
+    return new Uint8Array(bytes);
   }
 
   async createGroupFromNodes(nodeIds: string[], name: string): Promise<CreateGroupResult> {

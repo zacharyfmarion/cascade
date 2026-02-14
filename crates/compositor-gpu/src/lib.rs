@@ -214,14 +214,16 @@ mod tests {
         inputs.insert("image".to_string(), Value::Image(image.clone()));
         let params = HashMap::new();
 
+        let cm = compositor_core::color::BuiltinColorManagement::new();
         let eval_ctx = EvalContext {
             inputs,
             params: &params,
             frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
         };
 
         use compositor_core::node::Node;
-        let result = node.evaluate(&eval_ctx).expect("Evaluate should succeed");
+        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Evaluate should succeed");
         let output = result.get("image").expect("Should have image output");
         match output {
             Value::Image(out_img) => {
@@ -289,13 +291,15 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("pixel_size".to_string(), ParamValue::Int(4));
 
+        let cm = compositor_core::color::BuiltinColorManagement::new();
         let eval_ctx = EvalContext {
             inputs,
             params: &params,
             frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
         };
 
-        let result = node.evaluate(&eval_ctx).expect("Pixelate should succeed");
+        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
         let output = result.get("image").expect("Should have image output");
         match output {
             Value::Image(out_img) => {
@@ -350,13 +354,15 @@ mod tests {
         params.insert("dither_amount".to_string(), ParamValue::Float(1.0));
         params.insert("palette_size".to_string(), ParamValue::Int(4));
 
+        let cm = compositor_core::color::BuiltinColorManagement::new();
         let eval_ctx = EvalContext {
             inputs,
             params: &params,
             frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
         };
 
-        let result = node.evaluate(&eval_ctx).expect("Dither should succeed");
+        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Dither should succeed");
         let output = result.get("image").expect("Should have image output");
         match output {
             Value::Image(out_img) => {

@@ -1,5 +1,4 @@
-use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
 use std::any::Any;
@@ -50,12 +49,42 @@ impl Node for GaussianBlur {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let sigma = ctx.get_param_float("sigma")? as f32;
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let sigma = ctx.get_param_float("sigma")? as f32;
 
-        if sigma < 0.1 {
-            let output = image.clone();
+            if sigma < 0.1 {
+                let output = image.clone();
+                let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                    let original = ctx.get_input_image("image")?;
+                    crate::mask_utils::apply_mask(original, &output, mask)
+                } else {
+                    output
+                };
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(output));
+                return Ok(outputs);
+            }
+
+            let w = image.width as usize;
+            let h = image.height as usize;
+
+            let mut buf = image_to_f32(image);
+            let radii = box_radii_for_gaussian(sigma, 3);
+            let mut tmp = vec![0.0f32; w * h * 4];
+
+            for &r in &radii {
+                box_blur_h(&buf, &mut tmp, w, h, r);
+                box_blur_v(&tmp, &mut buf, w, h, r);
+            }
+
+            let out_data = buf;
+            let output = Image::from_f32_data(image.width, image.height, out_data);
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -64,32 +93,8 @@ impl Node for GaussianBlur {
             };
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
-            return Ok(outputs);
-        }
-
-        let w = image.width as usize;
-        let h = image.height as usize;
-
-        let mut buf = image_to_f32(image);
-        let radii = box_radii_for_gaussian(sigma, 3);
-        let mut tmp = vec![0.0f32; w * h * 4];
-
-        for &r in &radii {
-            box_blur_h(&buf, &mut tmp, w, h, r);
-            box_blur_v(&tmp, &mut buf, w, h, r);
-        }
-
-        let out_data = buf;
-        let output = Image::from_f32_data(image.width, image.height, out_data);
-        let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-            let original = ctx.get_input_image("image")?;
-            crate::mask_utils::apply_mask(original, &output, mask)
-        } else {
-            output
-        };
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

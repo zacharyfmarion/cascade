@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeDropZone } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 
@@ -51,7 +52,7 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
   }, [handleFile]);
 
   return (
-    <BaseNode {...props} data={data}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon('load_image', 'Input')}>
       <input
         ref={fileInputRef}
         type="file"

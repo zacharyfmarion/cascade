@@ -114,6 +114,7 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CompositorTheme {
     'port.bool': colors['terminal.ansiMagenta'] ?? (isDark ? '#cc66cc' : '#d33682'),
     'port.color': colors['terminal.ansiYellow'] ?? (isDark ? '#cccc00' : '#b58900'),
     'port.mask': isDark ? '#ffffff' : '#073642',
+    'port.field': isDark ? '#9b59b6' : '#7d3c98',
 
     'node.bg': surfaceBg,
     'node.selected': isDark ? lighten(surfaceBg, 0.08) : darken(surfaceBg, 0.08),
@@ -127,6 +128,9 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CompositorTheme {
     'node.header.transform': hexToRgba(colors['terminal.ansiCyan'] ?? '#00d4aa', 0.18),
     'node.header.generator': hexToRgba(colors['terminal.ansiGreen'] ?? '#4ca04c', 0.18),
     'node.header.matte': hexToRgba(fg, 0.15),
+    'node.header.group': hexToRgba(accent, 0.22),
+    'node.header.groupInput': hexToRgba(colors['terminal.ansiGreen'] ?? (isDark ? '#4ca04c' : '#859900'), 0.22),
+    'node.header.groupOutput': hexToRgba(colors['terminal.ansiRed'] ?? danger, 0.22),
 
     'slider.fill': hexToRgba(accent, 0.3),
     'slider.fillHover': hexToRgba(accent, 0.45),

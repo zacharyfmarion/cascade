@@ -7,10 +7,11 @@ use compositor_core::group::{
 };
 use compositor_core::node::{Node, NodeRegistry};
 use compositor_core::types::{FrameTime, NodeSpec, ParamValue, PortSpec, Value};
-use compositor_nodes_std::{register_standard_nodes, GroupNode, LoadImage, Viewer};
+use compositor_gpu::kernel_node::GpuKernelNode;
+use compositor_gpu::{GpuContext, KernelManifest};
+use compositor_nodes_std::{register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImage, Viewer};
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
-use slotmap::Key;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -25,6 +26,8 @@ pub struct Engine {
     last_timings: HashMap<String, f64>,
     group_definitions: HashMap<String, Arc<GroupDefinition>>,
     uuid_map: HashMap<String, NodeId>,
+    gpu_context: Option<Arc<GpuContext>>,
+    kernel_manifests: HashMap<String, KernelManifest>,
 }
 
 #[wasm_bindgen]
@@ -42,11 +45,79 @@ impl Engine {
             last_timings: HashMap::new(),
             group_definitions: HashMap::new(),
             uuid_map: HashMap::new(),
+            gpu_context: None,
+            kernel_manifests: HashMap::new(),
         }
     }
 
+    pub async fn init_gpu(&mut self) -> Result<(), JsValue> {
+        let ctx = GpuContext::new_async().await.map_err(to_js_error_str)?;
+        let shared = Arc::new(ctx);
+        compositor_gpu::register_gpu_nodes(Arc::make_mut(&mut self.registry), shared.clone());
+        self.gpu_context = Some(shared);
+        Ok(())
+    }
+
+    pub fn compile_script_node(
+        &mut self,
+        node_id: &str,
+        manifest_json: &str,
+    ) -> Result<JsValue, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+
+        let manifest: KernelManifest =
+            serde_json::from_str(manifest_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        let graph_node = self
+            .graph
+            .nodes
+            .get(id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let type_id = graph_node.type_id.clone();
+
+        if !type_id.starts_with("gpu_script") {
+            return Err(JsValue::from_str("Node is not a GPU Script node"));
+        }
+
+        let mut manifest = manifest;
+        manifest.id = type_id.clone();
+
+        let gpu_context = self
+            .gpu_context
+            .clone()
+            .ok_or_else(|| JsValue::from_str("GPU not available"))?;
+
+        let compiled_node =
+            GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())
+                .map_err(to_js_error_str)?;
+        let spec = compiled_node.spec();
+
+        self.kernel_manifests
+            .insert(type_id.clone(), manifest.clone());
+        let manifest_for_factory = manifest.clone();
+        let gpu_ctx = gpu_context.clone();
+        Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+            Arc::new(
+                GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
+                    .expect("GPU node"),
+            )
+        });
+
+        self.nodes.insert(id, Arc::new(compiled_node));
+        self.graph.prune_connections_for_node(id, &self.registry);
+        self.graph.mark_dirty(id);
+
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     pub fn list_node_types(&self) -> JsValue {
-        let specs: Vec<_> = self.registry.list_specs().into_iter().cloned().collect();
+        let specs: Vec<_> = self
+            .registry
+            .list_specs()
+            .into_iter()
+            .filter(|spec| !spec.id.starts_with("gpu_script::"))
+            .cloned()
+            .collect();
         serde_wasm_bindgen::to_value(&specs).unwrap_or(JsValue::NULL)
     }
 
@@ -83,7 +154,17 @@ impl Engine {
             return format_node_id(&self.graph, node_id);
         }
 
-        let node_id = self.graph.add_node(type_id);
+        let actual_type_id = if type_id == "gpu_script" {
+            let uid = format!("gpu_script::{}", Uuid::new_v4());
+            let uid2 = uid.clone();
+            Arc::make_mut(&mut self.registry)
+                .register_or_replace(&uid, move || Arc::new(GpuScriptDraftNode::new(&uid2)));
+            uid
+        } else {
+            type_id.to_string()
+        };
+
+        let node_id = self.graph.add_node(&actual_type_id);
         self.graph.set_position(node_id, x, y);
         let uuid = self
             .graph
@@ -92,7 +173,7 @@ impl Engine {
             .map(|node| node.uuid.clone())
             .unwrap_or_default();
         self.uuid_map.insert(uuid, node_id);
-        if let Some(node) = self.registry.create(type_id) {
+        if let Some(node) = self.registry.create(&actual_type_id) {
             self.nodes.insert(node_id, node);
         }
         format_node_id(&self.graph, node_id)
@@ -161,7 +242,11 @@ impl Engine {
         load_node.set_image_data(data).map_err(to_js_error)
     }
 
-    pub fn render_viewer(&mut self, viewer_node_id: &str, frame: u64) -> Result<Vec<u8>, JsValue> {
+    pub async fn render_viewer(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<Vec<u8>, JsValue> {
         let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
         let cm = BuiltinColorManagement::new();
         let eval_result = self
@@ -175,6 +260,7 @@ impl Engine {
                 FrameTime { frame },
                 &cm,
             )
+            .await
             .map_err(to_js_error)?;
         self.last_timings = eval_result
             .node_timings
@@ -187,7 +273,7 @@ impl Engine {
             })
             .collect();
         match eval_result.value {
-            Value::Image(image) => Ok(Viewer::image_to_rgba8(&image)),
+            Value::Image(image) => Ok(Viewer::image_to_rgba8(&image, &cm)),
             _ => Err(JsValue::from_str("Viewer output is not an image")),
         }
     }
@@ -196,21 +282,24 @@ impl Engine {
         serde_wasm_bindgen::to_value(&self.last_timings).unwrap_or(JsValue::NULL)
     }
 
-    pub fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
+    pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
         let id = match parse_node_id(&self.uuid_map, viewer_node_id) {
             Ok(v) => v,
             Err(_) => return JsValue::NULL,
         };
         let cm = BuiltinColorManagement::new();
-        let eval_result = self.evaluator.evaluate(
-            &mut self.graph,
-            &self.registry,
-            &self.nodes,
-            id,
-            "display",
-            FrameTime { frame },
-            &cm,
-        );
+        let eval_result = self
+            .evaluator
+            .evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                id,
+                "display",
+                FrameTime { frame },
+                &cm,
+            )
+            .await;
         if let Ok(eval_result) = eval_result {
             if let Value::Image(image) = eval_result.value {
                 let dims = RenderDimensions {
@@ -263,7 +352,7 @@ impl Engine {
         serde_wasm_bindgen::to_value(&graph).unwrap_or(JsValue::NULL)
     }
 
-    pub fn export_image(&mut self, node_id: &str, frame: u64) -> Result<Vec<u8>, JsValue> {
+    pub async fn export_image(&mut self, node_id: &str, frame: u64) -> Result<Vec<u8>, JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
 
         let instance = self
@@ -288,11 +377,12 @@ impl Engine {
                 FrameTime { frame },
                 &cm,
             )
+            .await
             .map_err(to_js_error)?;
 
         match eval_result.value {
             Value::Image(image) => {
-                let rgba8 = Viewer::image_to_rgba8(&image);
+                let rgba8 = Viewer::image_to_rgba8(&image, &cm);
                 let mut buf = Vec::new();
 
                 if format == 1 {
@@ -1074,7 +1164,7 @@ impl Engine {
                 })?
         };
 
-        if from_port_spec.ty != to_port_spec.ty {
+        if !compositor_core::graph::types_compatible(&from_port_spec.ty, &to_port_spec.ty) {
             return Err(CompositorError::TypeMismatch {
                 expected: format!("{:?}", to_port_spec.ty),
                 got: format!("{:?}", from_port_spec.ty),
@@ -1350,4 +1440,8 @@ fn convert_param_value(
 
 fn to_js_error(err: CompositorError) -> JsValue {
     JsValue::from_str(&err.to_string())
+}
+
+fn to_js_error_str(err: String) -> JsValue {
+    JsValue::from_str(&err)
 }

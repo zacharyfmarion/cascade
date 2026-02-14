@@ -1,6 +1,7 @@
-use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::color::ColorManagement;
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
+use rayon::prelude::*;
 use std::any::Any;
 use std::collections::HashMap;
 
@@ -11,8 +12,23 @@ impl Viewer {
         Self
     }
 
-    pub fn image_to_rgba8(image: &Image) -> Vec<u8> {
-        image.to_rgba8_srgb()
+    pub fn image_to_rgba8(image: &Image, cm: &dyn ColorManagement) -> Vec<u8> {
+        let mut pixels = image.data.as_ref().clone();
+        if let Ok(processor) = cm.create_display_transform(&image.color_space, "sRGB", "Standard") {
+            processor.apply(&mut pixels);
+        }
+        let pixel_count = image.pixel_count();
+        let mut out = vec![0u8; pixel_count * 4];
+        out.par_chunks_exact_mut(4)
+            .enumerate()
+            .for_each(|(i, rgba_out)| {
+                let idx = i * 4;
+                for c in 0..3 {
+                    rgba_out[c] = (pixels[idx + c].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+                }
+                rgba_out[3] = (pixels[idx + 3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+            });
+        out
     }
 }
 
@@ -37,11 +53,17 @@ impl Node for Viewer {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let mut outputs = HashMap::new();
-        outputs.insert("display".to_string(), Value::Image(image.clone()));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("display".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -113,11 +135,17 @@ impl Node for ExportImage {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let mut outputs = HashMap::new();
-        outputs.insert("display".to_string(), Value::Image(image.clone()));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("display".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -219,11 +247,17 @@ impl Node for ExportImageSequence {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let mut outputs = HashMap::new();
-        outputs.insert("display".to_string(), Value::Image(image.clone()));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("display".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

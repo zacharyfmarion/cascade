@@ -38,13 +38,14 @@ export interface ThemeTokens {
   'status.success': string;
   'status.errorBg': string;
 
-  // ── Port type colors (domain-specific) ───────────────────────
-  'port.image': string;
-  'port.float': string;
-  'port.int': string;
-  'port.bool': string;
-  'port.color': string;
-  'port.mask': string;
+   // ── Port type colors (domain-specific) ───────────────────────
+   'port.image': string;
+   'port.float': string;
+   'port.int': string;
+   'port.bool': string;
+   'port.color': string;
+   'port.mask': string;
+   'port.field': string;
 
   // ── Node chrome ──────────────────────────────────────────────
   'node.bg': string;
@@ -59,6 +60,9 @@ export interface ThemeTokens {
   'node.header.transform': string;
   'node.header.generator': string;
   'node.header.matte': string;
+  'node.header.group': string;
+  'node.header.groupInput': string;
+  'node.header.groupOutput': string;
 
   // ── Interactive / slider ─────────────────────────────────────
   'slider.fill': string;
@@ -116,12 +120,13 @@ export const THEME_TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
   'status.success',
   'status.errorBg',
 
-  'port.image',
-  'port.float',
-  'port.int',
-  'port.bool',
-  'port.color',
-  'port.mask',
+   'port.image',
+   'port.float',
+   'port.int',
+   'port.bool',
+   'port.color',
+   'port.mask',
+   'port.field',
 
   'node.bg',
   'node.selected',
@@ -135,6 +140,9 @@ export const THEME_TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
   'node.header.transform',
   'node.header.generator',
   'node.header.matte',
+  'node.header.group',
+  'node.header.groupInput',
+  'node.header.groupOutput',
 
   'slider.fill',
   'slider.fillHover',

@@ -1,5 +1,4 @@
-use compositor_core::error::CompositorError;
-use compositor_core::node::{EvalContext, Node};
+use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
 use std::any::Any;
@@ -85,45 +84,51 @@ impl Node for MapRange {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let image = ctx.get_input_image("image")?;
-        let from_min = ctx.get_param_float("from_min")? as f32;
-        let from_max = ctx.get_param_float("from_max")? as f32;
-        let to_min = ctx.get_param_float("to_min")? as f32;
-        let to_max = ctx.get_param_float("to_max")? as f32;
-        let clamp = ctx.get_param_bool("clamp")?;
-        let denom = from_max - from_min;
-        let clamp_min = to_min.min(to_max);
-        let clamp_max = to_min.max(to_max);
-        let pixel_count = image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
-                let a = image.data[idx + 3];
-                for c in 0..3 {
-                    let mapped = if denom.abs() > f32::EPSILON {
-                        (rgb[c] - from_min) / denom * (to_max - to_min) + to_min
-                    } else {
-                        to_min
-                    };
-                    let mut value = mapped;
-                    if clamp {
-                        value = value.clamp(clamp_min, clamp_max);
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let from_min = ctx.get_param_float("from_min")? as f32;
+            let from_max = ctx.get_param_float("from_max")? as f32;
+            let to_min = ctx.get_param_float("to_min")? as f32;
+            let to_max = ctx.get_param_float("to_max")? as f32;
+            let clamp = ctx.get_param_bool("clamp")?;
+            let denom = from_max - from_min;
+            let clamp_min = to_min.min(to_max);
+            let clamp_max = to_min.max(to_max);
+            let pixel_count = image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
+                    let a = image.data[idx + 3];
+                    for c in 0..3 {
+                        let mapped = if denom.abs() > f32::EPSILON {
+                            (rgb[c] - from_min) / denom * (to_max - to_min) + to_min
+                        } else {
+                            to_min
+                        };
+                        let mut value = mapped;
+                        if clamp {
+                            value = value.clamp(clamp_min, clamp_max);
+                        }
+                        rgb[c] = value;
                     }
-                    rgb[c] = value;
-                }
-                out[0] = rgb[0];
-                out[1] = rgb[1];
-                out[2] = rgb[2];
-                out[3] = a;
-            });
-        let output = Image::from_f32_data(image.width, image.height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+                    out[0] = rgb[0];
+                    out[1] = rgb[1];
+                    out[2] = rgb[2];
+                    out[3] = a;
+                });
+            let output = Image::from_f32_data(image.width, image.height, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -217,89 +222,95 @@ impl Node for MathNode {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let a_image = ctx.get_input_image("a")?;
-        let b_image = ctx.get_optional_input_image("b");
-        let operation = ctx.get_param_int("operation")?.clamp(0, 13);
-        let value_param = ctx.get_param_float("value")? as f32;
-        let clamp_result = ctx.get_param_bool("clamp_result")?;
-        let pixel_count = a_image.pixel_count();
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                let a_channels = [
-                    a_image.data[idx],
-                    a_image.data[idx + 1],
-                    a_image.data[idx + 2],
-                ];
-                let a_alpha = a_image.data[idx + 3];
-                let b_val = b_image
-                    .map(|image| luminance_at(image, idx))
-                    .unwrap_or(value_param);
-                let mut out_rgb = [0.0f32; 3];
-                for c in 0..3 {
-                    let a_val = a_channels[c];
-                    let mut result = match operation {
-                        0 => a_val + b_val,
-                        1 => a_val - b_val,
-                        2 => a_val * b_val,
-                        3 => {
-                            if b_val > 0.0001 {
-                                a_val / b_val
-                            } else {
-                                0.0
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let a_image = ctx.get_input_image("a")?;
+            let b_image = ctx.get_optional_input_image("b");
+            let operation = ctx.get_param_int("operation")?.clamp(0, 13);
+            let value_param = ctx.get_param_float("value")? as f32;
+            let clamp_result = ctx.get_param_bool("clamp_result")?;
+            let pixel_count = a_image.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    let a_channels = [
+                        a_image.data[idx],
+                        a_image.data[idx + 1],
+                        a_image.data[idx + 2],
+                    ];
+                    let a_alpha = a_image.data[idx + 3];
+                    let b_val = b_image
+                        .map(|image| luminance_at(image, idx))
+                        .unwrap_or(value_param);
+                    let mut out_rgb = [0.0f32; 3];
+                    for c in 0..3 {
+                        let a_val = a_channels[c];
+                        let mut result = match operation {
+                            0 => a_val + b_val,
+                            1 => a_val - b_val,
+                            2 => a_val * b_val,
+                            3 => {
+                                if b_val > 0.0001 {
+                                    a_val / b_val
+                                } else {
+                                    0.0
+                                }
                             }
-                        }
-                        4 => a_val.powf(b_val),
-                        5 => a_val.min(b_val),
-                        6 => a_val.max(b_val),
-                        7 => a_val.abs(),
-                        8 => {
-                            if a_val > b_val {
-                                1.0
-                            } else {
-                                0.0
+                            4 => a_val.powf(b_val),
+                            5 => a_val.min(b_val),
+                            6 => a_val.max(b_val),
+                            7 => a_val.abs(),
+                            8 => {
+                                if a_val > b_val {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
                             }
-                        }
-                        9 => {
-                            if a_val < b_val {
-                                1.0
-                            } else {
-                                0.0
+                            9 => {
+                                if a_val < b_val {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
                             }
-                        }
-                        10 => a_val.clamp(0.0, 1.0),
-                        11 => {
-                            if a_val >= b_val {
-                                1.0
-                            } else {
-                                0.0
+                            10 => a_val.clamp(0.0, 1.0),
+                            11 => {
+                                if a_val >= b_val {
+                                    1.0
+                                } else {
+                                    0.0
+                                }
                             }
+                            12 => smoothstep(0.0, b_val, a_val),
+                            13 => {
+                                let t = value_param;
+                                let b_channel = b_val;
+                                a_val * (1.0 - t) + b_channel * t
+                            }
+                            _ => a_val,
+                        };
+                        if clamp_result {
+                            result = result.clamp(0.0, 1.0);
                         }
-                        12 => smoothstep(0.0, b_val, a_val),
-                        13 => {
-                            let t = value_param;
-                            let b_channel = b_val;
-                            a_val * (1.0 - t) + b_channel * t
-                        }
-                        _ => a_val,
-                    };
-                    if clamp_result {
-                        result = result.clamp(0.0, 1.0);
+                        out_rgb[c] = result;
                     }
-                    out_rgb[c] = result;
-                }
-                out[0] = out_rgb[0];
-                out[1] = out_rgb[1];
-                out[2] = out_rgb[2];
-                out[3] = a_alpha;
-            });
-        let output = Image::from_f32_data(a_image.width, a_image.height, data);
-        let mut outputs = HashMap::new();
-        outputs.insert("image".to_string(), Value::Image(output));
-        Ok(outputs)
+                    out[0] = out_rgb[0];
+                    out[1] = out_rgb[1];
+                    out[2] = out_rgb[2];
+                    out[3] = a_alpha;
+                });
+            let output = Image::from_f32_data(a_image.width, a_image.height, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -9,19 +9,19 @@ export type WorkspacePreset = 'compositing' | 'viewing' | 'minimal';
 function addPresetPanels(api: DockviewApi, preset: WorkspacePreset) {
   switch (preset) {
     case 'compositing': {
-      api.addPanel({ id: 'node-library', component: 'node-library', title: 'Node Library' });
+      api.addPanel({ id: 'node-library', component: 'node-library', title: 'Node Library', initialWidth: 180 });
       api.addPanel({ id: 'node-canvas', component: 'node-canvas', title: 'Node Editor', position: { referencePanel: 'node-library', direction: 'right' } });
-      api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'right' } });
+      api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'right' }, initialWidth: 260 });
       api.addPanel({ id: 'viewer', component: 'viewer', title: 'Viewer', position: { referencePanel: 'inspector', direction: 'below' } });
-      api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: 'node-canvas', direction: 'below' } });
+      api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: 'node-canvas', direction: 'below' }, initialHeight: 40 });
       break;
     }
     case 'viewing': {
       api.addPanel({ id: 'viewer', component: 'viewer', title: 'Viewer' });
       api.addPanel({ id: 'node-canvas', component: 'node-canvas', title: 'Node Editor', position: { referencePanel: 'viewer', direction: 'right' } });
-      api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'below' } });
+      api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'below' }, initialHeight: 260 });
       api.addPanel({ id: 'node-library', component: 'node-library', title: 'Node Library', position: { referenceGroup: api.groups[api.groups.length - 1].id } });
-      api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: 'viewer', direction: 'below' } });
+      api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: 'viewer', direction: 'below' }, initialHeight: 40 });
       break;
     }
     case 'minimal': {

@@ -29,6 +29,7 @@
     "port.bool": "#cc66cc",
     "port.color": "#cccc00",
     "port.mask": "#ffffff",
+     "port.field": "#9b59b6",
 
     "node.bg": "#22223a",
     "node.selected": "#32325a",
@@ -42,6 +43,9 @@
     "node.header.transform": "rgba(40, 200, 220, 0.18)",
     "node.header.generator": "rgba(80, 200, 80, 0.18)",
     "node.header.matte": "rgba(200, 200, 200, 0.18)",
+    "node.header.group": "rgba(108, 92, 231, 0.22)",
+    "node.header.groupInput": "rgba(46, 204, 113, 0.22)",
+    "node.header.groupOutput": "rgba(231, 76, 60, 0.22)",
 
     "slider.fill": "rgba(108, 92, 231, 0.5)",
     "slider.fillHover": "rgba(108, 92, 231, 0.7)",

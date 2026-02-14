@@ -3,6 +3,7 @@ use compositor_core::node::{EvalContext, Node};
 use compositor_core::types::{FrameTime, Image, ParamValue, Value};
 use compositor_nodes_std::*;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use pollster;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -68,7 +69,7 @@ fn bench_color_brightness_contrast(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -90,7 +91,7 @@ fn bench_color_hue_saturation(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -110,7 +111,7 @@ fn bench_color_invert(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -135,7 +136,7 @@ fn bench_color_levels(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -160,7 +161,7 @@ fn bench_color_curves(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -189,7 +190,7 @@ fn bench_color_color_balance(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -213,7 +214,7 @@ fn bench_color_channel_shuffle(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -234,7 +235,7 @@ fn bench_color_threshold(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -255,7 +256,7 @@ fn bench_color_posterize(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -276,7 +277,7 @@ fn bench_color_gamma(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -296,7 +297,7 @@ fn bench_color_separate_hsva(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -322,7 +323,7 @@ fn bench_color_combine_hsva(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -344,7 +345,7 @@ fn bench_color_white_balance(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -365,7 +366,7 @@ fn bench_color_vibrance(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -395,7 +396,7 @@ fn bench_color_gradient_map(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -422,7 +423,7 @@ fn bench_color_tone_map(c: &mut Criterion) {
                 &ctx,
                 |b, ctx| {
                     b.iter(|| {
-                        black_box(node.evaluate(ctx).unwrap());
+                        black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
                     });
                 },
             );
@@ -450,7 +451,7 @@ fn bench_filter_gaussian_blur(c: &mut Criterion) {
                 &ctx,
                 |b, ctx| {
                     b.iter(|| {
-                        black_box(node.evaluate(ctx).unwrap());
+                        black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
                     });
                 },
             );
@@ -474,7 +475,7 @@ fn bench_filter_sharpen(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -495,7 +496,7 @@ fn bench_filter_edge_detect(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -516,7 +517,7 @@ fn bench_filter_dilate(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -537,7 +538,7 @@ fn bench_filter_erode(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -558,7 +559,7 @@ fn bench_filter_median(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -581,7 +582,7 @@ fn bench_filter_vignette(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -604,7 +605,57 @@ fn bench_filter_glow(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_filter_kuwahara_classic(c: &mut Criterion) {
+    let mut group = c.benchmark_group("filter_kuwahara_classic");
+    for size in SMALL_SIZES {
+        group.throughput(Throughput::Elements((size * size) as u64));
+        let image = create_test_image(size, size);
+        let node = Kuwahara::new();
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(image));
+        let mut params = HashMap::new();
+        params.insert("variation".to_string(), ParamValue::Int(0));
+        params.insert("size".to_string(), ParamValue::Int(6));
+        params.insert("uniformity".to_string(), ParamValue::Int(4));
+        params.insert("sharpness".to_string(), ParamValue::Float(0.5));
+        params.insert("eccentricity".to_string(), ParamValue::Float(1.0));
+        let ctx = make_context(inputs, &params);
+
+        group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
+            b.iter(|| {
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_filter_kuwahara_anisotropic(c: &mut Criterion) {
+    let mut group = c.benchmark_group("filter_kuwahara_anisotropic");
+    for size in SMALL_SIZES {
+        group.throughput(Throughput::Elements((size * size) as u64));
+        let image = create_test_image(size, size);
+        let node = Kuwahara::new();
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(image));
+        let mut params = HashMap::new();
+        params.insert("variation".to_string(), ParamValue::Int(1));
+        params.insert("size".to_string(), ParamValue::Int(6));
+        params.insert("uniformity".to_string(), ParamValue::Int(4));
+        params.insert("sharpness".to_string(), ParamValue::Float(0.5));
+        params.insert("eccentricity".to_string(), ParamValue::Float(1.0));
+        let ctx = make_context(inputs, &params);
+
+        group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
+            b.iter(|| {
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -627,7 +678,7 @@ fn bench_filter_lens_distortion(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -651,7 +702,7 @@ fn bench_composite_blend(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -674,7 +725,7 @@ fn bench_composite_alpha_over(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -703,7 +754,7 @@ fn bench_transform_resize(c: &mut Criterion) {
         group.throughput(Throughput::Elements((out_w * out_h) as u64));
         group.bench_with_input(BenchmarkId::new("scenario", label), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -729,7 +780,7 @@ fn bench_transform_crop(c: &mut Criterion) {
         group.throughput(Throughput::Elements((512u32 * 512u32) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -751,7 +802,7 @@ fn bench_transform_flip(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -773,7 +824,7 @@ fn bench_transform_rotate(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -795,7 +846,7 @@ fn bench_transform_translate(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -823,7 +874,7 @@ fn bench_transform_transform_2d(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -846,7 +897,7 @@ fn bench_generator_solid_color(c: &mut Criterion) {
     group.throughput(Throughput::Elements((1024u32 * 1024u32) as u64));
     group.bench_function("1024x1024", |b| {
         b.iter(|| {
-            black_box(node.evaluate(&ctx).unwrap());
+            black_box(pollster::block_on(node.evaluate(&ctx)).unwrap());
         });
     });
     group.finish();
@@ -867,7 +918,7 @@ fn bench_generator_noise(c: &mut Criterion) {
     group.throughput(Throughput::Elements((1024u32 * 1024u32) as u64));
     group.bench_function("1024x1024", |b| {
         b.iter(|| {
-            black_box(node.evaluate(&ctx).unwrap());
+            black_box(pollster::block_on(node.evaluate(&ctx)).unwrap());
         });
     });
     group.finish();
@@ -892,7 +943,7 @@ fn bench_generator_gradient(c: &mut Criterion) {
     group.throughput(Throughput::Elements((1024u32 * 1024u32) as u64));
     group.bench_function("1024x1024", |b| {
         b.iter(|| {
-            black_box(node.evaluate(&ctx).unwrap());
+            black_box(pollster::block_on(node.evaluate(&ctx)).unwrap());
         });
     });
     group.finish();
@@ -917,7 +968,7 @@ fn bench_generator_checkerboard(c: &mut Criterion) {
     group.throughput(Throughput::Elements((1024u32 * 1024u32) as u64));
     group.bench_function("1024x1024", |b| {
         b.iter(|| {
-            black_box(node.evaluate(&ctx).unwrap());
+            black_box(pollster::block_on(node.evaluate(&ctx)).unwrap());
         });
     });
     group.finish();
@@ -943,7 +994,7 @@ fn bench_generator_shape(c: &mut Criterion) {
     group.throughput(Throughput::Elements((1024u32 * 1024u32) as u64));
     group.bench_function("1024x1024", |b| {
         b.iter(|| {
-            black_box(node.evaluate(&ctx).unwrap());
+            black_box(pollster::block_on(node.evaluate(&ctx)).unwrap());
         });
     });
     group.finish();
@@ -962,7 +1013,7 @@ fn bench_matte_premultiply(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -982,7 +1033,7 @@ fn bench_matte_unpremultiply(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1004,7 +1055,7 @@ fn bench_matte_set_alpha(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1025,7 +1076,7 @@ fn bench_matte_extract_channel(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1050,7 +1101,7 @@ fn bench_matte_chroma_key(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1075,7 +1126,7 @@ fn bench_matte_despill(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1100,7 +1151,7 @@ fn bench_utility_map_range(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1123,7 +1174,7 @@ fn bench_utility_math(c: &mut Criterion) {
         group.throughput(Throughput::Elements((size * size) as u64));
         group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
             b.iter(|| {
-                black_box(node.evaluate(ctx).unwrap());
+                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
             });
         });
     }
@@ -1186,6 +1237,8 @@ criterion_group!(
     bench_filter_dilate,
     bench_filter_erode,
     bench_filter_median,
+    bench_filter_kuwahara_classic,
+    bench_filter_kuwahara_anisotropic,
     bench_filter_vignette,
     bench_filter_glow,
     bench_filter_lens_distortion

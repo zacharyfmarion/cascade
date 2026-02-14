@@ -1,7 +1,7 @@
 mod builtin_groups;
 pub mod document;
 
-use compositor_core::color::BuiltinColorManagement;
+use compositor_core::color::{BuiltinColorManagement, ColorManagement};
 use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
@@ -33,6 +33,7 @@ pub struct Engine {
     nodes: HashMap<NodeId, Arc<dyn Node>>,
     evaluator: Evaluator,
     gpu_context: Option<Arc<GpuContext>>,
+    color_management: Box<dyn ColorManagement>,
     group_definitions: HashMap<String, Arc<GroupDefinition>>,
     uuid_map: HashMap<String, NodeId>,
     kernel_manifests: HashMap<String, KernelManifest>,
@@ -170,6 +171,7 @@ impl Engine {
             nodes: HashMap::new(),
             evaluator: Evaluator::new(),
             gpu_context,
+            color_management: Box::new(BuiltinColorManagement::new()),
             group_definitions: HashMap::new(),
             uuid_map: HashMap::new(),
             kernel_manifests: HashMap::new(),
@@ -187,6 +189,26 @@ impl Engine {
             }
         }
         engine
+    }
+
+    #[cfg(feature = "ocio")]
+    pub fn load_ocio_config(&mut self, path: &str) -> Result<(), CompositorError> {
+        let ocio = compositor_ocio::OcioColorManagement::from_file(path)?;
+        self.color_management = Box::new(ocio);
+        self.evaluator = Evaluator::new();
+        Ok(())
+    }
+
+    #[cfg(feature = "ocio")]
+    pub fn load_ocio_from_env(&mut self) -> Result<(), CompositorError> {
+        let ocio = compositor_ocio::OcioColorManagement::from_env()?;
+        self.color_management = Box::new(ocio);
+        self.evaluator = Evaluator::new();
+        Ok(())
+    }
+
+    pub fn color_management(&self) -> &dyn ColorManagement {
+        self.color_management.as_ref()
     }
 
     pub fn register_gpu_kernel(&mut self, manifest_json: &str) -> Result<NodeSpec, String> {
@@ -1233,16 +1255,16 @@ impl Engine {
         frame: u64,
     ) -> Result<RenderResult, CompositorError> {
         let id = self.parse_node_id(viewer_node_id)?;
-        let cm = BuiltinColorManagement::new();
-        let eval_result = self.evaluator.evaluate(
+        let cm = self.color_management.as_ref();
+        let eval_result = pollster::block_on(self.evaluator.evaluate(
             &mut self.graph,
             &self.registry,
             &self.nodes,
             id,
             "display",
             FrameTime { frame },
-            &cm,
-        )?;
+            cm,
+        ))?;
         self.last_timings = eval_result
             .node_timings
             .into_iter()
@@ -1257,7 +1279,7 @@ impl Engine {
             Value::Image(image) => {
                 let width = image.width;
                 let height = image.height;
-                let pixels = Viewer::image_to_rgba8(&image);
+                let pixels = Viewer::image_to_rgba8(&image, cm);
                 Ok(RenderResult {
                     width,
                     height,
@@ -1276,16 +1298,16 @@ impl Engine {
         frame: u64,
     ) -> Result<compositor_core::eval::EvalResult, CompositorError> {
         let id = self.parse_node_id(node_id)?;
-        let cm = BuiltinColorManagement::new();
-        self.evaluator.evaluate(
+        let cm = self.color_management.as_ref();
+        pollster::block_on(self.evaluator.evaluate(
             &mut self.graph,
             &self.registry,
             &self.nodes,
             id,
             "display",
             FrameTime { frame },
-            &cm,
-        )
+            cm,
+        ))
     }
 
     pub fn render_export(
@@ -1305,19 +1327,19 @@ impl Engine {
             _ => 0,
         };
 
-        let cm = BuiltinColorManagement::new();
-        let eval_result = self.evaluator.evaluate(
+        let cm = self.color_management.as_ref();
+        let eval_result = pollster::block_on(self.evaluator.evaluate(
             &mut self.graph,
             &self.registry,
             &self.nodes,
             id,
             "display",
             FrameTime { frame },
-            &cm,
-        )?;
+            cm,
+        ))?;
         match eval_result.value {
             Value::Image(image) => {
-                let rgba8 = Viewer::image_to_rgba8(&image);
+                let rgba8 = Viewer::image_to_rgba8(&image, cm);
                 let mut buf = Vec::new();
                 let extension;
 
@@ -1371,17 +1393,17 @@ impl Engine {
 
         let mut results = Vec::new();
         let mut merged_timings = HashMap::new();
-        let cm = BuiltinColorManagement::new();
+        let cm = self.color_management.as_ref();
         for (vid, vid_str) in viewer_ids {
-            match self.evaluator.evaluate(
+            match pollster::block_on(self.evaluator.evaluate(
                 &mut self.graph,
                 &self.registry,
                 &self.nodes,
                 vid,
                 "display",
                 FrameTime { frame },
-                &cm,
-            ) {
+                cm,
+            )) {
                 Ok(eval_result) => {
                     for (nid, duration) in eval_result.node_timings {
                         merged_timings.insert(
@@ -1392,7 +1414,7 @@ impl Engine {
                     if let Value::Image(image) = eval_result.value {
                         let width = image.width;
                         let height = image.height;
-                        let pixels = Viewer::image_to_rgba8(&image);
+                        let pixels = Viewer::image_to_rgba8(&image, cm);
                         results.push((
                             vid_str,
                             RenderResult {
@@ -1494,11 +1516,11 @@ impl Engine {
 
         let ext = if format == 1 { "jpg" } else { "png" }.to_string();
         let padding = std::cmp::max(4, (range.end as f64).log10().ceil() as usize + 1);
+        let render_cm = Box::new(BuiltinColorManagement::new());
 
-        // Spawn background thread for rendering
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let cm = BuiltinColorManagement::new();
+                let cm = render_cm.as_ref();
                 let mut frame = range.start;
                 while frame <= range.end {
                     if job.cancelled.load(Ordering::Relaxed) {
@@ -1507,18 +1529,18 @@ impl Engine {
 
                     job.current_frame.store(frame, Ordering::Relaxed);
 
-                    match render_evaluator.evaluate(
+                    match pollster::block_on(render_evaluator.evaluate(
                         &mut render_graph,
                         &render_registry,
                         &render_nodes,
                         export_id,
                         "display",
                         FrameTime { frame },
-                        &cm,
-                    ) {
+                        cm,
+                    )) {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {
-                                let rgba8 = Viewer::image_to_rgba8(&image);
+                                let rgba8 = Viewer::image_to_rgba8(&image, cm);
                                 let filename =
                                     format!("{:0>width$}.{}", frame, ext, width = padding);
                                 let path = std::path::Path::new(&output_dir).join(&filename);
@@ -1539,23 +1561,16 @@ impl Engine {
                                         Err(e) => Err(e),
                                     }
                                 } else {
-                                    (|| -> Result<(), String> {
-                                        let file = std::fs::File::create(&path)
-                                            .map_err(|e| e.to_string())?;
-                                        let mut w = std::io::BufWriter::new(file);
-                                        let mut encoder =
-                                            png::Encoder::new(&mut w, image.width, image.height);
-                                        encoder.set_color(png::ColorType::Rgba);
-                                        encoder.set_depth(png::BitDepth::Eight);
-                                        encoder.set_compression(png::Compression::Fast);
-                                        encoder.set_filter(png::FilterType::Sub);
-                                        let mut writer =
-                                            encoder.write_header().map_err(|e| e.to_string())?;
-                                        writer
-                                            .write_image_data(&rgba8)
-                                            .map_err(|e| e.to_string())?;
-                                        Ok(())
-                                    })()
+                                    let img = image::RgbaImage::from_raw(
+                                        image.width,
+                                        image.height,
+                                        rgba8,
+                                    )
+                                    .ok_or_else(|| "Failed to create image buffer".to_string());
+                                    match img {
+                                        Ok(img) => img.save(&path).map_err(|e| e.to_string()),
+                                        Err(e) => Err(e),
+                                    }
                                 };
 
                                 if let Err(e) = encode_result {

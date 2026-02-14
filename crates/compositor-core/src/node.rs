@@ -3,7 +3,17 @@ use crate::error::CompositorError;
 use crate::types::*;
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type NodeFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<HashMap<String, Value>, CompositorError>> + Send + 'a>>;
+
+#[cfg(target_arch = "wasm32")]
+pub type NodeFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<HashMap<String, Value>, CompositorError>> + 'a>>;
 
 pub struct EvalContext<'a> {
     pub inputs: HashMap<String, Value>,
@@ -22,6 +32,13 @@ impl<'a> EvalContext<'a> {
 
     pub fn get_optional_input_image(&self, name: &str) -> Option<&Image> {
         self.inputs.get(name).and_then(|v| v.as_image())
+    }
+
+    pub fn get_input_field(&self, name: &str) -> Result<&Field, CompositorError> {
+        self.inputs
+            .get(name)
+            .and_then(|v| v.as_field())
+            .ok_or_else(|| CompositorError::MissingInput(name.to_string()))
     }
 
     pub fn get_param_float(&self, key: &str) -> Result<f64, CompositorError> {
@@ -63,7 +80,7 @@ impl<'a> EvalContext<'a> {
 pub trait Node: Send + Sync + Any {
     fn spec(&self) -> NodeSpec;
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError>;
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a>;
 
     fn as_any(&self) -> &dyn Any;
 

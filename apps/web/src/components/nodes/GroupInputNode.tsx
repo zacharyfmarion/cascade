@@ -6,7 +6,7 @@ import { useGraphStore } from '../../store/graphStore';
 import { getPortColor } from './BaseNode';
 import { AddPortForm, NodeButton } from './NodePrimitives';
 
-const VALUE_TYPES: ValueType[] = ['Image', 'Mask', 'Float', 'Int', 'Bool', 'Color'];
+const VALUE_TYPES: ValueType[] = ['Image', 'Mask', 'Float', 'Int', 'Bool', 'Color', 'Field'];
 
 export const GroupInputNode: React.FC<NodeProps> = ({ data, selected }) => {
   const spec = data.spec as NodeSpec;
@@ -38,7 +38,7 @@ export const GroupInputNode: React.FC<NodeProps> = ({ data, selected }) => {
     >
       <div
         className="base-node__header"
-        style={{ background: 'linear-gradient(135deg, #2d7d46, #1a5c30)' }}
+        style={{ background: 'var(--node-header-groupInput)' }}
       >
         <span className="base-node__title">Group Input</span>
         <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>▶</span>

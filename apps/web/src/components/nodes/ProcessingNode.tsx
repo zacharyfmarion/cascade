@@ -3,6 +3,7 @@ import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
 import { NodeDropdown, NodeCheckbox, NodeSection } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
@@ -35,7 +36,7 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
   );
 
   return (
-    <BaseNode {...props} data={data}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon(spec.id, spec.category)}>
       <NodeSection>
         {spec.params.map(p => {
           if (p.ui_hint.type === 'Hidden') return null;

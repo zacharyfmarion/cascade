@@ -61,6 +61,8 @@
 .dockview-theme-compositor {
   --dv-paneview-header-border-color: var(--border-default);
   --dv-tabs-and-actions-container-background-color: var(--bg-primary);
+  --dv-tabs-and-actions-container-height: 28px;
+  --dv-tabs-and-actions-container-font-size: 11px;
   --dv-activegroup-visiblepanel-tab-background-color: var(--bg-secondary);
   --dv-activegroup-hiddenpanel-tab-background-color: var(--bg-primary);
   --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg-surface);
@@ -75,15 +77,4 @@
   --dv-separator-border: var(--border-default);
   --dv-drag-over-background-color: rgba(var(--accent-primary-rgb, 0, 128, 255), 0.15);
   --dv-drag-over-border-color: var(--accent-primary);
-}
-
-/* Compact tab bar */
-.dockview-theme-compositor .tabs-and-actions-container {
-  height: 28px !important;
-  min-height: 28px !important;
-}
-
-.dockview-theme-compositor .tab {
-  height: 28px !important;
-  min-height: 28px !important;
 }

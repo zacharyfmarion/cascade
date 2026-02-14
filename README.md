@@ -20,7 +20,7 @@ compositor/
 
 ### Core concepts
 
-- **Image format**: f16 RGBA in linear color space. sRGB conversion happens only at I/O boundaries.
+- **Image format**: f32 RGBA in linear color space. sRGB conversion happens only at I/O boundaries. f16 is used only for GPU upload/readback.
 - **Graph**: SlotMap-based DAG with cycle detection, type-safe connections, and dirty propagation.
 - **Evaluator**: Pull-based from viewer nodes. Per-output caching keyed on `(frame_time, param_revision, upstream_hash)`.
 - **Self-describing nodes**: Each node declares its own inputs, outputs, params, and UI hints via `NodeSpec`. The frontend renders controls automatically — adding a new Rust node requires zero frontend changes.

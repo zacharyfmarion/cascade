@@ -9,8 +9,11 @@ use compositor_nodes_std::{register_standard_nodes, BrightnessContrast, LoadImag
 use image::codecs::png::PngEncoder;
 use image::ColorType;
 use image::ImageEncoder;
+use pollster::block_on;
 use std::any::Any;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -40,17 +43,16 @@ fn graph_connects_and_evaluates_chain() {
 
     let mut evaluator = Evaluator::new();
     let cm = BuiltinColorManagement::new();
-    let eval_result = evaluator
-        .evaluate(
-            &mut graph,
-            &registry,
-            &nodes,
-            viewer_id,
-            "display",
-            FrameTime { frame: 0 },
-            &cm,
-        )
-        .unwrap();
+    let eval_result = block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        viewer_id,
+        "display",
+        FrameTime { frame: 0 },
+        &cm,
+    ))
+    .unwrap();
     match eval_result.value {
         Value::Image(image) => {
             assert_eq!(image.width, 1);
@@ -63,7 +65,7 @@ fn graph_connects_and_evaluates_chain() {
 #[test]
 fn cache_hit_skips_evaluation() {
     let mut registry = NodeRegistry::new();
-    registry.register("counter", || Box::new(CounterNode::new()));
+    registry.register("counter", || Arc::new(CounterNode::new()));
 
     let mut graph = Graph::new();
     let node_id = graph.add_node("counter");
@@ -73,28 +75,26 @@ fn cache_hit_skips_evaluation() {
 
     let mut evaluator = Evaluator::new();
     let cm = BuiltinColorManagement::new();
-    evaluator
-        .evaluate(
-            &mut graph,
-            &registry,
-            &nodes,
-            node_id,
-            "value",
-            FrameTime { frame: 0 },
-            &cm,
-        )
-        .unwrap();
-    evaluator
-        .evaluate(
-            &mut graph,
-            &registry,
-            &nodes,
-            node_id,
-            "value",
-            FrameTime { frame: 0 },
-            &cm,
-        )
-        .unwrap();
+    block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        node_id,
+        "value",
+        FrameTime { frame: 0 },
+        &cm,
+    ))
+    .unwrap();
+    block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        node_id,
+        "value",
+        FrameTime { frame: 0 },
+        &cm,
+    ))
+    .unwrap();
 
     let counter = nodes
         .get(&node_id)
@@ -174,15 +174,27 @@ impl Node for CounterNode {
         }
     }
 
-    fn evaluate(
-        &self,
-        _ctx: &EvalContext,
-    ) -> Result<HashMap<String, Value>, compositor_core::error::CompositorError> {
-        let mut guard = self.count.lock().unwrap();
-        *guard += 1;
-        let mut outputs = HashMap::new();
-        outputs.insert("value".to_string(), Value::Float(1.0));
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        _ctx: &'a EvalContext<'a>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        HashMap<String, Value>,
+                        compositor_core::error::CompositorError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let mut guard = self.count.lock().unwrap();
+            *guard += 1;
+            let mut outputs = HashMap::new();
+            outputs.insert("value".to_string(), Value::Float(1.0));
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

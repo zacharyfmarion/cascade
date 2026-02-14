@@ -2,7 +2,7 @@ use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{GroupDefinition, GroupInterface, InternalConnection, InternalNode};
-use compositor_core::node::{EvalContext, Node, NodeRegistry};
+use compositor_core::node::{EvalContext, Node, NodeFuture, NodeRegistry};
 use compositor_core::types::*;
 use std::any::Any;
 use std::collections::HashMap;
@@ -44,17 +44,23 @@ impl Node for GroupInputNode {
         }
     }
 
-    fn evaluate(&self, _ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let guard = self
-            .injected
-            .read()
-            .map_err(|_| CompositorError::Other("Group input lock poisoned".to_string()))?;
-        let mut outputs = HashMap::new();
-        for port in &self.outputs {
-            let value = guard.get(&port.name).cloned().unwrap_or(Value::None);
-            outputs.insert(port.name.clone(), value);
-        }
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        _ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let guard = self
+                .injected
+                .read()
+                .map_err(|_| CompositorError::Other("Group input lock poisoned".to_string()))?;
+            let mut outputs = HashMap::new();
+            for port in &self.outputs {
+                let value = guard.get(&port.name).cloned().unwrap_or(Value::None);
+                outputs.insert(port.name.clone(), value);
+            }
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -89,13 +95,19 @@ impl Node for GroupOutputNode {
         }
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let mut outputs = HashMap::new();
-        for port in &self.ports {
-            let value = ctx.inputs.get(&port.name).cloned().unwrap_or(Value::None);
-            outputs.insert(port.name.clone(), value);
-        }
-        Ok(outputs)
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let mut outputs = HashMap::new();
+            for port in &self.ports {
+                let value = ctx.inputs.get(&port.name).cloned().unwrap_or(Value::None);
+                outputs.insert(port.name.clone(), value);
+            }
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -375,66 +387,91 @@ impl Node for GroupNode {
         Self::build_spec(&self.definition, &self.interface)
     }
 
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| CompositorError::Other("Group state lock poisoned".to_string()))?;
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let (mut internal_graph, internal_nodes, internal_registry, mut internal_evaluator) = {
+                let mut state = self
+                    .state
+                    .lock()
+                    .map_err(|_| CompositorError::Other("Group state lock poisoned".to_string()))?;
 
-        let input_node = state
-            .internal_nodes
-            .get(&self.group_input_id)
-            .ok_or_else(|| CompositorError::Other("Group input node not found".to_string()))?;
-        let group_input = input_node
-            .as_any()
-            .downcast_ref::<GroupInputNode>()
-            .ok_or_else(|| CompositorError::Other("Group input node type mismatch".to_string()))?;
-        group_input.inject_inputs(ctx.inputs.clone())?;
+                let input_node =
+                    state
+                        .internal_nodes
+                        .get(&self.group_input_id)
+                        .ok_or_else(|| {
+                            CompositorError::Other("Group input node not found".to_string())
+                        })?;
+                let group_input = input_node
+                    .as_any()
+                    .downcast_ref::<GroupInputNode>()
+                    .ok_or_else(|| {
+                        CompositorError::Other("Group input node type mismatch".to_string())
+                    })?;
+                group_input.inject_inputs(ctx.inputs.clone())?;
 
-        for promo in &self.definition.promotions {
-            if let Some(value) = ctx.params.get(&promo.group_param_key) {
-                let internal_id = self.id_map.get(&promo.internal_node_id).ok_or_else(|| {
-                    CompositorError::Other(format!(
-                        "Internal node {} not found",
-                        promo.internal_node_id
-                    ))
-                })?;
-                state.internal_graph.set_param(
-                    *internal_id,
-                    &promo.internal_param_key,
-                    value.clone(),
-                );
+                for promo in &self.definition.promotions {
+                    if let Some(value) = ctx.params.get(&promo.group_param_key) {
+                        let internal_id =
+                            self.id_map.get(&promo.internal_node_id).ok_or_else(|| {
+                                CompositorError::Other(format!(
+                                    "Internal node {} not found",
+                                    promo.internal_node_id
+                                ))
+                            })?;
+                        state.internal_graph.set_param(
+                            *internal_id,
+                            &promo.internal_param_key,
+                            value.clone(),
+                        );
+                    }
+                }
+
+                let internal_graph = std::mem::replace(&mut state.internal_graph, Graph::new());
+                let internal_nodes = std::mem::take(&mut state.internal_nodes);
+                let internal_registry =
+                    std::mem::replace(&mut state.internal_registry, NodeRegistry::new());
+                let internal_evaluator =
+                    std::mem::replace(&mut state.internal_evaluator, Evaluator::new());
+                (
+                    internal_graph,
+                    internal_nodes,
+                    internal_registry,
+                    internal_evaluator,
+                )
+            };
+
+            let mut outputs = HashMap::new();
+            for port in &self.interface.outputs {
+                let eval_result = internal_evaluator
+                    .evaluate(
+                        &mut internal_graph,
+                        &internal_registry,
+                        &internal_nodes,
+                        self.group_output_id,
+                        &port.name,
+                        ctx.frame_time,
+                        ctx.color_management,
+                    )
+                    .await?;
+                outputs.insert(port.name.clone(), eval_result.value);
             }
-        }
 
-        let (internal_graph, internal_nodes, internal_registry, internal_evaluator) = {
-            let GroupNodeState {
-                internal_graph,
-                internal_nodes,
-                internal_evaluator,
-                internal_registry,
-            } = &mut *state;
-            (
-                internal_graph,
-                internal_nodes,
-                internal_registry,
-                internal_evaluator,
-            )
-        };
-        let mut outputs = HashMap::new();
-        for port in &self.interface.outputs {
-            let eval_result = internal_evaluator.evaluate(
-                internal_graph,
-                &*internal_registry,
-                &*internal_nodes,
-                self.group_output_id,
-                &port.name,
-                ctx.frame_time,
-                ctx.color_management,
-            )?;
-            outputs.insert(port.name.clone(), eval_result.value);
-        }
-        Ok(outputs)
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| CompositorError::Other("Group state lock poisoned".to_string()))?;
+            state.internal_graph = internal_graph;
+            state.internal_nodes = internal_nodes;
+            state.internal_registry = internal_registry;
+            state.internal_evaluator = internal_evaluator;
+
+            Ok(outputs)
+        })
     }
 
     fn as_any(&self) -> &dyn Any {

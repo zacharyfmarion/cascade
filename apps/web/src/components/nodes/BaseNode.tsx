@@ -22,16 +22,17 @@ interface BaseNodeProps {
 }
 
 export const getPortColor = (type: string) => {
-  switch (type) {
-    case 'Image': return 'var(--port-image)';
-    case 'Mask': return 'var(--port-mask)';
-    case 'Float': return 'var(--port-float)';
-    case 'Int': return 'var(--port-int)';
-    case 'Bool': return 'var(--port-bool)';
-    case 'Color': return 'var(--port-color)';
-    default: return 'var(--port-mask)';
-  }
-};
+   switch (type) {
+     case 'Image': return 'var(--port-image)';
+     case 'Mask': return 'var(--port-mask)';
+     case 'Float': return 'var(--port-float)';
+     case 'Int': return 'var(--port-int)';
+     case 'Bool': return 'var(--port-bool)';
+     case 'Color': return 'var(--port-color)';
+     case 'Field': return 'var(--port-field)';
+     default: return 'var(--port-mask)';
+   }
+ };
 
 const getHeaderBackground = (category: string) => {
   switch (category) {
@@ -43,7 +44,7 @@ const getHeaderBackground = (category: string) => {
     case 'Transform': return 'var(--node-header-transform)';
     case 'Generator': return 'var(--node-header-generator)';
     case 'Matte': return 'var(--node-header-matte)';
-    case 'Group': return 'linear-gradient(135deg, #4a6fa5, #2d4a7d)';
+    case 'Group': return 'var(--node-header-group)';
     default: return 'var(--slider-bg)';
   }
 };

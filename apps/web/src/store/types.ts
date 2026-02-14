@@ -1,4 +1,4 @@
-export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color';
+export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field';
 
 export interface ColorStop {
   position: number;

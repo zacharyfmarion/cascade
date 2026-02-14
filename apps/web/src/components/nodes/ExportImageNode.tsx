@@ -9,6 +9,7 @@ import {
   NodeButton,
   NodeSection,
 } from './NodePrimitives';
+import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
@@ -58,7 +59,7 @@ export const ExportImageNode: React.FC<NodeProps> = (props) => {
   }, [props.id, exportImage]);
 
   return (
-    <BaseNode {...props} data={data}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon('export_image', 'Output')}>
       <NodeCanvas canvasRef={canvasRef} hasResult={!!result} />
 
       <NodeSection>

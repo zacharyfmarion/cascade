@@ -127,6 +127,113 @@ impl Image {
     }
 }
 
+/// Transform applied to field coordinates before sampling.
+#[derive(Debug, Clone)]
+pub struct FieldTransform {
+    pub scale: [f32; 2],
+    pub offset: [f32; 2],
+    pub rotation: f32, // radians
+}
+
+impl Default for FieldTransform {
+    fn default() -> Self {
+        Self {
+            scale: [1.0, 1.0],
+            offset: [0.0, 0.0],
+            rotation: 0.0,
+        }
+    }
+}
+
+impl FieldTransform {
+    /// Transforms UV coords: offset → rotate (around center) → scale.
+    pub fn apply(&self, u: f32, v: f32) -> (f32, f32) {
+        let u = u - self.offset[0];
+        let v = v - self.offset[1];
+
+        let (u, v) = if self.rotation.abs() > f32::EPSILON {
+            let cu = u - 0.5;
+            let cv = v - 0.5;
+            let cos_r = self.rotation.cos();
+            let sin_r = self.rotation.sin();
+            (cu * cos_r - cv * sin_r + 0.5, cu * sin_r + cv * cos_r + 0.5)
+        } else {
+            (u, v)
+        };
+
+        (u * self.scale[0], v * self.scale[1])
+    }
+}
+
+/// A resolution-independent procedural pattern.
+/// Maps normalized (u, v) coordinates in [0,1] to RGBA color values.
+#[derive(Clone)]
+pub struct Field {
+    pub sample_fn: Arc<dyn Fn(f32, f32) -> [f32; 4] + Send + Sync>,
+    pub transform: FieldTransform,
+}
+
+impl std::fmt::Debug for Field {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Field")
+            .field("transform", &self.transform)
+            .finish()
+    }
+}
+
+impl Field {
+    pub fn new<F>(sample_fn: F) -> Self
+    where
+        F: Fn(f32, f32) -> [f32; 4] + Send + Sync + 'static,
+    {
+        Self {
+            sample_fn: Arc::new(sample_fn),
+            transform: FieldTransform::default(),
+        }
+    }
+
+    pub fn with_transform<F>(sample_fn: F, transform: FieldTransform) -> Self
+    where
+        F: Fn(f32, f32) -> [f32; 4] + Send + Sync + 'static,
+    {
+        Self {
+            sample_fn: Arc::new(sample_fn),
+            transform,
+        }
+    }
+
+    /// Sample the field at the given UV coordinates, applying the transform.
+    pub fn sample(&self, u: f32, v: f32) -> [f32; 4] {
+        let (tu, tv) = self.transform.apply(u, v);
+        (self.sample_fn)(tu, tv)
+    }
+
+    /// Rasterize the field to an Image at the given dimensions.
+    pub fn rasterize(&self, width: u32, height: u32) -> Image {
+        let pixel_count = (width as usize) * (height as usize);
+        let mut data = vec![0.0f32; pixel_count * 4];
+        let w = width as usize;
+        let denom_x = if width > 1 { (width - 1) as f32 } else { 1.0 };
+        let denom_y = if height > 1 { (height - 1) as f32 } else { 1.0 };
+
+        data.par_chunks_exact_mut(4)
+            .enumerate()
+            .for_each(|(i, out)| {
+                let x = (i % w) as f32;
+                let y = (i / w) as f32;
+                let u = x / denom_x;
+                let v = y / denom_y;
+                let color = self.sample(u, v);
+                out[0] = color[0];
+                out[1] = color[1];
+                out[2] = color[2];
+                out[3] = color[3];
+            });
+
+        Image::from_f32_data(width, height, data)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum ValueType {
     Image,
@@ -135,6 +242,7 @@ pub enum ValueType {
     Int,
     Bool,
     Color,
+    Field,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +253,7 @@ pub enum Value {
     Int(i32),
     Bool(bool),
     Color([f32; 4]),
+    Field(Field),
     None,
 }
 
@@ -163,6 +272,7 @@ impl Value {
             Value::Int(_) => ValueType::Int,
             Value::Bool(_) => ValueType::Bool,
             Value::Color(_) => ValueType::Color,
+            Value::Field(_) => ValueType::Field,
             Value::None => ValueType::Float,
         }
     }
@@ -198,6 +308,13 @@ impl Value {
     pub fn as_color(&self) -> Option<[f32; 4]> {
         match self {
             Value::Color(c) => Some(*c),
+            _ => None,
+        }
+    }
+
+    pub fn as_field(&self) -> Option<&Field> {
+        match self {
+            Value::Field(f) => Some(f),
             _ => None,
         }
     }
