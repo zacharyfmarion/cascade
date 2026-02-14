@@ -332,6 +332,7 @@ const generateGlslKernel = async (prompt: string, apiKey: string): Promise<GlslM
 export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({ nodeId, typeId }) => {
   const compileScriptNode = useGraphStore(s => s.compileScriptNode);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
+  const nodeParams = useGraphStore(s => s.nodes.get(nodeId)?.params);
   const [apiKey, setApiKey] = useState('');
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
@@ -343,8 +344,29 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
     if (storedKey) setApiKey(storedKey);
   }, []);
   
-  // Initialize state from existing spec if available
   const [state, setState] = useState<ScriptEditorState>(() => {
+    const savedManifest = nodeParams?.['__script_manifest'];
+    if (savedManifest && 'String' in (savedManifest as Record<string, unknown>)) {
+      try {
+        const manifest = JSON.parse((savedManifest as { String: string }).String);
+        return {
+          inputs: (manifest.inputs ?? []).map((p: { name: string; label: string; ty: string }, i: number) => ({
+            id: `in_${i}`, name: p.name, label: p.label, ty: p.ty,
+          })),
+          outputs: (manifest.outputs ?? []).map((p: { name: string; label: string; ty: string }, i: number) => ({
+            id: `out_${i}`, name: p.name, label: p.label, ty: p.ty,
+          })),
+          params: (manifest.params ?? []).map((p: { key: string; label: string; type: string; default: number | boolean; min?: number; max?: number; step?: number }, i: number) => ({
+            id: `p_${i}`, key: p.key, label: p.label, ty: p.type,
+            default: p.default, min: p.min, max: p.max, step: p.step,
+          })),
+          kernel: manifest.kernel ?? 'return color;',
+          compileStatus: 'success' as const,
+          compileError: null,
+        };
+      } catch { /* fall through */ }
+    }
+
     const spec = nodeSpecs.find(s => s.id === typeId);
     if (spec) {
         return {
@@ -386,30 +408,31 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
         description: "Custom GPU shader node",
         inputs: state.inputs,
         outputs: state.outputs,
-        params: state.params.map(p => {
-            const defaultVal = p.ty === 'Bool' 
-                ? { Bool: Boolean(p.default) }
-                : p.ty === 'Int' 
-                    ? { Int: Number(p.default) }
-                    : { Float: Number(p.default) };
-
-            return {
-                key: p.key,
-                label: p.label,
-                ty: p.ty,
-                default: defaultVal,
-                min: p.min,
-                max: p.max,
-                step: p.step,
-                ui_hint: p.ty === 'Bool' 
-                    ? { type: 'Checkbox' } 
-                    : { type: 'Slider' }
-            };
-        }),
+        params: state.params.map(p => ({
+            key: p.key,
+            label: p.label,
+            type: p.ty,
+            default: p.ty === 'Bool' ? Boolean(p.default) : Number(p.default),
+            min: p.min,
+            max: p.max,
+            step: p.step,
+            ui: p.ty === 'Bool' ? 'Checkbox' : p.ty === 'Int' ? 'NumberInput' : 'Slider',
+        })),
         kernel: state.kernel
       };
 
-      await compileScriptNode(nodeId, JSON.stringify(manifest));
+      const manifestJson = JSON.stringify(manifest);
+      await compileScriptNode(nodeId, manifestJson);
+      const nodes = useGraphStore.getState().nodes;
+      const node = nodes.get(nodeId);
+      if (node) {
+        const updated = new Map(nodes);
+        updated.set(nodeId, {
+          ...node,
+          params: { ...node.params, __script_manifest: { String: manifestJson } },
+        });
+        useGraphStore.setState({ nodes: updated });
+      }
       setState(s => ({ ...s, compileStatus: 'success' }));
     } catch (e) {
       setState(s => ({ 

@@ -15,3 +15,14 @@ members = [
 # Our own crates stay at opt-level 0 for fast compile times.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Optimize our own compute-heavy crates in dev builds so image processing
+# and the WASM bridge aren't unusably slow during development.
+[profile.dev.package.compositor-nodes-std]
+opt-level = 2
+
+[profile.dev.package.compositor-core]
+opt-level = 2
+
+[profile.dev.package.compositor-wasm]
+opt-level = 2
