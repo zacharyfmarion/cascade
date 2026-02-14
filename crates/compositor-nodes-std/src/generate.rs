@@ -999,6 +999,116 @@ impl Node for RasterizeField {
     }
 }
 
+pub struct FloatConstant;
+
+impl FloatConstant {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for FloatConstant {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "float_constant".to_string(),
+            display_name: "Float".to_string(),
+            category: "Generator".to_string(),
+            description: "Output a constant float value".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Float,
+            }],
+            params: vec![ParamSpec {
+                key: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Float,
+                default: ParamDefault::Float(0.0),
+                min: None,
+                max: None,
+                step: Some(0.01),
+                ui_hint: UiHint::NumberInput,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let value = ctx.get_param_float("value")? as f32;
+            let mut outputs = HashMap::new();
+            outputs.insert("value".to_string(), Value::Float(value));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct IntegerConstant;
+
+impl IntegerConstant {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for IntegerConstant {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "integer_constant".to_string(),
+            display_name: "Integer".to_string(),
+            category: "Generator".to_string(),
+            description: "Output a constant integer value".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Int,
+            }],
+            params: vec![ParamSpec {
+                key: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(0),
+                min: None,
+                max: None,
+                step: Some(1.0),
+                ui_hint: UiHint::NumberInput,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let value = ctx.get_param_int("value")? as i32;
+            let mut outputs = HashMap::new();
+            outputs.insert("value".to_string(), Value::Int(value));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 fn build_field_transform(ctx: &EvalContext) -> Result<FieldTransform, CompositorError> {
     let scale_x = ctx.get_param_float("scale_x")? as f32;
     let scale_y = ctx.get_param_float("scale_y")? as f32;

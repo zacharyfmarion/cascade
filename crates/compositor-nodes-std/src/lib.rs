@@ -25,7 +25,9 @@ pub use color_convert::ColorConvert;
 pub use color_ops::{ChannelShuffle, ColorBalance, Curves, Gamma, Levels, Posterize, Threshold};
 pub use filter::GaussianBlur;
 pub use filter_ops::{Dilate, EdgeDetect, Erode, Kuwahara, Median, Sharpen};
-pub use generate::{Checkerboard, Gradient, Noise, RasterizeField, SolidColor};
+pub use generate::{
+    Checkerboard, FloatConstant, Gradient, IntegerConstant, Noise, RasterizeField, SolidColor,
+};
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
 pub use matte::{ChromaKey, ExtractChannel, Premultiply, SetAlpha, Unpremultiply};
@@ -89,6 +91,8 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("gradient", || Arc::new(Gradient::new()));
     registry.register("checkerboard", || Arc::new(Checkerboard::new()));
     registry.register("rasterize_field", || Arc::new(RasterizeField::new()));
+    registry.register("float_constant", || Arc::new(FloatConstant::new()));
+    registry.register("integer_constant", || Arc::new(IntegerConstant::new()));
 
     // Matte
     registry.register("premultiply", || Arc::new(Premultiply::new()));
