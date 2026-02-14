@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
-import { NodeDropdown, NodeCheckbox, NodeSection } from './NodePrimitives';
+import { NodeDropdown, NodeCheckbox, NodeNumberInput, NodeSection } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
@@ -44,7 +44,7 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
           const val = params[p.key] ?? p.default;
           const rawValue = extractParamValue(val);
 
-          if (p.ui_hint.type === 'Slider' || p.ui_hint.type === 'NumberInput') {
+          if (p.ui_hint.type === 'Slider') {
             return (
               <NodeSlider
                 key={p.key}
@@ -53,6 +53,21 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
                 min={p.min ?? 0}
                 max={p.max ?? 1}
                 step={p.step ?? 0.01}
+                onChange={(v) => handleLive(p.key, p.ty, v)}
+                onChangeCommit={(v) => handleCommit(p.key, p.ty, v)}
+              />
+            );
+          }
+
+          if (p.ui_hint.type === 'NumberInput') {
+            return (
+              <NodeNumberInput
+                key={p.key}
+                label={p.label}
+                value={Number(rawValue)}
+                min={p.min}
+                max={p.max}
+                step={p.step ?? 1}
                 onChange={(v) => handleLive(p.key, p.ty, v)}
                 onChangeCommit={(v) => handleCommit(p.key, p.ty, v)}
               />

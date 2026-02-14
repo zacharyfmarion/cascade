@@ -159,6 +159,7 @@ interface NodeNumberInputProps {
   label: string;
   value: number;
   onChange: (value: number) => void;
+  onChangeCommit?: (value: number) => void;
   min?: number;
   max?: number;
   step?: number;
@@ -166,22 +167,60 @@ interface NodeNumberInputProps {
 }
 
 export const NodeNumberInput: React.FC<NodeNumberInputProps> = ({
-  label, value, onChange, min, max, step, disabled,
-}) => (
-  <div className="node-number nopan nodrag nowheel" onPointerDown={(e) => e.stopPropagation()}>
-    <div className="node-number__label">{label}</div>
-    <input
-      type="number"
-      className="node-number__input"
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      min={min}
-      max={max}
-      step={step}
-      disabled={disabled}
-    />
-  </div>
-);
+  label, value, onChange, onChangeCommit, min, max, step, disabled,
+}) => {
+  const [localValue, setLocalValue] = React.useState(String(value));
+  const [editing, setEditing] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!editing) setLocalValue(String(value));
+  }, [value, editing]);
+
+  const commit = React.useCallback((raw: string) => {
+    const v = Number(raw);
+    if (!Number.isNaN(v)) {
+      onChange(v);
+      onChangeCommit?.(v);
+    }
+  }, [onChange, onChangeCommit]);
+
+  const handleChange = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setLocalValue(e.target.value);
+  }, []);
+
+  const handleFocus = React.useCallback(() => setEditing(true), []);
+
+  const handleBlur = React.useCallback(() => {
+    setEditing(false);
+    commit(localValue);
+  }, [localValue, commit]);
+
+  const handleKeyDown = React.useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      commit(localValue);
+      (e.target as HTMLInputElement).blur();
+    }
+  }, [localValue, commit]);
+
+  return (
+    <div className="node-number nopan nodrag nowheel" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="node-number__label">{label}</div>
+      <input
+        type="number"
+        className="node-number__input"
+        value={localValue}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+      />
+    </div>
+  );
+};
 
 // ── Button Group ────────────────────────────────────────────────
 

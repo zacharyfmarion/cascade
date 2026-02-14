@@ -1,6 +1,7 @@
 import React from 'react';
 import { useGraphStore } from '../store/graphStore';
 import { NodeSlider } from './nodes/NodeSlider';
+import { NodeNumberInput } from './nodes/NodePrimitives';
 import { ScriptNodeEditor } from './ScriptNodeEditor';
 import { ColorRampEditor } from './ColorRampEditor';
 import type { ParamSpec, ParamValue, ColorStop, PortSpec } from '../store/types';
@@ -20,13 +21,25 @@ const ParamControl: React.FC<{
 
   return (
     <div style={{ marginBottom: '8px' }}>
-      {(paramSpec.ui_hint.type === 'Slider' || paramSpec.ui_hint.type === 'NumberInput') && (
+      {paramSpec.ui_hint.type === 'Slider' && (
         <NodeSlider
           label={paramSpec.label}
           value={Number(rawValue)}
           min={paramSpec.min ?? 0}
           max={paramSpec.max ?? 1}
           step={paramSpec.step ?? 0.01}
+          onChange={(v) => onLive(paramSpec.key, createParamValue(paramSpec.ty, v))}
+          onChangeCommit={(v) => onCommit(paramSpec.key, createParamValue(paramSpec.ty, v))}
+        />
+      )}
+
+      {paramSpec.ui_hint.type === 'NumberInput' && (
+        <NodeNumberInput
+          label={paramSpec.label}
+          value={Number(rawValue)}
+          min={paramSpec.min}
+          max={paramSpec.max}
+          step={paramSpec.step ?? 1}
           onChange={(v) => onLive(paramSpec.key, createParamValue(paramSpec.ty, v))}
           onChangeCommit={(v) => onCommit(paramSpec.key, createParamValue(paramSpec.ty, v))}
         />
