@@ -29,7 +29,8 @@ pub struct Connection {
 #[derive(Clone)]
 pub struct Graph {
     pub nodes: SlotMap<NodeId, NodeInstance>,
-    pub connections: Vec<Connection>,
+    inputs: HashMap<(NodeId, String), (NodeId, String)>,
+    outputs: HashMap<NodeId, Vec<Connection>>,
     dirty_nodes: HashSet<NodeId>,
 }
 
@@ -41,7 +42,8 @@ impl Graph {
     pub fn new() -> Self {
         Self {
             nodes: SlotMap::with_key(),
-            connections: Vec::new(),
+            inputs: HashMap::new(),
+            outputs: HashMap::new(),
             dirty_nodes: HashSet::new(),
         }
     }
@@ -61,8 +63,13 @@ impl Graph {
 
     pub fn remove_node(&mut self, node_id: NodeId) {
         self.nodes.remove(node_id);
-        self.connections
-            .retain(|c| c.from_node != node_id && c.to_node != node_id);
+        self.inputs
+            .retain(|(to_node, _), (from_node, _)| *to_node != node_id && *from_node != node_id);
+        self.outputs.remove(&node_id);
+        for conns in self.outputs.values_mut() {
+            conns.retain(|c| c.to_node != node_id);
+        }
+        self.outputs.retain(|_, conns| !conns.is_empty());
         self.dirty_nodes.remove(&node_id);
     }
 
@@ -79,7 +86,7 @@ impl Graph {
         let input_names: HashSet<&str> = spec.inputs.iter().map(|p| p.name.as_str()).collect();
         let output_names: HashSet<&str> = spec.outputs.iter().map(|p| p.name.as_str()).collect();
 
-        self.connections.retain(|c| {
+        self.retain_connections(|c| {
             if c.to_node == node_id && !input_names.contains(c.to_port.as_str()) {
                 return false;
             }
@@ -155,16 +162,43 @@ impl Graph {
             return Err(CompositorError::CycleDetected);
         }
 
-        self.connections
-            .retain(|c| !(c.to_node == to_node && c.to_port == to_port));
-        self.connections.push(new_connection);
+        let to_port_string = to_port.to_string();
+        let to_key = (to_node, to_port_string.clone());
+        if let Some((prev_from_node, prev_from_port)) = self.inputs.remove(&to_key) {
+            if let Some(conns) = self.outputs.get_mut(&prev_from_node) {
+                conns.retain(|c| {
+                    !(c.to_node == to_node
+                        && c.to_port == to_port
+                        && c.from_port == prev_from_port)
+                });
+                if conns.is_empty() {
+                    self.outputs.remove(&prev_from_node);
+                }
+            }
+        }
+
+        self.inputs
+            .insert((to_node, to_port_string), (from_node, from_port.to_string()));
+        self.outputs
+            .entry(from_node)
+            .or_default()
+            .push(new_connection);
         self.mark_dirty(to_node);
         Ok(())
     }
 
     pub fn disconnect(&mut self, to_node: NodeId, to_port: &str) {
-        self.connections
-            .retain(|c| !(c.to_node == to_node && c.to_port == to_port));
+        let to_key = (to_node, to_port.to_string());
+        if let Some((from_node, from_port)) = self.inputs.remove(&to_key) {
+            if let Some(conns) = self.outputs.get_mut(&from_node) {
+                conns.retain(|c| {
+                    !(c.to_node == to_node && c.to_port == to_port && c.from_port == from_port)
+                });
+                if conns.is_empty() {
+                    self.outputs.remove(&from_node);
+                }
+            }
+        }
         self.mark_dirty(to_node);
     }
 
@@ -183,10 +217,10 @@ impl Graph {
     }
 
     pub fn get_upstream(&self, node_id: NodeId, input_port: &str) -> Option<(NodeId, String)> {
-        self.connections
-            .iter()
-            .find(|c| c.to_node == node_id && c.to_port == input_port)
-            .map(|c| (c.from_node, c.from_port.clone()))
+        let key = (node_id, input_port.to_string());
+        self.inputs
+            .get(&key)
+            .map(|(from_node, from_port)| (*from_node, from_port.clone()))
     }
 
     pub fn mark_dirty(&mut self, node_id: NodeId) {
@@ -207,14 +241,16 @@ impl Graph {
 
     pub fn get_downstream(&self, node_id: NodeId) -> Vec<NodeId> {
         let mut visited = HashSet::new();
-        let mut stack = vec![node_id];
+        let mut queue = std::collections::VecDeque::new();
         let mut out = Vec::new();
-        while let Some(current) = stack.pop() {
-            for connection in self.connections.iter() {
-                if connection.from_node == current && !visited.contains(&connection.to_node) {
-                    visited.insert(connection.to_node);
-                    out.push(connection.to_node);
-                    stack.push(connection.to_node);
+        queue.push_back(node_id);
+        while let Some(current) = queue.pop_front() {
+            if let Some(conns) = self.outputs.get(&current) {
+                for connection in conns {
+                    if visited.insert(connection.to_node) {
+                        out.push(connection.to_node);
+                        queue.push_back(connection.to_node);
+                    }
                 }
             }
         }
@@ -231,8 +267,8 @@ impl Graph {
             if !visited.insert(current) {
                 continue;
             }
-            for connection in self.connections.iter() {
-                if connection.from_node == current {
+            if let Some(conns) = self.outputs.get(&current) {
+                for connection in conns {
                     stack.push(connection.to_node);
                 }
             }
@@ -243,6 +279,53 @@ impl Graph {
             }
         }
         false
+    }
+
+    pub fn connections(&self) -> impl Iterator<Item = &Connection> + '_ {
+        self.outputs.values().flat_map(|conns| conns.iter())
+    }
+
+    pub fn connections_from(&self, node_id: NodeId) -> &[Connection] {
+        self.outputs
+            .get(&node_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn connections_to(&self, node_id: NodeId) -> impl Iterator<Item = Connection> + '_ {
+        self.inputs
+            .iter()
+            .filter(move |((to_node, _), _)| *to_node == node_id)
+            .map(|((to_node, to_port), (from_node, from_port))| Connection {
+                from_node: *from_node,
+                from_port: from_port.clone(),
+                to_node: *to_node,
+                to_port: to_port.clone(),
+            })
+    }
+
+    pub fn connection_count(&self) -> usize {
+        self.inputs.len()
+    }
+
+    pub fn retain_connections<F>(&mut self, predicate: F)
+    where
+        F: Fn(&Connection) -> bool,
+    {
+        self.inputs
+            .retain(|(to_node, to_port), (from_node, from_port)| {
+                predicate(&Connection {
+                    from_node: *from_node,
+                    from_port: from_port.clone(),
+                    to_node: *to_node,
+                    to_port: to_port.clone(),
+                })
+            });
+
+        for conns in self.outputs.values_mut() {
+            conns.retain(|c| predicate(c));
+        }
+        self.outputs.retain(|_, v| !v.is_empty());
     }
 }
 
@@ -386,7 +469,7 @@ mod tests {
 
         let result = graph.connect(&registry, input_id, "output", process_id, "input");
         assert!(result.is_ok());
-        assert_eq!(graph.connections.len(), 1);
+        assert_eq!(graph.connection_count(), 1);
     }
 
     #[test]
@@ -468,10 +551,10 @@ mod tests {
         graph
             .connect(&registry, input_id, "output", process_id, "input")
             .unwrap();
-        assert_eq!(graph.connections.len(), 1);
+        assert_eq!(graph.connection_count(), 1);
 
         graph.disconnect(process_id, "input");
-        assert_eq!(graph.connections.len(), 0);
+        assert_eq!(graph.connection_count(), 0);
     }
 
     #[test]
@@ -603,11 +686,11 @@ mod tests {
             .connect(&registry, process_id, "output", output_id, "input")
             .unwrap();
 
-        assert_eq!(graph.connections.len(), 2);
+        assert_eq!(graph.connection_count(), 2);
 
         graph.remove_node(process_id);
 
-        assert_eq!(graph.connections.len(), 0);
+        assert_eq!(graph.connection_count(), 0);
     }
 
     #[test]
