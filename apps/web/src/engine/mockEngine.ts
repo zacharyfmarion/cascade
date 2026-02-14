@@ -1,5 +1,5 @@
 import type { NodeSpec, ParamValue, RenderResult, NodeInstance, Connection } from '../store/types';
-import type { EngineBridge } from './bridge';
+import type { EngineBridge, AddNodeResult } from './bridge';
 
 const NODE_SPECS: NodeSpec[] = [
   {
@@ -329,7 +329,7 @@ export class MockEngine implements EngineBridge {
     return NODE_SPECS;
   }
 
-  addNode(typeId: string, x: number, y: number): string {
+  addNode(typeId: string, x: number, y: number): AddNodeResult {
     const id = crypto.randomUUID();
     const spec = NODE_SPECS.find(n => n.id === typeId);
     if (!spec) throw new Error(`Unknown node type: ${typeId}`);
@@ -345,7 +345,7 @@ export class MockEngine implements EngineBridge {
       params,
       position: { x, y }
     });
-    return id;
+    return { id, typeId };
   }
 
   removeNode(nodeId: string): void {

@@ -263,6 +263,8 @@ let pendingLiveRender: (() => void) | null = null;
 let playbackTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let playbackAborted = false;
 
+let renderLock: Promise<void> = Promise.resolve();
+
 export const useGraphStore = create<GraphState>()(
   devtools((set, get) => {
     const triggerAllViewers = () => {
@@ -338,28 +340,30 @@ export const useGraphStore = create<GraphState>()(
       }
     };
 
-    const renderAllViewersAsync = async () => {
-      const { nodes } = get();
-      const frame = get().currentFrame;
-      const scale = get().previewScale;
-      const newResults = new Map(get().renderResults);
-      let changed = false;
-      for (const [viewerId, node] of nodes) {
-        if (node.typeId !== 'viewer') continue;
-        try {
-          const result = await Promise.resolve(getEngine().renderViewer(viewerId, frame));
-          if (result) {
-            const scaled = await downscaleRenderResult(result, scale);
-            newResults.set(viewerId, scaled);
-            changed = true;
+    const renderAllViewersAsync = () => {
+      renderLock = renderLock.then(async () => {
+        const { nodes } = get();
+        const frame = get().currentFrame;
+        const scale = get().previewScale;
+        const newResults = new Map(get().renderResults);
+        let changed = false;
+        for (const [viewerId, node] of nodes) {
+          if (node.typeId !== 'viewer') continue;
+          try {
+            const result = await Promise.resolve(getEngine().renderViewer(viewerId, frame));
+            if (result) {
+              const scaled = await downscaleRenderResult(result, scale);
+              newResults.set(viewerId, scaled);
+              changed = true;
+            }
+          } catch {
           }
-        } catch {
         }
-      }
-      if (changed) {
-        set({ renderResults: newResults, lastError: null });
-        updateNodeTimings();
-      }
+        if (changed) {
+          set({ renderResults: newResults, lastError: null });
+          updateNodeTimings();
+        }
+      });
     };
 
     const recomputeSequenceState = () => {
@@ -451,10 +455,24 @@ export const useGraphStore = create<GraphState>()(
       addNode: async (typeId, position) => {
         await pushUndo();
 
-        const id = await getEngine().addNode(typeId, position.x, position.y);
+        const result = await getEngine().addNode(typeId, position.x, position.y);
+        const actualTypeId = result.typeId;
 
-        const spec = get().nodeSpecs.find(s => s.id === typeId);
+        let spec = get().nodeSpecs.find(s => s.id === actualTypeId);
         const params: Record<string, ParamValue> = {};
+
+        if (!spec && actualTypeId.startsWith('gpu_script::')) {
+          spec = {
+            id: actualTypeId,
+            display_name: 'GPU Script',
+            category: 'GPU',
+            description: 'Custom GPU shader node. Write GLSL and compile to run.',
+            inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+            outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+            params: [],
+          };
+          set({ nodeSpecs: [...get().nodeSpecs, spec] });
+        }
 
         if (spec) {
           spec.params.forEach(p => {
@@ -463,18 +481,18 @@ export const useGraphStore = create<GraphState>()(
         }
 
         const newNodes = new Map(get().nodes);
-        newNodes.set(id, {
-          id,
-          typeId,
+        newNodes.set(result.id, {
+          id: result.id,
+          typeId: actualTypeId,
           params,
           position
         });
 
         set({ nodes: newNodes });
-        if (typeId === 'load_image_sequence') {
+        if (actualTypeId === 'load_image_sequence') {
           recomputeSequenceState();
         }
-        return id;
+        return result.id;
       },
 
       removeNode: async (id) => {
@@ -776,22 +794,23 @@ export const useGraphStore = create<GraphState>()(
         const frame = get().currentFrame;
         const scale = get().previewScale;
         const generation = nextRenderGeneration(viewerNodeId);
-        Promise.resolve(getEngine().renderViewer(viewerNodeId, frame))
-          .then(result => (result ? downscaleRenderResult(result, scale) : null))
-          .then(result => {
-            if (!result) return;
-            if (renderGenerations.get(viewerNodeId) !== generation) return;
-            const newResults = new Map(get().renderResults);
-            newResults.set(viewerNodeId, result);
-            set({ renderResults: newResults, lastError: null });
-            updateNodeTimings();
-          })
-          .catch(e => {
+        renderLock = renderLock.then(async () => {
+          try {
+            const result = await Promise.resolve(getEngine().renderViewer(viewerNodeId, frame));
+            const scaled = result ? await downscaleRenderResult(result, scale) : null;
+            if (scaled && renderGenerations.get(viewerNodeId) === generation) {
+              const newResults = new Map(get().renderResults);
+              newResults.set(viewerNodeId, scaled);
+              set({ renderResults: newResults, lastError: null });
+              updateNodeTimings();
+            }
+          } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes('Missing input')) {
               set({ lastError: msg });
             }
-          });
+          }
+        });
       },
 
       setCurrentFrame: (frame) => {

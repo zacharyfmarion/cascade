@@ -14,9 +14,14 @@ export interface SequenceInfo {
   last_frame: number;
 }
 
+export interface AddNodeResult {
+  id: string;
+  typeId: string;
+}
+
 export interface EngineBridge {
   listNodeTypes(): Promise<NodeSpec[]> | NodeSpec[];
-  addNode(typeId: string, x: number, y: number): Promise<string> | string;
+  addNode(typeId: string, x: number, y: number): Promise<AddNodeResult> | AddNodeResult;
   removeNode(nodeId: string): Promise<void> | void;
   connect(fromNode: string, fromPort: string, toNode: string, toPort: string): Promise<void> | void;
   disconnect(toNode: string, toPort: string): Promise<void> | void;

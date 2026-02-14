@@ -1,5 +1,5 @@
 import init, { Engine } from '../wasm-pkg/compositor_wasm';
-import type { EngineBridge } from './bridge';
+import type { EngineBridge, AddNodeResult } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
 
@@ -66,8 +66,10 @@ export class WasmEngine implements EngineBridge {
     return this.getEngine().list_node_types() as NodeSpec[];
   }
 
-  addNode(typeId: string, x: number, y: number): string {
-    return this.getEngine().add_node(typeId, x, y);
+  addNode(typeId: string, x: number, y: number): AddNodeResult {
+    // WASM returns { id, typeId } as JsValue; generated .d.ts lags behind until wasm-pack rebuild
+    const result = this.getEngine().add_node(typeId, x, y) as unknown as { id: string; typeId: string };
+    return { id: result.id, typeId: result.typeId };
   }
 
   removeNode(nodeId: string): void {

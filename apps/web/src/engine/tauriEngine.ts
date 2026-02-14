@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EngineBridge, JobProgress, SequenceInfo } from './bridge';
+import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 
 type DocumentEnvelope = {
@@ -51,8 +51,9 @@ export class TauriEngine implements EngineBridge {
     return JSON.parse(json) as NodeSpec[];
   }
 
-  async addNode(typeId: string, x: number, y: number): Promise<string> {
-    return invoke<string>('add_node', { typeId, x, y });
+  async addNode(typeId: string, x: number, y: number): Promise<AddNodeResult> {
+    const json = await invoke<string>('add_node', { typeId, x, y });
+    return JSON.parse(json) as AddNodeResult;
   }
 
   async removeNode(nodeId: string): Promise<void> {
