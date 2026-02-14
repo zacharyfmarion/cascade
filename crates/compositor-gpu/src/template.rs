@@ -15,8 +15,11 @@ pub fn build_kernel_template(
     user_kernel_body: &str,
     params: &[KernelParam],
     extra_images: &[String],
+    scalar_inputs: &[KernelParam],
 ) -> String {
-    let params_block = build_params_block(params);
+    let mut all_uniforms = params.to_vec();
+    all_uniforms.extend_from_slice(scalar_inputs);
+    let params_block = build_params_block(&all_uniforms);
     let extra_image_block = build_extra_images_block(extra_images);
     let user_kernel =
         format!("vec4 process(vec4 color, vec2 uv, ivec2 pixel) {{\n{user_kernel_body}\n}}",);

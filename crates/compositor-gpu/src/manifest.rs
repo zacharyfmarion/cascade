@@ -118,8 +118,26 @@ impl KernelManifest {
             })
             .collect::<Result<Vec<_>, String>>()?;
 
+        let scalar_inputs = self
+            .inputs
+            .iter()
+            .filter(|port| matches_scalar_type(&port.ty))
+            .map(|port| {
+                let ty = parse_param_type(&port.ty)?;
+                Ok(KernelParam {
+                    name: port.name.clone(),
+                    ty,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+
         let extra_images = image_inputs.into_iter().skip(1).collect::<Vec<_>>();
-        Ok(build_kernel_template(&self.kernel, &params, &extra_images))
+        Ok(build_kernel_template(
+            &self.kernel,
+            &params,
+            &extra_images,
+            &scalar_inputs,
+        ))
     }
 }
 
@@ -258,6 +276,10 @@ fn parse_value_type(value: &str) -> Result<ValueType, String> {
 
 fn matches_image_type(value: &str) -> bool {
     matches!(value, "Image" | "Mask")
+}
+
+fn matches_scalar_type(value: &str) -> bool {
+    matches!(value, "Float" | "Int" | "Bool")
 }
 
 fn parse_param_type(value: &str) -> Result<ParamType, String> {

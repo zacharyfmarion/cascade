@@ -139,6 +139,8 @@ impl GpuKernelNode {
 
     fn build_param_buffer(&self, ctx: &EvalContext) -> Result<Vec<u8>, CompositorError> {
         let mut bytes = Vec::new();
+        let mut total_scalars = 0usize;
+
         for param in &self.spec.params {
             let value = ctx
                 .params
@@ -147,18 +149,49 @@ impl GpuKernelNode {
                 .or_else(|| default_param_value(param));
             let value = value.ok_or_else(|| CompositorError::MissingParam(param.key.clone()))?;
             bytes.extend_from_slice(&param_value_bytes(&param.ty, &value)?);
+            total_scalars += 1;
         }
 
-        let scalar_count = if self.spec.params.is_empty() {
-            1
-        } else {
-            self.spec.params.len()
-        };
-        let pad_needed = (4 - (scalar_count % 4)) % 4;
-        for _ in 0..pad_needed {
-            bytes.extend_from_slice(&0f32.to_le_bytes());
+        for port in &self.spec.inputs {
+            match port.ty {
+                ValueType::Float => {
+                    let v = ctx
+                        .inputs
+                        .get(&port.name)
+                        .and_then(|v| v.as_float())
+                        .unwrap_or(0.0);
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                    total_scalars += 1;
+                }
+                ValueType::Int => {
+                    let v = ctx
+                        .inputs
+                        .get(&port.name)
+                        .and_then(|v| v.as_int())
+                        .unwrap_or(0);
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                    total_scalars += 1;
+                }
+                ValueType::Bool => {
+                    let v: u32 = ctx
+                        .inputs
+                        .get(&port.name)
+                        .and_then(|v| v.as_bool())
+                        .map(|b| if b { 1 } else { 0 })
+                        .unwrap_or(0);
+                    bytes.extend_from_slice(&v.to_le_bytes());
+                    total_scalars += 1;
+                }
+                _ => {}
+            }
         }
-        if self.spec.params.is_empty() {
+
+        if total_scalars == 0 {
+            bytes.extend_from_slice(&0f32.to_le_bytes());
+            total_scalars = 1;
+        }
+        let pad_needed = (4 - (total_scalars % 4)) % 4;
+        for _ in 0..pad_needed {
             bytes.extend_from_slice(&0f32.to_le_bytes());
         }
         Ok(bytes)
@@ -454,11 +487,7 @@ fn collect_image_inputs<'a>(
                     }
                 }
             }
-            _ => {
-                return Err(CompositorError::Other(
-                    "GPU node inputs must be images".to_string(),
-                ))
-            }
+            _ => {}
         }
     }
     Ok(out)
