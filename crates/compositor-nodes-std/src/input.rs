@@ -1,0 +1,528 @@
+use compositor_core::error::CompositorError;
+use compositor_core::node::{EvalContext, Node};
+use compositor_core::types::*;
+use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::any::Any;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+/// Metadata about a loaded image sequence (frame count, range).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SequenceInfo {
+    pub frame_count: u64,
+    pub first_frame: u64,
+    pub last_frame: u64,
+}
+
+pub struct LoadImage {
+    image: Mutex<Option<Image>>,
+    original_bytes: Mutex<Option<Vec<u8>>>,
+}
+
+impl LoadImage {
+    pub fn new() -> Self {
+        Self {
+            image: Mutex::new(None),
+            original_bytes: Mutex::new(None),
+        }
+    }
+
+    pub fn set_image_data(&self, bytes: &[u8]) -> Result<(), CompositorError> {
+        let decoded = image::load_from_memory(bytes)
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let raw = rgba.as_raw();
+        let lut = srgb_to_linear_lut();
+        let pixel_count = (width as usize) * (height as usize);
+        let mut data = vec![0.0f32; pixel_count * 4];
+        data.par_chunks_exact_mut(4)
+            .enumerate()
+            .for_each(|(i, out)| {
+                let idx = i * 4;
+                out[0] = lut[raw[idx] as usize];
+                out[1] = lut[raw[idx + 1] as usize];
+                out[2] = lut[raw[idx + 2] as usize];
+                out[3] = raw[idx + 3] as f32 / 255.0;
+            });
+        let image = Image::from_f32_data(width, height, data);
+        let mut guard = self
+            .image
+            .lock()
+            .map_err(|_| CompositorError::Other("Image mutex poisoned".to_string()))?;
+        *guard = Some(image);
+        let mut bytes_guard = self
+            .original_bytes
+            .lock()
+            .map_err(|_| CompositorError::Other("Image bytes mutex poisoned".to_string()))?;
+        *bytes_guard = Some(bytes.to_vec());
+        Ok(())
+    }
+
+    pub fn get_image_bytes(&self) -> Option<Vec<u8>> {
+        self.original_bytes
+            .lock()
+            .ok()
+            .and_then(|guard| guard.clone())
+    }
+}
+
+impl Node for LoadImage {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "load_image".to_string(),
+            display_name: "Load Image".to_string(),
+            category: "Input".to_string(),
+            description: "Load an image from memory".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+            }],
+            params: vec![ParamSpec {
+                key: "image_data".to_string(),
+                label: "Image Data".to_string(),
+                ty: ValueType::Image,
+                default: ParamDefault::String(String::new()),
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: UiHint::Hidden,
+            }],
+        }
+    }
+
+    fn evaluate(&self, _ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
+        let guard = self
+            .image
+            .lock()
+            .map_err(|_| CompositorError::Other("Image mutex poisoned".to_string()))?;
+        let image = guard
+            .as_ref()
+            .ok_or_else(|| CompositorError::MissingInput("image_data".to_string()))?;
+        let mut outputs = HashMap::new();
+        outputs.insert("image".to_string(), Value::Image(image.clone()));
+        Ok(outputs)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+const FRAME_CACHE_SIZE: usize = 32;
+
+pub struct LoadImageSequence {
+    directory: Mutex<Option<String>>,
+    frame_cache: Mutex<FrameCache>,
+}
+
+struct FrameCache {
+    entries: Vec<(u64, Image)>,
+    max_size: usize,
+}
+
+impl FrameCache {
+    fn new(max_size: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(max_size),
+            max_size,
+        }
+    }
+
+    fn get(&self, frame: u64) -> Option<&Image> {
+        self.entries
+            .iter()
+            .find(|(f, _)| *f == frame)
+            .map(|(_, img)| img)
+    }
+
+    fn insert(&mut self, frame: u64, image: Image) {
+        if self.entries.iter().any(|(f, _)| *f == frame) {
+            return;
+        }
+        if self.entries.len() >= self.max_size {
+            self.entries.remove(0);
+        }
+        self.entries.push((frame, image));
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+impl LoadImageSequence {
+    pub fn new() -> Self {
+        Self {
+            directory: Mutex::new(None),
+            frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
+        }
+    }
+
+    pub fn set_directory(&self, dir: &str) -> Result<SequenceInfo, CompositorError> {
+        let mut guard = self
+            .directory
+            .lock()
+            .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
+        *guard = Some(dir.to_string());
+        drop(guard);
+
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+        cache.clear();
+        drop(cache);
+
+        let detected = detect_sequence_pattern(dir);
+        self.get_sequence_info(&detected)
+    }
+
+    pub fn get_sequence_info(&self, pattern: &str) -> Result<SequenceInfo, CompositorError> {
+        let dir_guard = self
+            .directory
+            .lock()
+            .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
+        let dir = dir_guard
+            .as_ref()
+            .ok_or_else(|| CompositorError::MissingInput("directory".to_string()))?;
+
+        let regex_pattern = build_frame_regex(pattern);
+        let re = regex::Regex::new(&regex_pattern)
+            .map_err(|e| CompositorError::Other(format!("Invalid pattern: {e}")))?;
+
+        let mut frame_numbers: Vec<u64> = Vec::new();
+        let entries = std::fs::read_dir(dir).map_err(|e| {
+            CompositorError::Other(format!("Failed to read directory {}: {e}", dir))
+        })?;
+
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if let Some(caps) = re.captures(name) {
+                    if let Some(m) = caps.get(1) {
+                        if let Ok(num) = m.as_str().parse::<u64>() {
+                            frame_numbers.push(num);
+                        }
+                    }
+                }
+            }
+        }
+
+        if frame_numbers.is_empty() {
+            return Ok(SequenceInfo {
+                frame_count: 0,
+                first_frame: 0,
+                last_frame: 0,
+            });
+        }
+
+        frame_numbers.sort_unstable();
+        Ok(SequenceInfo {
+            frame_count: frame_numbers.len() as u64,
+            first_frame: frame_numbers[0],
+            last_frame: *frame_numbers.last().unwrap(),
+        })
+    }
+
+    fn load_frame(&self, dir: &str, pattern: &str, frame: u64) -> Result<Image, CompositorError> {
+        let padding = parse_frame_padding(pattern);
+        let normalized = normalize_pattern(pattern);
+        let filename = normalized.replace("{frame}", &format_frame_number(frame, padding));
+        let path = std::path::Path::new(dir).join(&filename);
+        let is_png = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("png"))
+            .unwrap_or(false);
+
+        let (width, height, raw) = if is_png {
+            Self::decode_png_direct(&path)?
+        } else {
+            Self::decode_via_image(&path)?
+        };
+        let lut = srgb_to_linear_lut();
+        let pixel_count = (width as usize) * (height as usize);
+        let mut data = vec![0.0f32; pixel_count * 4];
+        data.par_chunks_exact_mut(4)
+            .enumerate()
+            .for_each(|(i, out)| {
+                let idx = i * 4;
+                out[0] = lut[raw[idx] as usize];
+                out[1] = lut[raw[idx + 1] as usize];
+                out[2] = lut[raw[idx + 2] as usize];
+                out[3] = raw[idx + 3] as f32 / 255.0;
+            });
+        Ok(Image::from_f32_data(width, height, data))
+    }
+
+    fn decode_png_direct(path: &std::path::Path) -> Result<(u32, u32, Vec<u8>), CompositorError> {
+        let file = std::fs::File::open(path).map_err(|e| {
+            CompositorError::Other(format!("Failed to read frame {}: {}", path.display(), e))
+        })?;
+        let decoder = png::Decoder::new(std::io::BufReader::new(file));
+        let mut reader = decoder
+            .read_info()
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+
+        let mut buf = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
+        let info = reader
+            .next_frame(&mut buf)
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        buf.truncate(info.buffer_size());
+
+        let width = info.width;
+        let height = info.height;
+
+        let rgba = match (info.color_type, info.bit_depth) {
+            (png::ColorType::Rgba, png::BitDepth::Eight) => buf,
+            (png::ColorType::Rgb, png::BitDepth::Eight) => {
+                let pixel_count = (width as usize) * (height as usize);
+                let mut rgba = vec![0u8; pixel_count * 4];
+                for i in 0..pixel_count {
+                    rgba[i * 4] = buf[i * 3];
+                    rgba[i * 4 + 1] = buf[i * 3 + 1];
+                    rgba[i * 4 + 2] = buf[i * 3 + 2];
+                    rgba[i * 4 + 3] = 255;
+                }
+                rgba
+            }
+            (png::ColorType::GrayscaleAlpha, png::BitDepth::Eight) => {
+                let pixel_count = (width as usize) * (height as usize);
+                let mut rgba = vec![0u8; pixel_count * 4];
+                for i in 0..pixel_count {
+                    let g = buf[i * 2];
+                    rgba[i * 4] = g;
+                    rgba[i * 4 + 1] = g;
+                    rgba[i * 4 + 2] = g;
+                    rgba[i * 4 + 3] = buf[i * 2 + 1];
+                }
+                rgba
+            }
+            (png::ColorType::Grayscale, png::BitDepth::Eight) => {
+                let pixel_count = (width as usize) * (height as usize);
+                let mut rgba = vec![0u8; pixel_count * 4];
+                for i in 0..pixel_count {
+                    let g = buf[i];
+                    rgba[i * 4] = g;
+                    rgba[i * 4 + 1] = g;
+                    rgba[i * 4 + 2] = g;
+                    rgba[i * 4 + 3] = 255;
+                }
+                rgba
+            }
+            _ => {
+                return Self::decode_via_image(path);
+            }
+        };
+
+        Ok((width, height, rgba))
+    }
+
+    fn decode_via_image(path: &std::path::Path) -> Result<(u32, u32, Vec<u8>), CompositorError> {
+        let bytes = std::fs::read(path).map_err(|e| {
+            CompositorError::Other(format!("Failed to read frame {}: {}", path.display(), e))
+        })?;
+        let decoded = image::load_from_memory(&bytes)
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        Ok((width, height, rgba.into_raw()))
+    }
+}
+
+impl Node for LoadImageSequence {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "load_image_sequence".to_string(),
+            display_name: "Load Image Sequence".to_string(),
+            category: "Input".to_string(),
+            description: "Load an image sequence from a directory".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "directory".to_string(),
+                    label: "Directory".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::String(String::new()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
+                },
+                ParamSpec {
+                    key: "pattern".to_string(),
+                    label: "Pattern".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::String("frame_{frame}.png".to_string()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
+                },
+            ],
+        }
+    }
+
+    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError> {
+        let dir_guard = self
+            .directory
+            .lock()
+            .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
+        let dir = dir_guard
+            .as_ref()
+            .ok_or_else(|| CompositorError::MissingInput("directory".to_string()))?
+            .clone();
+        drop(dir_guard);
+
+        let pattern = ctx
+            .get_param_string("pattern")
+            .unwrap_or("frame_{frame}.png");
+        let frame = ctx.frame_time.frame;
+
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+
+        if let Some(image) = cache.get(frame) {
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(image.clone()));
+            return Ok(outputs);
+        }
+
+        let image = self.load_frame(&dir, pattern, frame)?;
+        cache.insert(frame, image.clone());
+
+        let mut outputs = HashMap::new();
+        outputs.insert("image".to_string(), Value::Image(image));
+        Ok(outputs)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub fn detect_sequence_pattern(dir: &str) -> String {
+    let image_exts = ["png", "jpg", "jpeg", "exr", "tif", "tiff", "bmp", "webp"];
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return "{frame:4}.png".to_string(),
+    };
+
+    let mut filenames: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let lower = name.to_lowercase();
+            if image_exts.iter().any(|ext| lower.ends_with(ext)) {
+                Some(name)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    filenames.sort();
+
+    if filenames.is_empty() {
+        return "{frame:4}.png".to_string();
+    }
+
+    let sample = &filenames[0];
+    let numeric_re = regex::Regex::new(r"\d+").unwrap();
+    let mut best_match: Option<regex::Match> = None;
+    for m in numeric_re.find_iter(sample) {
+        match &best_match {
+            Some(prev) if m.as_str().len() >= prev.as_str().len() => best_match = Some(m),
+            None => best_match = Some(m),
+            _ => {}
+        }
+    }
+
+    match best_match {
+        Some(m) => {
+            let padding = m.as_str().len();
+            format!(
+                "{}{{frame:{}}}{}",
+                &sample[..m.start()],
+                padding,
+                &sample[m.end()..]
+            )
+        }
+        None => format!("{{frame:4}}.png"),
+    }
+}
+
+fn parse_frame_padding(pattern: &str) -> usize {
+    if let Some(start) = pattern.find("{frame:") {
+        let after = &pattern[start + 7..];
+        if let Some(end) = after.find('}') {
+            if let Ok(n) = after[..end].parse::<usize>() {
+                return n;
+            }
+        }
+    }
+    if pattern.contains("{frame}") {
+        return 4;
+    }
+    4
+}
+
+fn normalize_pattern(pattern: &str) -> String {
+    if let Some(start) = pattern.find("{frame:") {
+        let after = &pattern[start..];
+        if let Some(end) = after.find('}') {
+            let mut result = pattern[..start].to_string();
+            result.push_str("{frame}");
+            result.push_str(&pattern[start + end + 1..]);
+            return result;
+        }
+    }
+    pattern.to_string()
+}
+
+fn format_frame_number(frame: u64, padding: usize) -> String {
+    format!("{:0>width$}", frame, width = padding)
+}
+
+fn build_frame_regex(pattern: &str) -> String {
+    let normalized = normalize_pattern(pattern);
+    let escaped = regex::escape(&normalized);
+    let with_capture = escaped.replace("\\{frame\\}", "(\\d+)");
+    format!("^{}$", with_capture)
+}
+
+fn srgb_to_linear_lut() -> &'static [f32; 256] {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| {
+        let mut table = [0.0f32; 256];
+        for i in 0..256 {
+            let v = i as f32 / 255.0;
+            let linear = if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            };
+            table[i] = linear;
+        }
+        table
+    })
+}

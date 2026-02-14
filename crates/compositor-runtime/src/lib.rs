@@ -1,0 +1,2253 @@
+mod builtin_groups;
+pub mod document;
+
+use compositor_core::color::BuiltinColorManagement;
+use compositor_core::error::CompositorError;
+use compositor_core::eval::Evaluator;
+use compositor_core::graph::{Graph, NodeId};
+use compositor_core::group::{
+    GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
+};
+use compositor_core::node::{Node, NodeRegistry};
+pub use compositor_core::types::{FrameTime, NodeSpec, ParamValue, PortSpec, Value};
+use compositor_gpu::kernel_node::GpuKernelNode;
+use compositor_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
+use compositor_nodes_std::input::LoadImage as InputLoadImage;
+pub use compositor_nodes_std::SequenceInfo;
+use compositor_nodes_std::{
+    register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use uuid::Uuid;
+
+pub use document::*;
+
+pub struct Engine {
+    graph: Graph,
+    registry: Arc<NodeRegistry>,
+    nodes: HashMap<NodeId, Arc<dyn Node>>,
+    evaluator: Evaluator,
+    gpu_context: Option<Arc<GpuContext>>,
+    group_definitions: HashMap<String, Arc<GroupDefinition>>,
+    uuid_map: HashMap<String, NodeId>,
+    kernel_manifests: HashMap<String, KernelManifest>,
+    pub active_job: Option<Arc<RenderJob>>,
+    last_timings: HashMap<String, f64>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SerializableGraph {
+    pub nodes: Vec<SerializableNode>,
+    pub connections: Vec<SerializableConnection>,
+    #[serde(default)]
+    pub group_definitions: Vec<GroupDefinition>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SerializableNode {
+    pub id: String,
+    pub type_id: String,
+    pub params: HashMap<String, ParamValue>,
+    pub position: (f64, f64),
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SerializableConnection {
+    pub from_node: String,
+    pub from_port: String,
+    pub to_node: String,
+    pub to_port: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateGroupResult {
+    pub group_definition_id: String,
+    pub group_node_id: String,
+    pub removed_node_ids: Vec<String>,
+    pub new_spec: NodeSpec,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UngroupResult {
+    pub restored_nodes: Vec<RestoredNode>,
+    pub removed_group_node_id: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoredNode {
+    pub id: String,
+    pub type_id: String,
+    pub position: (f64, f64),
+    pub params: HashMap<String, ParamValue>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupInternalGraph {
+    pub group_def_id: String,
+    pub name: String,
+    pub nodes: Vec<InternalGraphNode>,
+    pub connections: Vec<InternalGraphConnection>,
+    pub inputs: Vec<PortSpec>,
+    pub outputs: Vec<PortSpec>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalGraphNode {
+    pub id: String,
+    pub type_id: String,
+    pub params: HashMap<String, ParamValue>,
+    pub position: (f64, f64),
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InternalGraphConnection {
+    pub from_node: String,
+    pub from_port: String,
+    pub to_node: String,
+    pub to_port: String,
+}
+
+pub struct RenderResult {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrameRange {
+    pub start: u64,
+    pub end: u64,
+    pub step: u64,
+}
+
+pub struct RenderJob {
+    pub id: String,
+    pub cancelled: Arc<AtomicBool>,
+    pub current_frame: Arc<AtomicU64>,
+    pub total_frames: u64,
+    pub completed: Arc<AtomicBool>,
+    pub error: Arc<std::sync::Mutex<Option<String>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JobProgress {
+    pub job_id: String,
+    pub current_frame: u64,
+    pub total_frames: u64,
+    pub completed: bool,
+    pub error: Option<String>,
+}
+
+impl Engine {
+    pub fn new() -> Self {
+        let mut registry = NodeRegistry::new();
+        register_standard_nodes(&mut registry);
+        let gpu_context = match GpuContext::new() {
+            Ok(context) => {
+                let shared = Arc::new(context);
+                register_gpu_nodes(&mut registry, shared.clone());
+                Some(shared)
+            }
+            Err(err) => {
+                eprintln!("[compositor-runtime] GPU init failed: {err}");
+                None
+            }
+        };
+        let mut engine = Self {
+            graph: Graph::new(),
+            registry: Arc::new(registry),
+            nodes: HashMap::new(),
+            evaluator: Evaluator::new(),
+            gpu_context,
+            group_definitions: HashMap::new(),
+            uuid_map: HashMap::new(),
+            kernel_manifests: HashMap::new(),
+            active_job: None,
+            last_timings: HashMap::new(),
+        };
+        builtin_groups::register_builtin_groups(&mut engine);
+        if let Some(kernels_dir) = find_kernels_dir() {
+            let path = kernels_dir.to_string_lossy();
+            if let Err(err) = engine.load_kernels_from_dir(&path) {
+                eprintln!(
+                    "[compositor-runtime] Failed to load kernels from {}: {err}",
+                    path
+                );
+            }
+        }
+        engine
+    }
+
+    pub fn register_gpu_kernel(&mut self, manifest_json: &str) -> Result<NodeSpec, String> {
+        let manifest: KernelManifest =
+            serde_json::from_str(manifest_json).map_err(|e| e.to_string())?;
+        let gpu_context = self
+            .gpu_context
+            .clone()
+            .ok_or_else(|| "GPU not available".to_string())?;
+        let validation_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())?;
+        let spec = validation_node.spec();
+        let manifest_id = manifest.id.clone();
+        self.kernel_manifests
+            .insert(manifest_id.clone(), manifest.clone());
+        let manifest_for_factory = manifest.clone();
+        Arc::make_mut(&mut self.registry).register(&manifest_id, move || {
+            Arc::new(
+                GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_context.clone())
+                    .expect("GPU node"),
+            )
+        });
+        Ok(spec)
+    }
+
+    pub fn register_group(&mut self, def: GroupDefinition) -> Result<NodeSpec, String> {
+        let arc_def = Arc::new(def);
+        let interface = GroupNode::derive_interface(&arc_def, &self.registry)?;
+        let spec = GroupNode::build_spec(&arc_def, &interface);
+        Arc::make_mut(&mut self.registry).register_spec(&spec.id, spec.clone());
+        self.group_definitions.insert(spec.id.clone(), arc_def);
+        Ok(spec)
+    }
+
+    pub fn create_group_from_nodes(
+        &mut self,
+        node_ids: &[&str],
+        name: &str,
+    ) -> Result<CreateGroupResult, CompositorError> {
+        if node_ids.is_empty() {
+            return Err(CompositorError::Other(
+                "No nodes selected for grouping".to_string(),
+            ));
+        }
+
+        let mut selected_ids = Vec::new();
+        let mut selected_set = HashSet::new();
+        for node_id in node_ids {
+            let id = self.parse_node_id(node_id)?;
+            if selected_set.insert(id) {
+                selected_ids.push(id);
+            }
+        }
+
+        struct SelectedNodeInfo {
+            id: NodeId,
+            type_id: String,
+            params: HashMap<String, ParamValue>,
+            position: (f64, f64),
+        }
+
+        let mut selected_nodes = Vec::new();
+        let mut centroid_x = 0.0;
+        let mut centroid_y = 0.0;
+        for id in &selected_ids {
+            let instance = self
+                .graph
+                .nodes
+                .get(*id)
+                .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+            centroid_x += instance.position.0;
+            centroid_y += instance.position.1;
+            selected_nodes.push(SelectedNodeInfo {
+                id: instance.id,
+                type_id: instance.type_id.clone(),
+                params: instance.params.clone(),
+                position: instance.position,
+            });
+        }
+        let count = selected_nodes.len() as f64;
+        let centroid = if count > 0.0 {
+            (centroid_x / count, centroid_y / count)
+        } else {
+            (0.0, 0.0)
+        };
+
+        struct IncomingBoundary {
+            external_from: NodeId,
+            external_from_port: String,
+            internal_to: String,
+            internal_to_port: String,
+            port_name: String,
+        }
+
+        struct OutgoingBoundary {
+            external_to: NodeId,
+            external_to_port: String,
+            internal_from: String,
+            internal_from_port: String,
+            port_name: String,
+        }
+
+        let mut internal_connections = Vec::new();
+        let mut incoming = Vec::new();
+        let mut outgoing = Vec::new();
+        let mut input_name_counts: HashMap<String, usize> = HashMap::new();
+        let mut output_name_counts: HashMap<String, usize> = HashMap::new();
+
+        for conn in &self.graph.connections {
+            let from_selected = selected_set.contains(&conn.from_node);
+            let to_selected = selected_set.contains(&conn.to_node);
+            if from_selected && to_selected {
+                internal_connections.push(InternalConnection {
+                    from_node: format_node_id(&self.graph, conn.from_node),
+                    from_port: conn.from_port.clone(),
+                    to_node: format_node_id(&self.graph, conn.to_node),
+                    to_port: conn.to_port.clone(),
+                });
+            } else if !from_selected && to_selected {
+                let to_instance = self
+                    .graph
+                    .nodes
+                    .get(conn.to_node)
+                    .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+                let to_spec = self
+                    .registry
+                    .get_spec(&to_instance.type_id)
+                    .ok_or_else(|| {
+                        CompositorError::Other(format!(
+                            "Unknown node type: {}",
+                            to_instance.type_id
+                        ))
+                    })?;
+                let _input_port = to_spec
+                    .inputs
+                    .iter()
+                    .find(|p| p.name == conn.to_port)
+                    .ok_or(CompositorError::PortNotFound {
+                        node_type: to_instance.type_id.clone(),
+                        port_name: conn.to_port.clone(),
+                    })?;
+                let base_name = format!("{}_{}", to_instance.type_id, conn.to_port);
+                let port_name = unique_port_name(&base_name, &mut input_name_counts);
+                incoming.push(IncomingBoundary {
+                    external_from: conn.from_node,
+                    external_from_port: conn.from_port.clone(),
+                    internal_to: format_node_id(&self.graph, conn.to_node),
+                    internal_to_port: conn.to_port.clone(),
+                    port_name: port_name.clone(),
+                });
+            } else if from_selected && !to_selected {
+                let from_instance = self
+                    .graph
+                    .nodes
+                    .get(conn.from_node)
+                    .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+                let from_spec =
+                    self.registry
+                        .get_spec(&from_instance.type_id)
+                        .ok_or_else(|| {
+                            CompositorError::Other(format!(
+                                "Unknown node type: {}",
+                                from_instance.type_id
+                            ))
+                        })?;
+                let _output_port = from_spec
+                    .outputs
+                    .iter()
+                    .find(|p| p.name == conn.from_port)
+                    .ok_or(CompositorError::PortNotFound {
+                        node_type: from_instance.type_id.clone(),
+                        port_name: conn.from_port.clone(),
+                    })?;
+                let base_name = format!("{}_{}", from_instance.type_id, conn.from_port);
+                let port_name = unique_port_name(&base_name, &mut output_name_counts);
+                outgoing.push(OutgoingBoundary {
+                    external_to: conn.to_node,
+                    external_to_port: conn.to_port.clone(),
+                    internal_from: format_node_id(&self.graph, conn.from_node),
+                    internal_from_port: conn.from_port.clone(),
+                    port_name: port_name.clone(),
+                });
+            }
+        }
+
+        let mut internal_nodes = Vec::new();
+        let mut min_x = f64::INFINITY;
+        let mut max_x = f64::NEG_INFINITY;
+        let mut avg_y = 0.0;
+        for instance in &selected_nodes {
+            let offset_x = instance.position.0 - centroid.0;
+            let offset_y = instance.position.1 - centroid.1;
+            if offset_x < min_x {
+                min_x = offset_x;
+            }
+            if offset_x > max_x {
+                max_x = offset_x;
+            }
+            avg_y += offset_y;
+            let mut params = instance.params.clone();
+            params.insert("__group_offset_x".to_string(), ParamValue::Float(offset_x));
+            params.insert("__group_offset_y".to_string(), ParamValue::Float(offset_y));
+            internal_nodes.push(InternalNode {
+                id: format_node_id(&self.graph, instance.id),
+                type_id: instance.type_id.clone(),
+                params,
+            });
+        }
+        avg_y /= count;
+        let node_width = 200.0;
+        let padding = 100.0;
+
+        let mut gi_params = HashMap::new();
+        gi_params.insert(
+            "__group_offset_x".to_string(),
+            ParamValue::Float(min_x - node_width - padding),
+        );
+        gi_params.insert("__group_offset_y".to_string(), ParamValue::Float(avg_y));
+        internal_nodes.push(InternalNode {
+            id: "gi".to_string(),
+            type_id: "group_input".to_string(),
+            params: gi_params,
+        });
+
+        let mut go_params = HashMap::new();
+        go_params.insert(
+            "__group_offset_x".to_string(),
+            ParamValue::Float(max_x + node_width + padding),
+        );
+        go_params.insert("__group_offset_y".to_string(), ParamValue::Float(avg_y));
+        internal_nodes.push(InternalNode {
+            id: "go".to_string(),
+            type_id: "group_output".to_string(),
+            params: go_params,
+        });
+
+        for boundary in &incoming {
+            internal_connections.push(InternalConnection {
+                from_node: "gi".to_string(),
+                from_port: boundary.port_name.clone(),
+                to_node: boundary.internal_to.clone(),
+                to_port: boundary.internal_to_port.clone(),
+            });
+        }
+        for boundary in &outgoing {
+            internal_connections.push(InternalConnection {
+                from_node: boundary.internal_from.clone(),
+                from_port: boundary.internal_from_port.clone(),
+                to_node: "go".to_string(),
+                to_port: boundary.port_name.clone(),
+            });
+        }
+
+        let group_definition_id = format!("group::user_{}", Uuid::new_v4());
+        let definition = GroupDefinition {
+            id: group_definition_id.clone(),
+            name: name.to_string(),
+            category: "User".to_string(),
+            description: "User-defined group".to_string(),
+            internal_graph: SerializableInternalGraph {
+                nodes: internal_nodes,
+                connections: internal_connections,
+            },
+            promotions: Vec::new(),
+            is_builtin: false,
+            explicit_inputs: None,
+            explicit_outputs: None,
+        };
+
+        let new_spec = self
+            .register_group(definition)
+            .map_err(CompositorError::Other)?;
+
+        let removed_node_ids: Vec<String> = selected_ids
+            .iter()
+            .map(|id| format_node_id(&self.graph, *id))
+            .collect();
+        for id in &selected_ids {
+            self.remove_node_internal(*id);
+        }
+
+        let group_node_id = self.add_node(&group_definition_id, centroid.0, centroid.1)?;
+        let group_id = self.parse_node_id(&group_node_id)?;
+
+        for boundary in &incoming {
+            self.graph.connect(
+                &self.registry,
+                boundary.external_from,
+                &boundary.external_from_port,
+                group_id,
+                &boundary.port_name,
+            )?;
+        }
+        for boundary in &outgoing {
+            self.graph.connect(
+                &self.registry,
+                group_id,
+                &boundary.port_name,
+                boundary.external_to,
+                &boundary.external_to_port,
+            )?;
+        }
+
+        Ok(CreateGroupResult {
+            group_definition_id,
+            group_node_id,
+            removed_node_ids,
+            new_spec,
+        })
+    }
+
+    pub fn ungroup_node(&mut self, group_node_id: &str) -> Result<UngroupResult, CompositorError> {
+        let group_id = self.parse_node_id(group_node_id)?;
+        let group_instance = self
+            .graph
+            .nodes
+            .get(group_id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let group_type_id = group_instance.type_id.clone();
+        let group_def = self
+            .group_definitions
+            .get(&group_type_id)
+            .cloned()
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+
+        let group_position = group_instance.position;
+
+        struct ExternalConnection {
+            from_node: NodeId,
+            from_port: String,
+            to_node: NodeId,
+            to_port: String,
+        }
+
+        let mut incoming_external = Vec::new();
+        let mut outgoing_external = Vec::new();
+        for conn in &self.graph.connections {
+            if conn.to_node == group_id {
+                incoming_external.push(ExternalConnection {
+                    from_node: conn.from_node,
+                    from_port: conn.from_port.clone(),
+                    to_node: conn.to_node,
+                    to_port: conn.to_port.clone(),
+                });
+            } else if conn.from_node == group_id {
+                outgoing_external.push(ExternalConnection {
+                    from_node: conn.from_node,
+                    from_port: conn.from_port.clone(),
+                    to_node: conn.to_node,
+                    to_port: conn.to_port.clone(),
+                });
+            }
+        }
+
+        self.remove_node_internal(group_id);
+
+        let (group_input_id, group_output_id) = find_group_nodes(group_def.as_ref())?;
+
+        let mut input_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        let mut output_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+        for conn in &group_def.internal_graph.connections {
+            if conn.from_node == group_input_id {
+                input_map
+                    .entry(conn.from_port.clone())
+                    .or_default()
+                    .push((conn.to_node.clone(), conn.to_port.clone()));
+            }
+            if conn.to_node == group_output_id {
+                output_map
+                    .entry(conn.to_port.clone())
+                    .or_default()
+                    .push((conn.from_node.clone(), conn.from_port.clone()));
+            }
+        }
+
+        let mut id_map: HashMap<String, NodeId> = HashMap::new();
+        let mut restored_nodes = Vec::new();
+
+        for internal in &group_def.internal_graph.nodes {
+            if internal.type_id == "group_input" || internal.type_id == "group_output" {
+                continue;
+            }
+
+            let offset_x = match internal.params.get("__group_offset_x") {
+                Some(ParamValue::Float(v)) => *v,
+                _ => 0.0,
+            };
+            let offset_y = match internal.params.get("__group_offset_y") {
+                Some(ParamValue::Float(v)) => *v,
+                _ => 0.0,
+            };
+            let position = (group_position.0 + offset_x, group_position.1 + offset_y);
+
+            let new_id_str = self.add_node(&internal.type_id, position.0, position.1)?;
+            let new_id = self.parse_node_id(&new_id_str)?;
+
+            let mut params = internal.params.clone();
+            params.remove("__group_offset_x");
+            params.remove("__group_offset_y");
+            for (key, value) in &params {
+                self.graph.set_param(new_id, key, value.clone());
+            }
+
+            id_map.insert(internal.id.clone(), new_id);
+            restored_nodes.push(RestoredNode {
+                id: new_id_str,
+                type_id: internal.type_id.clone(),
+                position,
+                params,
+            });
+        }
+
+        for conn in &group_def.internal_graph.connections {
+            if conn.from_node == group_input_id || conn.to_node == group_output_id {
+                continue;
+            }
+            if conn.from_node == group_output_id || conn.to_node == group_input_id {
+                continue;
+            }
+            let from_id = id_map
+                .get(&conn.from_node)
+                .copied()
+                .ok_or_else(|| CompositorError::Other("Internal node not restored".to_string()))?;
+            let to_id = id_map
+                .get(&conn.to_node)
+                .copied()
+                .ok_or_else(|| CompositorError::Other("Internal node not restored".to_string()))?;
+            self.graph.connect(
+                &self.registry,
+                from_id,
+                &conn.from_port,
+                to_id,
+                &conn.to_port,
+            )?;
+        }
+
+        for conn in &incoming_external {
+            if let Some(targets) = input_map.get(&conn.to_port) {
+                for (internal_id, internal_port) in targets {
+                    if let Some(new_id) = id_map.get(internal_id) {
+                        self.graph.connect(
+                            &self.registry,
+                            conn.from_node,
+                            &conn.from_port,
+                            *new_id,
+                            internal_port,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        for conn in &outgoing_external {
+            if let Some(sources) = output_map.get(&conn.from_port) {
+                for (internal_id, internal_port) in sources {
+                    if let Some(new_id) = id_map.get(internal_id) {
+                        self.graph.connect(
+                            &self.registry,
+                            *new_id,
+                            internal_port,
+                            conn.to_node,
+                            &conn.to_port,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        Ok(UngroupResult {
+            restored_nodes,
+            removed_group_node_id: group_node_id.to_string(),
+        })
+    }
+
+    pub fn get_group_internal_graph(
+        &self,
+        group_node_id: &str,
+    ) -> Result<GroupInternalGraph, CompositorError> {
+        let group_id = self.parse_node_id(group_node_id)?;
+        let group_instance = self
+            .graph
+            .nodes
+            .get(group_id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let group_def = self
+            .group_definitions
+            .get(&group_instance.type_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let interface = GroupNode::derive_interface(group_def, &self.registry)
+            .map_err(CompositorError::Other)?;
+
+        let mut nodes = Vec::new();
+        for internal in &group_def.internal_graph.nodes {
+            let offset_x = match internal.params.get("__group_offset_x") {
+                Some(ParamValue::Float(v)) => *v,
+                _ => 0.0,
+            };
+            let offset_y = match internal.params.get("__group_offset_y") {
+                Some(ParamValue::Float(v)) => *v,
+                _ => 0.0,
+            };
+            let mut params = internal.params.clone();
+            params.remove("__group_offset_x");
+            params.remove("__group_offset_y");
+            nodes.push(InternalGraphNode {
+                id: internal.id.clone(),
+                type_id: internal.type_id.clone(),
+                params,
+                position: (offset_x, offset_y),
+            });
+        }
+
+        let connections = group_def
+            .internal_graph
+            .connections
+            .iter()
+            .map(|c| InternalGraphConnection {
+                from_node: c.from_node.clone(),
+                from_port: c.from_port.clone(),
+                to_node: c.to_node.clone(),
+                to_port: c.to_port.clone(),
+            })
+            .collect();
+
+        Ok(GroupInternalGraph {
+            group_def_id: group_def.id.clone(),
+            name: group_def.name.clone(),
+            nodes,
+            connections,
+            inputs: interface.inputs,
+            outputs: interface.outputs,
+        })
+    }
+
+    pub fn update_group_interface(
+        &mut self,
+        group_def_id: &str,
+        inputs: Vec<PortSpec>,
+        outputs: Vec<PortSpec>,
+    ) -> Result<NodeSpec, CompositorError> {
+        let existing_def = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let mut updated_def = (*existing_def.as_ref()).clone();
+        let (group_input_id, group_output_id) = find_group_nodes(&updated_def)?;
+
+        let input_names: HashSet<String> = inputs.iter().map(|p| p.name.clone()).collect();
+        let output_names: HashSet<String> = outputs.iter().map(|p| p.name.clone()).collect();
+
+        updated_def.internal_graph.connections.retain(|conn| {
+            if conn.from_node == group_input_id {
+                return input_names.contains(&conn.from_port);
+            }
+            if conn.to_node == group_output_id {
+                return output_names.contains(&conn.to_port);
+            }
+            true
+        });
+
+        updated_def.explicit_inputs = Some(inputs);
+        updated_def.explicit_outputs = Some(outputs);
+
+        let spec = self
+            .register_group(updated_def)
+            .map_err(CompositorError::Other)?;
+
+        let def_arc = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+
+        let group_node_ids: Vec<NodeId> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.type_id == group_def_id)
+            .map(|(id, _)| id)
+            .collect();
+
+        for node_id in group_node_ids {
+            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
+                .map_err(CompositorError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+            self.graph
+                .prune_connections_for_node(node_id, &self.registry);
+        }
+
+        Ok(spec)
+    }
+
+    pub fn add_internal_connection(
+        &mut self,
+        group_def_id: &str,
+        from_node: &str,
+        from_port: &str,
+        to_node: &str,
+        to_port: &str,
+    ) -> Result<NodeSpec, CompositorError> {
+        let existing_def = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let mut updated_def = (*existing_def.as_ref()).clone();
+
+        let (group_input_id, group_output_id) = find_group_nodes(&updated_def)?;
+
+        let from_internal = updated_def
+            .internal_graph
+            .nodes
+            .iter()
+            .find(|node| node.id == from_node)
+            .ok_or_else(|| {
+                CompositorError::Other(format!("Internal node not found: {}", from_node))
+            })?;
+        let to_internal = updated_def
+            .internal_graph
+            .nodes
+            .iter()
+            .find(|node| node.id == to_node)
+            .ok_or_else(|| {
+                CompositorError::Other(format!("Internal node not found: {}", to_node))
+            })?;
+
+        updated_def
+            .internal_graph
+            .connections
+            .retain(|conn| !(conn.to_node == to_node && conn.to_port == to_port));
+
+        updated_def
+            .internal_graph
+            .connections
+            .push(InternalConnection {
+                from_node: from_node.to_string(),
+                from_port: from_port.to_string(),
+                to_node: to_node.to_string(),
+                to_port: to_port.to_string(),
+            });
+
+        let interface = GroupNode::derive_interface(&updated_def, &self.registry)
+            .map_err(CompositorError::Other)?;
+
+        let from_port_spec = if from_node == group_input_id {
+            interface
+                .inputs
+                .iter()
+                .find(|port| port.name == from_port)
+                .ok_or_else(|| CompositorError::PortNotFound {
+                    node_type: from_internal.type_id.clone(),
+                    port_name: from_port.to_string(),
+                })?
+        } else {
+            let from_spec = self
+                .registry
+                .get_spec(&from_internal.type_id)
+                .ok_or_else(|| {
+                    CompositorError::InvalidConnection(format!(
+                        "Unknown node type: {}",
+                        from_internal.type_id
+                    ))
+                })?;
+            from_spec
+                .outputs
+                .iter()
+                .find(|port| port.name == from_port)
+                .ok_or_else(|| CompositorError::PortNotFound {
+                    node_type: from_internal.type_id.clone(),
+                    port_name: from_port.to_string(),
+                })?
+        };
+
+        let to_port_spec = if to_node == group_output_id {
+            interface
+                .outputs
+                .iter()
+                .find(|port| port.name == to_port)
+                .ok_or_else(|| CompositorError::PortNotFound {
+                    node_type: to_internal.type_id.clone(),
+                    port_name: to_port.to_string(),
+                })?
+        } else {
+            let to_spec = self
+                .registry
+                .get_spec(&to_internal.type_id)
+                .ok_or_else(|| {
+                    CompositorError::InvalidConnection(format!(
+                        "Unknown node type: {}",
+                        to_internal.type_id
+                    ))
+                })?;
+            to_spec
+                .inputs
+                .iter()
+                .find(|port| port.name == to_port)
+                .ok_or_else(|| CompositorError::PortNotFound {
+                    node_type: to_internal.type_id.clone(),
+                    port_name: to_port.to_string(),
+                })?
+        };
+
+        if from_port_spec.ty != to_port_spec.ty {
+            return Err(CompositorError::TypeMismatch {
+                expected: format!("{:?}", to_port_spec.ty),
+                got: format!("{:?}", from_port_spec.ty),
+            });
+        }
+
+        let spec = self
+            .register_group(updated_def)
+            .map_err(CompositorError::Other)?;
+
+        let def_arc = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+
+        let group_node_ids: Vec<NodeId> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.type_id == group_def_id)
+            .map(|(id, _)| id)
+            .collect();
+
+        for node_id in group_node_ids {
+            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
+                .map_err(CompositorError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+            self.graph
+                .prune_connections_for_node(node_id, &self.registry);
+        }
+
+        Ok(spec)
+    }
+
+    pub fn remove_internal_connection(
+        &mut self,
+        group_def_id: &str,
+        to_node: &str,
+        to_port: &str,
+    ) -> Result<NodeSpec, CompositorError> {
+        let existing_def = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let mut updated_def = (*existing_def.as_ref()).clone();
+
+        updated_def
+            .internal_graph
+            .connections
+            .retain(|conn| !(conn.to_node == to_node && conn.to_port == to_port));
+
+        let spec = self
+            .register_group(updated_def)
+            .map_err(CompositorError::Other)?;
+
+        let def_arc = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+
+        let group_node_ids: Vec<NodeId> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.type_id == group_def_id)
+            .map(|(id, _)| id)
+            .collect();
+
+        for node_id in group_node_ids {
+            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
+                .map_err(CompositorError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+            self.graph
+                .prune_connections_for_node(node_id, &self.registry);
+        }
+
+        Ok(spec)
+    }
+
+    pub fn compile_script_node(
+        &mut self,
+        node_id: &str,
+        manifest_json: &str,
+    ) -> Result<NodeSpec, String> {
+        let id = self.parse_node_id(node_id).map_err(|e| e.to_string())?;
+
+        let manifest: KernelManifest =
+            serde_json::from_str(manifest_json).map_err(|e| e.to_string())?;
+
+        let graph_node = self
+            .graph
+            .nodes
+            .get(id)
+            .ok_or_else(|| "Node not found".to_string())?;
+        let type_id = graph_node.type_id.clone();
+
+        if !type_id.starts_with("gpu_script") {
+            return Err("Node is not a GPU Script node".to_string());
+        }
+
+        let mut manifest = manifest;
+        manifest.id = type_id.clone();
+
+        let gpu_context = self
+            .gpu_context
+            .clone()
+            .ok_or_else(|| "GPU not available".to_string())?;
+
+        let compiled_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())?;
+        let spec = compiled_node.spec();
+
+        self.kernel_manifests
+            .insert(type_id.clone(), manifest.clone());
+        let manifest_for_factory = manifest.clone();
+        let gpu_ctx = gpu_context.clone();
+        Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+            Arc::new(
+                GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
+                    .expect("GPU node"),
+            )
+        });
+
+        self.nodes.insert(id, Arc::new(compiled_node));
+
+        self.graph.prune_connections_for_node(id, &self.registry);
+
+        self.graph.mark_dirty(id);
+
+        Ok(spec)
+    }
+
+    pub fn load_kernels_from_dir(&mut self, dir_path: &str) -> Result<Vec<NodeSpec>, String> {
+        let dir = Path::new(dir_path);
+        let mut specs = Vec::new();
+        let entries = fs::read_dir(dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    eprintln!("[compositor-runtime] Failed to read kernel entry: {err}");
+                    continue;
+                }
+            };
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let manifest_json = match fs::read_to_string(&path) {
+                Ok(contents) => contents,
+                Err(err) => {
+                    eprintln!(
+                        "[compositor-runtime] Failed to read kernel file {}: {err}",
+                        path.display()
+                    );
+                    continue;
+                }
+            };
+            match self.register_gpu_kernel(&manifest_json) {
+                Ok(spec) => specs.push(spec),
+                Err(err) => {
+                    eprintln!(
+                        "[compositor-runtime] Failed to register kernel {}: {err}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        Ok(specs)
+    }
+
+    pub fn list_node_types(&self) -> Vec<NodeSpec> {
+        self.registry
+            .list_specs()
+            .into_iter()
+            .filter(|spec| !spec.id.starts_with("gpu_script::"))
+            .cloned()
+            .collect()
+    }
+
+    pub fn gpu_context(&self) -> Option<Arc<GpuContext>> {
+        self.gpu_context.clone()
+    }
+
+    pub fn register_uuid_for_node(&mut self, node_id: NodeId) -> String {
+        let uuid = self
+            .graph
+            .nodes
+            .get(node_id)
+            .map(|node| node.uuid.clone())
+            .unwrap_or_default();
+        if !uuid.is_empty() {
+            self.uuid_map.insert(uuid.clone(), node_id);
+        }
+        uuid
+    }
+
+    pub fn parse_node_id(&self, id: &str) -> Result<NodeId, CompositorError> {
+        parse_node_id_from_map(&self.uuid_map, id)
+    }
+
+    pub fn remove_node_internal(&mut self, node_id: NodeId) {
+        if let Some(instance) = self.graph.nodes.get(node_id) {
+            self.uuid_map.remove(&instance.uuid);
+        }
+        self.graph.remove_node(node_id);
+        self.nodes.remove(&node_id);
+    }
+
+    pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> Result<String, CompositorError> {
+        if let Some(def) = self.group_definitions.get(type_id) {
+            let node_id = self.graph.add_node(type_id);
+            self.graph.set_position(node_id, x, y);
+            let group_node = GroupNode::from_definition(def.clone(), &self.registry)
+                .map_err(CompositorError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+            return Ok(self.register_uuid_for_node(node_id));
+        }
+
+        let actual_type_id = if type_id == "gpu_script" {
+            let uuid = format!("gpu_script::{}", Uuid::new_v4());
+            let uid = uuid.clone();
+            Arc::make_mut(&mut self.registry)
+                .register_or_replace(&uuid, move || Arc::new(GpuScriptDraftNode::new(&uid)));
+            uuid
+        } else {
+            type_id.to_string()
+        };
+
+        let node_id = self.graph.add_node(&actual_type_id);
+        self.graph.set_position(node_id, x, y);
+        let node = self.registry.create(&actual_type_id).ok_or_else(|| {
+            CompositorError::Other(format!("Unknown node type: {}", actual_type_id))
+        })?;
+        self.nodes.insert(node_id, node);
+        Ok(self.register_uuid_for_node(node_id))
+    }
+
+    pub fn remove_node(&mut self, node_id: &str) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        self.remove_node_internal(id);
+        Ok(())
+    }
+
+    pub fn connect(
+        &mut self,
+        from_node: &str,
+        from_port: &str,
+        to_node: &str,
+        to_port: &str,
+    ) -> Result<(), CompositorError> {
+        let from_id = self.parse_node_id(from_node)?;
+        let to_id = self.parse_node_id(to_node)?;
+        self.graph
+            .connect(&self.registry, from_id, from_port, to_id, to_port)
+    }
+
+    pub fn disconnect(&mut self, to_node: &str, to_port: &str) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(to_node)?;
+        self.graph.disconnect(id, to_port);
+        Ok(())
+    }
+
+    pub fn set_param(
+        &mut self,
+        node_id: &str,
+        key: &str,
+        value: ParamValue,
+    ) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        self.graph.set_param(id, key, value);
+        Ok(())
+    }
+
+    pub fn set_position(&mut self, node_id: &str, x: f64, y: f64) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        self.graph.set_position(id, x, y);
+        Ok(())
+    }
+
+    pub fn load_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let load_node = node
+            .as_any()
+            .downcast_ref::<InputLoadImage>()
+            .ok_or_else(|| CompositorError::Other("Node is not LoadImage".to_string()))?;
+        load_node.set_image_data(data)
+    }
+
+    pub fn get_image_data(&self, node_id: &str) -> Result<Vec<u8>, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let load_node = node
+            .as_any()
+            .downcast_ref::<InputLoadImage>()
+            .ok_or_else(|| CompositorError::Other("Node is not LoadImage".to_string()))?;
+        compositor_nodes_std::input::LoadImage::get_image_bytes(load_node)
+            .ok_or_else(|| CompositorError::Other("No image data available".to_string()))
+    }
+
+    pub fn set_sequence_directory(
+        &mut self,
+        node_id: &str,
+        directory: &str,
+    ) -> Result<SequenceInfo, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let seq_node = node
+            .as_any()
+            .downcast_ref::<LoadImageSequence>()
+            .ok_or_else(|| CompositorError::Other("Node is not LoadImageSequence".to_string()))?;
+        seq_node.set_directory(directory)
+    }
+
+    pub fn get_sequence_info(
+        &self,
+        node_id: &str,
+        pattern: &str,
+    ) -> Result<SequenceInfo, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let seq_node = node
+            .as_any()
+            .downcast_ref::<LoadImageSequence>()
+            .ok_or_else(|| CompositorError::Other("Node is not LoadImageSequence".to_string()))?;
+        seq_node.get_sequence_info(pattern)
+    }
+
+    pub fn render_viewer(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<RenderResult, CompositorError> {
+        let id = self.parse_node_id(viewer_node_id)?;
+        let cm = BuiltinColorManagement::new();
+        let eval_result = self.evaluator.evaluate(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            "display",
+            FrameTime { frame },
+            &cm,
+        )?;
+        self.last_timings = eval_result
+            .node_timings
+            .into_iter()
+            .map(|(node_id, duration)| {
+                (
+                    format_node_id(&self.graph, node_id),
+                    duration.as_secs_f64() * 1000.0,
+                )
+            })
+            .collect();
+        match eval_result.value {
+            Value::Image(image) => {
+                let width = image.width;
+                let height = image.height;
+                let pixels = Viewer::image_to_rgba8(&image);
+                Ok(RenderResult {
+                    width,
+                    height,
+                    pixels,
+                })
+            }
+            _ => Err(CompositorError::Other(
+                "Viewer output is not an image".to_string(),
+            )),
+        }
+    }
+
+    pub fn evaluate_node(
+        &mut self,
+        node_id: &str,
+        frame: u64,
+    ) -> Result<compositor_core::eval::EvalResult, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let cm = BuiltinColorManagement::new();
+        self.evaluator.evaluate(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            "display",
+            FrameTime { frame },
+            &cm,
+        )
+    }
+
+    pub fn render_export(
+        &mut self,
+        node_id: &str,
+        frame: u64,
+    ) -> Result<(String, Vec<u8>), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+
+        let instance = self
+            .graph
+            .nodes
+            .get(id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let format = match instance.params.get("format") {
+            Some(ParamValue::Int(v)) => *v,
+            _ => 0,
+        };
+
+        let cm = BuiltinColorManagement::new();
+        let eval_result = self.evaluator.evaluate(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            "display",
+            FrameTime { frame },
+            &cm,
+        )?;
+        match eval_result.value {
+            Value::Image(image) => {
+                let rgba8 = Viewer::image_to_rgba8(&image);
+                let mut buf = Vec::new();
+                let extension;
+
+                if format == 1 {
+                    extension = "jpg".to_string();
+                    let img = image::RgbaImage::from_raw(image.width, image.height, rgba8)
+                        .ok_or_else(|| {
+                            CompositorError::Other("Failed to create image buffer".to_string())
+                        })?;
+                    let rgb_img = image::DynamicImage::ImageRgba8(img).into_rgb8();
+                    let mut cursor = std::io::Cursor::new(&mut buf);
+                    rgb_img
+                        .write_to(&mut cursor, image::ImageFormat::Jpeg)
+                        .map_err(|e| CompositorError::Other(format!("JPEG encode failed: {e}")))?;
+                } else {
+                    extension = "png".to_string();
+                    let img = image::RgbaImage::from_raw(image.width, image.height, rgba8)
+                        .ok_or_else(|| {
+                            CompositorError::Other("Failed to create image buffer".to_string())
+                        })?;
+                    let mut cursor = std::io::Cursor::new(&mut buf);
+                    img.write_to(&mut cursor, image::ImageFormat::Png)
+                        .map_err(|e| CompositorError::Other(format!("PNG encode failed: {e}")))?;
+                }
+
+                Ok((extension, buf))
+            }
+            _ => Err(CompositorError::Other(
+                "Export node output is not an image".to_string(),
+            )),
+        }
+    }
+
+    pub fn set_param_and_render_viewers(
+        &mut self,
+        node_id: &str,
+        key: &str,
+        value: ParamValue,
+        frame: u64,
+    ) -> Result<Vec<(String, RenderResult)>, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        self.graph.set_param(id, key, value);
+
+        let viewer_ids: Vec<(NodeId, String)> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.type_id == "viewer")
+            .map(|(id, _)| (id, format_node_id(&self.graph, id)))
+            .collect();
+
+        let mut results = Vec::new();
+        let mut merged_timings = HashMap::new();
+        let cm = BuiltinColorManagement::new();
+        for (vid, vid_str) in viewer_ids {
+            match self.evaluator.evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                vid,
+                "display",
+                FrameTime { frame },
+                &cm,
+            ) {
+                Ok(eval_result) => {
+                    for (nid, duration) in eval_result.node_timings {
+                        merged_timings.insert(
+                            format_node_id(&self.graph, nid),
+                            duration.as_secs_f64() * 1000.0,
+                        );
+                    }
+                    if let Value::Image(image) = eval_result.value {
+                        let width = image.width;
+                        let height = image.height;
+                        let pixels = Viewer::image_to_rgba8(&image);
+                        results.push((
+                            vid_str,
+                            RenderResult {
+                                width,
+                                height,
+                                pixels,
+                            },
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.last_timings = merged_timings;
+        Ok(results)
+    }
+
+    pub fn get_last_render_timings(&self) -> &HashMap<String, f64> {
+        &self.last_timings
+    }
+
+    pub fn start_render_sequence(&mut self, node_id: &str) -> Result<String, CompositorError> {
+        if self
+            .active_job
+            .as_ref()
+            .map_or(false, |j| !j.completed.load(Ordering::Acquire))
+        {
+            return Err(CompositorError::Other(
+                "A render job is already running".to_string(),
+            ));
+        }
+
+        let export_id = self.parse_node_id(node_id)?;
+        let instance = self
+            .graph
+            .nodes
+            .get(export_id)
+            .ok_or_else(|| CompositorError::Other("Export node not found".to_string()))?;
+
+        let output_dir = match instance.params.get("output_dir") {
+            Some(ParamValue::String(s)) => s.clone(),
+            _ => {
+                return Err(CompositorError::Other(
+                    "Output directory not set".to_string(),
+                ))
+            }
+        };
+
+        // Validate output directory exists and is writable before spawning
+        let output_path = std::path::Path::new(&output_dir);
+        if !output_path.is_dir() {
+            return Err(CompositorError::Other(format!(
+                "Output directory does not exist: {}",
+                output_dir
+            )));
+        }
+
+        let start = match instance.params.get("start_frame") {
+            Some(ParamValue::Int(v)) => *v as u64,
+            _ => 0,
+        };
+        let end = match instance.params.get("end_frame") {
+            Some(ParamValue::Int(v)) => *v as u64,
+            _ => 100,
+        };
+        let step = match instance.params.get("step") {
+            Some(ParamValue::Int(v)) => *v as u64,
+            _ => 1,
+        };
+        let range = FrameRange { start, end, step };
+
+        let format = match instance.params.get("format") {
+            Some(ParamValue::Int(v)) => *v,
+            _ => 0,
+        };
+
+        let total_frames = if range.step > 0 {
+            (range.end - range.start) / range.step + 1
+        } else {
+            return Err(CompositorError::Other("Step must be > 0".to_string()));
+        };
+
+        let job_id = format!("job_{}", uuid::Uuid::new_v4());
+        let job = Arc::new(RenderJob {
+            id: job_id.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            current_frame: Arc::new(AtomicU64::new(0)),
+            total_frames,
+            completed: Arc::new(AtomicBool::new(false)),
+            error: Arc::new(std::sync::Mutex::new(None)),
+        });
+        self.active_job = Some(job.clone());
+
+        // Snapshot the graph state for the background thread
+        let mut render_graph = self.graph.clone();
+        let render_nodes = self.nodes.clone();
+        let render_registry = Arc::clone(&self.registry);
+        let mut render_evaluator = Evaluator::new();
+
+        let ext = if format == 1 { "jpg" } else { "png" }.to_string();
+        let padding = std::cmp::max(4, (range.end as f64).log10().ceil() as usize + 1);
+
+        // Spawn background thread for rendering
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cm = BuiltinColorManagement::new();
+                let mut frame = range.start;
+                while frame <= range.end {
+                    if job.cancelled.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    job.current_frame.store(frame, Ordering::Relaxed);
+
+                    match render_evaluator.evaluate(
+                        &mut render_graph,
+                        &render_registry,
+                        &render_nodes,
+                        export_id,
+                        "display",
+                        FrameTime { frame },
+                        &cm,
+                    ) {
+                        Ok(eval_result) => {
+                            if let Value::Image(image) = eval_result.value {
+                                let rgba8 = Viewer::image_to_rgba8(&image);
+                                let filename =
+                                    format!("{:0>width$}.{}", frame, ext, width = padding);
+                                let path = std::path::Path::new(&output_dir).join(&filename);
+
+                                let encode_result = if format == 1 {
+                                    let img = image::RgbaImage::from_raw(
+                                        image.width,
+                                        image.height,
+                                        rgba8,
+                                    )
+                                    .ok_or_else(|| "Failed to create image buffer".to_string());
+                                    match img {
+                                        Ok(img) => {
+                                            let rgb_img =
+                                                image::DynamicImage::ImageRgba8(img).into_rgb8();
+                                            rgb_img.save(&path).map_err(|e| e.to_string())
+                                        }
+                                        Err(e) => Err(e),
+                                    }
+                                } else {
+                                    (|| -> Result<(), String> {
+                                        let file = std::fs::File::create(&path)
+                                            .map_err(|e| e.to_string())?;
+                                        let mut w = std::io::BufWriter::new(file);
+                                        let mut encoder =
+                                            png::Encoder::new(&mut w, image.width, image.height);
+                                        encoder.set_color(png::ColorType::Rgba);
+                                        encoder.set_depth(png::BitDepth::Eight);
+                                        encoder.set_compression(png::Compression::Fast);
+                                        encoder.set_filter(png::FilterType::Sub);
+                                        let mut writer =
+                                            encoder.write_header().map_err(|e| e.to_string())?;
+                                        writer
+                                            .write_image_data(&rgba8)
+                                            .map_err(|e| e.to_string())?;
+                                        Ok(())
+                                    })()
+                                };
+
+                                if let Err(e) = encode_result {
+                                    let mut err_guard = job.error.lock().unwrap();
+                                    *err_guard =
+                                        Some(format!("Frame {} encode/write failed: {}", frame, e));
+                                    return;
+                                }
+                            } else {
+                                let mut err_guard = job.error.lock().unwrap();
+                                *err_guard =
+                                    Some(format!("Frame {} output is not an image", frame));
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let mut err_guard = job.error.lock().unwrap();
+                            *err_guard = Some(format!("Frame {} evaluation failed: {}", frame, e));
+                            return;
+                        }
+                    }
+
+                    frame += range.step;
+                }
+            }));
+
+            // Handle panics — convert to error message
+            if let Err(panic_info) = result {
+                let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                    format!("Render thread panicked: {}", s)
+                } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    format!("Render thread panicked: {}", s)
+                } else {
+                    "Render thread panicked with unknown error".to_string()
+                };
+                let mut err_guard = job.error.lock().unwrap();
+                *err_guard = Some(msg);
+            }
+
+            // Signal completion with Release ordering so error is visible first
+            job.completed.store(true, Ordering::Release);
+        });
+
+        Ok(job_id)
+    }
+
+    pub fn cancel_job(&self) {
+        if let Some(ref job) = self.active_job {
+            job.cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub fn get_job_progress(&self) -> Option<JobProgress> {
+        self.active_job.as_ref().map(|job| {
+            let completed = job.completed.load(Ordering::Acquire);
+            let error = job.error.lock().ok().and_then(|guard| guard.clone());
+            JobProgress {
+                job_id: job.id.clone(),
+                current_frame: job.current_frame.load(Ordering::Relaxed),
+                total_frames: job.total_frames,
+                completed,
+                error,
+            }
+        })
+    }
+
+    pub fn export_graph(&self) -> SerializableGraph {
+        let nodes = self
+            .graph
+            .nodes
+            .values()
+            .map(|node| SerializableNode {
+                id: format_node_id(&self.graph, node.id),
+                type_id: node.type_id.clone(),
+                params: node.params.clone(),
+                position: node.position,
+            })
+            .collect();
+        let connections = self
+            .graph
+            .connections
+            .iter()
+            .map(|c| SerializableConnection {
+                from_node: format_node_id(&self.graph, c.from_node),
+                from_port: c.from_port.clone(),
+                to_node: format_node_id(&self.graph, c.to_node),
+                to_port: c.to_port.clone(),
+            })
+            .collect();
+        let group_definitions = self
+            .group_definitions
+            .values()
+            .filter(|def| !def.is_builtin)
+            .map(|def| def.as_ref().clone())
+            .collect();
+        SerializableGraph {
+            nodes,
+            connections,
+            group_definitions,
+        }
+    }
+
+    pub fn export_document(&self) -> CompositorDocument {
+        let graph = self.export_graph();
+
+        let used_type_ids: HashSet<&str> = graph.nodes.iter().map(|n| n.type_id.as_str()).collect();
+        let mut scripts = HashMap::new();
+        for (type_id, manifest) in &self.kernel_manifests {
+            if used_type_ids.contains(type_id.as_str()) {
+                scripts.insert(
+                    type_id.clone(),
+                    ScriptEntry {
+                        manifest: manifest.clone(),
+                    },
+                );
+            }
+        }
+
+        CompositorDocument {
+            compositor: DocumentHeader {
+                format_version: CURRENT_FORMAT_VERSION.to_string(),
+                app_version: String::new(),
+                created_at: String::new(),
+                modified_at: String::new(),
+            },
+            project: ProjectMetadata {
+                name: String::new(),
+                author: String::new(),
+                description: String::new(),
+            },
+            graph,
+            assets: HashMap::new(),
+            scripts,
+            view: None,
+        }
+    }
+
+    pub fn import_document(&mut self, document: CompositorDocument) -> Result<(), CompositorError> {
+        for entry in document.scripts.values() {
+            let manifest_json = serde_json::to_string(&entry.manifest)
+                .map_err(|e| CompositorError::Other(e.to_string()))?;
+            self.register_gpu_kernel(&manifest_json)
+                .map_err(CompositorError::Other)?;
+        }
+        self.import_graph(document.graph)
+    }
+
+    pub fn import_graph(&mut self, data: SerializableGraph) -> Result<(), CompositorError> {
+        self.graph = Graph::new();
+        self.nodes.clear();
+        self.evaluator = Evaluator::new();
+        self.uuid_map.clear();
+        self.kernel_manifests.clear();
+
+        self.group_definitions.retain(|_, def| def.is_builtin);
+        for def in data.group_definitions {
+            self.register_group(def).map_err(CompositorError::Other)?;
+        }
+
+        let mut id_map = HashMap::new();
+        for node in &data.nodes {
+            if node.type_id.starts_with("gpu_script::")
+                && self.registry.get_spec(&node.type_id).is_none()
+            {
+                let uid = node.type_id.clone();
+                Arc::make_mut(&mut self.registry).register_or_replace(&node.type_id, move || {
+                    Arc::new(GpuScriptDraftNode::new(&uid))
+                });
+            }
+        }
+        for node in &data.nodes {
+            let new_id = self.graph.add_node(&node.type_id);
+            self.graph
+                .set_position(new_id, node.position.0, node.position.1);
+            for (key, value) in &node.params {
+                self.graph.set_param(new_id, key, value.clone());
+            }
+            if let Some(instance) = self.graph.nodes.get_mut(new_id) {
+                instance.uuid = node.id.clone();
+            }
+            if let Some(def) = self.group_definitions.get(&node.type_id) {
+                let group_node = GroupNode::from_definition(def.clone(), &self.registry)
+                    .map_err(CompositorError::Other)?;
+                self.nodes.insert(new_id, Arc::new(group_node));
+            } else if let Some(instance) = self.registry.create(&node.type_id) {
+                self.nodes.insert(new_id, instance);
+            }
+            id_map.insert(node.id.clone(), new_id);
+            self.uuid_map.insert(node.id.clone(), new_id);
+        }
+
+        for conn in &data.connections {
+            let from_id = id_map.get(&conn.from_node).copied().ok_or_else(|| {
+                CompositorError::Other("Invalid from_node in connection".to_string())
+            })?;
+            let to_id = id_map.get(&conn.to_node).copied().ok_or_else(|| {
+                CompositorError::Other("Invalid to_node in connection".to_string())
+            })?;
+            self.graph.connect(
+                &self.registry,
+                from_id,
+                &conn.from_port,
+                to_id,
+                &conn.to_port,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn find_kernels_dir() -> Option<PathBuf> {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let candidate = parent.join("kernels");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    let local = PathBuf::from("kernels");
+    if local.is_dir() {
+        return Some(local);
+    }
+    None
+}
+
+fn format_node_id(graph: &Graph, id: NodeId) -> String {
+    graph
+        .nodes
+        .get(id)
+        .map(|node| node.uuid.clone())
+        .unwrap_or_default()
+}
+
+fn parse_node_id_from_map(
+    uuid_map: &HashMap<String, NodeId>,
+    id: &str,
+) -> Result<NodeId, CompositorError> {
+    if let Some(&node_id) = uuid_map.get(id) {
+        return Ok(node_id);
+    }
+    let value = id
+        .parse::<u64>()
+        .map_err(|_| CompositorError::Other(format!("Unknown node id: {}", id)))?;
+    Ok(NodeId::from(slotmap::KeyData::from_ffi(value)))
+}
+
+fn unique_port_name(base: &str, counts: &mut HashMap<String, usize>) -> String {
+    let entry = counts.entry(base.to_string()).or_insert(0);
+    *entry += 1;
+    if *entry == 1 {
+        base.to_string()
+    } else {
+        format!("{}_{}", base, *entry)
+    }
+}
+
+fn find_group_nodes(definition: &GroupDefinition) -> Result<(String, String), CompositorError> {
+    let mut group_input_id = None;
+    let mut group_output_id = None;
+    for node in &definition.internal_graph.nodes {
+        if node.type_id == "group_input" {
+            group_input_id = Some(node.id.clone());
+        }
+        if node.type_id == "group_output" {
+            group_output_id = Some(node.id.clone());
+        }
+    }
+    let group_input_id = group_input_id
+        .ok_or_else(|| CompositorError::Other("Group input node missing".to_string()))?;
+    let group_output_id = group_output_id
+        .ok_or_else(|| CompositorError::Other("Group output node missing".to_string()))?;
+    Ok((group_input_id, group_output_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compositor_gpu::ManifestPort;
+
+    fn sample_manifest_json() -> String {
+        let manifest = KernelManifest {
+            id: "test_kernel".to_string(),
+            display_name: "Test Kernel".to_string(),
+            category: "GPU".to_string(),
+            description: "test".to_string(),
+            inputs: vec![ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+            }],
+            outputs: vec![ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+            }],
+            params: vec![],
+            kernel: "return color;".to_string(),
+        };
+        serde_json::to_string(&manifest).expect("manifest json")
+    }
+
+    #[test]
+    fn test_add_gpu_script_node_creates_unique_type() {
+        let mut engine = Engine::new();
+        let node_id = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let id = engine.parse_node_id(&node_id).unwrap();
+        let node = engine.graph.nodes.get(id).unwrap();
+        assert!(node.type_id.starts_with("gpu_script::"));
+        let spec = engine.registry.get_spec(&node.type_id).unwrap();
+        assert_eq!(spec.display_name, "GPU Script");
+    }
+
+    #[test]
+    fn test_compile_script_node_rejects_non_gpu_script() {
+        let mut engine = Engine::new();
+        let node_id = engine.add_node("viewer", 0.0, 0.0).unwrap();
+        let manifest_json = sample_manifest_json();
+        let err = engine
+            .compile_script_node(&node_id, &manifest_json)
+            .unwrap_err();
+        assert!(err.contains("Node is not a GPU Script node"));
+    }
+
+    #[test]
+    fn test_compile_script_node_replaces_node_when_gpu_available() {
+        let mut engine = Engine::new();
+        if engine.gpu_context().is_none() {
+            return;
+        }
+        let node_id = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let id = engine.parse_node_id(&node_id).unwrap();
+        let manifest_json = sample_manifest_json();
+        let spec = engine
+            .compile_script_node(&node_id, &manifest_json)
+            .expect("compile");
+        let graph_node = engine.graph.nodes.get(id).unwrap();
+        assert_eq!(spec.id, graph_node.type_id);
+        let node = engine.nodes.get(&id).unwrap();
+        assert!(node.as_any().is::<GpuKernelNode>());
+    }
+
+    #[test]
+    fn test_pixelate_kernel_e2e_via_compile_script() {
+        use compositor_gpu::manifest::ManifestParam;
+
+        let mut engine = Engine::new();
+        if engine.gpu_context().is_none() {
+            println!("GPU not available, skipping pixelate E2E test");
+            return;
+        }
+
+        // Build a pixelate-only manifest
+        let manifest = KernelManifest {
+            id: "pixelate".to_string(),
+            display_name: "Pixelate".to_string(),
+            category: "GPU".to_string(),
+            description: "Pixelate effect".to_string(),
+            inputs: vec![ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+            }],
+            outputs: vec![ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+            }],
+            params: vec![ManifestParam {
+                key: "pixel_size".to_string(),
+                label: "Pixel Size".to_string(),
+                ty: "Int".to_string(),
+                default: serde_json::Value::from(4),
+                min: Some(1.0),
+                max: Some(128.0),
+                step: Some(1.0),
+                ui: Some("NumberInput".to_string()),
+            }],
+            kernel: r#"
+ivec2 dims = imageSize(u_input);
+int block = max(pixel_size, 1);
+ivec2 block_origin = (pixel / block) * block + block / 2;
+block_origin = clamp(block_origin, ivec2(0), dims - 1);
+vec4 pixelated = imageLoad(u_input, block_origin);
+return pixelated;
+"#
+            .trim()
+            .to_string(),
+        };
+        let manifest_json = serde_json::to_string(&manifest).expect("manifest json");
+
+        // Create a GPU script node and compile it with the pixelate kernel
+        let script_node_id = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let spec = engine
+            .compile_script_node(&script_node_id, &manifest_json)
+            .expect("compile pixelate kernel");
+        assert_eq!(spec.display_name, "Pixelate");
+        assert_eq!(spec.params.len(), 1);
+        assert_eq!(spec.params[0].key, "pixel_size");
+
+        // Create a full pipeline: LoadImage → Pixelate → Viewer
+        let load_id = engine.add_node("load_image", -200.0, 0.0).unwrap();
+        let viewer_id = engine.add_node("viewer", 200.0, 0.0).unwrap();
+
+        // Encode as PNG for LoadImage
+        let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
+            let r = ((x as f32 / 7.0) * 255.0) as u8;
+            let g = ((y as f32 / 7.0) * 255.0) as u8;
+            image::Rgba([r, g, 64, 255])
+        });
+        let mut png_bytes = Vec::new();
+        png_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode PNG");
+
+        engine
+            .load_image_data(&load_id, &png_bytes)
+            .expect("load image");
+
+        // Connect: LoadImage → Pixelate → Viewer
+        engine
+            .connect(&load_id, "image", &script_node_id, "image")
+            .expect("connect load→pixelate");
+        engine
+            .connect(&script_node_id, "image", &viewer_id, "image")
+            .expect("connect pixelate→viewer");
+
+        // Set pixel_size = 4 (8x8 image with block size 4 → four 4x4 blocks)
+        engine
+            .set_param(&script_node_id, "pixel_size", ParamValue::Int(4))
+            .expect("set pixel_size");
+
+        // Render
+        let result = engine
+            .render_viewer(&viewer_id, 0)
+            .expect("render through pixelate");
+        assert_eq!(result.width, 8);
+        assert_eq!(result.height, 8);
+
+        // With pixel_size=4 on an 8x8 image:
+        // Block origins: pixels 0-3 → origin (2,y), pixels 4-7 → origin (6,y)
+        // All pixels within a 4x4 block should have the same color.
+        // Verify: pixel (0,0) == pixel (1,0) == pixel (2,0) == pixel (3,0)
+        let px = |x: usize, y: usize| -> (u8, u8, u8, u8) {
+            let idx = (y * 8 + x) * 4;
+            (
+                result.pixels[idx],
+                result.pixels[idx + 1],
+                result.pixels[idx + 2],
+                result.pixels[idx + 3],
+            )
+        };
+
+        let p00 = px(0, 0);
+        let p10 = px(1, 0);
+        let p20 = px(2, 0);
+        let p30 = px(3, 0);
+        assert_eq!(
+            p00, p10,
+            "Pixels (0,0) and (1,0) should match in same block"
+        );
+        assert_eq!(
+            p10, p20,
+            "Pixels (1,0) and (2,0) should match in same block"
+        );
+        assert_eq!(
+            p20, p30,
+            "Pixels (2,0) and (3,0) should match in same block"
+        );
+
+        // Second block: pixel (4,0) should differ from first block
+        let p40 = px(4, 0);
+        assert_ne!(p00, p40, "Different blocks should have different colors");
+
+        // Verify vertical blocking too: (0,0) == (0,1) == (0,2) == (0,3)
+        let p01 = px(0, 1);
+        let p02 = px(0, 2);
+        let p03 = px(0, 3);
+        assert_eq!(
+            p00, p01,
+            "Pixels (0,0) and (0,1) should match in same block"
+        );
+        assert_eq!(
+            p01, p02,
+            "Pixels (0,1) and (0,2) should match in same block"
+        );
+        assert_eq!(
+            p02, p03,
+            "Pixels (0,2) and (0,3) should match in same block"
+        );
+
+        // Second vertical block should differ
+        let p04 = px(0, 4);
+        assert_ne!(
+            p00, p04,
+            "Different vertical blocks should have different colors"
+        );
+
+        // Alpha should be preserved
+        assert_eq!(p00.3, 255, "Alpha should be preserved");
+
+        println!(
+            "Pixelate E2E test PASSED — block (0,0): {:?}, block (4,0): {:?}, block (0,4): {:?}",
+            p00, p40, p04
+        );
+    }
+
+    #[test]
+    fn test_pixelate_group_e2e() {
+        let mut engine = Engine::new();
+        if engine.gpu_context().is_none() {
+            println!("GPU not available, skipping");
+            return;
+        }
+
+        let spec = engine.registry.get_spec("group::pixelate");
+        assert!(spec.is_some(), "Pixelate group should be registered");
+        let spec = spec.unwrap();
+        assert_eq!(spec.display_name, "Pixelate");
+        assert_eq!(spec.inputs.len(), 1);
+        assert_eq!(spec.inputs[0].name, "image");
+        assert_eq!(spec.outputs.len(), 1);
+        assert_eq!(spec.outputs[0].name, "image");
+        assert_eq!(spec.params.len(), 1);
+        assert_eq!(spec.params[0].key, "pixel_size");
+
+        let load_id = engine.add_node("load_image", -200.0, 0.0).unwrap();
+        let pix_id = engine.add_node("group::pixelate", 0.0, 0.0).unwrap();
+        let viewer_id = engine.add_node("viewer", 200.0, 0.0).unwrap();
+
+        let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
+            let r = ((x as f32 / 7.0) * 255.0) as u8;
+            let g = ((y as f32 / 7.0) * 255.0) as u8;
+            image::Rgba([r, g, 64, 255])
+        });
+        let mut png_bytes = Vec::new();
+        png_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode PNG");
+        engine.load_image_data(&load_id, &png_bytes).expect("load");
+
+        engine
+            .connect(&load_id, "image", &pix_id, "image")
+            .expect("connect");
+        engine
+            .connect(&pix_id, "image", &viewer_id, "image")
+            .expect("connect");
+        engine
+            .set_param(&pix_id, "pixel_size", ParamValue::Int(4))
+            .expect("set param");
+
+        let result = engine.render_viewer(&viewer_id, 0).expect("render");
+        assert_eq!(result.width, 8);
+        assert_eq!(result.height, 8);
+
+        let px = |x: usize, y: usize| -> (u8, u8, u8, u8) {
+            let idx = (y * 8 + x) * 4;
+            (
+                result.pixels[idx],
+                result.pixels[idx + 1],
+                result.pixels[idx + 2],
+                result.pixels[idx + 3],
+            )
+        };
+        assert_eq!(px(0, 0), px(1, 0), "Same block should match");
+        assert_eq!(px(0, 0), px(3, 3), "Same block should match");
+        assert_ne!(px(0, 0), px(4, 0), "Different blocks should differ");
+        assert_eq!(px(0, 0).3, 255, "Alpha preserved");
+        println!("Pixelate GROUP E2E test PASSED");
+    }
+
+    #[test]
+    fn test_dither_group_e2e() {
+        let mut engine = Engine::new();
+        if engine.gpu_context().is_none() {
+            println!("GPU not available, skipping");
+            return;
+        }
+
+        let spec = engine.registry.get_spec("group::dither");
+        assert!(spec.is_some(), "Dither group should be registered");
+        let spec = spec.unwrap();
+        assert_eq!(spec.display_name, "Dither");
+        assert_eq!(spec.inputs.len(), 2);
+        assert!(spec.inputs.iter().any(|p| p.name == "image"));
+        assert!(spec.inputs.iter().any(|p| p.name == "palette"));
+        assert_eq!(spec.outputs.len(), 1);
+        assert_eq!(spec.outputs[0].name, "image");
+        assert_eq!(spec.params.len(), 2);
+
+        let load_img_id = engine.add_node("load_image", -400.0, 0.0).unwrap();
+        let load_pal_id = engine.add_node("load_image", -400.0, 200.0).unwrap();
+        let dither_id = engine.add_node("group::dither", 0.0, 0.0).unwrap();
+        let viewer_id = engine.add_node("viewer", 200.0, 0.0).unwrap();
+
+        let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
+            let r = ((x as f32 / 7.0) * 255.0) as u8;
+            let g = ((y as f32 / 7.0) * 255.0) as u8;
+            image::Rgba([r, g, 128, 255])
+        });
+        let mut png_bytes = Vec::new();
+        png_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        engine.load_image_data(&load_img_id, &png_bytes).unwrap();
+
+        let pal_image = image::RgbaImage::from_fn(4, 1, |x, _| match x {
+            0 => image::Rgba([255, 0, 0, 255]),
+            1 => image::Rgba([0, 255, 0, 255]),
+            2 => image::Rgba([0, 0, 255, 255]),
+            _ => image::Rgba([255, 255, 255, 255]),
+        });
+        let mut pal_bytes = Vec::new();
+        pal_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut pal_bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        engine.load_image_data(&load_pal_id, &pal_bytes).unwrap();
+
+        engine
+            .connect(&load_img_id, "image", &dither_id, "image")
+            .unwrap();
+        engine
+            .connect(&load_pal_id, "image", &dither_id, "palette")
+            .unwrap();
+        engine
+            .connect(&dither_id, "image", &viewer_id, "image")
+            .unwrap();
+        engine
+            .set_param(&dither_id, "dither_amount", ParamValue::Float(1.0))
+            .unwrap();
+        engine
+            .set_param(&dither_id, "palette_size", ParamValue::Int(4))
+            .unwrap();
+
+        let result = engine.render_viewer(&viewer_id, 0).expect("render");
+        assert_eq!(result.width, 8);
+        assert_eq!(result.height, 8);
+
+        let px = |x: usize, y: usize| -> (u8, u8, u8, u8) {
+            let idx = (y * 8 + x) * 4;
+            (
+                result.pixels[idx],
+                result.pixels[idx + 1],
+                result.pixels[idx + 2],
+                result.pixels[idx + 3],
+            )
+        };
+        let p = px(0, 0);
+        assert_eq!(p.3, 255, "Alpha preserved");
+        let is_palette_color = (p.0 > 200 && p.1 < 50 && p.2 < 50)
+            || (p.0 < 50 && p.1 > 200 && p.2 < 50)
+            || (p.0 < 50 && p.1 < 50 && p.2 > 200)
+            || (p.0 > 200 && p.1 > 200 && p.2 > 200);
+        assert!(
+            is_palette_color,
+            "Output pixel should be snapped to a palette color, got {:?}",
+            p
+        );
+        println!("Dither GROUP E2E test PASSED");
+    }
+
+    #[test]
+    fn test_list_node_types_includes_groups() {
+        let engine = Engine::new();
+        let specs = engine.list_node_types();
+        let has_pixelate = specs.iter().any(|s| s.id == "group::pixelate");
+        let has_dither = specs.iter().any(|s| s.id == "group::dither");
+        let has_color_range = specs.iter().any(|s| s.id == "group::color_range");
+        assert!(has_pixelate, "Pixelate group should appear in node types");
+        assert!(has_dither, "Dither group should appear in node types");
+        assert!(
+            has_color_range,
+            "Color Range group should appear in node types"
+        );
+    }
+}

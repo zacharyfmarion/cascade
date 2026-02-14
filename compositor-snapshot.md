@@ -1,0 +1,126 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e6]: Compositor
+    - generic [ref=e7]:
+      - button "Undo" [ref=e8] [cursor=pointer]
+      - button "Redo" [disabled] [ref=e9]
+      - button "Save" [ref=e11] [cursor=pointer]
+      - button "Load" [ref=e12] [cursor=pointer]
+  - generic [ref=e13]:
+    - generic [ref=e14]: Node Library
+    - generic [ref=e16]:
+      - img [ref=e17]
+      - textbox "Search nodes..." [ref=e19]
+    - generic [ref=e20]:
+      - generic [ref=e21]:
+        - button "COLOR" [ref=e22] [cursor=pointer]:
+          - img [ref=e23]
+          - generic [ref=e25]: COLOR
+        - generic [ref=e26]:
+          - button "Invert" [ref=e27]:
+            - img [ref=e29]
+            - generic [ref=e31]: Invert
+          - button "Brightness / Contrast" [ref=e32]:
+            - img [ref=e34]
+            - generic [ref=e36]: Brightness / Contrast
+          - button "Hue / Saturation" [ref=e37]:
+            - img [ref=e39]
+            - generic [ref=e41]: Hue / Saturation
+      - generic [ref=e42]:
+        - button "OUTPUT" [ref=e43] [cursor=pointer]:
+          - img [ref=e44]
+          - generic [ref=e46]: OUTPUT
+        - button "Viewer" [ref=e48]:
+          - img [ref=e50]
+          - generic [ref=e52]: Viewer
+      - generic [ref=e53]:
+        - button "INPUT" [ref=e54] [cursor=pointer]:
+          - img [ref=e55]
+          - generic [ref=e57]: INPUT
+        - button "Load Image" [ref=e59]:
+          - img [ref=e61]
+          - generic [ref=e63]: Load Image
+      - generic [ref=e64]:
+        - button "FILTER" [ref=e65] [cursor=pointer]:
+          - img [ref=e66]
+          - generic [ref=e68]: FILTER
+        - button "Gaussian Blur" [ref=e70]:
+          - img [ref=e72]
+          - generic [ref=e74]: Gaussian Blur
+  - region "Node Graph Canvas" [ref=e76]:
+    - application [ref=e77]:
+      - generic [ref=e79]:
+        - generic:
+          - generic:
+            - img:
+              - group "Edge from 4294967297 to 4294967298" [ref=e158] [cursor=pointer]
+            - img:
+              - group "Edge from 4294967299 to 4294967300" [ref=e162] [cursor=pointer]
+          - generic:
+            - group [ref=e112]:
+              - generic [ref=e113]:
+                - generic [ref=e114]: Load Image
+                - generic [ref=e115]:
+                  - button "Drop image or click to select No file" [ref=e116] [cursor=pointer]:
+                    - text: Drop image or click to select
+                    - generic [ref=e117]: No file
+                  - generic [ref=e118]:
+                    - generic [ref=e119]: Image
+                    - generic "Image (Image)" [ref=e120]
+            - group [ref=e121]:
+              - generic [ref=e122]:
+                - generic [ref=e123]: Viewer
+                - generic [ref=e124]:
+                  - generic [ref=e125]:
+                    - generic "Image (Image)" [ref=e126]
+                    - generic [ref=e127]: Image
+                  - generic [ref=e130]:
+                    - generic [ref=e131]: Display
+                    - generic "Display (Image)" [ref=e132]
+            - group [ref=e133]:
+              - generic [ref=e134]:
+                - generic [ref=e135]: Load Image
+                - generic [ref=e136]:
+                  - button "Drop image or click to select No file" [ref=e137] [cursor=pointer]:
+                    - text: Drop image or click to select
+                    - generic [ref=e138]: No file
+                  - generic [ref=e139]:
+                    - generic [ref=e140]: Image
+                    - generic "Image (Image)" [ref=e141]
+            - group [ref=e142]:
+              - generic [ref=e143]:
+                - generic [ref=e144]: Viewer
+                - generic [ref=e145]:
+                  - generic [ref=e146]:
+                    - generic "Image (Image)" [ref=e147]
+                    - generic [ref=e148]: Image
+                  - generic [ref=e150]: No Output
+                  - generic [ref=e151]:
+                    - generic [ref=e152]: Display
+                    - generic "Display (Image)" [ref=e153]
+            - group [ref=e166]:
+              - generic [ref=e167]:
+                - generic [ref=e168]: Load Image
+                - generic [ref=e169]:
+                  - button "Drop image or click to select No file" [ref=e170] [cursor=pointer]:
+                    - text: Drop image or click to select
+                    - generic [ref=e171]: No file
+                  - generic [ref=e172]:
+                    - generic [ref=e173]: Image
+                    - generic "Image (Image)" [ref=e174]
+      - img
+      - generic "Control Panel" [ref=e80]:
+        - button "Zoom In" [ref=e81] [cursor=pointer]:
+          - img [ref=e82]
+        - button "Zoom Out" [ref=e84] [cursor=pointer]:
+          - img [ref=e85]
+        - button "Fit View" [ref=e87] [cursor=pointer]:
+          - img [ref=e88]
+        - button "Toggle Interactivity" [ref=e90] [cursor=pointer]:
+          - img [ref=e91]
+      - img "Mini Map" [ref=e94]
+  - generic [ref=e96]:
+    - generic [ref=e97]:
+      - generic [ref=e98]: Inspector
+      - generic [ref=e99]: Select a node to inspect
+    - generic [ref=e101]: Viewer (2x2)

@@ -1,0 +1,89 @@
+.app-layout {
+  display: grid;
+  grid-template-rows: 36px 1fr;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.toolbar__title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.toolbar__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.toolbar__btn {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.toolbar__btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.toolbar__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbar__separator {
+  width: 1px;
+  height: 16px;
+  background: var(--border-default);
+  margin: 0 4px;
+  align-self: center;
+}
+
+.dockview-theme-compositor {
+  --dv-paneview-header-border-color: var(--border-default);
+  --dv-tabs-and-actions-container-background-color: var(--bg-primary);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg-secondary);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--bg-primary);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--bg-surface);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--bg-primary);
+  --dv-tab-divider-color: var(--border-default);
+  --dv-activegroup-visiblepanel-tab-color: var(--text-primary);
+  --dv-activegroup-hiddenpanel-tab-color: var(--text-secondary);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-secondary);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--text-muted);
+  --dv-background-color: var(--bg-primary);
+  --dv-group-view-background-color: var(--bg-secondary);
+  --dv-separator-border: var(--border-default);
+  --dv-drag-over-background-color: rgba(var(--accent-primary-rgb, 0, 128, 255), 0.15);
+  --dv-drag-over-border-color: var(--accent-primary);
+}
+
+/* Compact tab bar */
+.dockview-theme-compositor .tabs-and-actions-container {
+  height: 28px !important;
+  min-height: 28px !important;
+}
+
+.dockview-theme-compositor .tab {
+  height: 28px !important;
+  min-height: 28px !important;
+}

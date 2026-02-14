@@ -1,0 +1,54 @@
+{
+  "name": "Compositor Dark",
+  "type": "dark",
+  "colors": {
+    "bg.primary": "#1a1a2e",
+    "bg.secondary": "#16213e",
+    "bg.tertiary": "#0f3460",
+    "bg.surface": "#1e1e3a",
+    "bg.canvas": "#0d0f1a",
+    "bg.canvasGrid": "#222222",
+
+    "text.primary": "#e0e0e0",
+    "text.secondary": "#a0a0b0",
+    "text.muted": "#606080",
+
+    "accent.primary": "#6c5ce7",
+    "accent.hover": "#7c6cf7",
+
+    "border.default": "#2a2a4a",
+    "border.active": "#4a4a7a",
+
+    "status.danger": "#e74c3c",
+    "status.success": "#2ecc71",
+    "status.errorBg": "rgba(231, 76, 60, 0.9)",
+
+    "port.image": "#00d4aa",
+    "port.float": "#a0a0a0",
+    "port.int": "#4ca04c",
+    "port.bool": "#cc66cc",
+    "port.color": "#cccc00",
+    "port.mask": "#ffffff",
+
+    "node.bg": "#22223a",
+    "node.selected": "#32325a",
+    "node.shadow": "0 2px 8px rgba(0,0,0,0.3)",
+    "node.shadowSelected": "0 0 0 2px #32325a, 0 4px 12px rgba(0,0,0,0.4)",
+    "node.header.input": "rgba(0, 212, 170, 0.18)",
+    "node.header.output": "rgba(231, 76, 60, 0.18)",
+    "node.header.color": "rgba(160, 80, 220, 0.18)",
+    "node.header.filter": "rgba(60, 120, 220, 0.18)",
+    "node.header.composite": "rgba(230, 160, 40, 0.18)",
+    "node.header.transform": "rgba(40, 200, 220, 0.18)",
+    "node.header.generator": "rgba(80, 200, 80, 0.18)",
+    "node.header.matte": "rgba(200, 200, 200, 0.18)",
+
+    "slider.fill": "rgba(108, 92, 231, 0.5)",
+    "slider.fillHover": "rgba(108, 92, 231, 0.7)",
+    "slider.bg": "rgba(0, 0, 0, 0.2)",
+
+    "shadow.overlay": "rgba(0,0,0,0.6)",
+    "shadow.contextMenu": "0 4px 12px rgba(0,0,0,0.5)",
+    "minimap.mask": "rgba(0,0,0,0.6)"
+  }
+}

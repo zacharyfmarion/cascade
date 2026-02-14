@@ -1,0 +1,146 @@
+/**
+ * Compositor Theme System
+ *
+ * All UI colors must come from theme tokens. Direct hex/rgb values are
+ * banned in component code and enforced by the `no-hardcoded-colors` ESLint rule.
+ *
+ * To add a new semantic color:
+ *   1. Add the token to `ThemeTokens`
+ *   2. Add a value for it in every preset theme JSON
+ *   3. Reference it in CSS/JSX as `var(--<token-with-dashes>)` e.g. `var(--bg-primary)`
+ */
+
+/** Every token key a Compositor theme must define. */
+export interface ThemeTokens {
+  // ── Backgrounds ──────────────────────────────────────────────
+  'bg.primary': string;
+  'bg.secondary': string;
+  'bg.tertiary': string;
+  'bg.surface': string;
+  'bg.canvas': string;
+  'bg.canvasGrid': string;
+
+  // ── Text ─────────────────────────────────────────────────────
+  'text.primary': string;
+  'text.secondary': string;
+  'text.muted': string;
+
+  // ── Accent ───────────────────────────────────────────────────
+  'accent.primary': string;
+  'accent.hover': string;
+
+  // ── Borders ──────────────────────────────────────────────────
+  'border.default': string;
+  'border.active': string;
+
+  // ── Status / semantic ────────────────────────────────────────
+  'status.danger': string;
+  'status.success': string;
+  'status.errorBg': string;
+
+  // ── Port type colors (domain-specific) ───────────────────────
+  'port.image': string;
+  'port.float': string;
+  'port.int': string;
+  'port.bool': string;
+  'port.color': string;
+  'port.mask': string;
+
+  // ── Node chrome ──────────────────────────────────────────────
+  'node.bg': string;
+  'node.selected': string;
+  'node.shadow': string;
+  'node.shadowSelected': string;
+  'node.header.input': string;
+  'node.header.output': string;
+  'node.header.color': string;
+  'node.header.filter': string;
+  'node.header.composite': string;
+  'node.header.transform': string;
+  'node.header.generator': string;
+  'node.header.matte': string;
+
+  // ── Interactive / slider ─────────────────────────────────────
+  'slider.fill': string;
+  'slider.fillHover': string;
+  'slider.bg': string;
+
+  // ── Overlay / shadow ─────────────────────────────────────────
+  'shadow.overlay': string;
+  'shadow.contextMenu': string;
+  'minimap.mask': string;
+}
+
+/** Full theme definition. */
+export interface CompositorTheme {
+  /** Human-readable name shown in the theme picker. */
+  name: string;
+  /** Light or dark — used for scrollbar/select styling. */
+  type: 'dark' | 'light';
+  /** Complete color map. Every key from ThemeTokens must be present. */
+  colors: ThemeTokens;
+}
+
+/**
+ * Converts a theme token key to its CSS custom property name.
+ *
+ * `'bg.primary'` -> `'--bg-primary'`
+ */
+export function tokenToCssVar(token: string): string {
+  return `--${token.replace(/\./g, '-')}`;
+}
+
+/**
+ * All token keys — used for runtime validation and iteration.
+ * Kept in sync with the ThemeTokens interface above.
+ */
+export const THEME_TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
+  'bg.primary',
+  'bg.secondary',
+  'bg.tertiary',
+  'bg.surface',
+  'bg.canvas',
+  'bg.canvasGrid',
+
+  'text.primary',
+  'text.secondary',
+  'text.muted',
+
+  'accent.primary',
+  'accent.hover',
+
+  'border.default',
+  'border.active',
+
+  'status.danger',
+  'status.success',
+  'status.errorBg',
+
+  'port.image',
+  'port.float',
+  'port.int',
+  'port.bool',
+  'port.color',
+  'port.mask',
+
+  'node.bg',
+  'node.selected',
+  'node.shadow',
+  'node.shadowSelected',
+  'node.header.input',
+  'node.header.output',
+  'node.header.color',
+  'node.header.filter',
+  'node.header.composite',
+  'node.header.transform',
+  'node.header.generator',
+  'node.header.matte',
+
+  'slider.fill',
+  'slider.fillHover',
+  'slider.bg',
+
+  'shadow.overlay',
+  'shadow.contextMenu',
+  'minimap.mask',
+] as const;

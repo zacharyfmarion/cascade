@@ -1,0 +1,54 @@
+{
+  "name": "Monokai",
+  "type": "dark",
+  "colors": {
+    "bg.primary": "#272822",
+    "bg.secondary": "#1e1f1c",
+    "bg.tertiary": "#3e3d32",
+    "bg.surface": "#2d2e27",
+    "bg.canvas": "#1a1b16",
+    "bg.canvasGrid": "#3e3d32",
+
+    "text.primary": "#f8f8f2",
+    "text.secondary": "#a6a69c",
+    "text.muted": "#75715e",
+
+    "accent.primary": "#a6e22e",
+    "accent.hover": "#b6f23e",
+
+    "border.default": "#3e3d32",
+    "border.active": "#66d9ef",
+
+    "status.danger": "#f92672",
+    "status.success": "#a6e22e",
+    "status.errorBg": "rgba(249, 38, 114, 0.9)",
+
+    "port.image": "#66d9ef",
+    "port.float": "#a6a69c",
+    "port.int": "#a6e22e",
+    "port.bool": "#ae81ff",
+    "port.color": "#e6db74",
+    "port.mask": "#f8f8f0",
+
+    "node.bg": "#2d2e27",
+    "node.selected": "#49483e",
+    "node.shadow": "0 2px 8px rgba(0,0,0,0.4)",
+    "node.shadowSelected": "0 0 0 2px #a6e22e, 0 4px 12px rgba(0,0,0,0.5)",
+    "node.header.input": "rgba(102, 217, 239, 0.18)",
+    "node.header.output": "rgba(249, 38, 114, 0.18)",
+    "node.header.color": "rgba(174, 129, 255, 0.18)",
+    "node.header.filter": "rgba(102, 217, 239, 0.18)",
+    "node.header.composite": "rgba(230, 219, 116, 0.18)",
+    "node.header.transform": "rgba(166, 226, 46, 0.18)",
+    "node.header.generator": "rgba(166, 226, 46, 0.18)",
+    "node.header.matte": "rgba(248, 248, 242, 0.18)",
+
+    "slider.fill": "rgba(166, 226, 46, 0.5)",
+    "slider.fillHover": "rgba(166, 226, 46, 0.7)",
+    "slider.bg": "rgba(0, 0, 0, 0.2)",
+
+    "shadow.overlay": "rgba(0,0,0,0.6)",
+    "shadow.contextMenu": "0 4px 12px rgba(0,0,0,0.5)",
+    "minimap.mask": "rgba(0,0,0,0.6)"
+  }
+}

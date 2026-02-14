@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/compositor-core",
+    "crates/compositor-gpu",
+    "crates/compositor-nodes-std",
+    "crates/compositor-wasm",
+    "crates/compositor-runtime",
+    "apps/tauri/src-tauri",
+]
+
+# Optimize dependencies in dev builds so image/rayon/etc aren't unusably slow.
+# Our own crates stay at opt-level 0 for fast compile times.
+[profile.dev.package."*"]
+opt-level = 2
