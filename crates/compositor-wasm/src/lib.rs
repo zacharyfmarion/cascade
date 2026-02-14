@@ -130,7 +130,25 @@ impl Engine {
         Ok(spec)
     }
 
-    pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> String {
+    pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> JsValue {
+        match self.add_node_internal(type_id, x, y) {
+            Some((id, actual_type_id)) => {
+                serde_wasm_bindgen::to_value(&AddNodeResult {
+                    id,
+                    type_id: actual_type_id,
+                })
+                .unwrap_or(JsValue::NULL)
+            }
+            None => JsValue::NULL,
+        }
+    }
+
+    fn add_node_internal(
+        &mut self,
+        type_id: &str,
+        x: f64,
+        y: f64,
+    ) -> Option<(String, String)> {
         if let Some(def) = self.group_definitions.get(type_id) {
             let node_id = self.graph.add_node(type_id);
             self.graph.set_position(node_id, x, y);
@@ -148,10 +166,11 @@ impl Engine {
                 Err(_) => {
                     self.graph.remove_node(node_id);
                     self.uuid_map.remove(&uuid);
-                    return String::new();
+                    return None;
                 }
             }
-            return format_node_id(&self.graph, node_id);
+            let id = format_node_id(&self.graph, node_id);
+            return Some((id, type_id.to_string()));
         }
 
         let actual_type_id = if type_id == "gpu_script" {
@@ -176,7 +195,8 @@ impl Engine {
         if let Some(node) = self.registry.create(&actual_type_id) {
             self.nodes.insert(node_id, node);
         }
-        format_node_id(&self.graph, node_id)
+        let id = format_node_id(&self.graph, node_id);
+        Some((id, actual_type_id))
     }
 
     pub fn remove_node(&mut self, node_id: &str) {
@@ -329,8 +349,7 @@ impl Engine {
             .collect();
         let connections = self
             .graph
-            .connections
-            .iter()
+            .connections()
             .map(|c| SerializableConnection {
                 from_node: format_node_id(&self.graph, c.from_node),
                 from_port: c.from_port.clone(),
@@ -609,7 +628,7 @@ impl Engine {
         let mut in_counts: HashMap<String, usize> = HashMap::new();
         let mut out_counts: HashMap<String, usize> = HashMap::new();
 
-        for conn in &self.graph.connections {
+        for conn in self.graph.connections() {
             let from_sel = selected_set.contains(&conn.from_node);
             let to_sel = selected_set.contains(&conn.to_node);
             if from_sel && to_sel {
@@ -753,12 +772,10 @@ impl Engine {
             self.nodes.remove(id);
         }
 
-        let gn_id_str = self.add_node(&gd_id, centroid.0, centroid.1);
-        if gn_id_str.is_empty() {
-            return Err(CompositorError::Other(
+        let (gn_id_str, _) = self.add_node_internal(&gd_id, centroid.0, centroid.1)
+            .ok_or_else(|| CompositorError::Other(
                 "Failed to create group node".to_string(),
-            ));
-        }
+            ))?;
         let gn_id = parse_node_id(&self.uuid_map, &gn_id_str)?;
 
         for b in &incoming {
@@ -812,7 +829,7 @@ impl Engine {
 
         let mut incoming = Vec::new();
         let mut outgoing_ext = Vec::new();
-        for conn in &self.graph.connections {
+        for conn in self.graph.connections() {
             if conn.to_node == gid {
                 incoming.push(ExtConn {
                     from_node: conn.from_node,
@@ -871,10 +888,8 @@ impl Engine {
                 _ => 0.0,
             };
             let pos = (gpos.0 + ox, gpos.1 + oy);
-            let new_str = self.add_node(&internal.type_id, pos.0, pos.1);
-            if new_str.is_empty() {
-                return Err(CompositorError::Other("Failed to restore node".to_string()));
-            }
+            let (new_str, _) = self.add_node_internal(&internal.type_id, pos.0, pos.1)
+                .ok_or_else(|| CompositorError::Other("Failed to restore node".to_string()))?;
             let new_id = parse_node_id(&self.uuid_map, &new_str)?;
             let mut params = internal.params.clone();
             params.remove("__group_offset_x");
@@ -1305,6 +1320,13 @@ struct InternalGraphConnection {
     from_port: String,
     to_node: String,
     to_port: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AddNodeResult {
+    id: String,
+    type_id: String,
 }
 
 #[derive(Serialize, Deserialize)]

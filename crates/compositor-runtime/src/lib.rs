@@ -316,7 +316,7 @@ impl Engine {
         let mut input_name_counts: HashMap<String, usize> = HashMap::new();
         let mut output_name_counts: HashMap<String, usize> = HashMap::new();
 
-        for conn in &self.graph.connections {
+        for conn in self.graph.connections() {
             let from_selected = selected_set.contains(&conn.from_node);
             let to_selected = selected_set.contains(&conn.to_node);
             if from_selected && to_selected {
@@ -489,7 +489,7 @@ impl Engine {
             self.remove_node_internal(*id);
         }
 
-        let group_node_id = self.add_node(&group_definition_id, centroid.0, centroid.1)?;
+        let (group_node_id, _) = self.add_node(&group_definition_id, centroid.0, centroid.1)?;
         let group_id = self.parse_node_id(&group_node_id)?;
 
         for boundary in &incoming {
@@ -544,7 +544,7 @@ impl Engine {
 
         let mut incoming_external = Vec::new();
         let mut outgoing_external = Vec::new();
-        for conn in &self.graph.connections {
+        for conn in self.graph.connections() {
             if conn.to_node == group_id {
                 incoming_external.push(ExternalConnection {
                     from_node: conn.from_node,
@@ -601,7 +601,7 @@ impl Engine {
             };
             let position = (group_position.0 + offset_x, group_position.1 + offset_y);
 
-            let new_id_str = self.add_node(&internal.type_id, position.0, position.1)?;
+            let (new_id_str, _) = self.add_node(&internal.type_id, position.0, position.1)?;
             let new_id = self.parse_node_id(&new_id_str)?;
 
             let mut params = internal.params.clone();
@@ -1117,14 +1117,23 @@ impl Engine {
         self.nodes.remove(&node_id);
     }
 
-    pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> Result<String, CompositorError> {
+    /// Returns `(node_uuid, actual_type_id)`. For most nodes, `actual_type_id` equals the
+    /// requested `type_id`. For `gpu_script` nodes, it's the generated unique ID like
+    /// `gpu_script::<uuid>`.
+    pub fn add_node(
+        &mut self,
+        type_id: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<(String, String), CompositorError> {
         if let Some(def) = self.group_definitions.get(type_id) {
             let node_id = self.graph.add_node(type_id);
             self.graph.set_position(node_id, x, y);
             let group_node = GroupNode::from_definition(def.clone(), &self.registry)
                 .map_err(CompositorError::Other)?;
             self.nodes.insert(node_id, Arc::new(group_node));
-            return Ok(self.register_uuid_for_node(node_id));
+            let uuid = self.register_uuid_for_node(node_id);
+            return Ok((uuid, type_id.to_string()));
         }
 
         let actual_type_id = if type_id == "gpu_script" {
@@ -1143,7 +1152,8 @@ impl Engine {
             CompositorError::Other(format!("Unknown node type: {}", actual_type_id))
         })?;
         self.nodes.insert(node_id, node);
-        Ok(self.register_uuid_for_node(node_id))
+        let uuid = self.register_uuid_for_node(node_id);
+        Ok((uuid, actual_type_id))
     }
 
     pub fn remove_node(&mut self, node_id: &str) -> Result<(), CompositorError> {
@@ -1651,8 +1661,7 @@ impl Engine {
             .collect();
         let connections = self
             .graph
-            .connections
-            .iter()
+            .connections()
             .map(|c| SerializableConnection {
                 from_node: format_node_id(&self.graph, c.from_node),
                 from_port: c.from_port.clone(),
@@ -1883,7 +1892,7 @@ mod tests {
     #[test]
     fn test_add_gpu_script_node_creates_unique_type() {
         let mut engine = Engine::new();
-        let node_id = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let (node_id, _) = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
         let id = engine.parse_node_id(&node_id).unwrap();
         let node = engine.graph.nodes.get(id).unwrap();
         assert!(node.type_id.starts_with("gpu_script::"));
@@ -1894,7 +1903,7 @@ mod tests {
     #[test]
     fn test_compile_script_node_rejects_non_gpu_script() {
         let mut engine = Engine::new();
-        let node_id = engine.add_node("viewer", 0.0, 0.0).unwrap();
+        let (node_id, _) = engine.add_node("viewer", 0.0, 0.0).unwrap();
         let manifest_json = sample_manifest_json();
         let err = engine
             .compile_script_node(&node_id, &manifest_json)
@@ -1908,7 +1917,7 @@ mod tests {
         if engine.gpu_context().is_none() {
             return;
         }
-        let node_id = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let (node_id, _) = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
         let id = engine.parse_node_id(&node_id).unwrap();
         let manifest_json = sample_manifest_json();
         let spec = engine
@@ -1970,7 +1979,7 @@ return pixelated;
         let manifest_json = serde_json::to_string(&manifest).expect("manifest json");
 
         // Create a GPU script node and compile it with the pixelate kernel
-        let script_node_id = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let (script_node_id, _) = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
         let spec = engine
             .compile_script_node(&script_node_id, &manifest_json)
             .expect("compile pixelate kernel");
@@ -1979,8 +1988,8 @@ return pixelated;
         assert_eq!(spec.params[0].key, "pixel_size");
 
         // Create a full pipeline: LoadImage → Pixelate → Viewer
-        let load_id = engine.add_node("load_image", -200.0, 0.0).unwrap();
-        let viewer_id = engine.add_node("viewer", 200.0, 0.0).unwrap();
+        let (load_id, _) = engine.add_node("load_image", -200.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 200.0, 0.0).unwrap();
 
         // Encode as PNG for LoadImage
         let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
@@ -2107,9 +2116,9 @@ return pixelated;
         assert_eq!(spec.params.len(), 1);
         assert_eq!(spec.params[0].key, "pixel_size");
 
-        let load_id = engine.add_node("load_image", -200.0, 0.0).unwrap();
-        let pix_id = engine.add_node("group::pixelate", 0.0, 0.0).unwrap();
-        let viewer_id = engine.add_node("viewer", 200.0, 0.0).unwrap();
+        let (load_id, _) = engine.add_node("load_image", -200.0, 0.0).unwrap();
+        let (pix_id, _) = engine.add_node("group::pixelate", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 200.0, 0.0).unwrap();
 
         let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
             let r = ((x as f32 / 7.0) * 255.0) as u8;
@@ -2174,10 +2183,10 @@ return pixelated;
         assert_eq!(spec.outputs[0].name, "image");
         assert_eq!(spec.params.len(), 2);
 
-        let load_img_id = engine.add_node("load_image", -400.0, 0.0).unwrap();
-        let load_pal_id = engine.add_node("load_image", -400.0, 200.0).unwrap();
-        let dither_id = engine.add_node("group::dither", 0.0, 0.0).unwrap();
-        let viewer_id = engine.add_node("viewer", 200.0, 0.0).unwrap();
+        let (load_img_id, _) = engine.add_node("load_image", -400.0, 0.0).unwrap();
+        let (load_pal_id, _) = engine.add_node("load_image", -400.0, 200.0).unwrap();
+        let (dither_id, _) = engine.add_node("group::dither", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 200.0, 0.0).unwrap();
 
         let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
             let r = ((x as f32 / 7.0) * 255.0) as u8;

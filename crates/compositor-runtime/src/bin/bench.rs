@@ -631,21 +631,20 @@ fn run() -> Result<(), String> {
 
     let mut engine = Engine::new();
 
-    let load_id = engine
+    let (load_id, _) = engine
         .add_node("load_image_sequence", 0.0, 0.0)
         .map_err(|e| e.to_string())?;
 
     let process_id = if let Some(node_id) = node.node_id() {
-        Some(
-            engine
-                .add_node(node_id, 200.0, 0.0)
-                .map_err(|e| e.to_string())?,
-        )
+        let (id, _) = engine
+            .add_node(node_id, 200.0, 0.0)
+            .map_err(|e| e.to_string())?;
+        Some(id)
     } else {
         None
     };
 
-    let export_id = engine
+    let (export_id, _) = engine
         .add_node("export_image_sequence", 400.0, 0.0)
         .map_err(|e| e.to_string())?;
 

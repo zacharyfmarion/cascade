@@ -27,7 +27,12 @@ fn add_node(
     y: f64,
 ) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.engine.add_node(&type_id, x, y).map_err(|e| e.to_string())
+    let (id, actual_type_id) = s
+        .engine
+        .add_node(&type_id, x, y)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&serde_json::json!({ "id": id, "typeId": actual_type_id }))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
