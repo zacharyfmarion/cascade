@@ -101,10 +101,7 @@ impl Node for GpuKuwaharaNode {
         self.spec.clone()
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a> {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let variation = ctx.get_param_int("variation")?.clamp(0, 1) as i32;
@@ -190,37 +187,37 @@ impl Node for GpuKuwaharaNode {
                     &classic_bind_group_layout_entries(),
                 )?;
 
-                let bind_group = self
-                    .context
-                    .device
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("GpuKuwahara Classic BindGroup"),
-                        layout: &pipeline.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&input_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&output_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &uniform_buffer,
-                                    offset: 0,
-                                    size: NonZeroU64::new(
-                                        std::mem::size_of::<ClassicParams>() as u64,
-                                    ),
-                                }),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&mask_view),
-                            },
-                        ],
-                    });
+                let bind_group =
+                    self.context
+                        .device
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("GpuKuwahara Classic BindGroup"),
+                            layout: &pipeline.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&input_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&output_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                        buffer: &uniform_buffer,
+                                        offset: 0,
+                                        size: NonZeroU64::new(
+                                            std::mem::size_of::<ClassicParams>() as u64
+                                        ),
+                                    }),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(&mask_view),
+                                },
+                            ],
+                        });
 
                 {
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -259,23 +256,23 @@ impl Node for GpuKuwaharaNode {
                     &shaders.tensor_wgsl,
                     &tensor_bind_group_layout_entries(),
                 )?;
-                let tensor_bind_group = self
-                    .context
-                    .device
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("GpuKuwahara Tensor BindGroup"),
-                        layout: &tensor_pipeline.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&input_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&tensor_view),
-                            },
-                        ],
-                    });
+                let tensor_bind_group =
+                    self.context
+                        .device
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("GpuKuwahara Tensor BindGroup"),
+                            layout: &tensor_pipeline.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&input_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&tensor_view),
+                                },
+                            ],
+                        });
 
                 {
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -341,35 +338,41 @@ impl Node for GpuKuwaharaNode {
                             bytemuck::bytes_of(&params),
                         );
 
-                        let blur_h_bind_group = self
-                            .context
-                            .device
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("GpuKuwahara BlurH BindGroup"),
-                                layout: &blur_h_pipeline.bind_group_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: wgpu::BindingResource::TextureView(&tensor_view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: wgpu::BindingResource::TextureView(&blur_view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 2,
-                                        resource: wgpu::BindingResource::Buffer(
-                                            wgpu::BufferBinding {
-                                                buffer: &blur_buffer,
-                                                offset: 0,
-                                                size: NonZeroU64::new(
-                                                    std::mem::size_of::<BlurParams>() as u64,
-                                                ),
-                                            },
-                                        ),
-                                    },
-                                ],
-                            });
+                        let blur_h_bind_group =
+                            self.context
+                                .device
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("GpuKuwahara BlurH BindGroup"),
+                                    layout: &blur_h_pipeline.bind_group_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: wgpu::BindingResource::TextureView(
+                                                &tensor_view,
+                                            ),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: wgpu::BindingResource::TextureView(
+                                                &blur_view,
+                                            ),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: wgpu::BindingResource::Buffer(
+                                                wgpu::BufferBinding {
+                                                    buffer: &blur_buffer,
+                                                    offset: 0,
+                                                    size: NonZeroU64::new(std::mem::size_of::<
+                                                        BlurParams,
+                                                    >(
+                                                    )
+                                                        as u64),
+                                                },
+                                            ),
+                                        },
+                                    ],
+                                });
 
                         {
                             let mut pass =
@@ -384,35 +387,41 @@ impl Node for GpuKuwaharaNode {
                             pass.dispatch_workgroups(x, y, 1);
                         }
 
-                        let blur_v_bind_group = self
-                            .context
-                            .device
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("GpuKuwahara BlurV BindGroup"),
-                                layout: &blur_v_pipeline.bind_group_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: wgpu::BindingResource::TextureView(&blur_view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: wgpu::BindingResource::TextureView(&tensor_view),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 2,
-                                        resource: wgpu::BindingResource::Buffer(
-                                            wgpu::BufferBinding {
-                                                buffer: &blur_buffer,
-                                                offset: 0,
-                                                size: NonZeroU64::new(
-                                                    std::mem::size_of::<BlurParams>() as u64,
-                                                ),
-                                            },
-                                        ),
-                                    },
-                                ],
-                            });
+                        let blur_v_bind_group =
+                            self.context
+                                .device
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("GpuKuwahara BlurV BindGroup"),
+                                    layout: &blur_v_pipeline.bind_group_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: wgpu::BindingResource::TextureView(
+                                                &blur_view,
+                                            ),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: wgpu::BindingResource::TextureView(
+                                                &tensor_view,
+                                            ),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: wgpu::BindingResource::Buffer(
+                                                wgpu::BufferBinding {
+                                                    buffer: &blur_buffer,
+                                                    offset: 0,
+                                                    size: NonZeroU64::new(std::mem::size_of::<
+                                                        BlurParams,
+                                                    >(
+                                                    )
+                                                        as u64),
+                                                },
+                                            ),
+                                        },
+                                    ],
+                                });
 
                         {
                             let mut pass =
@@ -449,41 +458,41 @@ impl Node for GpuKuwaharaNode {
                     &anisotropic_bind_group_layout_entries(),
                 )?;
 
-                let aniso_bind_group = self
-                    .context
-                    .device
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("GpuKuwahara Anisotropic BindGroup"),
-                        layout: &aniso_pipeline.bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&input_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::TextureView(&output_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                    buffer: &aniso_buffer,
-                                    offset: 0,
-                                    size: NonZeroU64::new(
-                                        std::mem::size_of::<AnisotropicParams>() as u64,
-                                    ),
-                                }),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: wgpu::BindingResource::TextureView(&mask_view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: wgpu::BindingResource::TextureView(&tensor_view),
-                            },
-                        ],
-                    });
+                let aniso_bind_group =
+                    self.context
+                        .device
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("GpuKuwahara Anisotropic BindGroup"),
+                            layout: &aniso_pipeline.bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(&input_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::TextureView(&output_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 2,
+                                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                        buffer: &aniso_buffer,
+                                        offset: 0,
+                                        size: NonZeroU64::new(
+                                            std::mem::size_of::<AnisotropicParams>() as u64,
+                                        ),
+                                    }),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 3,
+                                    resource: wgpu::BindingResource::TextureView(&mask_view),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 4,
+                                    resource: wgpu::BindingResource::TextureView(&tensor_view),
+                                },
+                            ],
+                        });
 
                 {
                     let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -611,7 +620,7 @@ fn kuwahara_spec() -> NodeSpec {
                 max: Some(100.0),
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             },
             ParamSpec {
                 key: "uniformity".to_string(),
@@ -622,7 +631,7 @@ fn kuwahara_spec() -> NodeSpec {
                 max: Some(50.0),
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             },
             ParamSpec {
                 key: "sharpness".to_string(),
@@ -633,7 +642,7 @@ fn kuwahara_spec() -> NodeSpec {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             },
             ParamSpec {
                 key: "eccentricity".to_string(),
@@ -644,7 +653,7 @@ fn kuwahara_spec() -> NodeSpec {
                 max: Some(2.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             },
         ],
     }

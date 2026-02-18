@@ -97,7 +97,9 @@ mod imp {
                     .map_err(|_| CompositorError::Other("Failed to create headers".to_string()))?;
                 headers
                     .set("Content-Type", "application/json")
-                    .map_err(|_| CompositorError::Other("Failed to set content-type".to_string()))?;
+                    .map_err(|_| {
+                        CompositorError::Other("Failed to set content-type".to_string())
+                    })?;
                 headers
                     .set("Authorization", &format!("Bearer {api_key}"))
                     .map_err(|_| {
@@ -116,11 +118,9 @@ mod imp {
 
             if !response.ok() {
                 let status = response.status();
-                let text = JsFuture::from(
-                    response.text().map_err(|_| {
-                        CompositorError::Other("Failed to read error body".to_string())
-                    })?,
-                )
+                let text = JsFuture::from(response.text().map_err(|_| {
+                    CompositorError::Other("Failed to read error body".to_string())
+                })?)
                 .await
                 .map_err(|_| CompositorError::Other("Failed to read error body".to_string()))?
                 .as_string()
@@ -131,9 +131,9 @@ mod imp {
             }
 
             let json = JsFuture::from(
-                response.json().map_err(|_| {
-                    CompositorError::Other("Failed to parse response".to_string())
-                })?,
+                response
+                    .json()
+                    .map_err(|_| CompositorError::Other("Failed to parse response".to_string()))?,
             )
             .await
             .map_err(|_| CompositorError::Other("Failed to parse response".to_string()))?;
@@ -243,8 +243,8 @@ mod imp {
     }
 
     fn build_form_data(request: &AiImageRequest) -> Result<FormData, CompositorError> {
-        let form =
-            FormData::new().map_err(|_| CompositorError::Other("FormData init failed".to_string()))?;
+        let form = FormData::new()
+            .map_err(|_| CompositorError::Other("FormData init failed".to_string()))?;
         form.append_with_str("prompt", &request.prompt)
             .map_err(|_| CompositorError::Other("Failed to set prompt".to_string()))?;
         form.append_with_str("model", &request.model)
@@ -288,7 +288,8 @@ mod imp {
     }
 
     async fn fetch_request(request: Request) -> Result<Response, CompositorError> {
-        let window = web_sys::window().ok_or_else(|| CompositorError::Other("No window".to_string()))?;
+        let window =
+            web_sys::window().ok_or_else(|| CompositorError::Other("No window".to_string()))?;
         let resp_value = JsFuture::from(window.fetch_with_request(&request))
             .await
             .map_err(|e| CompositorError::Other(format!("Fetch failed: {e:?}")))?;
@@ -300,7 +301,9 @@ mod imp {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod imp {
-    use compositor_core::ai::{AiFuture, AiImageRequest, AiImageResult, AiJobId, AiJobStatus, AiProvider};
+    use compositor_core::ai::{
+        AiFuture, AiImageRequest, AiImageResult, AiJobId, AiJobStatus, AiProvider,
+    };
     use compositor_core::error::CompositorError;
 
     #[derive(Clone)]

@@ -225,11 +225,7 @@ impl Node for GpuKernelNode {
         self.spec.clone()
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image_inputs = collect_image_inputs(&self.spec, ctx, &self.optional_inputs)?;
             if image_inputs.is_empty() {
@@ -263,8 +259,7 @@ impl Node for GpuKernelNode {
                             image.height,
                             wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
                         );
-                        let view =
-                            texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                         upload_image(&self.context.queue, &texture, image)?;
                         input_views.push(view);
                     }
@@ -276,8 +271,7 @@ impl Node for GpuKernelNode {
                             1,
                             wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
                         );
-                        let view =
-                            texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
                         upload_image(&self.context.queue, &texture, &dummy)?;
                         input_views.push(view);
                     }
@@ -552,6 +546,7 @@ fn default_param_value(param: &ParamSpec) -> Option<ParamValue> {
         ParamDefault::Color(_) => None,
         ParamDefault::ColorRamp(_) => None,
         ParamDefault::ColorPalette(_) => None,
+        ParamDefault::CurvePoints(_) => None,
         ParamDefault::String(_) => None,
     }
 }

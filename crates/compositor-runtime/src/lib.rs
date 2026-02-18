@@ -1,9 +1,10 @@
-mod builtin_groups;
 pub mod ai_provider;
+mod builtin_groups;
 pub mod document;
 
-use compositor_core::color::{BuiltinColorManagement, ColorManagement};
+use crate::ai_provider::NativeAiProvider;
 use compositor_core::ai::AiProvider;
+use compositor_core::color::{BuiltinColorManagement, ColorManagement};
 use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
@@ -19,7 +20,6 @@ pub use compositor_nodes_std::SequenceInfo;
 use compositor_nodes_std::{
     register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
 };
-use crate::ai_provider::NativeAiProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -64,6 +64,8 @@ pub struct SerializableNode {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub input_defaults: HashMap<String, ParamValue>,
     pub position: (f64, f64),
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub muted: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1353,6 +1355,12 @@ impl Engine {
         Ok(())
     }
 
+    pub fn set_muted(&mut self, node_id: &str, muted: bool) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        self.graph.set_muted(id, muted);
+        Ok(())
+    }
+
     pub fn load_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<(), CompositorError> {
         let id = self.parse_node_id(node_id)?;
         let node = self
@@ -1414,24 +1422,24 @@ impl Engine {
         seq_node.get_sequence_info(pattern)
     }
 
-     pub fn render_viewer(
-         &mut self,
-         viewer_node_id: &str,
-         frame: u64,
-     ) -> Result<RenderResult, CompositorError> {
-         let id = self.parse_node_id(viewer_node_id)?;
-         let cm = self.color_management.as_ref();
-         let eval_result = pollster::block_on(self.evaluator.evaluate(
-             &mut self.graph,
-             &self.registry,
-             &self.nodes,
-             id,
-             "display",
-             FrameTime { frame },
-             cm,
-             self.ai_provider.as_deref(),
-             &self.project_format,
-         ))?;
+    pub fn render_viewer(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<RenderResult, CompositorError> {
+        let id = self.parse_node_id(viewer_node_id)?;
+        let cm = self.color_management.as_ref();
+        let eval_result = pollster::block_on(self.evaluator.evaluate(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            "display",
+            FrameTime { frame },
+            cm,
+            self.ai_provider.as_deref(),
+            &self.project_format,
+        ))?;
         self.last_timings = eval_result
             .node_timings
             .into_iter()
@@ -1464,25 +1472,25 @@ impl Engine {
         }
     }
 
-     pub fn evaluate_node(
-         &mut self,
-         node_id: &str,
-         frame: u64,
-     ) -> Result<compositor_core::eval::EvalResult, CompositorError> {
-         let id = self.parse_node_id(node_id)?;
-         let cm = self.color_management.as_ref();
-         pollster::block_on(self.evaluator.evaluate(
-             &mut self.graph,
-             &self.registry,
-             &self.nodes,
-             id,
-             "display",
-             FrameTime { frame },
-             cm,
-             self.ai_provider.as_deref(),
-             &self.project_format,
-         ))
-     }
+    pub fn evaluate_node(
+        &mut self,
+        node_id: &str,
+        frame: u64,
+    ) -> Result<compositor_core::eval::EvalResult, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let cm = self.color_management.as_ref();
+        pollster::block_on(self.evaluator.evaluate(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            "display",
+            FrameTime { frame },
+            cm,
+            self.ai_provider.as_deref(),
+            &self.project_format,
+        ))
+    }
 
     pub fn render_export(
         &mut self,
@@ -1501,21 +1509,21 @@ impl Engine {
             _ => 0,
         };
 
-         let cm = self.color_management.as_ref();
-         let eval_result = pollster::block_on(self.evaluator.evaluate(
-             &mut self.graph,
-             &self.registry,
-             &self.nodes,
-             id,
-             "display",
-             FrameTime { frame },
-             cm,
-             self.ai_provider.as_deref(),
-             &self.project_format,
-         ))?;
-         match eval_result.value {
-             Value::Image(image) => {
-                 let rgba8 = Viewer::image_to_rgba8_with_display(
+        let cm = self.color_management.as_ref();
+        let eval_result = pollster::block_on(self.evaluator.evaluate(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            "display",
+            FrameTime { frame },
+            cm,
+            self.ai_provider.as_deref(),
+            &self.project_format,
+        ))?;
+        match eval_result.value {
+            Value::Image(image) => {
+                let rgba8 = Viewer::image_to_rgba8_with_display(
                     &image,
                     cm,
                     &self.active_display,
@@ -1575,18 +1583,18 @@ impl Engine {
         let mut results = Vec::new();
         let mut merged_timings = HashMap::new();
         let cm = self.color_management.as_ref();
-         for (vid, vid_str) in viewer_ids {
-             match pollster::block_on(self.evaluator.evaluate(
-                 &mut self.graph,
-                 &self.registry,
-                 &self.nodes,
-                 vid,
-                 "display",
-                 FrameTime { frame },
-                 cm,
-                 self.ai_provider.as_deref(),
-                 &self.project_format,
-             )) {
+        for (vid, vid_str) in viewer_ids {
+            match pollster::block_on(self.evaluator.evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                vid,
+                "display",
+                FrameTime { frame },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+            )) {
                 Ok(eval_result) => {
                     for (nid, duration) in eval_result.node_timings {
                         merged_timings.insert(
@@ -2050,6 +2058,7 @@ impl Engine {
                 params: node.params.clone(),
                 input_defaults: node.input_defaults.clone(),
                 position: node.position,
+                muted: node.muted,
             })
             .collect();
         let connections = self
@@ -2156,6 +2165,7 @@ impl Engine {
             }
             if let Some(instance) = self.graph.nodes.get_mut(new_id) {
                 instance.uuid = node.id.clone();
+                instance.muted = node.muted;
             }
             if let Some(def) = self.group_definitions.get(&node.type_id) {
                 let group_node = GroupNode::from_definition(def.clone(), &self.registry)
@@ -2636,7 +2646,9 @@ return pixelated;
         }
 
         let mut engine = Engine::new();
-        engine.load_ocio_from_env().expect("OCIO config should load from $OCIO");
+        engine
+            .load_ocio_from_env()
+            .expect("OCIO config should load from $OCIO");
 
         let displays = engine.available_displays();
         assert!(!displays.is_empty(), "OCIO config should provide displays");

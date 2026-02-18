@@ -1,5 +1,5 @@
-pub mod color;
 pub mod ai;
+pub mod color;
 pub mod error;
 pub mod eval;
 pub mod graph;

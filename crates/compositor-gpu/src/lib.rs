@@ -32,9 +32,9 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compositor_core::types::Format;
     use crate::manifest::builtin_pixelate_manifest;
     use crate::transpile::glsl_to_wgsl;
+    use compositor_core::types::Format;
 
     #[test]
     fn test_pixelate_glsl_builds() {

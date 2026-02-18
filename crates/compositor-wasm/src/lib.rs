@@ -1,5 +1,6 @@
 mod ai_provider;
 
+use crate::ai_provider::WasmAiProvider;
 use compositor_core::ai::AiProvider;
 use compositor_core::color::{BuiltinColorManagement, ColorManagement};
 use compositor_core::error::CompositorError;
@@ -9,17 +10,19 @@ use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-use compositor_core::types::{Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value};
+use compositor_core::types::{ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{GpuContext, KernelManifest};
-use compositor_nodes_std::{register_standard_nodes, ColorPaletteNode, GpuScriptDraftNode, GroupNode, LoadImage, LoadImageSequence, SequenceInfo, Viewer};
+use compositor_nodes_std::{
+    register_standard_nodes, ColorPaletteNode, GpuScriptDraftNode, GroupNode, LoadImage,
+    LoadImageSequence, SequenceInfo, Viewer,
+};
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use crate::ai_provider::WasmAiProvider;
 
 #[wasm_bindgen]
 pub struct Engine {
@@ -120,9 +123,8 @@ impl Engine {
             .clone()
             .ok_or_else(|| JsValue::from_str("GPU not available"))?;
 
-        let compiled_node =
-            GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())
-                .map_err(to_js_error_str)?;
+        let compiled_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())
+            .map_err(to_js_error_str)?;
         let spec = compiled_node.spec();
 
         self.kernel_manifests
@@ -169,23 +171,16 @@ impl Engine {
 
     pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> JsValue {
         match self.add_node_internal(type_id, x, y) {
-            Some((id, actual_type_id)) => {
-                serde_wasm_bindgen::to_value(&AddNodeResult {
-                    id,
-                    type_id: actual_type_id,
-                })
-                .unwrap_or(JsValue::NULL)
-            }
+            Some((id, actual_type_id)) => serde_wasm_bindgen::to_value(&AddNodeResult {
+                id,
+                type_id: actual_type_id,
+            })
+            .unwrap_or(JsValue::NULL),
             None => JsValue::NULL,
         }
     }
 
-    fn add_node_internal(
-        &mut self,
-        type_id: &str,
-        x: f64,
-        y: f64,
-    ) -> Option<(String, String)> {
+    fn add_node_internal(&mut self, type_id: &str, x: f64, y: f64) -> Option<(String, String)> {
         if let Some(def) = self.group_definitions.get(type_id) {
             let node_id = self.graph.add_node(type_id);
             self.graph.set_position(node_id, x, y);
@@ -280,7 +275,12 @@ impl Engine {
         Ok(())
     }
 
-    pub fn set_input_default(&mut self, node_id: &str, port_name: &str, value: JsValue) -> Result<(), JsValue> {
+    pub fn set_input_default(
+        &mut self,
+        node_id: &str,
+        port_name: &str,
+        value: JsValue,
+    ) -> Result<(), JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
         let param_spec = self
             .graph
@@ -297,6 +297,12 @@ impl Engine {
         if let Ok(id) = parse_node_id(&self.uuid_map, node_id) {
             self.graph.set_position(id, x, y);
         }
+    }
+
+    pub fn set_muted(&mut self, node_id: &str, muted: bool) -> Result<(), JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        self.graph.set_muted(id, muted);
+        Ok(())
     }
 
     pub fn load_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<(), JsValue> {
@@ -343,7 +349,12 @@ impl Engine {
         let param = ParamValue::ColorPalette(colors);
         self.graph.set_param(id, "colors", param);
         self.graph.mark_dirty(id);
-        let colors_ref = match self.graph.nodes.get(id).and_then(|n| n.params.get("colors")) {
+        let colors_ref = match self
+            .graph
+            .nodes
+            .get(id)
+            .and_then(|n| n.params.get("colors"))
+        {
             Some(ParamValue::ColorPalette(c)) => c,
             _ => return Err(JsValue::from_str("Failed to read back palette")),
         };
@@ -393,26 +404,26 @@ impl Engine {
             .map_err(to_js_error)
     }
 
-     pub async fn render_viewer(
-         &mut self,
-         viewer_node_id: &str,
-         frame: u64,
-     ) -> Result<Vec<u8>, JsValue> {
-         let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
-         let cm = &self.color_management;
-         let eval_result = self
-             .evaluator
-             .evaluate(
-                 &mut self.graph,
-                 &self.registry,
-                 &self.nodes,
-                 id,
-                 "display",
-                 FrameTime { frame },
-                 cm,
-                 self.ai_provider.as_deref(),
-                 &self.project_format,
-             )
+    pub async fn render_viewer(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<Vec<u8>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
+        let cm = &self.color_management;
+        let eval_result = self
+            .evaluator
+            .evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                id,
+                "display",
+                FrameTime { frame },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+            )
             .await
             .map_err(to_js_error)?;
         self.last_timings = eval_result
@@ -474,25 +485,25 @@ impl Engine {
         self.evaluator = Evaluator::new();
     }
 
-     pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
-         let id = match parse_node_id(&self.uuid_map, viewer_node_id) {
-             Ok(v) => v,
-             Err(_) => return JsValue::NULL,
-         };
-         let cm = &self.color_management;
-         let eval_result = self
-             .evaluator
-             .evaluate(
-                 &mut self.graph,
-                 &self.registry,
-                 &self.nodes,
-                 id,
-                 "display",
-                 FrameTime { frame },
-                 cm,
-                 self.ai_provider.as_deref(),
-                 &self.project_format,
-             )
+    pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
+        let id = match parse_node_id(&self.uuid_map, viewer_node_id) {
+            Ok(v) => v,
+            Err(_) => return JsValue::NULL,
+        };
+        let cm = &self.color_management;
+        let eval_result = self
+            .evaluator
+            .evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                id,
+                "display",
+                FrameTime { frame },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+            )
             .await;
         if let Ok(eval_result) = eval_result {
             if let Value::Image(image) = eval_result.value {
@@ -520,6 +531,7 @@ impl Engine {
                 params: node.params.clone(),
                 input_defaults: node.input_defaults.clone(),
                 position: node.position,
+                muted: node.muted,
             })
             .collect();
         let connections = self
@@ -559,26 +571,26 @@ impl Engine {
             _ => 0,
         };
 
-         let cm = &self.color_management;
-         let eval_result = self
-             .evaluator
-             .evaluate(
-                 &mut self.graph,
-                 &self.registry,
-                 &self.nodes,
-                 id,
-                 "display",
-                 FrameTime { frame },
-                 cm,
-                 self.ai_provider.as_deref(),
-                 &self.project_format,
-             )
-             .await
-             .map_err(to_js_error)?;
+        let cm = &self.color_management;
+        let eval_result = self
+            .evaluator
+            .evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                id,
+                "display",
+                FrameTime { frame },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+            )
+            .await
+            .map_err(to_js_error)?;
 
-         match eval_result.value {
-             Value::Image(image) => {
-                 let rgba8 = Viewer::image_to_rgba8_with_display(
+        match eval_result.value {
+            Value::Image(image) => {
+                let rgba8 = Viewer::image_to_rgba8_with_display(
                     &image,
                     cm,
                     &self.active_display,
@@ -632,10 +644,12 @@ impl Engine {
                 self.graph.set_param(new_id, key, value.clone());
             }
             for (port_name, value) in node.input_defaults.iter() {
-                self.graph.set_input_default(new_id, port_name, value.clone());
+                self.graph
+                    .set_input_default(new_id, port_name, value.clone());
             }
             if let Some(instance) = self.graph.nodes.get_mut(new_id) {
                 instance.uuid = node.id.clone();
+                instance.muted = node.muted;
             }
             self.uuid_map.insert(node.id.clone(), new_id);
             if let Some(def) = self.group_definitions.get(&node.type_id) {
@@ -971,10 +985,9 @@ impl Engine {
             self.nodes.remove(id);
         }
 
-        let (gn_id_str, _) = self.add_node_internal(&gd_id, centroid.0, centroid.1)
-            .ok_or_else(|| CompositorError::Other(
-                "Failed to create group node".to_string(),
-            ))?;
+        let (gn_id_str, _) = self
+            .add_node_internal(&gd_id, centroid.0, centroid.1)
+            .ok_or_else(|| CompositorError::Other("Failed to create group node".to_string()))?;
         let gn_id = parse_node_id(&self.uuid_map, &gn_id_str)?;
 
         for b in &incoming {
@@ -1087,7 +1100,8 @@ impl Engine {
                 _ => 0.0,
             };
             let pos = (gpos.0 + ox, gpos.1 + oy);
-            let (new_str, _) = self.add_node_internal(&internal.type_id, pos.0, pos.1)
+            let (new_str, _) = self
+                .add_node_internal(&internal.type_id, pos.0, pos.1)
                 .ok_or_else(|| CompositorError::Other("Failed to restore node".to_string()))?;
             let new_id = parse_node_id(&self.uuid_map, &new_str)?;
             let mut params = internal.params.clone();
@@ -1283,7 +1297,9 @@ impl Engine {
             .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
         let mut updated = (*existing.as_ref()).clone();
         updated.name = new_name.to_string();
-        let spec = self.register_group(updated).map_err(CompositorError::Other)?;
+        let spec = self
+            .register_group(updated)
+            .map_err(CompositorError::Other)?;
 
         let def_arc = self
             .group_definitions
@@ -1569,6 +1585,8 @@ struct SerializableNode {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     input_defaults: HashMap<String, ParamValue>,
     position: (f64, f64),
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    muted: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1646,6 +1664,30 @@ fn convert_param_value(
                 }
             }
             compositor_core::types::ValueType::Float => {
+                if matches!(spec.ui_hint, compositor_core::types::UiHint::ColorRamp) {
+                    if Array::is_array(&value) {
+                        let stops: Vec<ColorStop> =
+                            serde_wasm_bindgen::from_value(value).map_err(|e| {
+                                JsValue::from_str(&format!(
+                                    "Invalid ColorRamp stops: {}",
+                                    e
+                                ))
+                            })?;
+                        return Ok(ParamValue::ColorRamp(stops));
+                    }
+                }
+                if matches!(spec.ui_hint, compositor_core::types::UiHint::CurveEditor) {
+                    if Array::is_array(&value) {
+                        let points: Vec<compositor_core::types::CurvePoint> =
+                            serde_wasm_bindgen::from_value(value).map_err(|e| {
+                                JsValue::from_str(&format!(
+                                    "Invalid CurvePoints: {}",
+                                    e
+                                ))
+                            })?;
+                        return Ok(ParamValue::CurvePoints(points));
+                    }
+                }
                 if let Some(v) = value.as_f64() {
                     return Ok(ParamValue::Float(v));
                 }
@@ -1660,8 +1702,10 @@ fn convert_param_value(
                             if inner.length() == 4 {
                                 let mut c = [0.0f64; 4];
                                 for j in 0..4 {
-                                    c[j as usize] = inner.get(j as u32).as_f64()
-                                        .ok_or_else(|| JsValue::from_str("Invalid palette color component"))?;
+                                    c[j as usize] =
+                                        inner.get(j as u32).as_f64().ok_or_else(|| {
+                                            JsValue::from_str("Invalid palette color component")
+                                        })?;
                                 }
                                 colors.push(c);
                             }

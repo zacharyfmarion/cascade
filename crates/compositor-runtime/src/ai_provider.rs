@@ -1,5 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
-use compositor_core::ai::{AiFuture, AiImageRequest, AiImageResult, AiJobId, AiJobStatus, AiProvider};
+use compositor_core::ai::{
+    AiFuture, AiImageRequest, AiImageResult, AiJobId, AiJobStatus, AiProvider,
+};
 use compositor_core::error::CompositorError;
 use image::GenericImageView;
 use reqwest::blocking::multipart::{Form, Part};
