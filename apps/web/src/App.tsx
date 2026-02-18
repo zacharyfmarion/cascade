@@ -1,17 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Settings } from 'lucide-react';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
 
 import { SettingsModal } from './components/SettingsModal';
+import { AboutModal } from './components/AboutModal';
+import { MenuBar } from './components/MenuBar';
 import { useGraphStore } from './store/graphStore';
 import { useSettingsStore } from './store/settingsStore';
 import { useLayoutStore, applyDefaultLayout } from './store/layoutStore';
+import { useTauriMenuListener } from './menus/menuListener';
+import { handleMenuAction } from './menus/menuDefinition';
 import { panelComponents, tabComponents, EditorTab } from './components/panels/PanelComponents';
 import './store/themeStore';
 import './styles/theme.css';
 import './App.css';
+
+function useBeforeUnload() {
+  const dirty = useGraphStore(s => s.dirty);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [dirty]);
+}
 
 function useUndoRedoShortcuts() {
   const undo = useGraphStore(s => s.undo);
@@ -31,6 +48,33 @@ function useUndoRedoShortcuts() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [undo, redo]);
+}
+
+function useMenuShortcuts() {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+
+      switch (e.key.toLowerCase()) {
+        case 's':
+          e.preventDefault();
+          handleMenuAction('file.save');
+          break;
+        case 'o':
+          e.preventDefault();
+          handleMenuAction('file.open');
+          break;
+        case ',':
+          e.preventDefault();
+          handleMenuAction('file.settings');
+          break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 }
 
 function usePlaybackShortcuts() {
@@ -84,90 +128,25 @@ function usePlaybackShortcuts() {
   }, [hasSequenceNodes, togglePlayback, stepForward, stepBackward, goToStart, goToEnd, loopPlayback, setLoopPlayback]);
 }
 
+function isTauri(): boolean {
+  return '__TAURI_INTERNALS__' in window;
+}
+
 function Toolbar() {
-  const saveProject = useGraphStore(s => s.saveProject);
-  const loadProject = useGraphStore(s => s.loadProject);
-  const undo = useGraphStore(s => s.undo);
-  const redo = useGraphStore(s => s.redo);
-  const canUndo = useGraphStore(s => s.canUndo);
-  const canRedo = useGraphStore(s => s.canRedo);
   const openSettings = useSettingsStore(s => s.openSettings);
-  const applyWorkspacePreset = useLayoutStore(s => s.applyWorkspacePreset);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleLoad = useCallback(() => {
-    fileInputRef.current?.click();
-  }, []);
-
-  const handleFileChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) {
-        loadProject(file);
-        e.target.value = '';
-      }
-    },
-    [loadProject]
-  );
+  const isTauriApp = isTauri();
 
   return (
     <div className="toolbar">
-      <span className="toolbar__title">Compositor</span>
+      {isTauriApp ? (
+        <span className="toolbar__title">Compositor</span>
+      ) : (
+        <MenuBar />
+      )}
       <div className="toolbar__actions">
-        <button
-          type="button"
-          className="toolbar__btn"
-          onClick={undo}
-          disabled={!canUndo}
-          title="Undo (Ctrl+Z)"
-        >
-          Undo
-        </button>
-        <button
-          type="button"
-          className="toolbar__btn"
-          onClick={redo}
-          disabled={!canRedo}
-          title="Redo (Ctrl+Shift+Z)"
-        >
-          Redo
-        </button>
-        <div className="toolbar__separator" />
-        <button type="button" className="toolbar__btn" onClick={saveProject}>
-          Save
-        </button>
-        <button type="button" className="toolbar__btn" onClick={handleLoad}>
-          Load
-        </button>
-        <div className="toolbar__separator" />
-        <select
-          className="toolbar__btn"
-          onChange={(e) => {
-            if (e.target.value) {
-              applyWorkspacePreset(e.target.value as 'compositing' | 'viewing' | 'minimal');
-              e.target.value = '';
-            }
-          }}
-          value=""
-          title="Workspace presets"
-          style={{ cursor: 'pointer' }}
-        >
-          <option value="" disabled>Workspace</option>
-          <option value="compositing">Compositing</option>
-          <option value="viewing">Viewing</option>
-          <option value="minimal">Minimal</option>
-        </select>
-        <div className="toolbar__separator" />
         <button type="button" className="toolbar__btn" onClick={openSettings} title="Settings">
           <Settings size={14} />
         </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-        />
       </div>
     </div>
   );
@@ -182,8 +161,11 @@ function App() {
   const loadLayout = useLayoutStore(s => s.loadLayout);
   const saveLayout = useLayoutStore(s => s.saveLayout);
 
+  useBeforeUnload();
   useUndoRedoShortcuts();
+  useMenuShortcuts();
   usePlaybackShortcuts();
+  useTauriMenuListener();
 
   useEffect(() => {
     const suppress = (e: MouseEvent) => e.preventDefault();
@@ -258,6 +240,7 @@ function App() {
         />
       </div>
       <SettingsModal />
+      <AboutModal />
     </>
   );
 }

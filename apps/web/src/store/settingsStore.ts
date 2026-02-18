@@ -7,6 +7,10 @@ interface SettingsState {
   openSettings: () => void;
   closeSettings: () => void;
 
+  isAboutOpen: boolean;
+  openAbout: () => void;
+  closeAbout: () => void;
+
   // --- Appearance ---
   // (Theme is in themeStore already — just reference it from the Appearance tab UI)
 
@@ -25,12 +29,23 @@ interface SettingsState {
   setLivePreviewScale: (scale: number) => void;
   previewIdleDelay: number;  // ms, default 300
   setPreviewIdleDelay: (ms: number) => void;
+  maxUndoSteps: number;
+  setMaxUndoSteps: (steps: number) => void;
 
   // --- Playback ---
-  defaultFps: number;  // default 24
+  defaultFps: number;
   setDefaultFps: (fps: number) => void;
   loopPlayback: boolean;
   setLoopPlayback: (loop: boolean) => void;
+
+  // --- AI ---
+  aiApiKey: string;
+  setAiApiKey: (key: string) => void;
+
+  // --- Project ---
+  projectWidth: number;
+  projectHeight: number;
+  setProjectFormat: (width: number, height: number) => void;
 }
 
 const STORAGE_KEY = 'compositor-settings';
@@ -38,12 +53,16 @@ const STORAGE_KEY = 'compositor-settings';
 const DEFAULT_SETTINGS = {
   snapToGrid: true,
   gridSize: 15,
-  showMinimap: true,
+  showMinimap: false,
   showTimings: false,
   livePreviewScale: 0.5,
   previewIdleDelay: 300,
+  maxUndoSteps: 50,
   defaultFps: 24,
   loopPlayback: true,
+  aiApiKey: '',
+  projectWidth: 1920,
+  projectHeight: 1080,
 };
 
 function loadSettings() {
@@ -71,8 +90,12 @@ export const useSettingsStore = create<SettingsState>()(
           showTimings,
           livePreviewScale,
           previewIdleDelay,
+          maxUndoSteps,
           defaultFps,
           loopPlayback,
+          aiApiKey,
+          projectWidth,
+          projectHeight,
         } = get();
         
         try {
@@ -83,8 +106,12 @@ export const useSettingsStore = create<SettingsState>()(
             showTimings,
             livePreviewScale,
             previewIdleDelay,
+            maxUndoSteps,
             defaultFps,
             loopPlayback,
+            aiApiKey,
+            projectWidth,
+            projectHeight,
           }));
         } catch (e) {
           console.error('Failed to save settings:', e);
@@ -95,6 +122,10 @@ export const useSettingsStore = create<SettingsState>()(
         isSettingsOpen: false,
         openSettings: () => set({ isSettingsOpen: true }),
         closeSettings: () => set({ isSettingsOpen: false }),
+
+        isAboutOpen: false,
+        openAbout: () => set({ isAboutOpen: true }),
+        closeAbout: () => set({ isAboutOpen: false }),
 
         snapToGrid: initial.snapToGrid,
         setSnapToGrid: (snap) => { set({ snapToGrid: snap }); save(); },
@@ -114,11 +145,21 @@ export const useSettingsStore = create<SettingsState>()(
         previewIdleDelay: initial.previewIdleDelay,
         setPreviewIdleDelay: (ms) => { set({ previewIdleDelay: ms }); save(); },
 
+        maxUndoSteps: initial.maxUndoSteps,
+        setMaxUndoSteps: (steps) => { set({ maxUndoSteps: steps }); save(); },
+
         defaultFps: initial.defaultFps,
         setDefaultFps: (fps) => { set({ defaultFps: fps }); save(); },
         
         loopPlayback: initial.loopPlayback,
         setLoopPlayback: (loop) => { set({ loopPlayback: loop }); save(); },
+
+        aiApiKey: initial.aiApiKey,
+        setAiApiKey: (key) => { set({ aiApiKey: key }); save(); },
+
+        projectWidth: initial.projectWidth,
+        projectHeight: initial.projectHeight,
+        setProjectFormat: (width, height) => { set({ projectWidth: width, projectHeight: height }); save(); },
       };
     },
     { name: 'SettingsStore' }

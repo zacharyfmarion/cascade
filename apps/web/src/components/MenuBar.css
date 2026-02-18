@@ -1,0 +1,112 @@
+.menubar {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.menubar__menus {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.menubar__menu-wrapper {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.menubar__trigger {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  padding: 0 10px;
+  height: 100%;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+  font-family: inherit;
+}
+
+.menubar__trigger:hover,
+.menubar__trigger--active {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 200px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px var(--shadow-overlay);
+  padding: 4px 0;
+  z-index: 9999;
+}
+
+.menu-dropdown--sub {
+  position: absolute;
+  top: -4px;
+  left: 100%;
+}
+
+.menu-dropdown__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 5px 12px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  text-align: left;
+  font-family: inherit;
+  position: relative;
+}
+
+.menu-dropdown__item:hover {
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.menu-dropdown__item--submenu {
+  cursor: default;
+}
+
+.menu-dropdown__item-label {
+  flex: 1;
+}
+
+.menu-dropdown__item-shortcut {
+  margin-left: 24px;
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.menu-dropdown__item:hover .menu-dropdown__item-shortcut {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.menu-dropdown__item-arrow {
+  margin-left: 12px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.menu-dropdown__item:hover .menu-dropdown__item-arrow {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.menu-dropdown__separator {
+  height: 1px;
+  background: var(--border-default);
+  margin: 4px 0;
+}

@@ -16,6 +16,14 @@ import tokyoNight from './presets/tokyo-night.json';
 import rosePine from './presets/rose-pine.json';
 import palenight from './presets/palenight.json';
 import ayuDark from './presets/ayu-dark.json';
+import gruvboxLight from './presets/gruvbox-light.json';
+import nightOwl from './presets/night-owl.json';
+import synthwave84 from './presets/synthwave-84.json';
+import everforestDark from './presets/everforest-dark.json';
+import atomOneLight from './presets/atom-one-light.json';
+import shadesOfPurple from './presets/shades-of-purple.json';
+import cobalt2 from './presets/cobalt2.json';
+import horizon from './presets/horizon.json';
 
 export const PRESET_THEMES: CompositorTheme[] = [
   compositorDark as CompositorTheme,
@@ -28,12 +36,20 @@ export const PRESET_THEMES: CompositorTheme[] = [
   catppuccinLatte as CompositorTheme,
   rosePine as CompositorTheme,
   gruvboxDark as CompositorTheme,
+  gruvboxLight as CompositorTheme,
   palenight as CompositorTheme,
   ayuDark as CompositorTheme,
+  nightOwl as CompositorTheme,
+  synthwave84 as CompositorTheme,
+  everforestDark as CompositorTheme,
+  cobalt2 as CompositorTheme,
+  horizon as CompositorTheme,
+  shadesOfPurple as CompositorTheme,
   solarizedDark as CompositorTheme,
   solarizedLight as CompositorTheme,
   githubDark as CompositorTheme,
   githubLight as CompositorTheme,
+  atomOneLight as CompositorTheme,
 ];
 
 export const DEFAULT_THEME = compositorDark as CompositorTheme;

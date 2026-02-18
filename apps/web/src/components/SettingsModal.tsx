@@ -2,21 +2,35 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import { useThemeStore } from '../store/themeStore';
 import { useLayoutStore } from '../store/layoutStore';
+import { useGraphStore } from '../store/graphStore';
+import type { CompositorTheme } from '../themes/types';
 
-type Tab = 'appearance' | 'canvas' | 'performance' | 'playback';
+type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'color' | 'ai';
 
-const TAB_LABELS: { key: Tab; label: string }[] = [
+function isTauri(): boolean {
+  return '__TAURI_INTERNALS__' in window;
+}
+
+const ALL_TAB_LABELS: { key: Tab; label: string; tauriOnly?: boolean }[] = [
+  { key: 'project', label: 'Project' },
   { key: 'appearance', label: 'Appearance' },
   { key: 'canvas', label: 'Canvas' },
   { key: 'performance', label: 'Performance' },
   { key: 'playback', label: 'Playback' },
+  { key: 'color', label: 'Color', tauriOnly: true },
+  { key: 'ai', label: 'AI' },
 ];
 
+const TAB_LABELS = ALL_TAB_LABELS.filter(t => !t.tauriOnly || isTauri());
+
 const sectionDescriptions: Record<Tab, string> = {
+  project: 'Set project resolution and format.',
   appearance: 'Customize the look and feel of the application.',
   canvas: 'Configure node canvas behavior and display options.',
   performance: 'Tune preview rendering performance for your hardware.',
   playback: 'Set default playback behavior for image sequences.',
+  color: 'Configure display color space and view transform for the viewer.',
+  ai: 'Configure AI provider API keys for AI-powered nodes.',
 };
 
 const selectStyle: React.CSSProperties = {
@@ -48,16 +62,72 @@ const rowStyle: React.CSSProperties = {
   padding: '6px 0',
 };
 
+const ThemeCard = ({ theme, isSelected, onClick }: { theme: CompositorTheme; isSelected: boolean; onClick: () => void }) => {
+  const [isHovered, setIsHovered] = useState(false);
+  
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        border: isSelected ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        padding: '8px',
+        background: 'var(--bg-surface)',
+        transition: 'all 0.15s ease',
+        boxShadow: isSelected ? '0 0 0 1px var(--accent-primary)' : isHovered ? '0 2px 4px var(--shadow-overlay)' : 'none',
+        transform: isHovered ? 'translateY(-1px)' : 'none',
+        opacity: isHovered ? 1 : 0.9,
+      }}
+    >
+      <div style={{ 
+        fontSize: '0.8rem', 
+        fontWeight: isSelected ? 600 : 400, 
+        color: 'var(--text-primary)', 
+        marginBottom: '6px',
+        whiteSpace: 'nowrap', 
+        overflow: 'hidden', 
+        textOverflow: 'ellipsis' 
+      }}>
+        {theme.name}
+      </div>
+      <div style={{ display: 'flex', height: '12px', borderRadius: '2px', overflow: 'hidden', width: '100%' }}>
+         <div style={{ flex: 1, background: theme.colors['bg.primary'] }} />
+         <div style={{ flex: 1, background: theme.colors['accent.primary'] }} />
+         <div style={{ flex: 1, background: theme.colors['text.primary'] }} />
+         <div style={{ flex: 1, background: theme.colors['bg.secondary'] }} />
+         <div style={{ flex: 1, background: theme.colors['status.danger'] }} />
+         <div style={{ flex: 1, background: theme.colors['status.success'] }} />
+      </div>
+    </div>
+  );
+};
+
 function AppearanceTab() {
   const currentTheme = useThemeStore(s => s.currentTheme);
   const presetThemes = useThemeStore(s => s.presetThemes);
   const customThemes = useThemeStore(s => s.customThemes);
-  const setThemeByName = useThemeStore(s => s.setThemeByName);
+  const setTheme = useThemeStore(s => s.setTheme);
   const importVSCodeThemeJson = useThemeStore(s => s.importVSCodeThemeJson);
   const resetLayout = useLayoutStore(s => s.resetLayout);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const allThemes = [...presetThemes, ...customThemes];
+
+  const themesByCategory = allThemes.reduce<Record<string, CompositorTheme[]>>((acc, theme) => {
+    const cat = theme.type === 'light' ? 'Light' : 'Dark';
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(theme);
+    return acc;
+  }, {});
+  const categoryOrder = ['Dark', 'Light'];
+  const themeCategories = categoryOrder
+    .filter(cat => themesByCategory[cat]?.length)
+    .map(cat => ({ category: cat, themes: themesByCategory[cat] }));
 
   const handleImportFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,18 +147,39 @@ function AppearanceTab() {
 
   return (
     <div>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Theme</span>
-        <select
-          value={currentTheme.name}
-          onChange={e => setThemeByName(e.target.value)}
-          style={selectStyle}
-        >
-          {allThemes.map(t => (
-            <option key={t.name} value={t.name}>{t.name}</option>
-          ))}
-        </select>
-      </label>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Select a theme to customize the look and feel.
+      </div>
+
+      {themeCategories.map(section => (
+        <div key={section.category} style={{ marginBottom: '16px' }}>
+          <div style={{
+            fontSize: '0.7rem',
+            fontWeight: 600,
+            color: 'var(--text-muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            marginBottom: '8px',
+          }}>
+            {section.category}
+          </div>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(2, 1fr)',
+            gap: '8px',
+          }}>
+            {section.themes.map(theme => (
+              <ThemeCard
+                key={theme.name}
+                theme={theme}
+                isSelected={currentTheme.name === theme.name}
+                onClick={() => setTheme(theme)}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+
       <div style={{ paddingTop: '8px' }}>
         <button
           type="button"
@@ -202,6 +293,8 @@ function PerformanceTab() {
   const setLivePreviewScale = useSettingsStore(s => s.setLivePreviewScale);
   const previewIdleDelay = useSettingsStore(s => s.previewIdleDelay);
   const setPreviewIdleDelay = useSettingsStore(s => s.setPreviewIdleDelay);
+  const maxUndoSteps = useSettingsStore(s => s.maxUndoSteps);
+  const setMaxUndoSteps = useSettingsStore(s => s.setMaxUndoSteps);
 
   return (
     <div>
@@ -227,6 +320,18 @@ function PerformanceTab() {
           min={100}
           max={2000}
           step={50}
+          style={numberInputStyle}
+        />
+      </label>
+      <label style={rowStyle}>
+        <span style={{ color: 'var(--text-secondary)' }}>Max Undo Steps</span>
+        <input
+          type="number"
+          value={maxUndoSteps}
+          onChange={e => setMaxUndoSteps(Math.max(1, Math.min(200, Number(e.target.value))))}
+          min={1}
+          max={200}
+          step={1}
           style={numberInputStyle}
         />
       </label>
@@ -266,17 +371,261 @@ function PlaybackTab() {
   );
 }
 
+function ColorTab() {
+  const colorManagement = useGraphStore(s => s.colorManagement);
+  const setDisplayView = useGraphStore(s => s.setDisplayView);
+  const getViewsForDisplay = useGraphStore(s => s.getViewsForDisplay);
+  const loadColorManagementInfo = useGraphStore(s => s.loadColorManagementInfo);
+  const [availableViews, setAvailableViews] = useState<string[]>([]);
+
+  useEffect(() => {
+    loadColorManagementInfo();
+  }, [loadColorManagementInfo]);
+
+  useEffect(() => {
+    if (!colorManagement) return;
+    getViewsForDisplay(colorManagement.activeDisplay).then(setAvailableViews);
+  }, [colorManagement?.activeDisplay, getViewsForDisplay, colorManagement]);
+
+  if (!colorManagement) {
+    return (
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+        Loading color management info...
+      </div>
+    );
+  }
+
+  const handleDisplayChange = async (display: string) => {
+    const views = await getViewsForDisplay(display);
+    setAvailableViews(views);
+    const view = views.length > 0 ? views[0] : '';
+    await setDisplayView(display, view);
+  };
+
+  const handleViewChange = async (view: string) => {
+    await setDisplayView(colorManagement.activeDisplay, view);
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Working Space: {colorManagement.workingSpace}
+      </div>
+      <label style={rowStyle}>
+        <span style={{ color: 'var(--text-secondary)' }}>Display</span>
+        <select
+          value={colorManagement.activeDisplay}
+          onChange={e => handleDisplayChange(e.target.value)}
+          style={selectStyle}
+        >
+          {colorManagement.displays.map(d => (
+            <option key={d} value={d}>{d}</option>
+          ))}
+        </select>
+      </label>
+      <label style={rowStyle}>
+        <span style={{ color: 'var(--text-secondary)' }}>View</span>
+        <select
+          value={colorManagement.activeView}
+          onChange={e => handleViewChange(e.target.value)}
+          style={selectStyle}
+        >
+          {availableViews.map(v => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function AiTab() {
+  const aiApiKey = useSettingsStore(s => s.aiApiKey);
+  const setAiApiKey = useSettingsStore(s => s.setAiApiKey);
+  const setEngineAiKey = useGraphStore(s => s.setAiApiKey);
+  const [localKey, setLocalKey] = useState(aiApiKey);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = useCallback(() => {
+    setAiApiKey(localKey);
+    setEngineAiKey('openai', localKey).then(() => {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    });
+  }, [localKey, setAiApiKey, setEngineAiKey]);
+
+  return (
+    <div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Enter your OpenAI API key to enable AI-powered nodes like AI Inpaint.
+      </div>
+      <label style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>OpenAI API Key</span>
+        <input
+          type="text"
+          value={localKey}
+          onChange={e => { setLocalKey(e.target.value); setSaved(false); }}
+          onKeyDown={e => {
+            e.stopPropagation();
+            if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+              navigator.clipboard.readText().then(text => {
+                if (text) {
+                  const input = e.currentTarget;
+                  const start = input.selectionStart ?? 0;
+                  const end = input.selectionEnd ?? localKey.length;
+                  setLocalKey(localKey.slice(0, start) + text + localKey.slice(end));
+                  setSaved(false);
+                }
+              });
+            }
+          }}
+          placeholder="sk-..."
+          style={{
+            ...numberInputStyle,
+            width: '100%',
+            textAlign: 'left',
+            fontFamily: 'monospace',
+          }}
+        />
+      </label>
+      <div style={{ marginTop: '12px' }}>
+        <button
+          type="button"
+          onClick={handleSave}
+          style={{
+            background: saved ? 'var(--accent-primary)' : 'var(--bg-surface)',
+            color: saved ? 'var(--bg-primary)' : 'var(--text-secondary)',
+            border: '1px solid var(--border-default)',
+            borderRadius: '3px',
+            fontSize: '0.8rem',
+            padding: '6px 12px',
+            cursor: 'pointer',
+            width: '100%',
+          }}
+        >
+          {saved ? 'Saved' : 'Save API Key'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const RESOLUTION_PRESETS = [
+  { label: '720p (HD)', width: 1280, height: 720 },
+  { label: '1080p (Full HD)', width: 1920, height: 1080 },
+  { label: '1440p (2K)', width: 2560, height: 1440 },
+  { label: '2160p (4K UHD)', width: 3840, height: 2160 },
+  { label: '2K DCI', width: 2048, height: 1080 },
+  { label: '4K DCI', width: 4096, height: 2160 },
+  { label: 'Square 1K', width: 1024, height: 1024 },
+  { label: 'Square 2K', width: 2048, height: 2048 },
+];
+
+function ProjectTab() {
+  const projectWidth = useSettingsStore(s => s.projectWidth);
+  const projectHeight = useSettingsStore(s => s.projectHeight);
+  const setProjectFormat = useGraphStore(s => s.setProjectFormat);
+  const [localWidth, setLocalWidth] = useState(projectWidth);
+  const [localHeight, setLocalHeight] = useState(projectHeight);
+
+  const isCustom = !RESOLUTION_PRESETS.some(p => p.width === projectWidth && p.height === projectHeight);
+  const activePreset = RESOLUTION_PRESETS.find(p => p.width === projectWidth && p.height === projectHeight);
+
+  const applyResolution = useCallback((w: number, h: number) => {
+    const clampedW = Math.max(1, Math.min(8192, Math.round(w)));
+    const clampedH = Math.max(1, Math.min(8192, Math.round(h)));
+    setLocalWidth(clampedW);
+    setLocalHeight(clampedH);
+    setProjectFormat(clampedW, clampedH);
+  }, [setProjectFormat]);
+
+  return (
+    <div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        The project resolution determines the canvas size for generator nodes (Solid Color, Noise, Gradient, etc.) and the display window for compositing.
+      </div>
+
+      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Presets
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px', marginBottom: '16px' }}>
+        {RESOLUTION_PRESETS.map(preset => (
+          <button
+            key={preset.label}
+            type="button"
+            onClick={() => applyResolution(preset.width, preset.height)}
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              padding: '6px 10px',
+              fontSize: '0.75rem',
+              color: activePreset === preset ? 'var(--text-primary)' : 'var(--text-secondary)',
+              background: activePreset === preset ? 'var(--bg-surface)' : 'transparent',
+              border: activePreset === preset ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
+              borderRadius: '3px',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <div style={{ fontWeight: activePreset === preset ? 600 : 400 }}>{preset.label}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '1px' }}>{preset.width} × {preset.height}</div>
+          </button>
+        ))}
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: '12px' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Custom{isCustom ? ` (${projectWidth} × ${projectHeight})` : ''}
+        </div>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            W
+            <input
+              type="number"
+              value={localWidth}
+              min={1}
+              max={8192}
+              onChange={e => setLocalWidth(Number(e.target.value))}
+              onBlur={() => applyResolution(localWidth, localHeight)}
+              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') applyResolution(localWidth, localHeight); }}
+              style={{ ...numberInputStyle, width: '70px' }}
+            />
+          </label>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>×</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+            H
+            <input
+              type="number"
+              value={localHeight}
+              min={1}
+              max={8192}
+              onChange={e => setLocalHeight(Number(e.target.value))}
+              onBlur={() => applyResolution(localWidth, localHeight)}
+              onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') applyResolution(localWidth, localHeight); }}
+              style={{ ...numberInputStyle, width: '70px' }}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TAB_COMPONENTS: Record<Tab, React.FC> = {
+  project: ProjectTab,
   appearance: AppearanceTab,
   canvas: CanvasTab,
   performance: PerformanceTab,
   playback: PlaybackTab,
+  color: ColorTab,
+  ai: AiTab,
 };
 
 export const SettingsModal: React.FC = () => {
   const isOpen = useSettingsStore(s => s.isSettingsOpen);
   const closeSettings = useSettingsStore(s => s.closeSettings);
-  const [activeTab, setActiveTab] = useState<Tab>('appearance');
+  const [activeTab, setActiveTab] = useState<Tab>('project');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -307,7 +656,8 @@ export const SettingsModal: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'var(--shadow-overlay)',
+        background: 'rgba(0, 0, 0, 0.5)',
+        backdropFilter: 'blur(4px)',
       }}
       onClick={closeSettings}
       onKeyDown={e => { if (e.key === 'Escape') closeSettings(); }}
@@ -316,8 +666,7 @@ export const SettingsModal: React.FC = () => {
         role="document"
         style={{
           width: 600,
-          minHeight: 400,
-          maxHeight: 450,
+          height: 500,
           display: 'flex',
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-default)',
@@ -335,13 +684,13 @@ export const SettingsModal: React.FC = () => {
             borderRight: '1px solid var(--border-default)',
             display: 'flex',
             flexDirection: 'column',
-            padding: '12px 0',
+            padding: '16px 0',
             flexShrink: 0,
           }}
         >
           <div
             style={{
-              padding: '0 16px 12px',
+              padding: '0 20px 16px',
               fontSize: '0.9rem',
               fontWeight: 700,
               color: 'var(--text-secondary)',
@@ -360,7 +709,7 @@ export const SettingsModal: React.FC = () => {
                 display: 'block',
                 width: '100%',
                 textAlign: 'left',
-                padding: '8px 16px',
+                padding: '8px 20px',
                 fontSize: '0.8rem',
                 fontWeight: activeTab === tab.key ? 600 : 400,
                 color: activeTab === tab.key ? 'var(--text-primary)' : 'var(--text-secondary)',
@@ -389,7 +738,7 @@ export const SettingsModal: React.FC = () => {
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
-              padding: '12px 16px',
+              padding: '16px 24px',
               borderBottom: '1px solid var(--border-default)',
             }}
           >
@@ -421,7 +770,7 @@ export const SettingsModal: React.FC = () => {
             </button>
           </div>
 
-          <div style={{ padding: '16px', overflowY: 'auto', flex: 1 }}>
+          <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
             <ActiveTabComponent />
           </div>
         </div>
