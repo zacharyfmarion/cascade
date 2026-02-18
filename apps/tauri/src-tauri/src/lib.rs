@@ -1,3 +1,5 @@
+mod menu;
+
 use compositor_runtime::{
     AssetReference, CompositorDocument, Engine, PortSpec, RenderResult, SerializableGraph,
 };
@@ -83,6 +85,21 @@ fn set_param(
 }
 
 #[tauri::command]
+fn set_input_default(
+    state: State<'_, EngineState>,
+    node_id: String,
+    port_name: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let param_value: compositor_runtime::ParamValue =
+        serde_json::from_value(value).map_err(|e| e.to_string())?;
+    s.engine
+        .set_input_default(&node_id, &port_name, param_value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn set_position(
     state: State<'_, EngineState>,
     node_id: String,
@@ -114,6 +131,16 @@ fn load_image_data(
     s.engine
         .load_image_data(&node_id, data)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_image_data(state: State<'_, EngineState>, node_id: String) -> Result<Response, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let bytes = s
+        .engine
+        .get_image_data(&node_id)
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(bytes))
 }
 
 /// Returns raw RGBA8 pixels prefixed with [width_le32][height_le32].
@@ -365,6 +392,24 @@ fn render_sequence(state: State<'_, EngineState>, node_id: String) -> Result<Str
 }
 
 #[tauri::command]
+fn render_video(
+    #[allow(unused_variables)] state: State<'_, EngineState>,
+    #[allow(unused_variables)] node_id: String,
+) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.engine
+            .start_render_video(&node_id)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err("Video export is only available on macOS".to_string())
+    }
+}
+
+#[tauri::command]
 fn cancel_render_job(state: State<'_, EngineState>) -> Result<(), String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     s.engine.cancel_job();
@@ -474,13 +519,115 @@ fn remove_internal_connection(
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn rename_group(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    new_name: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .rename_group(&group_def_id, &new_name)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_ai_api_key(
+    state: State<'_, EngineState>,
+    provider: String,
+    key: String,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .set_ai_api_key(&provider, &key)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn is_ai_configured(state: State<'_, EngineState>) -> Result<bool, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(s.engine.is_ai_configured())
+}
+
+#[tauri::command]
+fn list_color_spaces(state: State<'_, EngineState>) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let spaces = s.engine.available_color_spaces();
+    serde_json::to_string(&spaces).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_displays(state: State<'_, EngineState>) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let displays = s.engine.available_displays();
+    serde_json::to_string(&displays).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_views(state: State<'_, EngineState>, display: String) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let views = s.engine.available_views(&display);
+    serde_json::to_string(&views).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_color_management_info(state: State<'_, EngineState>) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let info = serde_json::json!({
+        "workingSpace": s.engine.working_space(),
+        "activeDisplay": s.engine.active_display(),
+        "activeView": s.engine.active_view(),
+        "displays": s.engine.available_displays(),
+        "colorSpaces": s.engine.available_color_spaces(),
+    });
+    serde_json::to_string(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_display_view(
+    state: State<'_, EngineState>,
+    display: String,
+    view: String,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.set_active_display_view(display, view);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_project_format(
+    state: State<'_, EngineState>,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.set_project_format(width, height);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut engine = Engine::new();
+
+    #[cfg(feature = "ocio")]
+    {
+        match engine.load_ocio_from_env() {
+            Ok(()) => eprintln!("[compositor] Loaded OCIO config from $OCIO"),
+            Err(e) => {
+                eprintln!("[compositor] OCIO not loaded ({e}), using builtin color management")
+            }
+        }
+    }
+
     tauri::Builder::default()
-        .manage(Mutex::new(AppState {
-            engine: Engine::new(),
-        }))
+        .manage(Mutex::new(AppState { engine }))
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            menu::setup_menu(app)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             list_node_types,
             add_node,
@@ -488,8 +635,10 @@ pub fn run() {
             connect,
             disconnect,
             set_param,
+            set_input_default,
             set_position,
             load_image_data,
+            get_image_data,
             render_viewer,
             set_param_and_render,
             export_graph,
@@ -502,6 +651,7 @@ pub fn run() {
             set_sequence_directory,
             get_sequence_info,
             render_sequence,
+            render_video,
             cancel_render_job,
             get_job_progress,
             create_group_from_nodes,
@@ -510,7 +660,16 @@ pub fn run() {
             update_group_interface,
             add_internal_connection,
             remove_internal_connection,
+            rename_group,
+            set_ai_api_key,
+            is_ai_configured,
             get_last_render_timings,
+            list_color_spaces,
+            list_displays,
+            list_views,
+            get_color_management_info,
+            set_display_view,
+            set_project_format,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

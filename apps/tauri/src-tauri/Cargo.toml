@@ -14,5 +14,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [features]
-default = ["custom-protocol"]
+default = ["custom-protocol", "video", "ocio"]
 custom-protocol = ["tauri/custom-protocol"]
+video = ["compositor-runtime/video"]
+ocio = ["compositor-runtime/ocio"]
