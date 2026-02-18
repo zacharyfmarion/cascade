@@ -555,7 +555,11 @@ impl Engine {
             connections,
             group_definitions,
         };
-        serde_wasm_bindgen::to_value(&graph).unwrap_or(JsValue::NULL)
+        // Use serialize_maps_as_objects so HashMap<String, ParamValue> becomes
+        // a plain JS object instead of a JS Map. Required because
+        // JSON.stringify (used in saveProject) silently drops Map entries.
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        graph.serialize(&serializer).unwrap_or(JsValue::NULL)
     }
 
     pub async fn export_image(&mut self, node_id: &str, frame: u64) -> Result<Vec<u8>, JsValue> {

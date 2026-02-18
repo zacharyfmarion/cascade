@@ -86,6 +86,8 @@ export function getMenuBarDef(): MenuDef[] {
     {
       label: 'Help',
       items: [
+        { type: 'action', id: 'help.shortcuts', label: 'Keyboard Shortcuts', shortcut: '?' },
+        { type: 'separator' },
         { type: 'action', id: 'help.about', label: 'About Compositor' },
       ],
     },
@@ -149,6 +151,9 @@ export function handleMenuAction(id: string): void {
       layoutStore.resetLayout();
       break;
 
+    case 'help.shortcuts':
+      settingsStore.openShortcuts();
+      break;
     case 'help.about':
       settingsStore.openAbout();
       break;

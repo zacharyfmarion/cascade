@@ -3,6 +3,26 @@ import type { EngineBridge, AddNodeResult, ColorManagementInfo } from './bridge'
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
 
+/**
+ * Convert a tagged ParamValue (e.g. { CurvePoints: [...] }) to the raw form
+ * expected by WASM's set_param. For simple scalars we unwrap; for complex
+ * structured params (ColorRamp, CurvePoints, ColorPalette) we send the raw
+ * inner value directly so WASM can deserialize via serde_wasm_bindgen.
+ */
+function paramValueToWasm(value: ParamValue): unknown {
+  if ('Float' in value) return value.Float;
+  if ('Int' in value) return value.Int;
+  if ('Bool' in value) return value.Bool;
+  if ('Color' in value) return value.Color;
+  if ('String' in value) return value.String;
+  // Complex structured params: send the inner array directly.
+  // WASM convert_param_value uses the ParamSpec ui_hint to know the type.
+  if ('ColorRamp' in value) return value.ColorRamp;
+  if ('CurvePoints' in value) return value.CurvePoints;
+  if ('ColorPalette' in value) return value.ColorPalette;
+  return extractParamValue(value);
+}
+
 type DocumentEnvelope = {
   compositor: unknown;
   graph: unknown;
@@ -85,12 +105,12 @@ export class WasmEngine implements EngineBridge {
   }
 
   setParam(nodeId: string, key: string, value: ParamValue): void {
-    const raw = extractParamValue(value);
+    const raw = paramValueToWasm(value);
     this.getEngine().set_param(nodeId, key, raw);
   }
 
   setInputDefault(nodeId: string, portName: string, value: ParamValue): void {
-    const raw = extractParamValue(value);
+    const raw = paramValueToWasm(value);
     this.getEngine().set_input_default(nodeId, portName, raw);
   }
 

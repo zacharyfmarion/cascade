@@ -106,10 +106,11 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
   const svgRef = useRef<SVGSVGElement>(null);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const pointsRef = useRef(points);
   useEffect(() => { pointsRef.current = points; }, [points]);
 
-  // Suppress click-to-add after a drag completes (same pattern as ColorRampNode)
+  // Suppress click-to-add after a drag completes
   const justDraggedRef = useRef(false);
   const dragPointerIdRef = useRef<number | null>(null);
 
@@ -123,8 +124,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     y: pad + (1 - p.y) * plotH,
   }), [plotW, plotH]);
 
-  /** Convert screen pointer position to normalized [0,1] curve coords.
-   *  Uses getBoundingClientRect to handle React Flow zoom correctly. */
+  /** Convert screen pointer position to normalized [0,1] curve coords. */
   const pointerToNormalized = useCallback((clientX: number, clientY: number): CurvePoint => {
     if (!svgRef.current) return { x: 0, y: 0 };
     const rect = svgRef.current.getBoundingClientRect();
@@ -155,12 +155,14 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     return parts.join(' ');
   }, [points, plotW, plotH]);
 
-  // Click on empty space → add point (uses onClick, suppressed after drag)
+  // Click on empty space → add point AND clear selection
   const handleSvgClick = useCallback((e: React.MouseEvent) => {
     if (justDraggedRef.current) {
       justDraggedRef.current = false;
       return;
     }
+    setSelectedIdx(null); // Clear selection
+
     const pt = pointerToNormalized(e.clientX, e.clientY);
     const newPoints = [...points, pt].sort((a, b) => a.x - b.x);
     onChange(newPoints);
@@ -173,8 +175,10 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     if (svgRef.current) {
       svgRef.current.setPointerCapture(e.pointerId);
       dragPointerIdRef.current = e.pointerId;
+      svgRef.current.focus(); // Ensure SVG gets focus for keyboard events
     }
     setDraggingIdx(idx);
+    setSelectedIdx(idx);
     justDraggedRef.current = false;
   }, []);
 
@@ -214,15 +218,38 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
     }
   }, [draggingIdx, onChangeCommit]);
 
+  const deletePoint = useCallback((idx: number) => {
+    if (points.length <= 2) return;
+    const sorted = [...points].sort((a, b) => a.x - b.x);
+    const pt = points[idx];
+    const sortedIdx = sorted.indexOf(pt);
+    
+    // Don't delete endpoints
+    if (sortedIdx === 0 || sortedIdx === sorted.length - 1) return;
+
+    const newPoints = points.filter((_, i) => i !== idx);
+    onChange(newPoints);
+    setSelectedIdx(null);
+  }, [points, onChange]);
+
   const handlePointContextMenu = useCallback((e: React.MouseEvent, idx: number) => {
     e.preventDefault();
     e.stopPropagation();
-    if (points.length <= 2) return;
-    const sorted = [...points].sort((a, b) => a.x - b.x);
-    const sortedIdx = sorted.findIndex(p => p === points[idx]);
-    if (sortedIdx === 0 || sortedIdx === sorted.length - 1) return;
-    onChange(points.filter((_, i) => i !== idx));
-  }, [points, onChange]);
+    deletePoint(idx);
+  }, [deletePoint]);
+
+  const handlePointDoubleClick = useCallback((e: React.MouseEvent, idx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    deletePoint(idx);
+  }, [deletePoint]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIdx !== null) {
+      e.preventDefault();
+      deletePoint(selectedIdx);
+    }
+  }, [selectedIdx, deletePoint]);
 
   const gridLines = useMemo(() => {
     const lines: React.ReactElement[] = [];
@@ -245,11 +272,13 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
       ref={svgRef}
       width={width}
       height={height}
-      style={{ cursor: draggingIdx !== null ? 'grabbing' : 'crosshair', display: 'block' }}
+      tabIndex={0}
+      style={{ cursor: draggingIdx !== null ? 'grabbing' : 'crosshair', display: 'block', outline: 'none' }}
       className="nopan nodrag nowheel"
       onClick={handleSvgClick}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onKeyDown={handleKeyDown}
     >
       {/* Background */}
       <rect x={pad} y={pad} width={plotW} height={plotH}
@@ -273,25 +302,41 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
       {points.map((pt, idx) => {
         const svgPt = toSvg(pt);
         const isActive = draggingIdx === idx;
+        const isSelected = selectedIdx === idx;
         const isHovered = hoveredIdx === idx;
-        const r = isActive ? 5 : isHovered ? 4.5 : 4;
+        const r = isActive || isSelected ? 6 : isHovered ? 5 : 4;
+        
         return (
           <g key={idx}>
+            {isSelected && (
+              <circle
+                cx={svgPt.x} cy={svgPt.y} r={9}
+                fill="none"
+                stroke={color}
+                strokeOpacity="0.4"
+                strokeWidth="2"
+              />
+            )}
+            
             <circle
               cx={svgPt.x} cy={svgPt.y} r={r}
               fill={color}
               stroke="var(--border-default)"
-              strokeWidth="1"
+              strokeWidth={isActive || isSelected ? 2 : 1}
               style={{ cursor: 'grab' }}
               onPointerDown={(e) => handlePointPointerDown(e, idx)}
               onPointerEnter={() => setHoveredIdx(idx)}
               onPointerLeave={() => setHoveredIdx(null)}
               onContextMenu={(e) => handlePointContextMenu(e, idx)}
+              onDoubleClick={(e) => handlePointDoubleClick(e, idx)}
+              onClick={(e) => e.stopPropagation()}
             />
+
+            {/* Hover Coordinates (only if not dragging) */}
             {isHovered && !isActive && (
               <text
                 x={svgPt.x}
-                y={svgPt.y - 10}
+                y={svgPt.y - 12}
                 textAnchor="middle"
                 fill="var(--text-secondary)"
                 fontSize="9"
@@ -299,6 +344,28 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
               >
                 {pt.x.toFixed(2)}, {pt.y.toFixed(2)}
               </text>
+            )}
+
+            {/* Drag Tooltip (when dragging) */}
+            {isActive && (
+               <g pointerEvents="none" transform={`translate(${svgPt.x}, ${svgPt.y - 28})`}>
+                  <rect
+                    x={-35} y={0} width={70} height={20} rx={4}
+                    fill="var(--bg-secondary)"
+                    stroke="var(--border-default)"
+                    strokeWidth="1"
+                    opacity="0.9"
+                  />
+                  <text
+                    x={0} y={14}
+                    textAnchor="middle"
+                    fill="var(--text-primary)"
+                    fontSize="10"
+                    fontWeight="bold"
+                  >
+                    {pt.x.toFixed(2)}, {pt.y.toFixed(2)}
+                  </text>
+               </g>
             )}
           </g>
         );

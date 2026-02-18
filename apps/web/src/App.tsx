@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Settings } from 'lucide-react';
+import { Settings, HelpCircle } from 'lucide-react';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
 
 import { SettingsModal } from './components/SettingsModal';
 import { AboutModal } from './components/AboutModal';
+import { ShortcutsModal } from './components/ShortcutsModal';
 import { MenuBar } from './components/MenuBar';
 import { useGraphStore } from './store/graphStore';
 import { useSettingsStore } from './store/settingsStore';
@@ -53,9 +54,16 @@ function useUndoRedoShortcuts() {
 function useMenuShortcuts() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        useSettingsStore.getState().openShortcuts();
+        return;
+      }
+
+      if (!(e.metaKey || e.ctrlKey)) return;
 
       switch (e.key.toLowerCase()) {
         case 's':
@@ -134,6 +142,7 @@ function isTauri(): boolean {
 
 function Toolbar() {
   const openSettings = useSettingsStore(s => s.openSettings);
+  const openShortcuts = useSettingsStore(s => s.openShortcuts);
   const isTauriApp = isTauri();
 
   return (
@@ -144,6 +153,9 @@ function Toolbar() {
         <MenuBar />
       )}
       <div className="toolbar__actions">
+        <button type="button" className="toolbar__btn" onClick={openShortcuts} title="Keyboard Shortcuts">
+          <HelpCircle size={14} />
+        </button>
         <button type="button" className="toolbar__btn" onClick={openSettings} title="Settings">
           <Settings size={14} />
         </button>
@@ -240,6 +252,7 @@ function App() {
         />
       </div>
       <SettingsModal />
+      <ShortcutsModal />
       <AboutModal />
     </>
   );

@@ -253,6 +253,7 @@ interface GraphState {
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
   triggerRender: (viewerNodeId: string) => void;
+  newProject: () => Promise<void>;
   saveProject: () => void;
   loadProject: (file: File) => void;
   loadProjectFromPath?: () => void;
@@ -320,6 +321,44 @@ export const useGraphStore = create<GraphState>()(
       }
     };
 
+    /**
+     * Normalize complex param values after deserialization (load/import).
+     * Clamps values to valid ranges and ensures structural integrity.
+     */
+    const normalizeParamValue = (value: ParamValue): ParamValue => {
+      if ('CurvePoints' in value) {
+        const pts = value.CurvePoints;
+        if (!Array.isArray(pts) || pts.length < 2) {
+          return { CurvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] };
+        }
+        return {
+          CurvePoints: pts.map(p => ({
+            x: Math.max(0, Math.min(1, Number(p.x) || 0)),
+            y: Math.max(0, Math.min(1, Number(p.y) || 0)),
+          })),
+        };
+      }
+      if ('ColorRamp' in value) {
+        const stops = value.ColorRamp;
+        if (!Array.isArray(stops) || stops.length < 2) {
+          return { ColorRamp: [
+            { position: 0, color: [0, 0, 0, 1] },
+            { position: 1, color: [1, 1, 1, 1] },
+          ]};
+        }
+        return {
+          ColorRamp: stops.map(s => ({
+            position: Math.max(0, Math.min(1, Number(s.position) || 0)),
+            color: (Array.isArray(s.color) && s.color.length === 4
+              ? s.color.map(c => Math.max(0, Math.min(1, Number(c) || 0)))
+              : [0, 0, 0, 1]
+            ) as [number, number, number, number],
+          })),
+        };
+      }
+      return value;
+    };
+
     const applyGraphData = (graphData: SerializableGraphData) => {
       const newNodes = new Map<string, NodeInstance>();
       const newConnections: Connection[] = [];
@@ -330,7 +369,8 @@ export const useGraphStore = create<GraphState>()(
           const params: Record<string, ParamValue> = {};
           if (spec) {
             spec.params.forEach(p => {
-              params[p.key] = node.params?.[p.key] ?? p.default;
+              const rawValue = node.params?.[p.key] ?? p.default;
+              params[p.key] = normalizeParamValue(rawValue as ParamValue);
             });
           } else if (node.params) {
             Object.assign(params, node.params);
@@ -1491,6 +1531,30 @@ export const useGraphStore = create<GraphState>()(
         }
         webRenderCancelled = true;
         set({ isRendering: false });
+      },
+
+      newProject: async () => {
+        const eng = getEngine();
+        const emptyGraph = { nodes: [], connections: [] };
+        if (eng.importDocument) {
+          await eng.importDocument(emptyGraph);
+        } else {
+          await eng.importGraph(emptyGraph);
+        }
+        set({
+          nodes: new Map(),
+          connections: [],
+          selectedNodeIds: new Set(),
+          frames: new Map(),
+          selectedFrameId: null,
+          renderResults: new Map(),
+          editingStack: [{ id: 'root', label: 'Root' }],
+          dirty: false,
+          lastError: null,
+          hasSequenceNodes: false,
+          sequenceInfoMap: new Map(),
+          nodeTimings: new Map(),
+        });
       },
 
       saveProject: () => {

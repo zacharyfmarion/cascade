@@ -11,6 +11,10 @@ interface SettingsState {
   openAbout: () => void;
   closeAbout: () => void;
 
+  isShortcutsOpen: boolean;
+  openShortcuts: () => void;
+  closeShortcuts: () => void;
+
   // --- Appearance ---
   // (Theme is in themeStore already — just reference it from the Appearance tab UI)
 
@@ -126,6 +130,10 @@ export const useSettingsStore = create<SettingsState>()(
         isAboutOpen: false,
         openAbout: () => set({ isAboutOpen: true }),
         closeAbout: () => set({ isAboutOpen: false }),
+
+        isShortcutsOpen: false,
+        openShortcuts: () => set({ isShortcutsOpen: true }),
+        closeShortcuts: () => set({ isShortcutsOpen: false }),
 
         snapToGrid: initial.snapToGrid,
         setSnapToGrid: (snap) => { set({ snapToGrid: snap }); save(); },
