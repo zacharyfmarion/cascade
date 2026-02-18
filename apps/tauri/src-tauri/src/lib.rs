@@ -112,6 +112,18 @@ fn set_position(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn set_muted(
+    state: State<'_, EngineState>,
+    node_id: String,
+    muted: bool,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .set_muted(&node_id, muted)
+        .map_err(|e| e.to_string())
+}
+
 /// Receives raw image file bytes via the request body. Node ID passed in x-node-id header.
 #[tauri::command]
 fn load_image_data(
@@ -637,6 +649,7 @@ pub fn run() {
             set_param,
             set_input_default,
             set_position,
+            set_muted,
             load_image_data,
             get_image_data,
             render_viewer,
