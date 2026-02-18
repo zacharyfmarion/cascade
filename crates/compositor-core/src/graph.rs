@@ -17,6 +17,7 @@ pub struct NodeInstance {
     pub input_defaults: HashMap<String, ParamValue>,
     pub position: (f64, f64),
     pub param_revision: u64,
+    pub muted: bool,
 }
 
 #[derive(Clone)]
@@ -36,9 +37,7 @@ pub struct Graph {
 }
 
 pub fn types_compatible(from: &ValueType, to: &ValueType) -> bool {
-    from == to
-        || (*from == ValueType::Field
-            && (*to == ValueType::Image || *to == ValueType::Mask))
+    from == to || (*from == ValueType::Field && (*to == ValueType::Image || *to == ValueType::Mask))
 }
 
 impl Graph {
@@ -60,6 +59,7 @@ impl Graph {
             input_defaults: HashMap::new(),
             position: (0.0, 0.0),
             param_revision: 0,
+            muted: false,
         });
         self.dirty_nodes.insert(id);
         id
@@ -172,9 +172,7 @@ impl Graph {
         if let Some((prev_from_node, prev_from_port)) = self.inputs.remove(&to_key) {
             if let Some(conns) = self.outputs.get_mut(&prev_from_node) {
                 conns.retain(|c| {
-                    !(c.to_node == to_node
-                        && c.to_port == to_port
-                        && c.from_port == prev_from_port)
+                    !(c.to_node == to_node && c.to_port == to_port && c.from_port == prev_from_port)
                 });
                 if conns.is_empty() {
                     self.outputs.remove(&prev_from_node);
@@ -182,8 +180,10 @@ impl Graph {
             }
         }
 
-        self.inputs
-            .insert((to_node, to_port_string), (from_node, from_port.to_string()));
+        self.inputs.insert(
+            (to_node, to_port_string),
+            (from_node, from_port.to_string()),
+        );
         self.outputs
             .entry(from_node)
             .or_default()
@@ -226,6 +226,13 @@ impl Graph {
     pub fn set_position(&mut self, node_id: NodeId, x: f64, y: f64) {
         if let Some(node) = self.nodes.get_mut(node_id) {
             node.position = (x, y);
+        }
+    }
+
+    pub fn set_muted(&mut self, node_id: NodeId, muted: bool) {
+        if let Some(node) = self.nodes.get_mut(node_id) {
+            node.muted = muted;
+            self.mark_dirty(node_id);
         }
     }
 

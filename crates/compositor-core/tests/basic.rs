@@ -177,7 +177,7 @@ impl Node for CounterNode {
                 max: None,
                 step: None,
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }

@@ -112,7 +112,10 @@ impl Evaluator {
                     inputs.insert(input.name.clone(), Self::param_value_to_value(param_val));
                 } else if let Some(spec_default) = &input.default {
                     // 3. Spec-level default from PortSpec
-                    inputs.insert(input.name.clone(), Self::param_default_to_value(spec_default));
+                    inputs.insert(
+                        input.name.clone(),
+                        Self::param_default_to_value(spec_default),
+                    );
                 }
             }
 
@@ -126,9 +129,8 @@ impl Evaluator {
                     }
                     _ => None,
                 });
-            let (raster_format, raster_dw) = ref_domain.unwrap_or_else(|| {
-                (project_format.clone(), project_format.display_window)
-            });
+            let (raster_format, raster_dw) = ref_domain
+                .unwrap_or_else(|| (project_format.clone(), project_format.display_window));
 
             let all_inputs = spec.all_inputs();
             for port in all_inputs.iter() {
@@ -146,15 +148,29 @@ impl Evaluator {
                 }
             }
 
+            // Muted nodes pass data through without processing
+            if instance.muted {
+                for output in spec.outputs.iter() {
+                    let pass_value = spec.inputs.iter()
+                        .find(|inp| inp.ty == output.ty)
+                        .and_then(|inp| inputs.get(&inp.name))
+                        .cloned()
+                        .unwrap_or(Value::None);
+                    self.cache
+                        .insert((node_id, output.name.clone()), (key.clone(), pass_value));
+                }
+                node_timings.insert(node_id, Duration::ZERO);
+                graph.clear_dirty(node_id);
+                continue;
+            }
+
             let mut merged_params = Self::merge_params(instance, spec);
             for param in &spec.params {
                 if !crate::types::NodeSpec::is_connectable_param(param) {
                     continue;
                 }
                 if let Some((up_node, up_port)) = graph.get_upstream(node_id, &param.key) {
-                    if let Some((_, cached_value)) =
-                        self.cache.get(&(up_node, up_port.clone()))
-                    {
+                    if let Some((_, cached_value)) = self.cache.get(&(up_node, up_port.clone())) {
                         let param_value = match cached_value {
                             Value::Float(v) => Some(ParamValue::Float(*v as f64)),
                             Value::Int(v) => Some(ParamValue::Int(*v as i64)),
@@ -297,6 +313,7 @@ impl Evaluator {
             ParamDefault::Color(v) => ParamValue::Color(*v),
             ParamDefault::ColorRamp(v) => ParamValue::ColorRamp(v.clone()),
             ParamDefault::ColorPalette(v) => ParamValue::ColorPalette(v.clone()),
+            ParamDefault::CurvePoints(v) => ParamValue::CurvePoints(v.clone()),
             ParamDefault::String(v) => ParamValue::String(v.clone()),
         }
     }
@@ -306,7 +323,9 @@ impl Evaluator {
             ParamValue::Float(v) => Value::Float(*v as f32),
             ParamValue::Int(v) => Value::Int(*v as i32),
             ParamValue::Bool(v) => Value::Bool(*v),
-            ParamValue::Color(v) => Value::Color([v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32]),
+            ParamValue::Color(v) => {
+                Value::Color([v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32])
+            }
             _ => Value::None,
         }
     }
@@ -316,7 +335,9 @@ impl Evaluator {
             ParamDefault::Float(v) => Value::Float(*v as f32),
             ParamDefault::Int(v) => Value::Int(*v as i32),
             ParamDefault::Bool(v) => Value::Bool(*v),
-            ParamDefault::Color(v) => Value::Color([v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32]),
+            ParamDefault::Color(v) => {
+                Value::Color([v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32])
+            }
             _ => Value::None,
         }
     }
@@ -354,11 +375,7 @@ mod tests {
             self.spec.clone()
         }
 
-        fn evaluate<'a>(
-            &'a self,
-            _ctx: &'a EvalContext<'a>,
-        ) -> NodeFuture<'a>
-        {
+        fn evaluate<'a>(&'a self, _ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
             Box::pin(async move {
                 let mut outputs = HashMap::new();
                 outputs.insert("output".to_string(), self.output.clone());
@@ -1100,13 +1117,11 @@ mod tests {
                     match ctx.inputs.get("image") {
                         Some(Value::Image(img)) => {
                             assert_eq!(
-                                img.format,
-                                *ctx.project_format,
+                                img.format, *ctx.project_format,
                                 "rasterized field should use project_format"
                             );
                             assert_eq!(
-                                img.data_window,
-                                ctx.project_format.display_window,
+                                img.data_window, ctx.project_format.display_window,
                                 "rasterized field should use project_format display_window"
                             );
                             let mut outputs = HashMap::new();
@@ -1209,5 +1224,133 @@ mod tests {
         } else {
             panic!("Expected Image output");
         }
+    }
+
+    #[test]
+    fn test_muted_node_passes_through_input() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+        let sink_id = graph.add_node("sink");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+        graph
+            .connect(&registry, processor_id, "output", sink_id, "input")
+            .unwrap();
+
+        // Mute the processor node
+        graph.set_muted(processor_id, true);
+        assert!(graph.nodes.get(processor_id).unwrap().muted);
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(Image::new(1, 1)), // Processor would output 1x1, but muted skips it
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let result = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+        ));
+
+        assert!(result.is_ok());
+        let eval_result = result.unwrap();
+
+        // Muted processor should have zero timing
+        assert_eq!(
+            *eval_result.node_timings.get(&processor_id).unwrap(),
+            std::time::Duration::ZERO
+        );
+    }
+
+    #[test]
+    fn test_unmuted_node_evaluates_normally() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+        let sink_id = graph.add_node("sink");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+        graph
+            .connect(&registry, processor_id, "output", sink_id, "input")
+            .unwrap();
+
+        // Mute and then unmute
+        graph.set_muted(processor_id, true);
+        graph.set_muted(processor_id, false);
+        assert!(!graph.nodes.get(processor_id).unwrap().muted);
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let result = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+        ));
+
+        assert!(result.is_ok());
     }
 }
