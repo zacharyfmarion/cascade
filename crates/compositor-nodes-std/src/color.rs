@@ -67,11 +67,7 @@ impl Node for BrightnessContrast {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -121,31 +117,36 @@ impl Node for BrightnessContrast {
                             out[2] = rgba[2];
                             out[3] = rgba[3];
                         });
-                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
-                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                         let original = ctx.get_input_image("image")?;
-                         crate::mask_utils::apply_mask(original, &output, mask)
-                     } else {
-                         output
-                     };
-                     let mut outputs = HashMap::new();
-                     outputs.insert("image".to_string(), Value::Image(output));
-                     Ok(outputs)
-                 }
-             }
-         })
-     }
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
+                    let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                        let original = ctx.get_input_image("image")?;
+                        crate::mask_utils::apply_mask(original, &output, mask)
+                    } else {
+                        output
+                    };
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
 
-     fn as_any(&self) -> &dyn Any {
-         self
-     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
-     fn as_any_mut(&mut self) -> &mut dyn Any {
-         self
-     }
- }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
- pub struct HueSaturation;
+pub struct HueSaturation;
 
 impl HueSaturation {
     pub fn new() -> Self {
@@ -207,11 +208,7 @@ impl Node for HueSaturation {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -262,31 +259,36 @@ impl Node for HueSaturation {
                             out[2] = nb;
                             out[3] = a;
                         });
-                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
-                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                         let original = ctx.get_input_image("image")?;
-                         crate::mask_utils::apply_mask(original, &output, mask)
-                     } else {
-                         output
-                     };
-                     let mut outputs = HashMap::new();
-                     outputs.insert("image".to_string(), Value::Image(output));
-                     Ok(outputs)
-                 }
-             }
-         })
-     }
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
+                    let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                        let original = ctx.get_input_image("image")?;
+                        crate::mask_utils::apply_mask(original, &output, mask)
+                    } else {
+                        output
+                    };
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
 
-     fn as_any(&self) -> &dyn Any {
-         self
-     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
-     fn as_any_mut(&mut self) -> &mut dyn Any {
-         self
-     }
- }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
- pub struct SeparateHsva;
+pub struct SeparateHsva;
 
 impl SeparateHsva {
     pub fn new() -> Self {
@@ -337,11 +339,7 @@ impl Node for SeparateHsva {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let pixel_count = image.pixel_count();
@@ -371,10 +369,30 @@ impl Node for SeparateHsva {
                         out[3] = 1.0;
                     }
                 });
-            let hue_image = Image::new_with_domain(image.format.clone(), image.data_window, hue_data, image.color_space.clone());
-            let saturation_image = Image::new_with_domain(image.format.clone(), image.data_window, saturation_data, image.color_space.clone());
-            let value_image = Image::new_with_domain(image.format.clone(), image.data_window, value_data, image.color_space.clone());
-            let alpha_image = Image::new_with_domain(image.format.clone(), image.data_window, alpha_data, image.color_space.clone());
+            let hue_image = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                hue_data,
+                image.color_space.clone(),
+            );
+            let saturation_image = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                saturation_data,
+                image.color_space.clone(),
+            );
+            let value_image = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                value_data,
+                image.color_space.clone(),
+            );
+            let alpha_image = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                alpha_data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("hue".to_string(), Value::Image(hue_image));
             outputs.insert("saturation".to_string(), Value::Image(saturation_image));
@@ -444,11 +462,7 @@ impl Node for CombineHsva {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let hue_image = ctx.get_input_image("hue")?;
             let saturation_image = ctx.get_input_image("saturation")?;
@@ -471,7 +485,12 @@ impl Node for CombineHsva {
                     out[2] = b;
                     out[3] = alpha_luma;
                 });
-            let output = Image::new_with_domain(hue_image.format.clone(), hue_image.data_window, data, hue_image.color_space.clone());
+            let output = Image::new_with_domain(
+                hue_image.format.clone(),
+                hue_image.data_window,
+                data,
+                hue_image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -526,11 +545,7 @@ impl Node for Invert {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -563,31 +578,36 @@ impl Node for Invert {
                             out[2] = b;
                             out[3] = a;
                         });
-                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
-                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                         let original = ctx.get_input_image("image")?;
-                         crate::mask_utils::apply_mask(original, &output, mask)
-                     } else {
-                         output
-                     };
-                     let mut outputs = HashMap::new();
-                     outputs.insert("image".to_string(), Value::Image(output));
-                     Ok(outputs)
-                 }
-             }
-         })
-     }
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
+                    let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                        let original = ctx.get_input_image("image")?;
+                        crate::mask_utils::apply_mask(original, &output, mask)
+                    } else {
+                        output
+                    };
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
 
-     fn as_any(&self) -> &dyn Any {
-         self
-     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
-     fn as_any_mut(&mut self) -> &mut dyn Any {
-         self
-     }
- }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
- fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let l = (max + min) * 0.5;
@@ -755,11 +775,7 @@ impl Node for ColorRampNode {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -811,25 +827,30 @@ impl Node for ColorRampNode {
                             out[2] = rgba[2];
                             out[3] = rgba[3];
                         });
-                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
-                     let mut outputs = HashMap::new();
-                     outputs.insert("image".to_string(), Value::Image(output));
-                     Ok(outputs)
-                 }
-             }
-         })
-     }
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
 
-     fn as_any(&self) -> &dyn Any {
-         self
-     }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
-     fn as_any_mut(&mut self) -> &mut dyn Any {
-         self
-     }
- }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
- /// Evaluate the color ramp at t using linear or constant interpolation.
+/// Evaluate the color ramp at t using linear or constant interpolation.
 fn evaluate_color_ramp(stops: &[ColorStop], t: f32, interpolation: i64) -> [f32; 4] {
     if stops.is_empty() {
         return [0.0, 0.0, 0.0, 1.0];

@@ -91,16 +91,12 @@ impl Node for LoadImage {
                 max: None,
                 step: None,
                 ui_hint: UiHint::Hidden,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        _ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, _ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let guard = self
                 .image
@@ -345,11 +341,7 @@ impl Node for LoadImageSequence {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let frame = ctx.frame_time.frame;
 

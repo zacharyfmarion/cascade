@@ -73,11 +73,7 @@ impl Node for Resize {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let width = ctx.get_param_int("width")?.clamp(1, 8192) as u32;
@@ -181,11 +177,7 @@ impl Node for Crop {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let x = ctx.get_param_int("x")? as i32;
@@ -212,8 +204,14 @@ impl Node for Crop {
             if out_dw.width_u32() == 0 || out_dw.height_u32() == 0 {
                 let data = vec![0.0f32; 4];
                 let empty_dw = RectI {
-                    min: IVec2 { x: crop_rect.min.x, y: crop_rect.min.y },
-                    max: IVec2 { x: crop_rect.min.x + 1, y: crop_rect.min.y + 1 },
+                    min: IVec2 {
+                        x: crop_rect.min.x,
+                        y: crop_rect.min.y,
+                    },
+                    max: IVec2 {
+                        x: crop_rect.min.x + 1,
+                        y: crop_rect.min.y + 1,
+                    },
                 };
                 let output = Image::new_with_domain(
                     image.format.clone(),
@@ -317,11 +315,7 @@ impl Node for Flip {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let horizontal = ctx.get_param_bool("horizontal")?;
@@ -343,7 +337,12 @@ impl Node for Flip {
                     out[3] = image.data[idx + 3];
                 });
 
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -413,11 +412,7 @@ impl Node for Rotate {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let angle = ctx.get_param_float("angle")? as f32;
@@ -460,8 +455,14 @@ impl Node for Rotate {
             }
 
             let out_dw = RectI {
-                min: IVec2 { x: min_x.floor() as i32, y: min_y.floor() as i32 },
-                max: IVec2 { x: max_x.ceil() as i32, y: max_y.ceil() as i32 },
+                min: IVec2 {
+                    x: min_x.floor() as i32,
+                    y: min_y.floor() as i32,
+                },
+                max: IVec2 {
+                    x: max_x.ceil() as i32,
+                    y: max_y.ceil() as i32,
+                },
             };
             let out_w = out_dw.width_u32().max(1);
             let out_h = out_dw.height_u32().max(1);
@@ -581,11 +582,7 @@ impl Node for Translate {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let shift_x = ctx.get_param_int("x")?.clamp(-8192, 8192) as i32;
@@ -963,11 +960,7 @@ impl Node for Transform2D {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let tx = ctx.get_param_float("translate_x")? as f32;
@@ -1033,8 +1026,14 @@ impl Node for Transform2D {
             }
 
             let out_dw = RectI {
-                min: IVec2 { x: min_x.floor() as i32, y: min_y.floor() as i32 },
-                max: IVec2 { x: max_x.ceil() as i32, y: max_y.ceil() as i32 },
+                min: IVec2 {
+                    x: min_x.floor() as i32,
+                    y: min_y.floor() as i32,
+                },
+                max: IVec2 {
+                    x: max_x.ceil() as i32,
+                    y: max_y.ceil() as i32,
+                },
             };
             let out_w = out_dw.width_u32().max(1);
             let out_h = out_dw.height_u32().max(1);

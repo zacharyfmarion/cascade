@@ -98,11 +98,7 @@ impl Node for SolidColor {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
             let color = ctx.get_param_color("color")?;
@@ -140,7 +136,7 @@ impl Node for Noise {
             id: "noise".to_string(),
             display_name: "Noise".to_string(),
             category: "Generator".to_string(),
-            description: "Generate procedural noise".to_string(),
+            description: "Generate procedural Perlin noise with fractal layering".to_string(),
             inputs: vec![],
             outputs: vec![PortSpec {
                 name: "field".to_string(),
@@ -150,14 +146,139 @@ impl Node for Noise {
             }],
             params: vec![
                 ParamSpec {
+                    key: "noise_type".to_string(),
+                    label: "Type".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(2.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "fBM".to_string(),
+                        "Multifractal".to_string(),
+                        "Ridged Multifractal".to_string(),
+                    ]),
+                    promotable: false,
+                },
+                ParamSpec {
+                    key: "dimensions".to_string(),
+                    label: "Dimensions".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec!["2D".to_string(), "3D".to_string()]),
+                    promotable: false,
+                },
+                ParamSpec {
                     key: "seed".to_string(),
                     label: "Seed".to_string(),
                     ty: ValueType::Int,
-                    default: ParamDefault::Int(42),
+                    default: ParamDefault::Int(0),
                     min: Some(0.0),
                     max: Some(99999.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "w".to_string(),
+                    label: "W".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1000.0),
+                    max: Some(1000.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "noise_scale".to_string(),
+                    label: "Scale".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(5.0),
+                    min: Some(-1000.0),
+                    max: Some(1000.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "detail".to_string(),
+                    label: "Detail".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(2.0),
+                    min: Some(0.0),
+                    max: Some(15.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "roughness".to_string(),
+                    label: "Roughness".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.5),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "lacunarity".to_string(),
+                    label: "Lacunarity".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(2.0),
+                    min: Some(0.0),
+                    max: Some(1000.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "distortion".to_string(),
+                    label: "Distortion".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1000.0),
+                    max: Some(1000.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "offset_noise".to_string(),
+                    label: "Offset".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1000.0),
+                    max: Some(1000.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gain".to_string(),
+                    label: "Gain".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.0),
+                    max: Some(1000.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "normalize".to_string(),
+                    label: "Normalize".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(true),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
                     promotable: true,
                 },
                 ParamSpec {
@@ -169,17 +290,6 @@ impl Node for Noise {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
-                    promotable: true,
-                },
-                ParamSpec {
-                    key: "intensity".to_string(),
-                    label: "Intensity".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
                     promotable: true,
                 },
                 ParamSpec {
@@ -241,27 +351,59 @@ impl Node for Noise {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
+            let noise_type = ctx.get_param_int("noise_type")? as i32;
+            let dimensions = ctx.get_param_int("dimensions")? as i32;
             let seed = ctx.get_param_int("seed")? as f32;
+            let w = ctx.get_param_float("w")? as f32;
+            let noise_scale = ctx.get_param_float("noise_scale")? as f32;
+            let detail = (ctx.get_param_float("detail")? as f32).clamp(0.0, 15.0);
+            let roughness = (ctx.get_param_float("roughness")? as f32).max(0.0);
+            let lacunarity = ctx.get_param_float("lacunarity")? as f32;
+            let distortion = ctx.get_param_float("distortion")? as f32;
+            let offset_noise = ctx.get_param_float("offset_noise")? as f32;
+            let gain = ctx.get_param_float("gain")? as f32;
+            let normalize = ctx.get_param_bool("normalize")?;
             let monochrome = ctx.get_param_bool("monochrome")?;
-            let intensity = ctx.get_param_float("intensity")? as f32;
+
+            let np = NoiseParams {
+                noise_type,
+                detail,
+                roughness,
+                lacunarity,
+                distortion,
+                offset_n: offset_noise,
+                gain,
+                do_normalize: normalize,
+            };
+
             let field = Field::with_transform(
                 move |u, v| {
-                    let noise_u = u * 1000.0;
-                    let noise_v = v * 1000.0;
-                    if monochrome {
-                        let value = hash_noise(noise_u, noise_v, seed) * intensity;
-                        [value, value, value, 1.0]
+                    let x = u * noise_scale + seed * 100.0;
+                    let y = v * noise_scale + seed * 71.0;
+
+                    let val = if dimensions == 1 {
+                        noise_eval_3d(x, y, w, &np)
                     } else {
-                        let r = hash_noise(noise_u, noise_v, seed) * intensity;
-                        let g = hash_noise(noise_u, noise_v, seed + 1.0) * intensity;
-                        let b = hash_noise(noise_u, noise_v, seed + 2.0) * intensity;
+                        noise_eval_2d(x, y, &np)
+                    };
+
+                    if monochrome {
+                        [val, val, val, 1.0]
+                    } else {
+                        let r = val;
+                        let g = if dimensions == 1 {
+                            noise_eval_3d(x + 139.52, y + 186.41, w + 107.32, &np)
+                        } else {
+                            noise_eval_2d(x + 139.52, y + 186.41, &np)
+                        };
+                        let b = if dimensions == 1 {
+                            noise_eval_3d(x + 273.84, y + 317.59, w + 251.68, &np)
+                        } else {
+                            noise_eval_2d(x + 273.84, y + 317.59, &np)
+                        };
                         [r, g, b, 1.0]
                     }
                 },
@@ -402,11 +544,7 @@ impl Node for Gradient {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
             let direction = ctx.get_param_int("direction")?;
@@ -575,11 +713,7 @@ impl Node for Checkerboard {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
             let size = ctx.get_param_int("size")? as u32;
@@ -794,11 +928,7 @@ impl Node for Shape {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
             let shape = ctx.get_param_int("shape")?.clamp(0, 2);
@@ -921,11 +1051,7 @@ impl Node for RasterizeField {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let field = ctx.get_input_field("field")?;
             let width = ctx.get_param_int("width")? as u32;
@@ -982,10 +1108,7 @@ impl Node for FloatConstant {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a> {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let value = ctx.get_param_float("value")? as f32;
             let mut outputs = HashMap::new();
@@ -1039,10 +1162,7 @@ impl Node for IntegerConstant {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a> {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let value = ctx.get_param_int("value")? as i32;
             let mut outputs = HashMap::new();
@@ -1096,10 +1216,7 @@ impl Node for ColorConstant {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a> {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let color = ctx.get_param_color("color")?;
             let mut outputs = HashMap::new();
@@ -1138,11 +1255,537 @@ fn build_field_transform(ctx: &EvalContext) -> Result<FieldTransform, Compositor
     })
 }
 
-fn hash_noise(x: f32, y: f32, seed: f32) -> f32 {
-    let v = (x * 12.9898 + y * 78.233 + seed * 43758.5453).sin() * 43758.5453;
-    v - v.floor()
+#[derive(Clone, Copy)]
+struct NoiseParams {
+    noise_type: i32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+    distortion: f32,
+    offset_n: f32,
+    gain: f32,
+    do_normalize: bool,
+}
+
+// ── Perlin noise primitives (matching Blender's noise.cc) ───────────
+
+fn floor_fraction(x: f32) -> (i32, f32) {
+    let xi = x.floor() as i32;
+    let xf = x - x.floor();
+    (xi, xf)
+}
+
+fn fade(t: f32) -> f32 {
+    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+fn noise_hash(x: u32, y: u32, z: u32) -> u32 {
+    let mut a: u32 = 0xdeadbeef_u32.wrapping_add(3 << 2).wrapping_add(13);
+    let mut b = a;
+    let mut c = a;
+
+    c = c.wrapping_add(z);
+    b = b.wrapping_add(y);
+    a = a.wrapping_add(x);
+
+    c ^= b;
+    c = c.wrapping_sub(b.rotate_left(14));
+    a ^= c;
+    a = a.wrapping_sub(c.rotate_left(11));
+    b ^= a;
+    b = b.wrapping_sub(a.rotate_left(25));
+    c ^= b;
+    c = c.wrapping_sub(b.rotate_left(16));
+    a ^= c;
+    a = a.wrapping_sub(c.rotate_left(4));
+    b ^= a;
+    b = b.wrapping_sub(a.rotate_left(14));
+    c ^= b;
+    c = c.wrapping_sub(b.rotate_left(24));
+
+    c
+}
+
+fn noise_hash_2d(x: u32, y: u32) -> u32 {
+    noise_hash(x, y, 0)
+}
+
+fn negate_if(val: f32, condition: bool) -> f32 {
+    if condition {
+        -val
+    } else {
+        val
+    }
+}
+
+fn noise_grad_2d(hash: u32, x: f32, y: f32) -> f32 {
+    let h = hash & 3;
+    let u = if h & 1 == 0 { x } else { y };
+    let v = if h & 1 == 0 { y } else { x };
+    negate_if(u, h & 2 != 0) + negate_if(v, (h >> 1) ^ (h & 1) != 0)
+}
+
+fn noise_grad_3d(hash: u32, x: f32, y: f32, z: f32) -> f32 {
+    let h = hash & 15;
+    let u = if h < 8 { x } else { y };
+    let vt = if h == 12 || h == 14 { x } else { z };
+    let v = if h < 4 { y } else { vt };
+    negate_if(u, h & 1 != 0) + negate_if(v, h & 2 != 0)
+}
+
+fn perlin_2d(x: f32, y: f32) -> f32 {
+    let (xi, fx) = floor_fraction(x);
+    let (yi, fy) = floor_fraction(y);
+
+    let u = fade(fx);
+    let v = fade(fy);
+
+    let x0 = xi as u32;
+    let x1 = x0.wrapping_add(1);
+    let y0 = yi as u32;
+    let y1 = y0.wrapping_add(1);
+
+    let n00 = noise_grad_2d(noise_hash_2d(x0, y0), fx, fy);
+    let n10 = noise_grad_2d(noise_hash_2d(x1, y0), fx - 1.0, fy);
+    let n01 = noise_grad_2d(noise_hash_2d(x0, y1), fx, fy - 1.0);
+    let n11 = noise_grad_2d(noise_hash_2d(x1, y1), fx - 1.0, fy - 1.0);
+
+    let nx0 = lerp(n00, n10, u);
+    let nx1 = lerp(n01, n11, u);
+    lerp(nx0, nx1, v)
+}
+
+fn perlin_3d(x: f32, y: f32, z: f32) -> f32 {
+    let (xi, fx) = floor_fraction(x);
+    let (yi, fy) = floor_fraction(y);
+    let (zi, fz) = floor_fraction(z);
+
+    let u = fade(fx);
+    let v = fade(fy);
+    let w = fade(fz);
+
+    let x0 = xi as u32;
+    let x1 = x0.wrapping_add(1);
+    let y0 = yi as u32;
+    let y1 = y0.wrapping_add(1);
+    let z0 = zi as u32;
+    let z1 = z0.wrapping_add(1);
+
+    let n000 = noise_grad_3d(noise_hash(x0, y0, z0), fx, fy, fz);
+    let n100 = noise_grad_3d(noise_hash(x1, y0, z0), fx - 1.0, fy, fz);
+    let n010 = noise_grad_3d(noise_hash(x0, y1, z0), fx, fy - 1.0, fz);
+    let n110 = noise_grad_3d(noise_hash(x1, y1, z0), fx - 1.0, fy - 1.0, fz);
+    let n001 = noise_grad_3d(noise_hash(x0, y0, z1), fx, fy, fz - 1.0);
+    let n101 = noise_grad_3d(noise_hash(x1, y0, z1), fx - 1.0, fy, fz - 1.0);
+    let n011 = noise_grad_3d(noise_hash(x0, y1, z1), fx, fy - 1.0, fz - 1.0);
+    let n111 = noise_grad_3d(noise_hash(x1, y1, z1), fx - 1.0, fy - 1.0, fz - 1.0);
+
+    let nx00 = lerp(n000, n100, u);
+    let nx10 = lerp(n010, n110, u);
+    let nx01 = lerp(n001, n101, u);
+    let nx11 = lerp(n011, n111, u);
+
+    let nxy0 = lerp(nx00, nx10, v);
+    let nxy1 = lerp(nx01, nx11, v);
+
+    lerp(nxy0, nxy1, w)
+}
+
+const PERLIN_SCALE_2D: f32 = 0.6616;
+const PERLIN_SCALE_3D: f32 = 0.9820;
+const PERLIN_WRAP: f32 = 100000.0;
+
+fn perlin_signed_2d(x: f32, y: f32) -> f32 {
+    let x = x % PERLIN_WRAP;
+    let y = y % PERLIN_WRAP;
+    perlin_2d(x, y) * PERLIN_SCALE_2D
+}
+
+fn perlin_signed_3d(x: f32, y: f32, z: f32) -> f32 {
+    let x = x % PERLIN_WRAP;
+    let y = y % PERLIN_WRAP;
+    let z = z % PERLIN_WRAP;
+    perlin_3d(x, y, z) * PERLIN_SCALE_3D
+}
+
+// ── Fractal noise types ─────────────────────────────────────────────
+
+fn perlin_fbm_2d(
+    x: f32,
+    y: f32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+    do_normalize: bool,
+) -> f32 {
+    let mut fscale = 1.0_f32;
+    let mut amp = 1.0_f32;
+    let mut maxamp = 0.0_f32;
+    let mut sum = 0.0_f32;
+
+    let octaves = detail as i32;
+    for _ in 0..=octaves {
+        let t = perlin_signed_2d(x * fscale, y * fscale);
+        sum += t * amp;
+        maxamp += amp;
+        amp *= roughness;
+        fscale *= lacunarity;
+    }
+
+    let rmd = detail - detail.floor();
+    if rmd != 0.0 {
+        let t = perlin_signed_2d(x * fscale, y * fscale);
+        let sum2 = sum + t * amp;
+        if do_normalize {
+            return lerp(
+                0.5 * sum / maxamp + 0.5,
+                0.5 * sum2 / (maxamp + amp) + 0.5,
+                rmd,
+            );
+        } else {
+            return lerp(sum, sum2, rmd);
+        }
+    }
+
+    if do_normalize {
+        0.5 * sum / maxamp + 0.5
+    } else {
+        sum
+    }
+}
+
+fn perlin_fbm_3d(
+    x: f32,
+    y: f32,
+    z: f32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+    do_normalize: bool,
+) -> f32 {
+    let mut fscale = 1.0_f32;
+    let mut amp = 1.0_f32;
+    let mut maxamp = 0.0_f32;
+    let mut sum = 0.0_f32;
+
+    let octaves = detail as i32;
+    for _ in 0..=octaves {
+        let t = perlin_signed_3d(x * fscale, y * fscale, z * fscale);
+        sum += t * amp;
+        maxamp += amp;
+        amp *= roughness;
+        fscale *= lacunarity;
+    }
+
+    let rmd = detail - detail.floor();
+    if rmd != 0.0 {
+        let t = perlin_signed_3d(x * fscale, y * fscale, z * fscale);
+        let sum2 = sum + t * amp;
+        if do_normalize {
+            return lerp(
+                0.5 * sum / maxamp + 0.5,
+                0.5 * sum2 / (maxamp + amp) + 0.5,
+                rmd,
+            );
+        } else {
+            return lerp(sum, sum2, rmd);
+        }
+    }
+
+    if do_normalize {
+        0.5 * sum / maxamp + 0.5
+    } else {
+        sum
+    }
+}
+
+fn perlin_multi_fractal_2d(
+    mut x: f32,
+    mut y: f32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+) -> f32 {
+    let mut value = 1.0_f32;
+    let mut pwr = 1.0_f32;
+
+    let octaves = detail as i32;
+    for _ in 0..=octaves {
+        value *= pwr * perlin_signed_2d(x, y) + 1.0;
+        pwr *= roughness;
+        x *= lacunarity;
+        y *= lacunarity;
+    }
+
+    let rmd = detail - detail.floor();
+    if rmd != 0.0 {
+        value *= rmd * pwr * perlin_signed_2d(x, y) + 1.0;
+    }
+
+    value
+}
+
+fn perlin_multi_fractal_3d(
+    mut x: f32,
+    mut y: f32,
+    mut z: f32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+) -> f32 {
+    let mut value = 1.0_f32;
+    let mut pwr = 1.0_f32;
+
+    let octaves = detail as i32;
+    for _ in 0..=octaves {
+        value *= pwr * perlin_signed_3d(x, y, z) + 1.0;
+        pwr *= roughness;
+        x *= lacunarity;
+        y *= lacunarity;
+        z *= lacunarity;
+    }
+
+    let rmd = detail - detail.floor();
+    if rmd != 0.0 {
+        value *= rmd * pwr * perlin_signed_3d(x, y, z) + 1.0;
+    }
+
+    value
+}
+
+fn perlin_ridged_2d(
+    mut x: f32,
+    mut y: f32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+    offset_n: f32,
+    gain: f32,
+) -> f32 {
+    let mut pwr = roughness;
+
+    let mut signal = offset_n - perlin_signed_2d(x, y).abs();
+    signal *= signal;
+    let mut value = signal;
+    let mut weight: f32;
+
+    let octaves = detail as i32;
+    for _ in 1..=octaves {
+        x *= lacunarity;
+        y *= lacunarity;
+        weight = (signal * gain).clamp(0.0, 1.0);
+        signal = offset_n - perlin_signed_2d(x, y).abs();
+        signal *= signal;
+        signal *= weight;
+        value += signal * pwr;
+        pwr *= roughness;
+    }
+
+    value
+}
+
+#[allow(clippy::too_many_arguments)]
+fn perlin_ridged_3d(
+    mut x: f32,
+    mut y: f32,
+    mut z: f32,
+    detail: f32,
+    roughness: f32,
+    lacunarity: f32,
+    offset_n: f32,
+    gain: f32,
+) -> f32 {
+    let mut pwr = roughness;
+
+    let mut signal = offset_n - perlin_signed_3d(x, y, z).abs();
+    signal *= signal;
+    let mut value = signal;
+    let mut weight: f32;
+
+    let octaves = detail as i32;
+    for _ in 1..=octaves {
+        x *= lacunarity;
+        y *= lacunarity;
+        z *= lacunarity;
+        weight = (signal * gain).clamp(0.0, 1.0);
+        signal = offset_n - perlin_signed_3d(x, y, z).abs();
+        signal *= signal;
+        signal *= weight;
+        value += signal * pwr;
+        pwr *= roughness;
+    }
+
+    value
+}
+
+// ── Distortion (domain warping) ─────────────────────────────────────
+
+fn distort_2d(x: f32, y: f32, strength: f32) -> (f32, f32) {
+    if strength.abs() < f32::EPSILON {
+        return (x, y);
+    }
+    let dx = perlin_signed_2d(x + 132.54, y + 164.28) * strength;
+    let dy = perlin_signed_2d(x + 197.36, y + 241.71) * strength;
+    (x + dx, y + dy)
+}
+
+fn distort_3d(x: f32, y: f32, z: f32, strength: f32) -> (f32, f32, f32) {
+    if strength.abs() < f32::EPSILON {
+        return (x, y, z);
+    }
+    let dx = perlin_signed_3d(x + 132.54, y + 164.28, z + 107.32) * strength;
+    let dy = perlin_signed_3d(x + 197.36, y + 241.71, z + 153.49) * strength;
+    let dz = perlin_signed_3d(x + 263.18, y + 318.94, z + 201.67) * strength;
+    (x + dx, y + dy, z + dz)
+}
+
+// ── Top-level noise evaluation dispatch ─────────────────────────────
+
+fn noise_eval_2d(x: f32, y: f32, p: &NoiseParams) -> f32 {
+    let (x, y) = distort_2d(x, y, p.distortion);
+    match p.noise_type {
+        0 => perlin_fbm_2d(x, y, p.detail, p.roughness, p.lacunarity, p.do_normalize),
+        1 => perlin_multi_fractal_2d(x, y, p.detail, p.roughness, p.lacunarity),
+        2 => perlin_ridged_2d(
+            x,
+            y,
+            p.detail,
+            p.roughness,
+            p.lacunarity,
+            p.offset_n,
+            p.gain,
+        ),
+        _ => perlin_fbm_2d(x, y, p.detail, p.roughness, p.lacunarity, p.do_normalize),
+    }
+}
+
+fn noise_eval_3d(x: f32, y: f32, z: f32, p: &NoiseParams) -> f32 {
+    let (x, y, z) = distort_3d(x, y, z, p.distortion);
+    match p.noise_type {
+        0 => perlin_fbm_3d(x, y, z, p.detail, p.roughness, p.lacunarity, p.do_normalize),
+        1 => perlin_multi_fractal_3d(x, y, z, p.detail, p.roughness, p.lacunarity),
+        2 => perlin_ridged_3d(
+            x,
+            y,
+            z,
+            p.detail,
+            p.roughness,
+            p.lacunarity,
+            p.offset_n,
+            p.gain,
+        ),
+        _ => perlin_fbm_3d(x, y, z, p.detail, p.roughness, p.lacunarity, p.do_normalize),
+    }
+}
+
+#[cfg(test)]
+mod noise_tests {
+    use super::*;
+
+    #[test]
+    fn test_perlin_noise_deterministic() {
+        let a = perlin_signed_2d(1.5, 2.7);
+        let b = perlin_signed_2d(1.5, 2.7);
+        assert_eq!(a, b, "Perlin noise must be deterministic");
+
+        let c = perlin_signed_3d(1.5, 2.7, 3.1);
+        let d = perlin_signed_3d(1.5, 2.7, 3.1);
+        assert_eq!(c, d, "3D Perlin noise must be deterministic");
+    }
+
+    #[test]
+    fn test_perlin_fbm_normalized_range() {
+        let mut min_val = f32::MAX;
+        let mut max_val = f32::MIN;
+        for i in 0..1000 {
+            let x = (i as f32) * 0.13;
+            let y = (i as f32) * 0.17 + 5.0;
+            let val = perlin_fbm_2d(x, y, 4.0, 0.5, 2.0, true);
+            min_val = min_val.min(val);
+            max_val = max_val.max(val);
+        }
+        assert!(
+            min_val >= -0.1 && max_val <= 1.1,
+            "Normalized fBM should be approximately in [0,1], got [{}, {}]",
+            min_val,
+            max_val
+        );
+    }
+
+    #[test]
+    fn test_noise_types_differ() {
+        let x = 3.7;
+        let y = 8.2;
+        let detail = 3.0;
+        let roughness = 0.5;
+        let lacunarity = 2.0;
+
+        let fbm = perlin_fbm_2d(x, y, detail, roughness, lacunarity, false);
+        let multi = perlin_multi_fractal_2d(x, y, detail, roughness, lacunarity);
+        let ridged = perlin_ridged_2d(x, y, detail, roughness, lacunarity, 1.0, 2.0);
+
+        assert!(
+            (fbm - multi).abs() > 0.001 || (fbm - ridged).abs() > 0.001,
+            "Different noise types should produce different values: fbm={}, multi={}, ridged={}",
+            fbm,
+            multi,
+            ridged
+        );
+    }
+
+    #[test]
+    fn test_distortion_modifies_output() {
+        let x = 5.0;
+        let y = 5.0;
+        let np_no = NoiseParams {
+            noise_type: 0,
+            detail: 2.0,
+            roughness: 0.5,
+            lacunarity: 2.0,
+            distortion: 0.0,
+            offset_n: 0.0,
+            gain: 1.0,
+            do_normalize: true,
+        };
+        let np_with = NoiseParams {
+            noise_type: 0,
+            detail: 2.0,
+            roughness: 0.5,
+            lacunarity: 2.0,
+            distortion: 2.0,
+            offset_n: 0.0,
+            gain: 1.0,
+            do_normalize: true,
+        };
+        let no_distort = noise_eval_2d(x, y, &np_no);
+        let with_distort = noise_eval_2d(x, y, &np_with);
+        assert!(
+            (no_distort - with_distort).abs() > 0.001,
+            "Distortion should change the output: {} vs {}",
+            no_distort,
+            with_distort
+        );
+    }
+
+    #[test]
+    fn test_perlin_spatial_coherence() {
+        let a = perlin_signed_2d(1.0, 1.0);
+        let b = perlin_signed_2d(1.001, 1.0);
+        assert!(
+            (a - b).abs() < 0.01,
+            "Nearby points should have similar values: {} vs {}",
+            a,
+            b
+        );
+
+        let c = perlin_signed_2d(50.0, 50.0);
+        assert!(
+            (a - c).abs() > 0.0001 || a == 0.0,
+            "Distant points should generally differ"
+        );
+    }
 }

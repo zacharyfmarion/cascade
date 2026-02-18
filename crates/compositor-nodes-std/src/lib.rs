@@ -1,8 +1,8 @@
 use compositor_core::node::NodeRegistry;
 use std::sync::Arc;
 
-pub mod blend;
 pub mod ai;
+pub mod blend;
 pub mod color;
 pub mod color_convert;
 pub mod color_ops;
@@ -19,13 +19,13 @@ pub mod script;
 pub mod transform;
 pub mod utility;
 
-pub use blend::{AlphaOver, Blend};
 pub use ai::AiInpaint;
+pub use blend::{AlphaOver, Blend, Merge};
 pub use color::{
     BrightnessContrast, ColorRampNode, CombineHsva, HueSaturation, Invert, SeparateHsva,
 };
 pub use color_convert::ColorConvert;
-pub use color_ops::{ChannelShuffle, ColorBalance, Curves, Gamma, Levels, Posterize, Threshold};
+pub use color_ops::{ChannelShuffle, Clamp, ColorBalance, Curves, Gamma, Grade, Levels, Posterize, Threshold};
 pub use filter::GaussianBlur;
 pub use filter_ops::{Dilate, EdgeDetect, Erode, Median, Sharpen};
 pub use generate::{
@@ -34,9 +34,9 @@ pub use generate::{
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
-pub use matte::{ChromaKey, ExtractChannel, Premultiply, SetAlpha, Unpremultiply};
-pub use palette::ColorPaletteNode;
+pub use matte::{ChromaKey, CombineRgba, CopyChannels, ExtractChannel, Premultiply, SeparateRgba, SetAlpha, Unpremultiply};
 pub use output::{ExportImageSequence, ExportVideo, Viewer};
+pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use transform::{Crop, Flip, Resize, Rotate, Transform2D, Translate};
 pub use utility::{MapRange, MathNode};
@@ -64,6 +64,8 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("threshold", || Arc::new(Threshold::new()));
     registry.register("posterize", || Arc::new(Posterize::new()));
     registry.register("gamma", || Arc::new(Gamma::new()));
+    registry.register("grade", || Arc::new(Grade::new()));
+    registry.register("clamp", || Arc::new(Clamp::new()));
     registry.register("color_ramp", || Arc::new(ColorRampNode::new()));
     registry.register("color_palette", || Arc::new(ColorPaletteNode::new()));
     registry.register("separate_hsva", || Arc::new(SeparateHsva::new()));
@@ -83,6 +85,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     // Composite
     registry.register("blend", || Arc::new(Blend::new()));
     registry.register("alpha_over", || Arc::new(AlphaOver::new()));
+    registry.register("merge", || Arc::new(Merge::new()));
 
     // Transform
     registry.register("resize", || Arc::new(Resize::new()));
@@ -107,6 +110,9 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("unpremultiply", || Arc::new(Unpremultiply::new()));
     registry.register("set_alpha", || Arc::new(SetAlpha::new()));
     registry.register("extract_channel", || Arc::new(ExtractChannel::new()));
+    registry.register("separate_rgba", || Arc::new(SeparateRgba::new()));
+    registry.register("combine_rgba", || Arc::new(CombineRgba::new()));
+    registry.register("copy_channels", || Arc::new(CopyChannels::new()));
     registry.register("chroma_key", || Arc::new(ChromaKey::new()));
     registry.register("despill", || Arc::new(Despill::new()));
     registry.register("shape", || Arc::new(Shape::new()));
@@ -277,18 +283,131 @@ mod tests {
         assert_color_approx(sampled, [0.5, 0.5, 0.5, 1.0], "levels");
     }
 
+    fn curves_default_params() -> HashMap<String, ParamValue> {
+        let identity = vec![
+            CurvePoint { x: 0.0, y: 0.0 },
+            CurvePoint { x: 1.0, y: 1.0 },
+        ];
+        let mut params = HashMap::new();
+        params.insert("channel".to_string(), ParamValue::Int(0));
+        params.insert("master_curve".to_string(), ParamValue::CurvePoints(identity.clone()));
+        params.insert("red_curve".to_string(), ParamValue::CurvePoints(identity.clone()));
+        params.insert("green_curve".to_string(), ParamValue::CurvePoints(identity.clone()));
+        params.insert("blue_curve".to_string(), ParamValue::CurvePoints(identity));
+        params
+    }
+
     #[test]
     fn test_curves_field_passthrough() {
         let node = Curves::new();
-        let mut params = HashMap::new();
-        params.insert("black_point".to_string(), ParamValue::Float(0.0));
-        params.insert("shadows".to_string(), ParamValue::Float(0.25));
-        params.insert("midtones".to_string(), ParamValue::Float(0.5));
-        params.insert("highlights".to_string(), ParamValue::Float(0.75));
-        params.insert("white_point".to_string(), ParamValue::Float(1.0));
+        let params = curves_default_params();
         let value = eval_field_passthrough(&node, [0.5, 0.5, 0.5, 1.0], params);
         let sampled = sample_field(&value);
-        assert_color_approx(sampled, [0.5, 0.5, 0.5, 1.0], "curves");
+        assert_color_approx(sampled, [0.5, 0.5, 0.5, 1.0], "curves identity field");
+    }
+
+    #[test]
+    fn test_curves_identity() {
+        let node = Curves::new();
+        let params = curves_default_params();
+        let img = make_test_image(2, 2, [0.3, 0.5, 0.7, 1.0]);
+        let result = eval_image_node(&node, img, params);
+        assert_color_approx(
+            [result.data[0], result.data[1], result.data[2], result.data[3]],
+            [0.3, 0.5, 0.7, 1.0],
+            "curves identity",
+        );
+    }
+
+    #[test]
+    fn test_curves_master_darkens() {
+        let node = Curves::new();
+        let mut params = curves_default_params();
+        // S-curve that pulls midtones down
+        params.insert(
+            "master_curve".to_string(),
+            ParamValue::CurvePoints(vec![
+                CurvePoint { x: 0.0, y: 0.0 },
+                CurvePoint { x: 0.5, y: 0.3 },
+                CurvePoint { x: 1.0, y: 1.0 },
+            ]),
+        );
+        let img = make_test_image(2, 2, [0.5, 0.5, 0.5, 1.0]);
+        let result = eval_image_node(&node, img, params);
+        let r = result.data[0];
+        let g = result.data[1];
+        let b = result.data[2];
+        // Midtones should be pulled down toward 0.3
+        assert!(r < 0.5, "master curve should darken midtones, got r={}", r);
+        assert!((r - 0.3).abs() < 0.02, "expected ~0.3, got r={}", r);
+        assert!((r - g).abs() < 0.001, "master should affect all channels equally");
+        assert!((r - b).abs() < 0.001, "master should affect all channels equally");
+        // Alpha unchanged
+        assert!((result.data[3] - 1.0).abs() < 0.001, "alpha should be unchanged");
+    }
+
+    #[test]
+    fn test_curves_per_channel() {
+        let node = Curves::new();
+        let mut params = curves_default_params();
+        // Only adjust red curve — lift midtones
+        params.insert(
+            "red_curve".to_string(),
+            ParamValue::CurvePoints(vec![
+                CurvePoint { x: 0.0, y: 0.0 },
+                CurvePoint { x: 0.5, y: 0.7 },
+                CurvePoint { x: 1.0, y: 1.0 },
+            ]),
+        );
+        let img = make_test_image(2, 2, [0.5, 0.5, 0.5, 1.0]);
+        let result = eval_image_node(&node, img, params);
+        let r = result.data[0];
+        let g = result.data[1];
+        let b = result.data[2];
+        // Red should be lifted
+        assert!(r > 0.6, "red curve should lift red midtones, got r={}", r);
+        // Green and blue should be unchanged (identity curve)
+        assert!((g - 0.5).abs() < 0.01, "green should be unchanged, got g={}", g);
+        assert!((b - 0.5).abs() < 0.01, "blue should be unchanged, got b={}", b);
+    }
+
+    #[test]
+    fn test_curves_monotone_no_overshoot() {
+        let node = Curves::new();
+        let mut params = curves_default_params();
+        // Steep S-curve that would overshoot with natural cubic spline
+        params.insert(
+            "master_curve".to_string(),
+            ParamValue::CurvePoints(vec![
+                CurvePoint { x: 0.0, y: 0.0 },
+                CurvePoint { x: 0.25, y: 0.0 },
+                CurvePoint { x: 0.5, y: 1.0 },
+                CurvePoint { x: 0.75, y: 1.0 },
+                CurvePoint { x: 1.0, y: 1.0 },
+            ]),
+        );
+        // Test values across the range — none should go below 0 or above 1
+        for input_val in [0.1f32, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9] {
+            let img = make_test_image(1, 1, [input_val, input_val, input_val, 1.0]);
+            let result = eval_image_node(&node, img, params.clone());
+            let out = result.data[0];
+            assert!(
+                out >= -0.01 && out <= 1.01,
+                "monotone cubic should not overshoot: input={}, output={}",
+                input_val,
+                out
+            );
+        }
+    }
+
+    #[test]
+    fn test_curves_format_passthrough() {
+        let node = Curves::new();
+        let params = curves_default_params();
+        let img = make_test_image(2, 2, [0.5, 0.5, 0.5, 1.0]);
+        let result = eval_image_node(&node, img, params);
+        assert_eq!(result.format.width(), 2);
+        assert_eq!(result.format.height(), 2);
     }
 
     #[test]
@@ -432,6 +551,14 @@ mod tests {
     /// Helper: create a small test image with a non-trivial data_window and format.
     /// The image is 4×4 pixels with data_window offset to (100,100)→(104,104)
     /// and format set to HD 1920×1080. All pixels are set to `color`.
+    fn make_test_image(w: u32, h: u32, color: [f32; 4]) -> Image {
+        let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+        for pixel in data.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&color);
+        }
+        Image::from_f32_data(w, h, data)
+    }
+
     fn make_offset_image(color: [f32; 4]) -> Image {
         let w = 4u32;
         let h = 4u32;
@@ -485,12 +612,18 @@ mod tests {
         // Format must be preserved
         assert_eq!(output.format, input.format, "format must propagate");
         // Data window must be preserved (same dimensions, same offset)
-        assert_eq!(output.data_window, input.data_window, "data_window must propagate");
+        assert_eq!(
+            output.data_window, input.data_window,
+            "data_window must propagate"
+        );
         // Dimensions must still match
         assert_eq!(output.width, 4);
         assert_eq!(output.height, 4);
         // Color space must be preserved
-        assert_eq!(output.color_space, input.color_space, "color_space must propagate");
+        assert_eq!(
+            output.color_space, input.color_space,
+            "color_space must propagate"
+        );
         // Pixel values should be modified (brightness +0.1)
         let px = output.get_pixel_f32(0, 0);
         assert!(
@@ -507,9 +640,18 @@ mod tests {
 
         let output = eval_image_node(&node, input.clone(), HashMap::new());
 
-        assert_eq!(output.format, input.format, "format must propagate through invert");
-        assert_eq!(output.data_window, input.data_window, "data_window must propagate through invert");
-        assert_eq!(output.color_space, input.color_space, "color_space must propagate through invert");
+        assert_eq!(
+            output.format, input.format,
+            "format must propagate through invert"
+        );
+        assert_eq!(
+            output.data_window, input.data_window,
+            "data_window must propagate through invert"
+        );
+        assert_eq!(
+            output.color_space, input.color_space,
+            "color_space must propagate through invert"
+        );
 
         let px = output.get_pixel_f32(0, 0);
         assert!(
@@ -547,24 +689,45 @@ mod tests {
 
         // Step 1: Invert
         let after_invert = eval_image_node(&Invert::new(), input, HashMap::new());
-        assert_eq!(after_invert.format, original_format, "format lost after invert");
-        assert_eq!(after_invert.data_window, original_dw, "data_window lost after invert");
+        assert_eq!(
+            after_invert.format, original_format,
+            "format lost after invert"
+        );
+        assert_eq!(
+            after_invert.data_window, original_dw,
+            "data_window lost after invert"
+        );
 
         // Step 2: BrightnessContrast
         let mut bc_params = HashMap::new();
         bc_params.insert("brightness".to_string(), ParamValue::Float(0.0));
         bc_params.insert("contrast".to_string(), ParamValue::Float(0.0));
         let after_bc = eval_image_node(&BrightnessContrast::new(), after_invert, bc_params);
-        assert_eq!(after_bc.format, original_format, "format lost after brightness/contrast");
-        assert_eq!(after_bc.data_window, original_dw, "data_window lost after brightness/contrast");
+        assert_eq!(
+            after_bc.format, original_format,
+            "format lost after brightness/contrast"
+        );
+        assert_eq!(
+            after_bc.data_window, original_dw,
+            "data_window lost after brightness/contrast"
+        );
 
         // Step 3: Gamma
         let mut gamma_params = HashMap::new();
         gamma_params.insert("gamma".to_string(), ParamValue::Float(1.0));
         let after_gamma = eval_image_node(&Gamma::new(), after_bc, gamma_params);
-        assert_eq!(after_gamma.format, original_format, "format lost after gamma");
-        assert_eq!(after_gamma.data_window, original_dw, "data_window lost after gamma");
-        assert_eq!(after_gamma.color_space, original_cs, "color_space lost after gamma");
+        assert_eq!(
+            after_gamma.format, original_format,
+            "format lost after gamma"
+        );
+        assert_eq!(
+            after_gamma.data_window, original_dw,
+            "data_window lost after gamma"
+        );
+        assert_eq!(
+            after_gamma.color_space, original_cs,
+            "color_space lost after gamma"
+        );
     }
 
     #[test]
@@ -605,9 +768,18 @@ mod tests {
 
         let output = eval_image_node(&node, input.clone(), params);
 
-        assert_eq!(output.format, input.format, "format must propagate through blur");
-        assert_eq!(output.data_window, input.data_window, "data_window must propagate through blur");
-        assert_eq!(output.color_space, input.color_space, "color_space must propagate through blur");
+        assert_eq!(
+            output.format, input.format,
+            "format must propagate through blur"
+        );
+        assert_eq!(
+            output.data_window, input.data_window,
+            "data_window must propagate through blur"
+        );
+        assert_eq!(
+            output.color_space, input.color_space,
+            "color_space must propagate through blur"
+        );
         assert_eq!(output.width, 4);
         assert_eq!(output.height, 4);
     }
@@ -619,8 +791,14 @@ mod tests {
 
         let output = eval_image_node(&node, input.clone(), HashMap::new());
 
-        assert_eq!(output.format, input.format, "format must propagate through premultiply");
-        assert_eq!(output.data_window, input.data_window, "data_window must propagate through premultiply");
+        assert_eq!(
+            output.format, input.format,
+            "format must propagate through premultiply"
+        );
+        assert_eq!(
+            output.data_window, input.data_window,
+            "data_window must propagate through premultiply"
+        );
         // Premultiplied: RGB * A = 0.5 * 0.5 = 0.25
         let px = output.get_pixel_f32(0, 0);
         assert!(
@@ -727,12 +905,188 @@ mod tests {
         }
     }
 
+    fn merge_params(
+        operation: i32,
+        bbox: i32,
+        opacity: f32,
+        mix: f32,
+    ) -> HashMap<String, ParamValue> {
+        let mut params = HashMap::new();
+        params.insert("operation".to_string(), ParamValue::Int(operation.into()));
+        params.insert("bbox".to_string(), ParamValue::Int(bbox.into()));
+        params.insert("opacity".to_string(), ParamValue::Float(opacity.into()));
+        params.insert("mix".to_string(), ParamValue::Float(mix.into()));
+        params
+    }
+
+    /// Reference Porter-Duff implementations from the 1984 paper.
+    /// These use straight (unpremultiplied) alpha.
+    /// a_alpha is the effective alpha of A (after opacity/mask).
+    mod porter_duff_reference {
+        /// A over B
+        pub fn over(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = aa + ba * (1.0 - aa);
+            if out_a <= 0.0 {
+                return [0.0, 0.0, 0.0, 0.0];
+            }
+            [
+                (a[0] * aa + b[0] * ba * (1.0 - aa)) / out_a,
+                (a[1] * aa + b[1] * ba * (1.0 - aa)) / out_a,
+                (a[2] * aa + b[2] * ba * (1.0 - aa)) / out_a,
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// B over A (Under)
+        pub fn under(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            over(b, ba, a, aa)
+        }
+
+        /// A In B
+        pub fn src_in(a: [f32; 4], aa: f32, _b: [f32; 4], ba: f32) -> [f32; 4] {
+            [a[0], a[1], a[2], (aa * ba).clamp(0.0, 1.0)]
+        }
+
+        /// A Out B
+        pub fn src_out(a: [f32; 4], aa: f32, _b: [f32; 4], ba: f32) -> [f32; 4] {
+            [a[0], a[1], a[2], (aa * (1.0 - ba)).clamp(0.0, 1.0)]
+        }
+
+        /// A Atop B
+        pub fn atop(a: [f32; 4], aa: f32, b: [f32; 4], _ba: f32) -> [f32; 4] {
+            [
+                a[0] * aa + b[0] * (1.0 - aa),
+                a[1] * aa + b[1] * (1.0 - aa),
+                a[2] * aa + b[2] * (1.0 - aa),
+                _ba.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// A Xor B
+        pub fn xor(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = aa * (1.0 - ba) + ba * (1.0 - aa);
+            if out_a <= 0.0 {
+                return [0.0, 0.0, 0.0, 0.0];
+            }
+            [
+                (a[0] * aa * (1.0 - ba) + b[0] * ba * (1.0 - aa)) / out_a,
+                (a[1] * aa * (1.0 - ba) + b[1] * ba * (1.0 - aa)) / out_a,
+                (a[2] * aa * (1.0 - ba) + b[2] * ba * (1.0 - aa)) / out_a,
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// Stencil: B where A has alpha
+        pub fn stencil(_a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            [b[0], b[1], b[2], (ba * aa).clamp(0.0, 1.0)]
+        }
+
+        /// Mask: same as In
+        pub fn mask(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            src_in(a, aa, b, ba)
+        }
+
+        /// Plus (additive)
+        pub fn plus(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            [
+                a[0] * aa + b[0] * ba, // no RGB clamp (HDR)
+                a[1] * aa + b[1] * ba,
+                a[2] * aa + b[2] * ba,
+                (aa + ba).min(1.0),
+            ]
+        }
+
+        /// Multiply
+        pub fn multiply(a: [f32; 4], _aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = _aa + ba - _aa * ba;
+            [
+                a[0] * b[0],
+                a[1] * b[1],
+                a[2] * b[2],
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// Difference
+        pub fn difference(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = aa + ba - aa * ba;
+            [
+                (a[0] - b[0]).abs(),
+                (a[1] - b[1]).abs(),
+                (a[2] - b[2]).abs(),
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// Screen
+        pub fn screen(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = aa + ba - aa * ba;
+            [
+                1.0 - (1.0 - a[0]) * (1.0 - b[0]),
+                1.0 - (1.0 - a[1]) * (1.0 - b[1]),
+                1.0 - (1.0 - a[2]) * (1.0 - b[2]),
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// Max
+        pub fn max_op(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = aa + ba - aa * ba;
+            [
+                a[0].max(b[0]),
+                a[1].max(b[1]),
+                a[2].max(b[2]),
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+
+        /// Min
+        pub fn min_op(a: [f32; 4], aa: f32, b: [f32; 4], ba: f32) -> [f32; 4] {
+            let out_a = aa + ba - aa * ba;
+            [
+                a[0].min(b[0]),
+                a[1].min(b[1]),
+                a[2].min(b[2]),
+                out_a.clamp(0.0, 1.0),
+            ]
+        }
+    }
+
+    /// Run the Merge node on two 1x1 images and return the output pixel.
+    fn merge_single_pixel(
+        a_color: [f32; 4],
+        b_color: [f32; 4],
+        operation: i64,
+        opacity: f64,
+    ) -> [f32; 4] {
+        let a = Image::from_f32_data(1, 1, a_color.to_vec());
+        let b = Image::from_f32_data(1, 1, b_color.to_vec());
+        let node = Merge::new();
+        let mut params = HashMap::new();
+        params.insert("operation".to_string(), ParamValue::Int(operation));
+        params.insert("bbox".to_string(), ParamValue::Int(0));
+        params.insert("opacity".to_string(), ParamValue::Float(opacity));
+        params.insert("mix".to_string(), ParamValue::Float(1.0));
+        let output = eval_two_input_node(&node, "A", a, "B", b, params);
+        output.get_pixel_f32(0, 0)
+    }
+
     #[test]
     fn test_alpha_over_same_size_images() {
-        let bg = Image::from_f32_data(2, 2, vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
-                                                   0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0]);
-        let fg = Image::from_f32_data(2, 2, vec![1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5,
-                                                   1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5]);
+        let bg = Image::from_f32_data(
+            2,
+            2,
+            vec![
+                0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
+            ],
+        );
+        let fg = Image::from_f32_data(
+            2,
+            2,
+            vec![
+                1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5,
+            ],
+        );
         let node = AlphaOver::new();
         let mut params = HashMap::new();
         params.insert("opacity".to_string(), ParamValue::Float(1.0));
@@ -756,7 +1110,10 @@ mod tests {
 
         // FG: 2x2 red at (1,1)→(3,3), offset within the BG
         let fg_data = vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat();
-        let fg_dw = RectI { min: IVec2::new(1, 1), max: IVec2::new(3, 3) };
+        let fg_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
         let fg = Image::new_with_domain(
             Format::from_dimensions(4, 4),
             fg_dw,
@@ -778,18 +1135,27 @@ mod tests {
 
         // (0,0) = bg only (blue), fg is transparent black here → pure blue
         let px00 = output.get_rgba(0, 0);
-        assert!(approx_eq(px00[2], 1.0) && approx_eq(px00[0], 0.0),
-            "top-left should be blue: {:?}", px00);
+        assert!(
+            approx_eq(px00[2], 1.0) && approx_eq(px00[0], 0.0),
+            "top-left should be blue: {:?}",
+            px00
+        );
 
         // (1,1) = fg is opaque red (alpha=1) → completely overrides bg
         let px11 = output.get_rgba(1, 1);
-        assert!(approx_eq(px11[0], 1.0) && approx_eq(px11[2], 0.0),
-            "center should be red: {:?}", px11);
+        assert!(
+            approx_eq(px11[0], 1.0) && approx_eq(px11[2], 0.0),
+            "center should be red: {:?}",
+            px11
+        );
 
         // (3,3) = bg only again (fg data_window is half-open, doesn't include 3)
         let px33 = output.get_rgba(3, 3);
-        assert!(approx_eq(px33[2], 1.0) && approx_eq(px33[0], 0.0),
-            "bottom-right should be blue: {:?}", px33);
+        assert!(
+            approx_eq(px33[2], 1.0) && approx_eq(px33[0], 0.0),
+            "bottom-right should be blue: {:?}",
+            px33
+        );
     }
 
     #[test]
@@ -798,7 +1164,10 @@ mod tests {
         let a = Image::from_f32_data(2, 2, vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat());
 
         // B: green at (10,10)→(12,12) — completely separate
-        let b_dw = RectI { min: IVec2::new(10, 10), max: IVec2::new(12, 12) };
+        let b_dw = RectI {
+            min: IVec2::new(10, 10),
+            max: IVec2::new(12, 12),
+        };
         let b = Image::new_with_domain(
             Format::from_dimensions(20, 20),
             b_dw,
@@ -826,7 +1195,273 @@ mod tests {
 
         // (5,5) = neither has data → transparent black
         let px_gap = output.get_rgba(5, 5);
-        assert!(approx_eq(px_gap[3], 0.0), "gap should be transparent: {:?}", px_gap);
+        assert!(
+            approx_eq(px_gap[3], 0.0),
+            "gap should be transparent: {:?}",
+            px_gap
+        );
+    }
+
+    #[test]
+    fn test_merge_porter_duff_vs_reference() {
+        let test_pixels: Vec<([f32; 4], [f32; 4], &str)> = vec![
+            ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], "opaque red over opaque blue"),
+            (
+                [1.0, 0.0, 0.0, 0.5],
+                [0.0, 0.0, 1.0, 0.8],
+                "semi-trans red over semi-trans blue",
+            ),
+            (
+                [0.0, 1.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0, 1.0],
+                "transparent A over opaque B",
+            ),
+            (
+                [1.0, 0.5, 0.0, 1.0],
+                [0.0, 0.0, 0.0, 0.0],
+                "opaque A over transparent B",
+            ),
+            ([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], "both transparent"),
+            (
+                [0.3, 0.6, 0.9, 0.7],
+                [0.9, 0.3, 0.1, 0.4],
+                "arbitrary semi-transparent",
+            ),
+            (
+                [1.0, 1.0, 1.0, 0.5],
+                [0.5, 0.5, 0.5, 0.5],
+                "white over gray, both 50%",
+            ),
+            (
+                [0.0, 0.0, 0.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+                "black over white, both opaque",
+            ),
+            (
+                [1.4, 0.2, 0.0, 0.9],
+                [0.4, 1.3, 0.8, 0.6],
+                "hdr channels over semi-transparent",
+            ),
+        ];
+
+        let operations: Vec<(i64, &str, fn([f32; 4], f32, [f32; 4], f32) -> [f32; 4])> = vec![
+            (0, "Over", porter_duff_reference::over),
+            (1, "Under", porter_duff_reference::under),
+            (2, "In", porter_duff_reference::src_in),
+            (3, "Out", porter_duff_reference::src_out),
+            (4, "Atop", porter_duff_reference::atop),
+            (5, "Xor", porter_duff_reference::xor),
+            (6, "Stencil", porter_duff_reference::stencil),
+            (7, "Mask", porter_duff_reference::mask),
+            (8, "Plus", porter_duff_reference::plus),
+            (9, "Multiply", porter_duff_reference::multiply),
+            (10, "Difference", porter_duff_reference::difference),
+            (11, "Screen", porter_duff_reference::screen),
+            (12, "Max", porter_duff_reference::max_op),
+            (13, "Min", porter_duff_reference::min_op),
+        ];
+
+        for (a, b, pixel_desc) in &test_pixels {
+            for (op_idx, op_name, ref_fn) in &operations {
+                let actual = merge_single_pixel(*a, *b, *op_idx, 1.0);
+                let expected = ref_fn(*a, a[3], *b, b[3]);
+
+                for c in 0..4 {
+                    let channel = ["R", "G", "B", "A"][c];
+                    assert!(
+                        (actual[c] - expected[c]).abs() < 0.002,
+                        "MISMATCH: op={}, pixels={}, channel={}: got {}, expected {}\n  A={:?}, B={:?}\n  actual={:?}, expected={:?}",
+                        op_name,
+                        pixel_desc,
+                        channel,
+                        actual[c],
+                        expected[c],
+                        a,
+                        b,
+                        actual,
+                        expected,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_merge_bbox_intersection() {
+        let a_dw = RectI {
+            min: IVec2::new(0, 0),
+            max: IVec2::new(2, 2),
+        };
+        let b_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
+        let format = Format::from_dimensions(3, 3);
+        let a = Image::new_with_domain(
+            format.clone(),
+            a_dw,
+            vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat(),
+            ColorSpaceId::default_working(),
+        );
+        let b = Image::new_with_domain(
+            format,
+            b_dw,
+            vec![[0.0f32, 0.0, 1.0, 1.0]; 4].concat(),
+            ColorSpaceId::default_working(),
+        );
+        let node = Merge::new();
+
+        let output = eval_two_input_node(&node, "A", a, "B", b, merge_params(0, 1, 1.0, 1.0));
+
+        assert_eq!(output.data_window.min, IVec2::new(1, 1));
+        assert_eq!(output.data_window.max, IVec2::new(2, 2));
+        assert_eq!(output.width, 1);
+        assert_eq!(output.height, 1);
+        let px = output.get_rgba(1, 1);
+        assert_color_approx(px, [1.0, 0.0, 0.0, 1.0], "merge bbox intersection");
+    }
+
+    #[test]
+    fn test_merge_bbox_a() {
+        let a_dw = RectI {
+            min: IVec2::new(0, 0),
+            max: IVec2::new(2, 2),
+        };
+        let b_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
+        let format = Format::from_dimensions(3, 3);
+        let a = Image::new_with_domain(
+            format.clone(),
+            a_dw,
+            vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat(),
+            ColorSpaceId::default_working(),
+        );
+        let b = Image::new_with_domain(
+            format,
+            b_dw,
+            vec![[0.0f32, 0.0, 1.0, 1.0]; 4].concat(),
+            ColorSpaceId::default_working(),
+        );
+        let node = Merge::new();
+
+        let output =
+            eval_two_input_node(&node, "A", a.clone(), "B", b, merge_params(0, 2, 1.0, 1.0));
+
+        assert_eq!(output.data_window, a.data_window);
+        assert_eq!(output.width, a.width);
+        assert_eq!(output.height, a.height);
+    }
+
+    #[test]
+    fn test_merge_bbox_b() {
+        let a_dw = RectI {
+            min: IVec2::new(0, 0),
+            max: IVec2::new(2, 2),
+        };
+        let b_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
+        let format = Format::from_dimensions(3, 3);
+        let a = Image::new_with_domain(
+            format.clone(),
+            a_dw,
+            vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat(),
+            ColorSpaceId::default_working(),
+        );
+        let b = Image::new_with_domain(
+            format,
+            b_dw,
+            vec![[0.0f32, 0.0, 1.0, 1.0]; 4].concat(),
+            ColorSpaceId::default_working(),
+        );
+        let node = Merge::new();
+
+        let output =
+            eval_two_input_node(&node, "A", a, "B", b.clone(), merge_params(0, 3, 1.0, 1.0));
+
+        assert_eq!(output.data_window, b.data_window);
+        assert_eq!(output.width, b.width);
+        assert_eq!(output.height, b.height);
+    }
+
+    #[test]
+    fn test_merge_different_size_images() {
+        let bg_data = vec![[0.0f32, 0.0, 1.0, 1.0]; 16].concat();
+        let b = Image::from_f32_data(4, 4, bg_data);
+
+        let a_data = vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat();
+        let a_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
+        let a = Image::new_with_domain(
+            Format::from_dimensions(4, 4),
+            a_dw,
+            a_data,
+            ColorSpaceId::default_working(),
+        );
+
+        let node = Merge::new();
+        let output = eval_two_input_node(&node, "A", a, "B", b, merge_params(0, 0, 1.0, 1.0));
+
+        assert_eq!(output.data_window.min, IVec2::new(0, 0));
+        assert_eq!(output.data_window.max, IVec2::new(4, 4));
+        assert_eq!(output.width, 4);
+        assert_eq!(output.height, 4);
+
+        let px00 = output.get_rgba(0, 0);
+        assert!(
+            approx_eq(px00[2], 1.0) && approx_eq(px00[0], 0.0),
+            "outside A region should be blue: {:?}",
+            px00
+        );
+
+        let px11 = output.get_rgba(1, 1);
+        assert!(
+            approx_eq(px11[0], 1.0) && approx_eq(px11[2], 0.0),
+            "inside A region should be red: {:?}",
+            px11
+        );
+    }
+
+    #[test]
+    fn test_merge_with_opacity() {
+        let a = [1.0f32, 0.0, 0.0, 0.8];
+        let b = [0.0f32, 0.0, 1.0, 0.6];
+
+        for opacity_int in [0, 25, 50, 75, 100] {
+            let opacity = opacity_int as f64 / 100.0;
+            let effective_aa = a[3] * opacity as f32;
+
+            let actual = merge_single_pixel(a, b, 0, opacity);
+            let expected = porter_duff_reference::over(a, effective_aa, b, b[3]);
+
+            for c in 0..4 {
+                assert!(
+                    (actual[c] - expected[c]).abs() < 0.002,
+                    "Opacity {}: channel {} mismatch: got {}, expected {}",
+                    opacity,
+                    c,
+                    actual[c],
+                    expected[c],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_merge_with_mix() {
+        let a = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]);
+        let b = Image::from_f32_data(1, 1, vec![0.0, 0.0, 1.0, 1.0]);
+        let node = Merge::new();
+
+        let output = eval_two_input_node(&node, "A", a, "B", b, merge_params(0, 0, 1.0, 0.25));
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.25, 0.0, 0.75, 1.0], "merge mix");
     }
 
     #[test]
@@ -835,7 +1470,10 @@ mod tests {
         let base = Image::from_f32_data(4, 4, vec![[0.5f32, 0.5, 0.5, 1.0]; 16].concat());
 
         // Blend: 2x2 white at (1,1)→(3,3)
-        let bl_dw = RectI { min: IVec2::new(1, 1), max: IVec2::new(3, 3) };
+        let bl_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
         let bl = Image::new_with_domain(
             Format::from_dimensions(4, 4),
             bl_dw,
@@ -865,9 +1503,13 @@ mod tests {
     #[test]
     fn test_alpha_over_format_from_background() {
         let bg_format = Format::hd();
-        let bg_dw = RectI { min: IVec2::new(10, 10), max: IVec2::new(14, 14) };
+        let bg_dw = RectI {
+            min: IVec2::new(10, 10),
+            max: IVec2::new(14, 14),
+        };
         let bg = Image::new_with_domain(
-            bg_format.clone(), bg_dw,
+            bg_format.clone(),
+            bg_dw,
             vec![0.0f32; 64],
             ColorSpaceId::new(ColorSpaceId::ACESCG),
         );
@@ -880,8 +1522,15 @@ mod tests {
 
         let output = eval_two_input_node(&node, "background", bg.clone(), "foreground", fg, params);
 
-        assert_eq!(output.format, bg_format, "format should come from background");
-        assert_eq!(output.color_space.as_str(), ColorSpaceId::ACESCG, "color_space from background");
+        assert_eq!(
+            output.format, bg_format,
+            "format should come from background"
+        );
+        assert_eq!(
+            output.color_space.as_str(),
+            ColorSpaceId::ACESCG,
+            "color_space from background"
+        );
     }
 
     #[test]
@@ -951,7 +1600,11 @@ mod tests {
         assert_eq!(output.width, 1);
         assert_eq!(output.height, 1);
         let px = output.get_rgba(200, 200);
-        assert_color_approx(px, [0.0, 0.0, 0.0, 0.0], "non-overlapping crop is transparent");
+        assert_color_approx(
+            px,
+            [0.0, 0.0, 0.0, 0.0],
+            "non-overlapping crop is transparent",
+        );
     }
 
     #[test]
@@ -985,9 +1638,14 @@ mod tests {
 
         let output = eval_image_node(&node, input.clone(), params);
 
-        assert!(output.width > input.width || output.height > input.height,
+        assert!(
+            output.width > input.width || output.height > input.height,
             "rotated image should expand: {}x{} vs {}x{}",
-            output.width, output.height, input.width, input.height);
+            output.width,
+            output.height,
+            input.width,
+            input.height
+        );
         assert_eq!(output.format, input.format);
     }
 
@@ -1007,8 +1665,18 @@ mod tests {
         let out_center_x = (output.data_window.min.x + output.data_window.max.x) as f32 / 2.0;
         let out_center_y = (output.data_window.min.y + output.data_window.max.y) as f32 / 2.0;
 
-        assert!((out_center_x - in_center_x).abs() < 1.5, "center X preserved: {} vs {}", out_center_x, in_center_x);
-        assert!((out_center_y - in_center_y).abs() < 1.5, "center Y preserved: {} vs {}", out_center_y, in_center_y);
+        assert!(
+            (out_center_x - in_center_x).abs() < 1.5,
+            "center X preserved: {} vs {}",
+            out_center_x,
+            in_center_x
+        );
+        assert!(
+            (out_center_y - in_center_y).abs() < 1.5,
+            "center Y preserved: {} vs {}",
+            out_center_y,
+            in_center_y
+        );
         assert_eq!(output.format, input.format);
     }
 
@@ -1051,9 +1719,12 @@ mod tests {
 
         let output = eval_image_node(&node, input.clone(), params);
 
-        assert!(output.data_window.width_u32() >= input.data_window.width_u32() * 2 - 1,
+        assert!(
+            output.data_window.width_u32() >= input.data_window.width_u32() * 2 - 1,
             "scaled width: {} vs input {}",
-            output.data_window.width_u32(), input.data_window.width_u32());
+            output.data_window.width_u32(),
+            input.data_window.width_u32()
+        );
         assert_eq!(output.format, input.format);
     }
 
@@ -1072,5 +1743,374 @@ mod tests {
         assert_eq!(output.data_window, input.data_window);
         assert_eq!(output.width, input.width);
         assert_eq!(output.height, input.height);
+    }
+
+    // ── Channel node tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_separate_rgba_roundtrip() {
+        let input = Image::from_f32_data(2, 2, vec![
+            0.1, 0.2, 0.3, 0.4,
+            0.5, 0.6, 0.7, 0.8,
+            0.9, 0.0, 0.1, 1.0,
+            0.0, 1.0, 0.0, 0.5,
+        ]);
+        let sep = SeparateRgba::new();
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(input.clone()));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            params: &HashMap::new(),
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+        };
+        let result = block_on(sep.evaluate(&ctx)).unwrap();
+        let red = match result.get("red").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+        let green = match result.get("green").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+        let blue = match result.get("blue").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+        let alpha = match result.get("alpha").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+        // Each channel output should be grayscale with the channel value
+        assert!(approx_eq(red.get_pixel_f32(0, 0)[0], 0.1), "red ch pixel 0");
+        assert!(approx_eq(green.get_pixel_f32(0, 0)[0], 0.2), "green ch pixel 0");
+        assert!(approx_eq(blue.get_pixel_f32(0, 0)[0], 0.3), "blue ch pixel 0");
+        assert!(approx_eq(alpha.get_pixel_f32(0, 0)[0], 0.4), "alpha ch pixel 0");
+        assert!(approx_eq(red.get_pixel_f32(1, 0)[0], 0.5), "red ch pixel 1");
+        // All channel outputs should have alpha = 1.0
+        assert!(approx_eq(red.get_pixel_f32(0, 0)[3], 1.0), "red output alpha");
+        // Format should propagate
+        assert_eq!(red.format, input.format);
+        assert_eq!(red.data_window, input.data_window);
+    }
+
+    #[test]
+    fn test_separate_combine_rgba_roundtrip() {
+        // Separate then Combine should reconstruct the original channels
+        let input = Image::from_f32_data(2, 2, vec![
+            0.1, 0.2, 0.3, 0.4,
+            0.5, 0.6, 0.7, 0.8,
+            0.9, 0.0, 0.1, 1.0,
+            0.0, 1.0, 0.0, 0.5,
+        ]);
+        // Step 1: Separate
+        let sep = SeparateRgba::new();
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(input.clone()));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            params: &HashMap::new(),
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+        };
+        let sep_result = block_on(sep.evaluate(&ctx)).unwrap();
+        let red = sep_result.get("red").unwrap().clone();
+        let green = sep_result.get("green").unwrap().clone();
+        let blue = sep_result.get("blue").unwrap().clone();
+        let alpha = sep_result.get("alpha").unwrap().clone();
+        // Step 2: Combine
+        let comb = CombineRgba::new();
+        let mut comb_inputs = HashMap::new();
+        comb_inputs.insert("red".to_string(), red);
+        comb_inputs.insert("green".to_string(), green);
+        comb_inputs.insert("blue".to_string(), blue);
+        comb_inputs.insert("alpha".to_string(), alpha);
+        let ctx2 = EvalContext {
+            inputs: comb_inputs,
+            params: &HashMap::new(),
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+        };
+        let comb_result = block_on(comb.evaluate(&ctx2)).unwrap();
+        let output = match comb_result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+        // Should match original pixel values
+        for y in 0..2u32 {
+            for x in 0..2u32 {
+                let orig = input.get_pixel_f32(x, y);
+                let out = output.get_pixel_f32(x, y);
+                for c in 0..4 {
+                    assert!(
+                        (orig[c] - out[c]).abs() < 0.01,
+                        "pixel ({},{}) channel {}: orig={}, got={}",
+                        x, y, c, orig[c], out[c]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_copy_channels_identity() {
+        // Default params (A.R, A.G, A.B, A.A) should pass through A unchanged
+        let a = Image::from_f32_data(2, 2, vec![
+            0.1, 0.2, 0.3, 0.4,
+            0.5, 0.6, 0.7, 0.8,
+            0.9, 0.0, 0.1, 1.0,
+            0.0, 1.0, 0.0, 0.5,
+        ]);
+        let b = Image::from_f32_data(2, 2, vec![1.0f32; 16]);
+        let node = CopyChannels::new();
+        let mut params = HashMap::new();
+        params.insert("red".to_string(), ParamValue::Int(0));   // A.R
+        params.insert("green".to_string(), ParamValue::Int(1)); // A.G
+        params.insert("blue".to_string(), ParamValue::Int(2));  // A.B
+        params.insert("alpha".to_string(), ParamValue::Int(3)); // A.A
+        let output = eval_two_input_node(&node, "A", a.clone(), "B", b, params);
+        for y in 0..2u32 {
+            for x in 0..2u32 {
+                let orig = a.get_pixel_f32(x, y);
+                let out = output.get_pixel_f32(x, y);
+                for c in 0..4 {
+                    assert!(
+                        approx_eq(orig[c], out[c]),
+                        "identity failed at ({},{}) ch {}: {} vs {}",
+                        x, y, c, orig[c], out[c]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_copy_channels_swap_from_b() {
+        // Take RGB from B, Alpha from A
+        let a = Image::from_f32_data(1, 1, vec![0.1, 0.2, 0.3, 0.9]);
+        let b = Image::from_f32_data(1, 1, vec![0.7, 0.8, 0.9, 0.0]);
+        let node = CopyChannels::new();
+        let mut params = HashMap::new();
+        params.insert("red".to_string(), ParamValue::Int(4));   // B.R
+        params.insert("green".to_string(), ParamValue::Int(5)); // B.G
+        params.insert("blue".to_string(), ParamValue::Int(6));  // B.B
+        params.insert("alpha".to_string(), ParamValue::Int(3)); // A.A
+        let output = eval_two_input_node(&node, "A", a, "B", b, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.7), "R from B: {}", px[0]);
+        assert!(approx_eq(px[1], 0.8), "G from B: {}", px[1]);
+        assert!(approx_eq(px[2], 0.9), "B from B: {}", px[2]);
+        assert!(approx_eq(px[3], 0.9), "A from A: {}", px[3]);
+    }
+
+    #[test]
+    fn test_copy_channels_shuffle() {
+        // Shuffle: output R=A.Blue, G=B.Alpha, B=A.Red, A=B.Green
+        let a = Image::from_f32_data(1, 1, vec![0.1, 0.2, 0.3, 0.4]);
+        let b = Image::from_f32_data(1, 1, vec![0.5, 0.6, 0.7, 0.8]);
+        let node = CopyChannels::new();
+        let mut params = HashMap::new();
+        params.insert("red".to_string(), ParamValue::Int(2));   // A.B
+        params.insert("green".to_string(), ParamValue::Int(7)); // B.A
+        params.insert("blue".to_string(), ParamValue::Int(0));  // A.R
+        params.insert("alpha".to_string(), ParamValue::Int(5)); // B.G
+        let output = eval_two_input_node(&node, "A", a, "B", b, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.3), "R=A.B: {}", px[0]);
+        assert!(approx_eq(px[1], 0.8), "G=B.A: {}", px[1]);
+        assert!(approx_eq(px[2], 0.1), "B=A.R: {}", px[2]);
+        assert!(approx_eq(px[3], 0.6), "A=B.G: {}", px[3]);
+    }
+
+    // ── Grade and Clamp node tests ──────────────────────────────────────
+
+    #[test]
+    fn test_grade_identity() {
+        let node = Grade::new();
+        let mut params = HashMap::new();
+        params.insert("lift_r".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_g".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_b".to_string(), ParamValue::Float(0.0));
+        params.insert("gamma_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_b".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_b".to_string(), ParamValue::Float(1.0));
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 0.9]);
+        let output = eval_image_node(&node, input.clone(), params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.5), "R identity: {}", px[0]);
+        assert!(approx_eq(px[1], 0.3), "G identity: {}", px[1]);
+        assert!(approx_eq(px[2], 0.7), "B identity: {}", px[2]);
+        assert!(approx_eq(px[3], 0.9), "A preserved: {}", px[3]);
+    }
+
+    #[test]
+    fn test_grade_lift() {
+        let node = Grade::new();
+        let mut params = HashMap::new();
+        params.insert("lift_r".to_string(), ParamValue::Float(0.1));
+        params.insert("lift_g".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_b".to_string(), ParamValue::Float(-0.1));
+        params.insert("gamma_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_b".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_b".to_string(), ParamValue::Float(1.0));
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]);
+        let output = eval_image_node(&node, input, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.6), "R lifted +0.1: {}", px[0]);
+        assert!(approx_eq(px[1], 0.5), "G unchanged: {}", px[1]);
+        assert!(approx_eq(px[2], 0.4), "B lifted -0.1: {}", px[2]);
+    }
+
+    #[test]
+    fn test_grade_gain() {
+        let node = Grade::new();
+        let mut params = HashMap::new();
+        params.insert("lift_r".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_g".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_b".to_string(), ParamValue::Float(0.0));
+        params.insert("gamma_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_b".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_r".to_string(), ParamValue::Float(2.0));
+        params.insert("gain_g".to_string(), ParamValue::Float(0.5));
+        params.insert("gain_b".to_string(), ParamValue::Float(1.0));
+        let input = Image::from_f32_data(1, 1, vec![0.4, 0.6, 0.8, 1.0]);
+        let output = eval_image_node(&node, input, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.8), "R gain 2x: {}", px[0]);
+        assert!(approx_eq(px[1], 0.3), "G gain 0.5x: {}", px[1]);
+        assert!(approx_eq(px[2], 0.8), "B gain 1x: {}", px[2]);
+    }
+
+    #[test]
+    fn test_grade_gamma() {
+        let node = Grade::new();
+        let mut params = HashMap::new();
+        params.insert("lift_r".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_g".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_b".to_string(), ParamValue::Float(0.0));
+        params.insert("gamma_r".to_string(), ParamValue::Float(2.0));
+        params.insert("gamma_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_b".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_b".to_string(), ParamValue::Float(1.0));
+        let input = Image::from_f32_data(1, 1, vec![0.25, 0.5, 0.5, 1.0]);
+        let output = eval_image_node(&node, input, params);
+        let px = output.get_pixel_f32(0, 0);
+        // gamma=2 means inv_gamma=0.5, so 0.25^0.5 = 0.5
+        assert!(approx_eq(px[0], 0.5), "R gamma 2.0: {}", px[0]);
+        assert!(approx_eq(px[1], 0.5), "G unchanged: {}", px[1]);
+    }
+
+    #[test]
+    fn test_grade_format_propagation() {
+        let node = Grade::new();
+        let mut params = HashMap::new();
+        params.insert("lift_r".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_g".to_string(), ParamValue::Float(0.0));
+        params.insert("lift_b".to_string(), ParamValue::Float(0.0));
+        params.insert("gamma_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gamma_b".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_r".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_g".to_string(), ParamValue::Float(1.0));
+        params.insert("gain_b".to_string(), ParamValue::Float(1.0));
+        let input = make_offset_image([0.5, 0.5, 0.5, 1.0]);
+        let output = eval_image_node(&node, input.clone(), params);
+        assert_eq!(output.format, input.format);
+        assert_eq!(output.data_window, input.data_window);
+        assert_eq!(output.color_space, input.color_space);
+    }
+
+    #[test]
+    fn test_clamp_default() {
+        let node = Clamp::new();
+        let mut params = HashMap::new();
+        params.insert("min_r".to_string(), ParamValue::Float(0.0));
+        params.insert("min_g".to_string(), ParamValue::Float(0.0));
+        params.insert("min_b".to_string(), ParamValue::Float(0.0));
+        params.insert("max_r".to_string(), ParamValue::Float(1.0));
+        params.insert("max_g".to_string(), ParamValue::Float(1.0));
+        params.insert("max_b".to_string(), ParamValue::Float(1.0));
+        params.insert("clamp_alpha".to_string(), ParamValue::Bool(false));
+        // HDR values outside [0,1]
+        let input = Image::from_f32_data(1, 1, vec![-0.1, 1.5, 0.5, 2.0]);
+        let output = eval_image_node(&node, input, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.0), "R clamped min: {}", px[0]);
+        assert!(approx_eq(px[1], 1.0), "G clamped max: {}", px[1]);
+        assert!(approx_eq(px[2], 0.5), "B unchanged: {}", px[2]);
+        assert!(approx_eq(px[3], 2.0), "A not clamped: {}", px[3]);
+    }
+
+    #[test]
+    fn test_clamp_alpha() {
+        let node = Clamp::new();
+        let mut params = HashMap::new();
+        params.insert("min_r".to_string(), ParamValue::Float(0.0));
+        params.insert("min_g".to_string(), ParamValue::Float(0.0));
+        params.insert("min_b".to_string(), ParamValue::Float(0.0));
+        params.insert("max_r".to_string(), ParamValue::Float(1.0));
+        params.insert("max_g".to_string(), ParamValue::Float(1.0));
+        params.insert("max_b".to_string(), ParamValue::Float(1.0));
+        params.insert("clamp_alpha".to_string(), ParamValue::Bool(true));
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.5]);
+        let output = eval_image_node(&node, input, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[3], 1.0), "A clamped: {}", px[3]);
+    }
+
+    #[test]
+    fn test_clamp_custom_range() {
+        let node = Clamp::new();
+        let mut params = HashMap::new();
+        params.insert("min_r".to_string(), ParamValue::Float(0.2));
+        params.insert("min_g".to_string(), ParamValue::Float(0.2));
+        params.insert("min_b".to_string(), ParamValue::Float(0.2));
+        params.insert("max_r".to_string(), ParamValue::Float(0.8));
+        params.insert("max_g".to_string(), ParamValue::Float(0.8));
+        params.insert("max_b".to_string(), ParamValue::Float(0.8));
+        params.insert("clamp_alpha".to_string(), ParamValue::Bool(false));
+        let input = Image::from_f32_data(1, 1, vec![0.0, 0.5, 1.0, 1.0]);
+        let output = eval_image_node(&node, input, params);
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.2), "R clamped to min: {}", px[0]);
+        assert!(approx_eq(px[1], 0.5), "G in range: {}", px[1]);
+        assert!(approx_eq(px[2], 0.8), "B clamped to max: {}", px[2]);
+    }
+
+    #[test]
+    fn test_clamp_format_propagation() {
+        let node = Clamp::new();
+        let mut params = HashMap::new();
+        params.insert("min_r".to_string(), ParamValue::Float(0.0));
+        params.insert("min_g".to_string(), ParamValue::Float(0.0));
+        params.insert("min_b".to_string(), ParamValue::Float(0.0));
+        params.insert("max_r".to_string(), ParamValue::Float(1.0));
+        params.insert("max_g".to_string(), ParamValue::Float(1.0));
+        params.insert("max_b".to_string(), ParamValue::Float(1.0));
+        params.insert("clamp_alpha".to_string(), ParamValue::Bool(false));
+        let input = make_offset_image([0.5, 0.5, 0.5, 1.0]);
+        let output = eval_image_node(&node, input.clone(), params);
+        assert_eq!(output.format, input.format);
+        assert_eq!(output.data_window, input.data_window);
+        assert_eq!(output.color_space, input.color_space);
     }
 }

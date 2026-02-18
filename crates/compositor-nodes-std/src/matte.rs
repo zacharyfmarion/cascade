@@ -43,11 +43,7 @@ impl Node for Premultiply {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let pixel_count = image.pixel_count();
@@ -65,8 +61,13 @@ impl Node for Premultiply {
                     out[1] = g * a;
                     out[2] = b * a;
                     out[3] = a;
-                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                });
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -113,11 +114,7 @@ impl Node for Unpremultiply {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let pixel_count = image.pixel_count();
@@ -139,9 +136,14 @@ impl Node for Unpremultiply {
                     out[0] = nr;
                     out[1] = ng;
                     out[2] = nb;
-                     out[3] = a;
-                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    out[3] = a;
+                });
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -196,11 +198,7 @@ impl Node for SetAlpha {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let alpha = ctx.get_input_image("alpha")?;
@@ -231,9 +229,14 @@ impl Node for SetAlpha {
                     out[0] = r;
                     out[1] = g;
                     out[2] = b;
-                     out[3] = a;
-                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    out[3] = a;
+                });
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -295,11 +298,7 @@ impl Node for ExtractChannel {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let channel = clamp_channel(ctx.get_param_int("channel")?);
@@ -314,9 +313,14 @@ impl Node for ExtractChannel {
                     out[0] = value;
                     out[1] = value;
                     out[2] = value;
-                     out[3] = 1.0;
-                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    out[3] = 1.0;
+                });
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -397,11 +401,7 @@ impl Node for ChromaKey {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let key_color = ctx.get_param_color("key_color")?;
@@ -448,10 +448,20 @@ impl Node for ChromaKey {
                     out[0] = a_val;
                     out[1] = a_val;
                     out[2] = a_val;
-                     out[3] = 1.0;
-                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
-            let matte_output = Image::new_with_domain(image.format.clone(), image.data_window, matte_data, image.color_space.clone());
+                    out[3] = 1.0;
+                });
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
+            let matte_output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                matte_data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             outputs.insert("matte".to_string(), Value::Image(matte_output));
@@ -537,11 +547,7 @@ impl Node for Despill {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let method = ctx.get_param_int("method")?.clamp(0, 2);
@@ -598,9 +604,14 @@ impl Node for Despill {
                     out[0] = r;
                     out[1] = g;
                     out[2] = b;
-                     out[3] = a;
-                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    out[3] = a;
+                });
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -623,5 +634,411 @@ fn clamp_channel(value: i64) -> usize {
         3
     } else {
         value as usize
+    }
+}
+
+pub struct SeparateRgba;
+
+impl SeparateRgba {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for SeparateRgba {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "separate_rgba".to_string(),
+            display_name: "Separate RGBA".to_string(),
+            category: "Channel".to_string(),
+            description: "Separate an image into individual R, G, B, A channels".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![
+                PortSpec {
+                    name: "red".to_string(),
+                    label: "Red".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "green".to_string(),
+                    label: "Green".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "blue".to_string(),
+                    label: "Blue".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "alpha".to_string(),
+                    label: "Alpha".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let pixel_count = image.pixel_count();
+            let mut r_data = vec![0.0f32; pixel_count * 4];
+            let mut g_data = vec![0.0f32; pixel_count * 4];
+            let mut b_data = vec![0.0f32; pixel_count * 4];
+            let mut a_data = vec![0.0f32; pixel_count * 4];
+            let image_data = &image.data;
+            r_data
+                .par_chunks_exact_mut(4)
+                .zip(g_data.par_chunks_exact_mut(4))
+                .zip(b_data.par_chunks_exact_mut(4))
+                .zip(a_data.par_chunks_exact_mut(4))
+                .enumerate()
+                .for_each(|(i, (((r_out, g_out), b_out), a_out))| {
+                    let idx = i * 4;
+                    let channels = [
+                        (r_out, image_data[idx]),
+                        (g_out, image_data[idx + 1]),
+                        (b_out, image_data[idx + 2]),
+                        (a_out, image_data[idx + 3]),
+                    ];
+                    for (out, value) in channels {
+                        out[0] = value;
+                        out[1] = value;
+                        out[2] = value;
+                        out[3] = 1.0;
+                    }
+                });
+            let make_image = |data: Vec<f32>| {
+                Image::new_with_domain(
+                    image.format.clone(),
+                    image.data_window,
+                    data,
+                    image.color_space.clone(),
+                )
+            };
+            let mut outputs = HashMap::new();
+            outputs.insert("red".to_string(), Value::Image(make_image(r_data)));
+            outputs.insert("green".to_string(), Value::Image(make_image(g_data)));
+            outputs.insert("blue".to_string(), Value::Image(make_image(b_data)));
+            outputs.insert("alpha".to_string(), Value::Image(make_image(a_data)));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct CombineRgba;
+
+impl CombineRgba {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for CombineRgba {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "combine_rgba".to_string(),
+            display_name: "Combine RGBA".to_string(),
+            category: "Channel".to_string(),
+            description: "Combine individual R, G, B, A channels into an image".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "red".to_string(),
+                    label: "Red".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "green".to_string(),
+                    label: "Green".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "blue".to_string(),
+                    label: "Blue".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "alpha".to_string(),
+                    label: "Alpha".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let red_image = ctx.get_input_image("red")?;
+            let green_image = ctx.get_input_image("green")?;
+            let blue_image = ctx.get_input_image("blue")?;
+            let alpha_image = ctx.get_input_image("alpha")?;
+
+            // Use red image as reference for format/data_window
+            let out_dw = red_image.data_window;
+            let out_w = out_dw.width_u32() as usize;
+            let out_h = out_dw.height_u32() as usize;
+            let pixel_count = out_w * out_h;
+            let mut data = vec![0.0f32; pixel_count * 4];
+
+            let min_x = out_dw.min.x;
+            let min_y = out_dw.min.y;
+
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let lx = (i % out_w) as i32;
+                    let ly = (i / out_w) as i32;
+                    let gx = min_x + lx;
+                    let gy = min_y + ly;
+
+                    // Extract luminance from each channel input
+                    let r_px = red_image.get_rgba(gx, gy);
+                    let g_px = green_image.get_rgba(gx, gy);
+                    let b_px = blue_image.get_rgba(gx, gy);
+                    let a_px = alpha_image.get_rgba(gx, gy);
+
+                    let r_luma = 0.2126 * r_px[0] + 0.7152 * r_px[1] + 0.0722 * r_px[2];
+                    let g_luma = 0.2126 * g_px[0] + 0.7152 * g_px[1] + 0.0722 * g_px[2];
+                    let b_luma = 0.2126 * b_px[0] + 0.7152 * b_px[1] + 0.0722 * b_px[2];
+                    let a_luma = 0.2126 * a_px[0] + 0.7152 * a_px[1] + 0.0722 * a_px[2];
+
+                    out[0] = r_luma;
+                    out[1] = g_luma;
+                    out[2] = b_luma;
+                    out[3] = a_luma;
+                });
+
+            let output = Image::new_with_domain(
+                red_image.format.clone(),
+                out_dw,
+                data,
+                red_image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct CopyChannels;
+
+impl CopyChannels {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for CopyChannels {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "copy_channels".to_string(),
+            display_name: "Copy Channels".to_string(),
+            category: "Channel".to_string(),
+            description: "Copy channels between two images (like Nuke's Shuffle2)".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "A".to_string(),
+                    label: "A".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "B".to_string(),
+                    label: "B".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "red".to_string(),
+                    label: "Red".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(7.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "A.Red".to_string(),
+                        "A.Green".to_string(),
+                        "A.Blue".to_string(),
+                        "A.Alpha".to_string(),
+                        "B.Red".to_string(),
+                        "B.Green".to_string(),
+                        "B.Blue".to_string(),
+                        "B.Alpha".to_string(),
+                    ]),
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "green".to_string(),
+                    label: "Green".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1),
+                    min: Some(0.0),
+                    max: Some(7.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "A.Red".to_string(),
+                        "A.Green".to_string(),
+                        "A.Blue".to_string(),
+                        "A.Alpha".to_string(),
+                        "B.Red".to_string(),
+                        "B.Green".to_string(),
+                        "B.Blue".to_string(),
+                        "B.Alpha".to_string(),
+                    ]),
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "blue".to_string(),
+                    label: "Blue".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(2),
+                    min: Some(0.0),
+                    max: Some(7.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "A.Red".to_string(),
+                        "A.Green".to_string(),
+                        "A.Blue".to_string(),
+                        "A.Alpha".to_string(),
+                        "B.Red".to_string(),
+                        "B.Green".to_string(),
+                        "B.Blue".to_string(),
+                        "B.Alpha".to_string(),
+                    ]),
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "alpha".to_string(),
+                    label: "Alpha".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(3),
+                    min: Some(0.0),
+                    max: Some(7.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "A.Red".to_string(),
+                        "A.Green".to_string(),
+                        "A.Blue".to_string(),
+                        "A.Alpha".to_string(),
+                        "B.Red".to_string(),
+                        "B.Green".to_string(),
+                        "B.Blue".to_string(),
+                        "B.Alpha".to_string(),
+                    ]),
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let a = ctx.get_input_image("A")?;
+            let b = ctx.get_input_image("B")?;
+            let r_src = ctx.get_param_int("red")?.clamp(0, 7) as usize;
+            let g_src = ctx.get_param_int("green")?.clamp(0, 7) as usize;
+            let b_src = ctx.get_param_int("blue")?.clamp(0, 7) as usize;
+            let a_src = ctx.get_param_int("alpha")?.clamp(0, 7) as usize;
+
+            let out_dw = a.data_window;
+            let out_w = out_dw.width_u32() as usize;
+            let out_h = out_dw.height_u32() as usize;
+            let pixel_count = out_w * out_h;
+            let mut data = vec![0.0f32; pixel_count * 4];
+
+            let min_x = out_dw.min.x;
+            let min_y = out_dw.min.y;
+
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out_px)| {
+                    let lx = (i % out_w) as i32;
+                    let ly = (i / out_w) as i32;
+                    let gx = min_x + lx;
+                    let gy = min_y + ly;
+
+                    let a_px = a.get_rgba(gx, gy);
+                    let b_px = b.get_rgba(gx, gy);
+
+                    // Sources 0-3 = A.R/G/B/A, 4-7 = B.R/G/B/A
+                    let pick = |src: usize| -> f32 {
+                        if src < 4 {
+                            a_px[src]
+                        } else {
+                            b_px[src - 4]
+                        }
+                    };
+
+                    out_px[0] = pick(r_src);
+                    out_px[1] = pick(g_src);
+                    out_px[2] = pick(b_src);
+                    out_px[3] = pick(a_src);
+                });
+
+            let output = Image::new_with_domain(
+                a.format.clone(),
+                out_dw,
+                data,
+                a.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

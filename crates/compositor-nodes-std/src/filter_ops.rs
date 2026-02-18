@@ -67,11 +67,7 @@ impl Node for Sharpen {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let amount = ctx.get_param_float("amount")? as f32;
@@ -126,7 +122,12 @@ impl Node for Sharpen {
             });
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -192,16 +193,12 @@ impl Node for EdgeDetect {
                 max: Some(5.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let strength = ctx.get_param_float("strength")? as f32;
@@ -262,7 +259,12 @@ impl Node for EdgeDetect {
                 });
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -328,16 +330,12 @@ impl Node for Dilate {
                 max: Some(50.0),
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let radius = ctx.get_param_int("radius")?.clamp(1, 50) as usize;
@@ -363,7 +361,12 @@ impl Node for Dilate {
             max_filter_v(&tmp, &mut out, w, h, radius);
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -429,16 +432,12 @@ impl Node for Erode {
                 max: Some(50.0),
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let radius = ctx.get_param_int("radius")?.clamp(1, 50) as usize;
@@ -464,7 +463,12 @@ impl Node for Erode {
             min_filter_v(&tmp, &mut out, w, h, radius);
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -530,16 +534,12 @@ impl Node for Median {
                 max: Some(10.0),
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let radius = ctx.get_param_int("radius")?.clamp(1, 10) as usize;
@@ -584,7 +584,12 @@ impl Node for Median {
             });
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -679,11 +684,7 @@ impl Node for Vignette {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let amount = ctx.get_param_float("amount")? as f32;
@@ -722,7 +723,12 @@ impl Node for Vignette {
                     out[2] = b;
                     out[3] = a;
                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -817,11 +823,7 @@ impl Node for Glow {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let threshold = ctx.get_param_float("threshold")? as f32;
@@ -885,7 +887,12 @@ impl Node for Glow {
             });
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -1190,11 +1197,7 @@ impl Node for LensDistortion {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let distortion = ctx.get_param_float("distortion")? as f32;
@@ -1270,7 +1273,12 @@ impl Node for LensDistortion {
             });
 
             let out_data = out;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)
@@ -1352,5 +1360,3 @@ fn min_filter_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
             });
         });
 }
-
-

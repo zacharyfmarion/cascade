@@ -48,16 +48,12 @@ impl Node for GaussianBlur {
                 max: Some(100.0),
                 step: Some(0.1),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let sigma = ctx.get_param_float("sigma")? as f32;
@@ -88,7 +84,12 @@ impl Node for GaussianBlur {
             }
 
             let out_data = buf;
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out_data,
+                image.color_space.clone(),
+            );
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)

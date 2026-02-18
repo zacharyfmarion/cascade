@@ -87,8 +87,8 @@ fn parse_gpl(text: &str) -> Result<Vec<[f64; 4]>, CompositorError> {
 }
 
 fn parse_image_palette(bytes: &[u8]) -> Result<Vec<[f64; 4]>, CompositorError> {
-    let decoded = image::load_from_memory(bytes)
-        .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+    let decoded =
+        image::load_from_memory(bytes).map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
     let rgba = decoded.to_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
 
@@ -174,7 +174,11 @@ fn rgb_to_hsl(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
 }
 
 fn color_to_hsl(c: &[f64; 4]) -> (f64, f64, f64) {
-    let (r, g, b) = (linear_to_srgb(c[0]), linear_to_srgb(c[1]), linear_to_srgb(c[2]));
+    let (r, g, b) = (
+        linear_to_srgb(c[0]),
+        linear_to_srgb(c[1]),
+        linear_to_srgb(c[2]),
+    );
     rgb_to_hsl(r, g, b)
 }
 
@@ -287,9 +291,7 @@ impl Node for ColorPaletteNode {
             let colors = ctx.get_param_color_palette("colors")?;
 
             if colors.is_empty() {
-                return Err(CompositorError::Other(
-                    "Color palette is empty".to_string(),
-                ));
+                return Err(CompositorError::Other("Color palette is empty".to_string()));
             }
 
             let width = colors.len() as u32;
@@ -357,12 +359,42 @@ Columns: 8
 
     #[test]
     fn test_sort_colors_perceptual() {
-        let red = [srgb_byte_to_linear(255), srgb_byte_to_linear(0), srgb_byte_to_linear(0), 1.0];
-        let dark_red = [srgb_byte_to_linear(128), srgb_byte_to_linear(0), srgb_byte_to_linear(0), 1.0];
-        let green = [srgb_byte_to_linear(0), srgb_byte_to_linear(255), srgb_byte_to_linear(0), 1.0];
-        let blue = [srgb_byte_to_linear(0), srgb_byte_to_linear(0), srgb_byte_to_linear(255), 1.0];
-        let gray = [srgb_byte_to_linear(128), srgb_byte_to_linear(128), srgb_byte_to_linear(128), 1.0];
-        let white = [srgb_byte_to_linear(255), srgb_byte_to_linear(255), srgb_byte_to_linear(255), 1.0];
+        let red = [
+            srgb_byte_to_linear(255),
+            srgb_byte_to_linear(0),
+            srgb_byte_to_linear(0),
+            1.0,
+        ];
+        let dark_red = [
+            srgb_byte_to_linear(128),
+            srgb_byte_to_linear(0),
+            srgb_byte_to_linear(0),
+            1.0,
+        ];
+        let green = [
+            srgb_byte_to_linear(0),
+            srgb_byte_to_linear(255),
+            srgb_byte_to_linear(0),
+            1.0,
+        ];
+        let blue = [
+            srgb_byte_to_linear(0),
+            srgb_byte_to_linear(0),
+            srgb_byte_to_linear(255),
+            1.0,
+        ];
+        let gray = [
+            srgb_byte_to_linear(128),
+            srgb_byte_to_linear(128),
+            srgb_byte_to_linear(128),
+            1.0,
+        ];
+        let white = [
+            srgb_byte_to_linear(255),
+            srgb_byte_to_linear(255),
+            srgb_byte_to_linear(255),
+            1.0,
+        ];
 
         let mut colors = vec![gray, blue, dark_red, white, red, green];
         sort_colors_perceptual(&mut colors);
@@ -374,18 +406,25 @@ Columns: 8
             let (_, s, _) = color_to_hsl(c);
             assert!(s < 0.12, "Achromatic colors should be at the end");
         }
-        assert!(color_to_hsl(&achro[0]).2 > color_to_hsl(&achro[1]).2,
-            "Achromatic colors should be sorted light to dark");
+        assert!(
+            color_to_hsl(&achro[0]).2 > color_to_hsl(&achro[1]).2,
+            "Achromatic colors should be sorted light to dark"
+        );
 
         let red_idx = chromatic.iter().position(|c| *c == red).unwrap();
         let dark_red_idx = chromatic.iter().position(|c| *c == dark_red).unwrap();
-        assert!(red_idx < dark_red_idx,
-            "Within same hue band, lighter colors should come first");
+        assert!(
+            red_idx < dark_red_idx,
+            "Within same hue band, lighter colors should come first"
+        );
 
-        let hue_bands: Vec<usize> = chromatic.iter().map(|c| {
-            let (h, _, _) = color_to_hsl(c);
-            (h * 8.0).floor() as usize
-        }).collect();
+        let hue_bands: Vec<usize> = chromatic
+            .iter()
+            .map(|c| {
+                let (h, _, _) = color_to_hsl(c);
+                (h * 8.0).floor() as usize
+            })
+            .collect();
         for w in hue_bands.windows(2) {
             assert!(w[0] <= w[1], "Hue bands should be in order");
         }

@@ -1,10 +1,10 @@
+use crate::input::LoadImage;
 use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{GroupDefinition, GroupInterface, InternalConnection, InternalNode};
 use compositor_core::node::{EvalContext, Node, NodeFuture, NodeRegistry};
 use compositor_core::types::*;
-use crate::input::LoadImage;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -45,11 +45,7 @@ impl Node for GroupInputNode {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        _ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, _ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let guard = self
                 .injected
@@ -96,11 +92,7 @@ impl Node for GroupOutputNode {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let mut outputs = HashMap::new();
             for port in &self.ports {
@@ -398,11 +390,7 @@ impl Node for GroupNode {
         Self::build_spec(&self.definition, &self.interface)
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let (mut internal_graph, internal_nodes, internal_registry, mut internal_evaluator) = {
                 let mut state = self

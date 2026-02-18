@@ -65,11 +65,7 @@ impl Node for ColorConvert {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let from_space = ctx.get_param_string("from_space")?;
@@ -82,7 +78,8 @@ impl Node for ColorConvert {
             let processor = cm.create_transform(&from_id, &to_id)?;
             processor.apply(&mut data);
 
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, to_id);
+            let output =
+                Image::new_with_domain(image.format.clone(), image.data_window, data, to_id);
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

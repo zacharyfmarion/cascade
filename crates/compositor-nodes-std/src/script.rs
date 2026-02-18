@@ -42,11 +42,7 @@ impl Node for GpuScriptDraftNode {
         self.spec.clone()
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        _ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, _ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             Err(CompositorError::Other(
                 "GPU Script not compiled yet. Write GLSL code and click Compile.".to_string(),

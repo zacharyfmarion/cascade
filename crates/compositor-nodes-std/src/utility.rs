@@ -91,11 +91,7 @@ impl Node for MapRange {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let from_min = ctx.get_param_float("from_min")? as f32;
@@ -131,7 +127,12 @@ impl Node for MapRange {
                     out[2] = rgb[2];
                     out[3] = a;
                 });
-            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -235,11 +236,7 @@ impl Node for MathNode {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let a_image = ctx.get_input_image("a")?;
             let b_image = ctx.get_optional_input_image("b");
@@ -319,7 +316,12 @@ impl Node for MathNode {
                     out[2] = out_rgb[2];
                     out[3] = a_alpha;
                 });
-            let output = Image::new_with_domain(a_image.format.clone(), a_image.data_window, data, a_image.color_space.clone());
+            let output = Image::new_with_domain(
+                a_image.format.clone(),
+                a_image.data_window,
+                data,
+                a_image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
