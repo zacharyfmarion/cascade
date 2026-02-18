@@ -132,10 +132,19 @@ impl Node for Blend {
                         opacity
                     };
 
-                    out[0] = (base_r + (blended_r - base_r) * effective_opacity).clamp(0.0, 1.0);
-                    out[1] = (base_g + (blended_g - base_g) * effective_opacity).clamp(0.0, 1.0);
-                    out[2] = (base_b + (blended_b - base_b) * effective_opacity).clamp(0.0, 1.0);
-                    out[3] = base_a.max(bl_a).clamp(0.0, 1.0);
+                    // Blend layer's effective coverage, scaled by opacity + mask.
+                    let blend_alpha = bl_a * effective_opacity;
+
+                    // Porter-Duff "over" alpha: blend layer composited over base.
+                    let out_a = blend_alpha + base_a * (1.0 - blend_alpha);
+
+                    // RGB: lerp from base toward the blended result, weighted by
+                    // the blend layer's coverage.  No clamp — HDR values (>1.0)
+                    // are valid.
+                    out[0] = base_r + (blended_r - base_r) * blend_alpha;
+                    out[1] = base_g + (blended_g - base_g) * blend_alpha;
+                    out[2] = base_b + (blended_b - base_b) * blend_alpha;
+                    out[3] = out_a;
                 });
 
             let output =

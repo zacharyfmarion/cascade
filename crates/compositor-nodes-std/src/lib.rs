@@ -1495,9 +1495,9 @@ mod tests {
         let px00 = output.get_rgba(0, 0);
         assert!(approx_eq(px00[0], 0.5), "outside blend region: {:?}", px00);
 
-        // (1,1): base=0.5, blend=1.0. Add: 0.5+1.0=1.0 (clamped)
+        // (1,1): base=0.5, blend=1.0. Add: 0.5+1.0=1.5 (HDR, no clamp)
         let px11 = output.get_rgba(1, 1);
-        assert!(approx_eq(px11[0], 1.0), "inside blend region: {:?}", px11);
+        assert!(approx_eq(px11[0], 1.5), "inside blend region: {:?}", px11);
     }
 
     #[test]
@@ -2112,5 +2112,193 @@ mod tests {
         assert_eq!(output.format, input.format);
         assert_eq!(output.data_window, input.data_window);
         assert_eq!(output.color_space, input.color_space);
+    }
+
+    /// Naive direct-convolution Gaussian blur as a reference implementation.
+    /// Slow (O(w*h*r^2)) but obviously correct. Works in premultiplied space
+    /// to handle alpha edges properly, then converts back to straight alpha.
+    fn reference_gaussian_blur(img: &Image, sigma: f32) -> Image {
+        let w = img.width as usize;
+        let h = img.height as usize;
+        let radius = (sigma * 3.0).ceil() as i32;
+        let mut kernel = Vec::new();
+        let mut sum = 0.0f64;
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                let d2 = (dx * dx + dy * dy) as f64;
+                let g = (-d2 / (2.0 * sigma as f64 * sigma as f64)).exp();
+                kernel.push((dx, dy, g));
+                sum += g;
+            }
+        }
+        for entry in kernel.iter_mut() {
+            entry.2 /= sum;
+        }
+
+        let src = &img.data;
+        let mut out = vec![0.0f32; w * h * 4];
+
+        for y in 0..h {
+            for x in 0..w {
+                let mut acc_r = 0.0f64;
+                let mut acc_g = 0.0f64;
+                let mut acc_b = 0.0f64;
+                let mut acc_a = 0.0f64;
+
+                for &(dx, dy, weight) in &kernel {
+                    let sx = (x as i32 + dx).clamp(0, w as i32 - 1) as usize;
+                    let sy = (y as i32 + dy).clamp(0, h as i32 - 1) as usize;
+                    let idx = (sy * w + sx) * 4;
+                    let a = src[idx + 3] as f64;
+                    acc_r += src[idx] as f64 * a * weight;
+                    acc_g += src[idx + 1] as f64 * a * weight;
+                    acc_b += src[idx + 2] as f64 * a * weight;
+                    acc_a += a * weight;
+                }
+
+                let oi = (y * w + x) * 4;
+                if acc_a > 1e-10 {
+                    out[oi] = (acc_r / acc_a) as f32;
+                    out[oi + 1] = (acc_g / acc_a) as f32;
+                    out[oi + 2] = (acc_b / acc_a) as f32;
+                } else {
+                    out[oi] = 0.0;
+                    out[oi + 1] = 0.0;
+                    out[oi + 2] = 0.0;
+                }
+                out[oi + 3] = acc_a as f32;
+            }
+        }
+
+        Image::from_f32_data(img.width, img.height, out)
+    }
+
+    #[test]
+    fn test_gaussian_blur_vs_reference() {
+        let w = 64u32;
+        let h = 64u32;
+        let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+
+        // Left half: opaque white. Right half: transparent black.
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                if x < 32 {
+                    data[i] = 1.0;
+                    data[i + 1] = 1.0;
+                    data[i + 2] = 1.0;
+                    data[i + 3] = 1.0;
+                }
+            }
+        }
+
+        let input = Image::from_f32_data(w, h, data);
+
+        for sigma in [0.5f64, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0] {
+            let node = GaussianBlur::new();
+            let mut params = HashMap::new();
+            params.insert("sigma".to_string(), ParamValue::Float(sigma));
+            let actual = eval_image_node(&node, input.clone(), params);
+            let expected = reference_gaussian_blur(&input, sigma as f32);
+
+            let mut max_rgb_diff: f32 = 0.0;
+            let mut max_a_diff: f32 = 0.0;
+            let mut worst_pixel = (0, 0);
+
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let ai = (y * w as usize + x) * 4;
+                    let a = &actual.data;
+                    let e = &expected.data;
+
+                    // Only compare RGB where alpha is significant — at near-zero
+                    // alpha, RGB values are invisible and unpremultiply amplifies
+                    // noise.
+                    let alpha = a[ai + 3].max(e[ai + 3]);
+                    if alpha > 0.05 {
+                        for c in 0..3 {
+                            let diff = (a[ai + c] - e[ai + c]).abs();
+                            if diff > max_rgb_diff {
+                                max_rgb_diff = diff;
+                                worst_pixel = (x, y);
+                            }
+                        }
+                    }
+                    let ad = (a[ai + 3] - e[ai + 3]).abs();
+                    if ad > max_a_diff {
+                        max_a_diff = ad;
+                    }
+                }
+            }
+
+            // RGB should match very closely — the premultiply sandwich
+            // ensures correct color blending regardless of approximation method.
+            assert!(
+                max_rgb_diff < 0.01,
+                "sigma={}: RGB diff too large: {:.4} at pixel ({},{}) \
+                 actual=[{:.3},{:.3},{:.3},{:.3}] expected=[{:.3},{:.3},{:.3},{:.3}]",
+                sigma, max_rgb_diff, worst_pixel.0, worst_pixel.1,
+                actual.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4],
+                actual.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4 + 1],
+                actual.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4 + 2],
+                actual.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4 + 3],
+                expected.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4],
+                expected.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4 + 1],
+                expected.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4 + 2],
+                expected.data[(worst_pixel.1 * w as usize + worst_pixel.0) * 4 + 3],
+            );
+
+            // Alpha tolerance is generous because 3-pass box blur is an
+            // approximation of a true Gaussian — divergence up to ~0.27 is
+            // expected at very small sigma where the box radius is tiny.
+            assert!(
+                max_a_diff < 0.30,
+                "sigma={}: Alpha diff too large: {:.4}",
+                sigma, max_a_diff,
+            );
+        }
+    }
+
+    #[test]
+    fn test_gaussian_blur_no_dark_halo() {
+        let w = 16u32;
+        let h = 16u32;
+        let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+
+        // Left half: opaque white. Right half: transparent black.
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                if x < 8 {
+                    data[i] = 1.0;
+                    data[i + 1] = 1.0;
+                    data[i + 2] = 1.0;
+                    data[i + 3] = 1.0;
+                }
+            }
+        }
+
+        let input = Image::from_f32_data(w, h, data);
+        let node = GaussianBlur::new();
+        let mut params = HashMap::new();
+        params.insert("sigma".to_string(), ParamValue::Float(3.0));
+        let output = eval_image_node(&node, input, params);
+
+        // Check pixels near the alpha edge (x=7..9, middle row).
+        // With correct blurring, any pixel with partial alpha should
+        // have RGB close to white (1.0), not darkened by transparent
+        // black bleeding in.
+        let y = 8;
+        for x in 5..11 {
+            let px = output.get_rgba(x as i32, y as i32);
+            if px[3] > 0.01 {
+                assert!(
+                    px[0] > 0.8 && px[1] > 0.8 && px[2] > 0.8,
+                    "Dark halo at ({},{}): rgba=[{:.3},{:.3},{:.3},{:.3}] — \
+                     RGB should be close to 1.0 for pixels with alpha > 0",
+                    x, y, px[0], px[1], px[2], px[3]
+                );
+            }
+        }
     }
 }

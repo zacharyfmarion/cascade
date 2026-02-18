@@ -78,10 +78,17 @@ impl Node for GaussianBlur {
             let radii = box_radii_for_gaussian(sigma, 3);
             let mut tmp = vec![0.0f32; w * h * 4];
 
+            // Image data is straight alpha. Premultiply before blurring so
+            // transparent pixels (which may have arbitrary RGB) contribute
+            // correctly to the weighted average, then unpremultiply after.
+            premultiply_buffer(&mut buf);
+
             for &r in &radii {
                 box_blur_h(&buf, &mut tmp, w, h, r);
                 box_blur_v(&tmp, &mut buf, w, h, r);
             }
+
+            unpremultiply_buffer(&mut buf);
 
             let out_data = buf;
             let output = Image::new_with_domain(
@@ -111,6 +118,27 @@ impl Node for GaussianBlur {
     }
 }
 
+pub(crate) fn premultiply_buffer(buf: &mut [f32]) {
+    buf.par_chunks_exact_mut(4).for_each(|px| {
+        let a = px[3];
+        px[0] *= a;
+        px[1] *= a;
+        px[2] *= a;
+    });
+}
+
+pub(crate) fn unpremultiply_buffer(buf: &mut [f32]) {
+    buf.par_chunks_exact_mut(4).for_each(|px| {
+        let a = px[3];
+        if a > 0.0 {
+            let inv_a = 1.0 / a;
+            px[0] *= inv_a;
+            px[1] *= inv_a;
+            px[2] *= inv_a;
+        }
+    });
+}
+
 fn image_to_f32(image: &Image) -> Vec<f32> {
     let mut out = vec![0.0f32; image.data.len()];
     out.par_chunks_exact_mut(4)
@@ -127,7 +155,7 @@ fn image_to_f32(image: &Image) -> Vec<f32> {
 
 /// Compute box radii that approximate a Gaussian blur when applied N passes.
 /// Uses the algorithm from W3C SVG spec / "Fastest Gaussian Blur" by Ivan Kutskir.
-fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
+pub(crate) fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
     let w_ideal = ((12.0 * sigma * sigma / n as f32) + 1.0).sqrt();
     let mut wl = w_ideal.floor() as usize;
     if wl % 2 == 0 {
@@ -148,7 +176,7 @@ fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
 }
 
 /// Horizontal box blur pass — O(width × height), independent of radius.
-fn box_blur_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
+pub(crate) fn box_blur_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
     if r == 0 {
         dst.copy_from_slice(src);
         return;
@@ -183,11 +211,10 @@ fn box_blur_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
                 }
 
                 let add_x = (x + r + 1).min(w - 1);
-                let sub_x = if x >= r + 1 { x - r - 1 } else { 0 };
+                let sub_x = if x >= r { x - r } else { 0 };
                 let add = row + add_x * 4;
                 let sub = row + sub_x * 4;
 
-                // When x < r, we're subtracting the clamped first pixel
                 let sub_vals = if x < r {
                     first
                 } else {
@@ -203,7 +230,7 @@ fn box_blur_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
 
 /// Vertical box blur pass — O(width × height), independent of radius.
 /// Iterates column-major but processes one column at a time for locality.
-fn box_blur_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
+pub(crate) fn box_blur_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
     if r == 0 {
         dst.copy_from_slice(src);
         return;
@@ -239,7 +266,7 @@ fn box_blur_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
                 }
 
                 let add_y = (y + r + 1).min(h - 1);
-                let sub_y = if y >= r + 1 { y - r - 1 } else { 0 };
+                let sub_y = if y >= r { y - r } else { 0 };
                 let add = add_y * stride + col;
                 let sub = sub_y * stride + col;
 

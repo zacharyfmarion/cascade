@@ -106,11 +106,13 @@ impl Node for Sharpen {
             let original = image_to_f32(image);
             let mut blurred = original.clone();
             let mut tmp = vec![0.0f32; w * h * 4];
-            let radii = box_radii_for_gaussian(radius, 3);
+            let radii = crate::filter::box_radii_for_gaussian(radius, 3);
+            crate::filter::premultiply_buffer(&mut blurred);
             for &r in &radii {
-                box_blur_h(&blurred, &mut tmp, w, h, r);
-                box_blur_v(&tmp, &mut blurred, w, h, r);
+                crate::filter::box_blur_h(&blurred, &mut tmp, w, h, r);
+                crate::filter::box_blur_v(&tmp, &mut blurred, w, h, r);
             }
+            crate::filter::unpremultiply_buffer(&mut blurred);
 
             let mut out = vec![0.0f32; w * h * 4];
             out.par_chunks_exact_mut(4).enumerate().for_each(|(i, px)| {
@@ -867,10 +869,10 @@ impl Node for Glow {
 
             let mut blurred = bright.clone();
             let mut tmp = vec![0.0f32; w * h * 4];
-            let radii = box_radii_for_gaussian(radius, 3);
+            let radii = crate::filter::box_radii_for_gaussian(radius, 3);
             for &r in &radii {
-                box_blur_h(&blurred, &mut tmp, w, h, r);
-                box_blur_v(&tmp, &mut blurred, w, h, r);
+                crate::filter::box_blur_h(&blurred, &mut tmp, w, h, r);
+                crate::filter::box_blur_v(&tmp, &mut blurred, w, h, r);
             }
 
             let mut out = vec![0.0f32; w * h * 4];
@@ -937,100 +939,7 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
-    let w_ideal = ((12.0 * sigma * sigma / n as f32) + 1.0).sqrt();
-    let mut wl = w_ideal.floor() as usize;
-    if wl % 2 == 0 {
-        wl = wl.saturating_sub(1);
-    }
-    let wu = wl + 2;
 
-    let m_ideal =
-        (12.0 * sigma * sigma - (n * wl * wl + 4 * n * wl + 3 * n) as f32) / (4 * wl + 4) as f32;
-    let m = m_ideal.round() as usize;
-
-    (0..n)
-        .map(|i| {
-            let size = if i < m { wl } else { wu };
-            (size.saturating_sub(1)) / 2
-        })
-        .collect()
-}
-
-fn box_blur_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
-    if r == 0 {
-        dst.copy_from_slice(src);
-        return;
-    }
-    let row_stride = w * 4;
-    dst.par_chunks_exact_mut(row_stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            let row_start = y * row_stride;
-            row.par_chunks_exact_mut(4).enumerate().for_each(|(x, px)| {
-                let start = x.saturating_sub(r);
-                let end = (x + r).min(w - 1);
-                let span = (end - start + 1) as f32;
-                let mut acc = [0.0f32; 4];
-                for nx in start..=end {
-                    let idx = row_start + nx * 4;
-                    acc[0] += src[idx];
-                    acc[1] += src[idx + 1];
-                    acc[2] += src[idx + 2];
-                    acc[3] += src[idx + 3];
-                }
-                for c in 0..4 {
-                    px[c] = acc[c] / span;
-                }
-            });
-        });
-}
-
-fn box_blur_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
-    if r == 0 {
-        dst.copy_from_slice(src);
-        return;
-    }
-    let stride = w * 4;
-    let mut columns = vec![0.0f32; w * h * 4];
-    columns
-        .par_chunks_exact_mut(h * 4)
-        .enumerate()
-        .for_each(|(x, col_buf)| {
-            col_buf
-                .par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(y, px)| {
-                    let start = y.saturating_sub(r);
-                    let end = (y + r).min(h - 1);
-                    let span = (end - start + 1) as f32;
-                    let mut acc = [0.0f32; 4];
-                    for ny in start..=end {
-                        let idx = ny * stride + x * 4;
-                        acc[0] += src[idx];
-                        acc[1] += src[idx + 1];
-                        acc[2] += src[idx + 2];
-                        acc[3] += src[idx + 3];
-                    }
-                    for c in 0..4 {
-                        px[c] = acc[c] / span;
-                    }
-                });
-        });
-
-    dst.par_chunks_exact_mut(stride)
-        .enumerate()
-        .for_each(|(y, row)| {
-            row.par_chunks_exact_mut(4).enumerate().for_each(|(x, px)| {
-                let col_buf = &columns[x * h * 4..(x + 1) * h * 4];
-                let idx = y * 4;
-                px[0] = col_buf[idx];
-                px[1] = col_buf[idx + 1];
-                px[2] = col_buf[idx + 2];
-                px[3] = col_buf[idx + 3];
-            });
-        });
-}
 
 fn max_filter_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
     if r == 0 {
