@@ -5,7 +5,8 @@ import { NodeColorPicker } from './nodes/NodeColorPicker';
 import { NodeNumberInput } from './nodes/NodePrimitives';
 import { ScriptNodeEditor } from './ScriptNodeEditor';
 import { ColorRampEditor } from './ColorRampEditor';
-import type { ParamSpec, ParamValue, ColorStop, PortSpec, NodeSpec, ValueType } from '../store/types';
+import { CurveEditor } from './nodes/CurveEditor';
+import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec, ValueType } from '../store/types';
 import { createParamValue, extractParamValue } from '../store/types';
 
 const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox', 'ColorPicker'];
@@ -164,6 +165,25 @@ const ParamControl: React.FC<{
         );
       })()}
 
+      {paramSpec.ui_hint.type === 'CurveEditor' && (() => {
+        const pts: CurvePoint[] = 'CurvePoints' in value
+          ? (value as { CurvePoints: CurvePoint[] }).CurvePoints
+          : [{ x: 0, y: 0 }, { x: 1, y: 1 }];
+        return (
+          <div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              {paramSpec.label}
+            </div>
+            <CurveEditor
+              points={pts}
+              onChange={(newPts) => onChange(paramSpec.key, { CurvePoints: newPts })}
+              width={280}
+              height={200}
+            />
+          </div>
+        );
+      })()}
+
       {paramSpec.ui_hint.type === 'FilePicker' && (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
           File selection handled in node
@@ -183,10 +203,15 @@ export const Inspector: React.FC = () => {
   const enterGroup = useGraphStore(s => s.enterGroup);
   const renameGroup = useGraphStore(s => s.renameGroup);
   const editingStack = useGraphStore(s => s.editingStack);
+  const frames = useGraphStore(s => s.frames);
+  const selectedFrameId = useGraphStore(s => s.selectedFrameId);
+  const updateFrame = useGraphStore(s => s.updateFrame);
+  const removeFrame = useGraphStore(s => s.removeFrame);
 
   const selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds).pop()! : null;
   const selectedNode = selectedNodeId ? nodes.get(selectedNodeId) : null;
   const spec = selectedNode ? nodeSpecs.find(s => s.id === selectedNode.typeId) : null;
+  const selectedFrame = selectedFrameId ? frames.get(selectedFrameId) : null;
 
   const isGroupNode = selectedNode?.typeId.startsWith('group::') ?? false;
   const isGroupIO = selectedNode?.typeId === 'group_input' || selectedNode?.typeId === 'group_output';
@@ -226,6 +251,92 @@ export const Inspector: React.FC = () => {
 
   if (selectedNode && selectedNode.typeId.startsWith('gpu_script')) {
     return <ScriptNodeEditor nodeId={selectedNode.id} typeId={selectedNode.typeId} />;
+  }
+
+  if (selectedFrame) {
+    return (
+      <div className="panel" style={{ width: '100%', height: '100%' }}>
+        <div style={{ padding: '16px' }}>
+          <div style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '4px' }}>
+            Frame
+          </div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+            Visual grouping — does not affect processing
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '0.8rem' }}>
+              <span style={{ color: 'var(--text-secondary)' }}>Label</span>
+              <input
+                type="text"
+                value={selectedFrame.label}
+                onChange={(e) => updateFrame(selectedFrame.id, { label: e.target.value })}
+                style={{
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '3px',
+                  padding: '6px 8px',
+                  fontSize: '0.85rem',
+                  width: '100%',
+                  outline: 'none',
+                }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
+              />
+            </label>
+          </div>
+
+          <div style={{ marginBottom: '12px' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '6px' }}>Color</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {['purple', 'blue', 'green', 'orange', 'red', 'gray'].map(colorKey => (
+                <button
+                  key={colorKey}
+                  type="button"
+                  onClick={() => updateFrame(selectedFrame.id, { color: colorKey })}
+                  title={colorKey}
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 4,
+                    border: selectedFrame.color === colorKey
+                      ? '2px solid var(--accent-primary)'
+                      : '1px solid var(--border-default)',
+                    cursor: 'pointer',
+                    background: colorKey === 'purple' ? 'rgba(108, 92, 231, 0.5)'
+                      : colorKey === 'blue' ? 'rgba(60, 120, 220, 0.5)'
+                      : colorKey === 'green' ? 'rgba(46, 204, 113, 0.5)'
+                      : colorKey === 'orange' ? 'rgba(230, 160, 40, 0.5)'
+                      : colorKey === 'red' ? 'rgba(231, 76, 60, 0.5)'
+                      : 'rgba(200, 200, 200, 0.3)',
+                    padding: 0,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => removeFrame(selectedFrame.id)}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              background: 'transparent',
+              color: 'var(--status-danger)',
+              border: '1px solid var(--status-danger)',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              fontFamily: 'inherit',
+            }}
+          >
+            Delete Frame
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!selectedNode || !spec) {

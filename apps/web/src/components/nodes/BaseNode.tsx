@@ -157,6 +157,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
   headerExtra, headerIcon, headerTag, onHeaderDoubleClick,
 }) => {
   const { spec } = data;
+  const muted = useGraphStore(s => s.nodes.get(id)?.muted ?? false);
   const timing = useGraphStore(s => s.nodeTimings.get(id));
   const showTimings = useSettingsStore(s => s.showTimings);
   const connections = useGraphStore(s => s.connections);
@@ -199,7 +200,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
 
   return (
     <div
-      className={`base-node ${selected ? 'base-node--selected' : ''}`}
+      className={`base-node ${selected ? 'base-node--selected' : ''} ${muted ? 'base-node--muted' : ''}`}
       style={{
         minWidth: minWidth ?? '180px',
         maxWidth: maxWidth ?? '220px',

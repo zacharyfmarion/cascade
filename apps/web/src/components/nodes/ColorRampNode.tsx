@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeDropdown, NodeButton, NodeSection } from './NodePrimitives';
@@ -29,6 +29,11 @@ const hexToFloat = (hex: string, alpha: number): [number, number, number, number
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+const DEFAULT_STOPS: ColorStop[] = [
+  { position: 0, color: [0, 0, 0, 1] },
+  { position: 1, color: [1, 1, 1, 1] },
+];
+
 const interpolateColorAt = (stops: ColorStop[], pos: number): [number, number, number, number] => {
   const sorted = [...stops].sort((a, b) => a.position - b.position);
   if (pos <= sorted[0].position) return sorted[0].color;
@@ -51,11 +56,25 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { spec, params } = data;
   const setParam = useGraphStore(s => s.setParam);
+  const setParamLive = useGraphStore(s => s.setParamLive);
+  const setParamCommit = useGraphStore(s => s.setParamCommit);
 
-  const stopsValue = params['stops'] ?? spec.params.find(p => p.key === 'stops')?.default;
-  const stops: ColorStop[] = stopsValue && 'ColorRamp' in stopsValue
-    ? (stopsValue as { ColorRamp: ColorStop[] }).ColorRamp
-    : [{ position: 0, color: [0, 0, 0, 1] }, { position: 1, color: [1, 1, 1, 1] }];
+  const storeStopsValue = useGraphStore(s => {
+    const node = s.nodes.get(props.id);
+    return node?.params['stops'];
+  });
+  const stopsValue = storeStopsValue ?? spec.params.find(p => p.key === 'stops')?.default;
+  const stops: ColorStop[] = useMemo(() => {
+    if (stopsValue && typeof stopsValue === 'object' && 'ColorRamp' in stopsValue) {
+      return (stopsValue as { ColorRamp: ColorStop[] }).ColorRamp;
+    }
+    return DEFAULT_STOPS;
+  }, [stopsValue]);
+
+  // NEW: Local state for smooth dragging
+  const [localStops, setLocalStops] = useState<ColorStop[] | null>(null);
+  const displayStops = localStops ?? stops;
+  const pendingLiveSyncRef = useRef<number | null>(null);
 
   const interpValue = params['interpolation'] ?? spec.params.find(p => p.key === 'interpolation')?.default;
   const interpolation = interpValue ? Number(extractParamValue(interpValue)) : 0;
@@ -63,58 +82,122 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  // Track the pointer ID that initiated the drag
+  const dragPointerIdRef = useRef<number | null>(null);
 
-  const sortedForGradient = [...stops].sort((a, b) => a.position - b.position);
-  const gradientCSS = `linear-gradient(to right, ${
-    sortedForGradient.map(s => {
-      const [r, g, b, a] = s.color;
-      return `rgba(${floatToByte(r)},${floatToByte(g)},${floatToByte(b)},${a}) ${s.position * 100}%`;
-    }).join(', ')
-  })`;
+  const gradientCSS = useMemo(() => {
+    const sorted = [...displayStops].sort((a, b) => a.position - b.position);
+    if (interpolation === 1) {
+      // Constant: each stop holds its color until the next stop begins
+      const parts: string[] = [];
+      for (let i = 0; i < sorted.length; i++) {
+        const [r, g, b, a] = sorted[i].color;
+        const rgba = `rgba(${floatToByte(r)},${floatToByte(g)},${floatToByte(b)},${a})`;
+        const from = sorted[i].position * 100;
+        const to = i < sorted.length - 1 ? sorted[i + 1].position * 100 : 100;
+        parts.push(`${rgba} ${from}%`, `${rgba} ${to}%`);
+      }
+      return `linear-gradient(to right, ${parts.join(', ')})`;
+    }
+    return `linear-gradient(to right, ${
+      sorted.map(s => {
+        const [r, g, b, a] = s.color;
+        return `rgba(${floatToByte(r)},${floatToByte(g)},${floatToByte(b)},${a}) ${s.position * 100}%`;
+      }).join(', ')
+    })`;
+  }, [displayStops, interpolation]);
 
   const updateStops = useCallback((newStops: ColorStop[]) => {
-    setParam(props.id, 'stops', { ColorRamp: newStops });
+    setParam(props.id, 'stops', { ColorRamp: newStops } as ParamValue);
   }, [props.id, setParam]);
 
+  // Throttled sync effect
+  useEffect(() => {
+      if (localStops === null || draggingIdx === null) return;
+      
+      if (pendingLiveSyncRef.current !== null) return; // already scheduled
+      
+      pendingLiveSyncRef.current = requestAnimationFrame(() => {
+          pendingLiveSyncRef.current = null;
+          setParamLive(props.id, 'stops', { ColorRamp: localStops } as ParamValue);
+      });
+      
+      return () => {
+          if (pendingLiveSyncRef.current !== null) {
+              cancelAnimationFrame(pendingLiveSyncRef.current);
+              pendingLiveSyncRef.current = null;
+          }
+      };
+  }, [localStops, draggingIdx, props.id, setParamLive]);
+
+  const updateStopsCommit = useCallback((newStops: ColorStop[]) => {
+    setParamCommit(props.id, 'stops', { ColorRamp: newStops } as ParamValue);
+  }, [props.id, setParamCommit]);
+
+  // Track whether a drag just finished so we can suppress the click on the bar
+  const justDraggedRef = useRef(false);
+
   const handleBarClick = useCallback((e: React.MouseEvent) => {
+    if (justDraggedRef.current) {
+      justDraggedRef.current = false;
+      return;
+    }
     if (!barRef.current) return;
     const rect = barRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const newColor = interpolateColorAt(stops, x);
-    const newStops = [...stops, { position: x, color: newColor }];
+    const newStops: ColorStop[] = [...stops, { position: x, color: newColor }];
     updateStops(newStops);
     setSelectedIdx(newStops.length - 1);
   }, [stops, updateStops]);
 
-  const handleStopMouseDown = useCallback((e: React.MouseEvent, idx: number) => {
+  const handleStopPointerDown = useCallback((e: React.PointerEvent, idx: number) => {
+    // Prevent React Flow from starting node drag
     e.stopPropagation();
     e.preventDefault();
+    
+    if (barRef.current) {
+      barRef.current.setPointerCapture(e.pointerId);
+      dragPointerIdRef.current = e.pointerId;
+    }
+    
+    setLocalStops([...stops]);
     setSelectedIdx(idx);
     setDraggingIdx(idx);
-  }, []);
+    justDraggedRef.current = true;
+  }, [stops]);
 
-  const updateStopPosition = useCallback((idx: number, newPos: number) => {
-    const updated = [...stops];
-    updated[idx] = { ...updated[idx], position: newPos };
-    updateStops(updated);
-  }, [stops, updateStops]);
+  const handleBarPointerMove = useCallback((e: React.PointerEvent) => {
+    if (draggingIdx === null || !barRef.current) return;
+    
+    const rect = barRef.current.getBoundingClientRect();
+    const newPos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    
+    setLocalStops(prev => {
+        if (!prev) return prev;
+        const updated = [...prev];
+        updated[draggingIdx] = { ...updated[draggingIdx], position: newPos };
+        return updated;
+    });
+    
+    justDraggedRef.current = true;
+  }, [draggingIdx]);
 
-  useEffect(() => {
-    if (draggingIdx === null) return;
-    const onMove = (e: MouseEvent) => {
-      if (barRef.current) {
-        const rect = barRef.current.getBoundingClientRect();
-        updateStopPosition(draggingIdx, Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)));
+  const handleBarPointerUp = useCallback((_e: React.PointerEvent) => {
+    if (draggingIdx !== null) {
+      if (barRef.current && dragPointerIdRef.current !== null) {
+        barRef.current.releasePointerCapture(dragPointerIdRef.current);
+        dragPointerIdRef.current = null;
       }
-    };
-    const onUp = () => setDraggingIdx(null);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [draggingIdx, updateStopPosition]);
+      
+      if (localStops) {
+          updateStopsCommit(localStops);
+      }
+      
+      setLocalStops(null);
+      setDraggingIdx(null);
+    }
+  }, [draggingIdx, localStops, updateStopsCommit]);
 
   const handleDelete = useCallback(() => {
     if (selectedIdx !== null && stops.length > 2) {
@@ -123,14 +206,23 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     }
   }, [selectedIdx, stops, updateStops]);
 
-  const handleColorChange = useCallback((hex: string) => {
+  const handleColorInput = useCallback((hex: string) => {
     if (selectedIdx === null) return;
-    const updated = [...stops];
+    const updated: ColorStop[] = [...stops];
     updated[selectedIdx] = { ...updated[selectedIdx], color: hexToFloat(hex, updated[selectedIdx].color[3]) };
-    updateStops(updated);
-  }, [selectedIdx, stops, updateStops]);
+    setParamLive(props.id, 'stops', { ColorRamp: updated } as ParamValue);
+  }, [selectedIdx, stops, props.id, setParamLive]);
 
-  const selectedStop = selectedIdx !== null && selectedIdx < stops.length ? stops[selectedIdx] : null;
+  const handleColorCommit = useCallback((hex: string) => {
+    if (selectedIdx === null) return;
+    const updated: ColorStop[] = [...stops];
+    updated[selectedIdx] = { ...updated[selectedIdx], color: hexToFloat(hex, updated[selectedIdx].color[3]) };
+    const value = { ColorRamp: updated } as ParamValue;
+    setParamLive(props.id, 'stops', value);
+    setParamCommit(props.id, 'stops', value);
+  }, [selectedIdx, stops, props.id, setParamLive, setParamCommit]);
+
+  const selectedStop = selectedIdx !== null && selectedIdx < displayStops.length ? displayStops[selectedIdx] : null;
 
   const interpOptions = spec.params.find(p => p.key === 'interpolation');
   const dropdownData = interpOptions?.ui_hint.type === 'Dropdown' ? interpOptions.ui_hint.data : ['Linear', 'Constant'];
@@ -153,51 +245,68 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
 
         <NodeSection spaced>
           <div
+            className="node-color-ramp__bar"
             ref={barRef}
             onClick={handleBarClick}
-            className="node-color-ramp__bar"
+            onPointerMove={handleBarPointerMove}
+            onPointerUp={handleBarPointerUp}
             role="button"
             tabIndex={0}
             onKeyDown={() => {}}
-            style={{ background: gradientCSS }}
-          />
+          >
+            <div
+              className="node-color-ramp__gradient"
+              style={{
+                background: gradientCSS,
+                pointerEvents: 'none',
+              }}
+            />
+          </div>
 
-          <div className="node-color-ramp__stops">
-            {stops.map((stop, i) => (
+          <div className="node-color-ramp__stops" style={{ pointerEvents: 'none' }}>
+            {displayStops.map((stop, i) => (
               <div
                 key={i}
-                onMouseDown={(e) => handleStopMouseDown(e, i)}
+                onPointerDown={(e) => handleStopPointerDown(e, i)}
                 className={`node-color-ramp__stop${selectedIdx === i ? ' node-color-ramp__stop--selected' : ''}`}
                 style={{
                   left: `${stop.position * 100}%`,
-                  borderBottomColor: selectedIdx === i ? 'var(--accent-primary)' : 'var(--text-secondary)',
-                  borderBottomWidth: '8px',
-                  borderBottomStyle: 'solid',
+                  pointerEvents: 'auto',
                 }}
-              />
+              >
+                <div
+                  className="node-color-ramp__stop-handle"
+                  style={{
+                    color: colorToHex(stop.color)
+                  }}
+                />
+              </div>
             ))}
           </div>
         </NodeSection>
 
         {selectedStop && (
           <div className="node-color-ramp__editor">
-            <div
-              className="node-color-swatch"
-              style={{
-                background: `rgba(${floatToByte(selectedStop.color[0])},${floatToByte(selectedStop.color[1])},${floatToByte(selectedStop.color[2])},1)`,
-              }}
-            >
+            <div className="node-color-swatch">
+              <div
+                className="node-color-swatch__preview"
+                style={{
+                  // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+                  background: `rgba(${floatToByte(selectedStop.color[0])},${floatToByte(selectedStop.color[1])},${floatToByte(selectedStop.color[2])},1)`,
+                }}
+              />
               <input
                 type="color"
                 value={colorToHex(selectedStop.color)}
-                onChange={(e) => handleColorChange(e.target.value)}
+                onInput={(e) => handleColorInput((e.target as HTMLInputElement).value)}
+                onChange={(e) => handleColorCommit(e.target.value)}
                 className="node-color-swatch__input"
               />
             </div>
 
-            <span className="node-color-swatch__position">
+            <div className="node-color-swatch__position">
               {selectedStop.position.toFixed(3)}
-            </span>
+            </div>
 
             <NodeButton
               onClick={handleDelete}
