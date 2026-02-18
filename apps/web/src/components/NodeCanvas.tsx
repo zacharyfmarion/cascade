@@ -352,6 +352,63 @@ export const NodeCanvas: React.FC = () => {
 
   const setSelectedNodes = useGraphStore(s => s.setSelectedNodes);
 
+  const refitFrames = useCallback((excludeNodeIds?: Set<string>) => {
+    const PADDING = 30;
+    const HEADER = 28;
+    const MIN_W = 200;
+    const MIN_H = 150;
+    const { frames, nodes } = useGraphStore.getState();
+    const flowNodeList = getNodes();
+
+    for (const frame of frames.values()) {
+      const containedBounds: { l: number; t: number; r: number; b: number }[] = [];
+
+      for (const [nodeId, node] of nodes) {
+        if (excludeNodeIds?.has(nodeId)) continue;
+        const fn = flowNodeList.find(n => n.id === nodeId);
+        const w = fn?.measured?.width ?? 200;
+        const h = fn?.measured?.height ?? 100;
+        const cx = node.position.x + w / 2;
+        const cy = node.position.y + h / 2;
+
+        if (
+          cx >= frame.position.x &&
+          cy >= frame.position.y &&
+          cx <= frame.position.x + frame.size.width &&
+          cy <= frame.position.y + frame.size.height
+        ) {
+          containedBounds.push({ l: node.position.x, t: node.position.y, r: node.position.x + w, b: node.position.y + h });
+        }
+      }
+
+      if (containedBounds.length > 0) {
+        const minL = Math.min(...containedBounds.map(b => b.l));
+        const minT = Math.min(...containedBounds.map(b => b.t));
+        const maxR = Math.max(...containedBounds.map(b => b.r));
+        const maxB = Math.max(...containedBounds.map(b => b.b));
+
+        const newX = minL - PADDING;
+        const newY = minT - PADDING - HEADER;
+        const newW = Math.max(MIN_W, (maxR - minL) + PADDING * 2);
+        const newH = Math.max(MIN_H, (maxB - minT) + PADDING * 2 + HEADER);
+
+        const pos = frame.position;
+        const sz = frame.size;
+        if (
+          Math.abs(newX - pos.x) > 1 ||
+          Math.abs(newY - pos.y) > 1 ||
+          Math.abs(newW - sz.width) > 1 ||
+          Math.abs(newH - sz.height) > 1
+        ) {
+          useGraphStore.getState().updateFrame(frame.id, {
+            position: { x: newX, y: newY },
+            size: { width: newW, height: newH },
+          });
+        }
+      }
+    }
+  }, [getNodes]);
+
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const removals = changes.filter(c => c.type === 'remove');
     const nonRemovals = changes.filter(c => c.type !== 'remove');
@@ -532,16 +589,23 @@ export const NodeCanvas: React.FC = () => {
       setSelectedNodes(selectedIds);
     }
 
-    removals.forEach(change => {
-      if (change.type === 'remove') {
-        if (change.id.startsWith('frame__')) {
-          useGraphStore.getState().removeFrame(change.id.slice(7));
-        } else {
-          removeNode(change.id);
+    if (removals.length > 0) {
+      const deletedNodeIds = new Set<string>();
+      removals.forEach(change => {
+        if (change.type === 'remove') {
+          if (change.id.startsWith('frame__')) {
+            useGraphStore.getState().removeFrame(change.id.slice(7));
+          } else {
+            deletedNodeIds.add(change.id);
+            removeNode(change.id);
+          }
         }
+      });
+      if (deletedNodeIds.size > 0) {
+        refitFrames(deletedNodeIds);
       }
-    });
-  }, [setPosition, setSelectedNodes, removeNode]);
+    }
+  }, [setPosition, setSelectedNodes, removeNode, refitFrames]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     const removals = changes.filter(c => c.type === 'remove');
