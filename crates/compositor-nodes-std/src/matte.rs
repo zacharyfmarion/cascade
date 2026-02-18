@@ -1042,3 +1042,700 @@ impl Node for CopyChannels {
         self
     }
 }
+
+pub struct LuminanceKey;
+
+impl LuminanceKey {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for LuminanceKey {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "luminance_key".to_string(),
+            display_name: "Luminance Key".to_string(),
+            category: "Matte".to_string(),
+            description: "Generate matte from pixel brightness".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "matte".to_string(),
+                    label: "Matte".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            params: vec![
+                ParamSpec {
+                    key: "low".to_string(),
+                    label: "Low".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.2),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "high".to_string(),
+                    label: "High".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.8),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "channel".to_string(),
+                    label: "Channel".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(4.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "Luminance".to_string(),
+                        "Red".to_string(),
+                        "Green".to_string(),
+                        "Blue".to_string(),
+                        "Alpha".to_string(),
+                    ]),
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "invert".to_string(),
+                    label: "Invert".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let low = ctx.get_param_float("low")? as f32;
+            let high = ctx.get_param_float("high")? as f32;
+            let channel = ctx.get_param_int("channel")?.clamp(0, 4);
+            let invert = ctx.get_param_bool("invert")?;
+
+            let low = low.min(high);
+            let high = low.max(high);
+            let range = high - low;
+
+            let pixel_count = image.pixel_count();
+            let src = &image.data;
+            let mut data = vec![0.0f32; pixel_count * 4];
+            let mut matte_data = vec![0.0f32; pixel_count * 4];
+
+            data.par_chunks_exact_mut(4)
+                .zip(matte_data.par_chunks_exact_mut(4))
+                .enumerate()
+                .for_each(|(i, (out, matte))| {
+                    let idx = i * 4;
+                    let r = src[idx];
+                    let g = src[idx + 1];
+                    let b = src[idx + 2];
+                    let a = src[idx + 3];
+
+                    let sample = match channel {
+                        1 => r,
+                        2 => g,
+                        3 => b,
+                        4 => a,
+                        _ => 0.2126 * r + 0.7152 * g + 0.0722 * b,
+                    };
+
+                    let mut key = if range <= f32::EPSILON {
+                        if sample >= low { 1.0 } else { 0.0 }
+                    } else {
+                        ((sample - low) / range).clamp(0.0, 1.0)
+                    };
+
+                    if invert {
+                        key = 1.0 - key;
+                    }
+
+                    out[0] = r;
+                    out[1] = g;
+                    out[2] = b;
+                    out[3] = a * key;
+
+                    matte[0] = key;
+                    matte[1] = key;
+                    matte[2] = key;
+                    matte[3] = 1.0;
+                });
+
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
+            let matte_output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                matte_data,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            outputs.insert("matte".to_string(), Value::Image(matte_output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct DifferenceMatte;
+
+impl DifferenceMatte {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for DifferenceMatte {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "difference_matte".to_string(),
+            display_name: "Difference Matte".to_string(),
+            category: "Matte".to_string(),
+            description: "Generate matte from difference between footage and clean plate".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "plate".to_string(),
+                    label: "Clean Plate".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "matte".to_string(),
+                    label: "Matte".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            params: vec![
+                ParamSpec {
+                    key: "tolerance".to_string(),
+                    label: "Tolerance".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.1),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "softness".to_string(),
+                    label: "Softness".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.1),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let plate = ctx.get_input_image("plate")?;
+            let tolerance = ctx.get_param_float("tolerance")? as f32;
+            let softness = (ctx.get_param_float("softness")? as f32).max(0.0);
+            let soft_end = tolerance + softness;
+
+            let pixel_count = image.pixel_count();
+            let src = &image.data;
+            let plate_data = &plate.data;
+            let plate_pixels = plate.pixel_count();
+            let mut data = vec![0.0f32; pixel_count * 4];
+            let mut matte_data = vec![0.0f32; pixel_count * 4];
+
+            data.par_chunks_exact_mut(4)
+                .zip(matte_data.par_chunks_exact_mut(4))
+                .enumerate()
+                .for_each(|(i, (out, matte))| {
+                    let idx = i * 4;
+                    let r = src[idx];
+                    let g = src[idx + 1];
+                    let b = src[idx + 2];
+                    let a = src[idx + 3];
+
+                    let plate_idx = if i < plate_pixels { i * 4 } else { 0 };
+                    let pr = plate_data[plate_idx];
+                    let pg = plate_data[plate_idx + 1];
+                    let pb = plate_data[plate_idx + 2];
+
+                    let dr = r - pr;
+                    let dg = g - pg;
+                    let db = b - pb;
+                    let dist = (dr * dr + dg * dg + db * db).sqrt();
+
+                    let key = if dist < tolerance {
+                        0.0
+                    } else if softness <= f32::EPSILON || dist > soft_end {
+                        1.0
+                    } else {
+                        (dist - tolerance) / softness
+                    };
+
+                    out[0] = r;
+                    out[1] = g;
+                    out[2] = b;
+                    out[3] = a * key;
+
+                    matte[0] = key;
+                    matte[1] = key;
+                    matte[2] = key;
+                    matte[3] = 1.0;
+                });
+
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
+            let matte_output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                matte_data,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            outputs.insert("matte".to_string(), Value::Image(matte_output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct EdgeBlur;
+
+impl EdgeBlur {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for EdgeBlur {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "edge_blur".to_string(),
+            display_name: "Edge Blur".to_string(),
+            category: "Matte".to_string(),
+            description: "Blur edges of a matte for smoother composites".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "radius".to_string(),
+                    label: "Radius".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(3.0),
+                    min: Some(0.1),
+                    max: Some(50.0),
+                    step: Some(0.1),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "edge_threshold".to_string(),
+                    label: "Edge Threshold".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.01),
+                    min: Some(0.001),
+                    max: Some(0.5),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let sigma = ctx.get_param_float("radius")? as f32;
+            let edge_threshold = ctx.get_param_float("edge_threshold")? as f32;
+
+            let w = image.width as usize;
+            let h = image.height as usize;
+            if w == 0 || h == 0 || sigma < 0.1 {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
+
+            let src: Vec<f32> = image.data.to_vec();
+
+            let mut edge_mask = vec![0.0f32; w * h];
+            for y in 0..h {
+                for x in 0..w {
+                    let idx = (y * w + x) * 4;
+                    let a = src[idx + 3];
+
+                    let mut max_diff = 0.0f32;
+                    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx >= 0 && nx < w as i32 && ny >= 0 && ny < h as i32 {
+                            let ni = (ny as usize * w + nx as usize) * 4;
+                            let na = src[ni + 3];
+                            let diff = (a - na).abs();
+                            if diff > max_diff {
+                                max_diff = diff;
+                            }
+                        }
+                    }
+                    edge_mask[y * w + x] = if max_diff > edge_threshold { 1.0 } else { 0.0 };
+                }
+            }
+
+            let blur_radius = (sigma * 2.0).ceil() as usize;
+            for _ in 0..2 {
+                let prev = edge_mask.clone();
+                for y in 0..h {
+                    for x in 0..w {
+                        let x0 = x.saturating_sub(blur_radius);
+                        let x1 = (x + blur_radius).min(w - 1);
+                        let y0 = y.saturating_sub(blur_radius);
+                        let y1 = (y + blur_radius).min(h - 1);
+                        let mut sum = 0.0f32;
+                        let mut count = 0.0f32;
+                        for ny in y0..=y1 {
+                            for nx in x0..=x1 {
+                                sum += prev[ny * w + nx];
+                                count += 1.0;
+                            }
+                        }
+                        edge_mask[y * w + x] = (sum / count).min(1.0);
+                    }
+                }
+            }
+
+            let mut blurred = src.clone();
+            let radii = crate::filter::box_radii_for_gaussian(sigma, 3);
+            let mut tmp = vec![0.0f32; w * h * 4];
+            for &r in &radii {
+                crate::filter::box_blur_h(&blurred, &mut tmp, w, h, r);
+                crate::filter::box_blur_v(&tmp, &mut blurred, w, h, r);
+            }
+
+            let mut out = vec![0.0f32; w * h * 4];
+            out.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, px)| {
+                    let idx = i * 4;
+                    let mix = edge_mask[i];
+                    for c in 0..4 {
+                        px[c] = src[idx + c] * (1.0 - mix) + blurred[idx + c] * mix;
+                    }
+                });
+
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                out,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct MatteExpand;
+
+impl MatteExpand {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for MatteExpand {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "matte_expand".to_string(),
+            display_name: "Matte Expand".to_string(),
+            category: "Matte".to_string(),
+            description: "Expand matte edges outward (dilate alpha only)".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "radius".to_string(),
+                label: "Radius".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(1),
+                min: Some(1.0),
+                max: Some(50.0),
+                step: Some(1.0),
+                ui_hint: UiHint::NumberInput,
+                promotable: true,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let radius = ctx.get_param_int("radius")?.clamp(1, 50) as usize;
+            let w = image.width as usize;
+            let h = image.height as usize;
+            if w == 0 || h == 0 {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
+
+            let src = &image.data;
+            let mut alpha: Vec<f32> = (0..w * h).map(|i| src[i * 4 + 3]).collect();
+            let mut tmp = vec![0.0f32; w * h];
+
+            for _ in 0..radius {
+                for y in 0..h {
+                    for x in 0..w {
+                        let mut max_a = alpha[y * w + x];
+                        if x > 0 { max_a = max_a.max(alpha[y * w + x - 1]); }
+                        if x + 1 < w { max_a = max_a.max(alpha[y * w + x + 1]); }
+                        tmp[y * w + x] = max_a;
+                    }
+                }
+                for y in 0..h {
+                    for x in 0..w {
+                        let mut max_a = tmp[y * w + x];
+                        if y > 0 { max_a = max_a.max(tmp[(y - 1) * w + x]); }
+                        if y + 1 < h { max_a = max_a.max(tmp[(y + 1) * w + x]); }
+                        alpha[y * w + x] = max_a;
+                    }
+                }
+            }
+
+            let mut data = vec![0.0f32; w * h * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, px)| {
+                    let idx = i * 4;
+                    px[0] = src[idx];
+                    px[1] = src[idx + 1];
+                    px[2] = src[idx + 2];
+                    px[3] = alpha[i];
+                });
+
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct MatteShrink;
+
+impl MatteShrink {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for MatteShrink {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "matte_shrink".to_string(),
+            display_name: "Matte Shrink".to_string(),
+            category: "Matte".to_string(),
+            description: "Shrink matte edges inward (erode alpha only)".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "radius".to_string(),
+                label: "Radius".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(1),
+                min: Some(1.0),
+                max: Some(50.0),
+                step: Some(1.0),
+                ui_hint: UiHint::NumberInput,
+                promotable: true,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let radius = ctx.get_param_int("radius")?.clamp(1, 50) as usize;
+            let w = image.width as usize;
+            let h = image.height as usize;
+            if w == 0 || h == 0 {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
+
+            let src = &image.data;
+            let mut alpha: Vec<f32> = (0..w * h).map(|i| src[i * 4 + 3]).collect();
+            let mut tmp = vec![0.0f32; w * h];
+
+            for _ in 0..radius {
+                for y in 0..h {
+                    for x in 0..w {
+                        let mut min_a = alpha[y * w + x];
+                        if x > 0 { min_a = min_a.min(alpha[y * w + x - 1]); }
+                        if x + 1 < w { min_a = min_a.min(alpha[y * w + x + 1]); }
+                        tmp[y * w + x] = min_a;
+                    }
+                }
+                for y in 0..h {
+                    for x in 0..w {
+                        let mut min_a = tmp[y * w + x];
+                        if y > 0 { min_a = min_a.min(tmp[(y - 1) * w + x]); }
+                        if y + 1 < h { min_a = min_a.min(tmp[(y + 1) * w + x]); }
+                        alpha[y * w + x] = min_a;
+                    }
+                }
+            }
+
+            let mut data = vec![0.0f32; w * h * 4];
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, px)| {
+                    let idx = i * 4;
+                    px[0] = src[idx];
+                    px[1] = src[idx + 1];
+                    px[2] = src[idx + 2];
+                    px[3] = alpha[i];
+                });
+
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                image.data_window,
+                data,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}

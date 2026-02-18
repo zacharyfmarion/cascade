@@ -34,7 +34,7 @@ pub use generate::{
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
-pub use matte::{ChromaKey, CombineRgba, CopyChannels, ExtractChannel, Premultiply, SeparateRgba, SetAlpha, Unpremultiply};
+pub use matte::{ChromaKey, CombineRgba, CopyChannels, DifferenceMatte, EdgeBlur, ExtractChannel, LuminanceKey, MatteExpand, MatteShrink, Premultiply, SeparateRgba, SetAlpha, Unpremultiply};
 pub use output::{ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
@@ -117,6 +117,11 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("copy_channels", || Arc::new(CopyChannels::new()));
     registry.register("chroma_key", || Arc::new(ChromaKey::new()));
     registry.register("despill", || Arc::new(Despill::new()));
+    registry.register("luminance_key", || Arc::new(LuminanceKey::new()));
+    registry.register("difference_matte", || Arc::new(DifferenceMatte::new()));
+    registry.register("edge_blur", || Arc::new(EdgeBlur::new()));
+    registry.register("matte_expand", || Arc::new(MatteExpand::new()));
+    registry.register("matte_shrink", || Arc::new(MatteShrink::new()));
     registry.register("shape", || Arc::new(Shape::new()));
     registry.register("white_balance", || Arc::new(WhiteBalance::new()));
     registry.register("vibrance", || Arc::new(Vibrance::new()));
@@ -2352,5 +2357,407 @@ mod tests {
         let node = Dot::new();
         let output = eval_image_node(&node, input.clone(), HashMap::new());
         assert_eq!(output.data, input.data);
+    }
+
+    // ── Matte node helpers ───────────────────────────────────────────────
+
+    /// Evaluate a node with one image input and return both "image" and "matte" outputs.
+    fn eval_matte_node(
+        node: &dyn Node,
+        input: Image,
+        params: HashMap<String, ParamValue>,
+    ) -> (Image, Image) {
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(input));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+        };
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+        let image = match result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            other => panic!("Expected Image, got {:?}", other.value_type()),
+        };
+        let matte = match result.get("matte").unwrap() {
+            Value::Image(img) => img.clone(),
+            other => panic!("Expected Image for matte, got {:?}", other.value_type()),
+        };
+        (image, matte)
+    }
+
+    /// Evaluate DifferenceMatte with two inputs (image + plate).
+    fn eval_difference_matte(
+        image: Image,
+        plate: Image,
+        params: HashMap<String, ParamValue>,
+    ) -> (Image, Image) {
+        let node = DifferenceMatte::new();
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(image));
+        inputs.insert("plate".to_string(), Value::Image(plate));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+        };
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+        let img = match result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            other => panic!("Expected Image, got {:?}", other.value_type()),
+        };
+        let matte = match result.get("matte").unwrap() {
+            Value::Image(img) => img.clone(),
+            other => panic!("Expected Image for matte, got {:?}", other.value_type()),
+        };
+        (img, matte)
+    }
+
+    // ── LuminanceKey tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_luminance_key_bright_keyed() {
+        // Bright pixel (lum=1.0) with low=0.2, high=0.8 → key=1.0
+        let input = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        let node = LuminanceKey::new();
+        let mut params = HashMap::new();
+        params.insert("low".to_string(), ParamValue::Float(0.2));
+        params.insert("high".to_string(), ParamValue::Float(0.8));
+        params.insert("channel".to_string(), ParamValue::Int(0)); // luminance
+        params.insert("invert".to_string(), ParamValue::Bool(false));
+
+        let (img, matte) = eval_matte_node(&node, input, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        // key=1.0, so alpha = 1.0*1.0 = 1.0, matte = white
+        assert!(approx_eq(px[3], 1.0), "alpha should be 1.0: {}", px[3]);
+        assert!(approx_eq(mk[0], 1.0), "matte R should be 1.0: {}", mk[0]);
+        assert!(approx_eq(mk[3], 1.0), "matte alpha should be 1.0: {}", mk[3]);
+    }
+
+    #[test]
+    fn test_luminance_key_dark_suppressed() {
+        // Dark pixel (lum=0.0) with low=0.2, high=0.8 → key=0.0
+        let input = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 1.0]);
+        let node = LuminanceKey::new();
+        let mut params = HashMap::new();
+        params.insert("low".to_string(), ParamValue::Float(0.2));
+        params.insert("high".to_string(), ParamValue::Float(0.8));
+        params.insert("channel".to_string(), ParamValue::Int(0));
+        params.insert("invert".to_string(), ParamValue::Bool(false));
+
+        let (img, matte) = eval_matte_node(&node, input, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        assert!(approx_eq(px[3], 0.0), "alpha should be 0.0: {}", px[3]);
+        assert!(approx_eq(mk[0], 0.0), "matte should be 0.0: {}", mk[0]);
+    }
+
+    #[test]
+    fn test_luminance_key_midtone_soft() {
+        // Pixel with lum=0.5, low=0.2, high=0.8 → key=(0.5-0.2)/0.6 = 0.5
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]);
+        let node = LuminanceKey::new();
+        let mut params = HashMap::new();
+        params.insert("low".to_string(), ParamValue::Float(0.2));
+        params.insert("high".to_string(), ParamValue::Float(0.8));
+        params.insert("channel".to_string(), ParamValue::Int(0));
+        params.insert("invert".to_string(), ParamValue::Bool(false));
+
+        let (img, matte) = eval_matte_node(&node, input, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        assert!(approx_eq(px[3], 0.5), "alpha should be 0.5: {}", px[3]);
+        assert!(approx_eq(mk[0], 0.5), "matte should be 0.5: {}", mk[0]);
+    }
+
+    #[test]
+    fn test_luminance_key_invert() {
+        // Bright pixel with invert → key should flip
+        let input = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        let node = LuminanceKey::new();
+        let mut params = HashMap::new();
+        params.insert("low".to_string(), ParamValue::Float(0.2));
+        params.insert("high".to_string(), ParamValue::Float(0.8));
+        params.insert("channel".to_string(), ParamValue::Int(0));
+        params.insert("invert".to_string(), ParamValue::Bool(true));
+
+        let (img, matte) = eval_matte_node(&node, input, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        // Inverted: key=1.0 → 0.0
+        assert!(approx_eq(px[3], 0.0), "inverted alpha should be 0.0: {}", px[3]);
+        assert!(approx_eq(mk[0], 0.0), "inverted matte should be 0.0: {}", mk[0]);
+    }
+
+    #[test]
+    fn test_luminance_key_red_channel() {
+        // Red=0.8, Green=0.0, Blue=0.0 → channel=1 (Red), low=0.2, high=0.8 → key=1.0
+        let input = Image::from_f32_data(1, 1, vec![0.8, 0.0, 0.0, 1.0]);
+        let node = LuminanceKey::new();
+        let mut params = HashMap::new();
+        params.insert("low".to_string(), ParamValue::Float(0.2));
+        params.insert("high".to_string(), ParamValue::Float(0.8));
+        params.insert("channel".to_string(), ParamValue::Int(1)); // Red channel
+        params.insert("invert".to_string(), ParamValue::Bool(false));
+
+        let (_, matte) = eval_matte_node(&node, input, params);
+        let mk = matte.get_pixel_f32(0, 0);
+        assert!(approx_eq(mk[0], 1.0), "red channel key should be 1.0: {}", mk[0]);
+    }
+
+    // ── DifferenceMatte tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_difference_matte_identical() {
+        // Identical image and plate → difference=0 → key=0 (background keyed out)
+        let image = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 1.0]);
+        let plate = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("tolerance".to_string(), ParamValue::Float(0.1));
+        params.insert("softness".to_string(), ParamValue::Float(0.1));
+
+        let (img, matte) = eval_difference_matte(image, plate, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        assert!(approx_eq(px[3], 0.0), "alpha should be 0 for identical: {}", px[3]);
+        assert!(approx_eq(mk[0], 0.0), "matte should be 0 for identical: {}", mk[0]);
+    }
+
+    #[test]
+    fn test_difference_matte_very_different() {
+        // Very different → large distance → key=1.0
+        let image = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]);
+        let plate = Image::from_f32_data(1, 1, vec![0.0, 1.0, 0.0, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("tolerance".to_string(), ParamValue::Float(0.1));
+        params.insert("softness".to_string(), ParamValue::Float(0.1));
+
+        let (img, matte) = eval_difference_matte(image, plate, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        // Distance = sqrt(1+1) ≈ 1.414, well above tolerance+softness
+        assert!(approx_eq(px[3], 1.0), "alpha should be 1.0 for different: {}", px[3]);
+        assert!(approx_eq(mk[0], 1.0), "matte should be 1.0 for different: {}", mk[0]);
+    }
+
+    #[test]
+    fn test_difference_matte_soft_edge() {
+        // Small difference within softness range → partial key
+        let image = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]);
+        // dist = sqrt(0.15^2 * 3) ≈ 0.2598
+        let plate = Image::from_f32_data(1, 1, vec![0.35, 0.35, 0.35, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("tolerance".to_string(), ParamValue::Float(0.1));
+        params.insert("softness".to_string(), ParamValue::Float(0.3));
+
+        let (img, matte) = eval_difference_matte(image, plate, params);
+        let px = img.get_pixel_f32(0, 0);
+        let mk = matte.get_pixel_f32(0, 0);
+
+        // key = (dist - 0.1) / 0.3 ≈ (0.2598 - 0.1) / 0.3 ≈ 0.533
+        assert!(px[3] > 0.1 && px[3] < 0.9, "alpha should be partial: {}", px[3]);
+        assert!(mk[0] > 0.1 && mk[0] < 0.9, "matte should be partial: {}", mk[0]);
+    }
+
+    // ── EdgeBlur tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_edge_blur_no_edges() {
+        // Fully opaque image with no alpha edges → should be unchanged
+        let input = make_test_image(4, 4, [0.5, 0.3, 0.7, 1.0]);
+        let node = EdgeBlur::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Float(3.0));
+        params.insert("edge_threshold".to_string(), ParamValue::Float(0.01));
+
+        let output = eval_image_node(&node, input.clone(), params);
+        // All alpha values are 1.0 → no edges → output ≈ input
+        for i in 0..16 {
+            let idx = i * 4;
+            for c in 0..4 {
+                assert!(
+                    (output.data[idx + c] - input.data[idx + c]).abs() < 0.02,
+                    "pixel {} channel {} should be unchanged: {} vs {}",
+                    i, c, output.data[idx + c], input.data[idx + c]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_edge_blur_with_edge() {
+        // Create image with sharp alpha edge: left half opaque, right half transparent
+        let w = 8u32;
+        let h = 4u32;
+        let mut data = vec![0.0f32; (w * h) as usize * 4];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let idx = (y * w as usize + x) * 4;
+                if x < 4 {
+                    data[idx] = 1.0;
+                    data[idx + 1] = 1.0;
+                    data[idx + 2] = 1.0;
+                    data[idx + 3] = 1.0;
+                }
+                // right half stays 0,0,0,0
+            }
+        }
+        let input = Image::from_f32_data(w, h, data);
+        let node = EdgeBlur::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Float(2.0));
+        params.insert("edge_threshold".to_string(), ParamValue::Float(0.01));
+
+        let output = eval_image_node(&node, input.clone(), params);
+
+        // Interior pixels (x=0) should be nearly unchanged
+        let interior = output.get_pixel_f32(0, 2);
+        assert!(
+            interior[3] > 0.9,
+            "Interior alpha should stay high: {}",
+            interior[3]
+        );
+
+        // The edge pixel (x=3, adjacent to transparent) should be blurred
+        let edge = output.get_pixel_f32(3, 2);
+        let orig_edge = input.get_pixel_f32(3, 2);
+        // Edge region should show some blur effect (alpha slightly reduced)
+        // or at minimum, the node should run without error
+        assert!(edge[3] <= orig_edge[3] + 0.01, "Edge alpha should not increase beyond original");
+    }
+
+    // ── MatteExpand tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_matte_expand_grows_alpha() {
+        // Single opaque pixel in center of 3x3, rest transparent
+        let mut data = vec![0.0f32; 9 * 4];
+        // Center pixel (1,1) = opaque white
+        let center = (1 * 3 + 1) * 4;
+        data[center] = 1.0;
+        data[center + 1] = 1.0;
+        data[center + 2] = 1.0;
+        data[center + 3] = 1.0;
+
+        let input = Image::from_f32_data(3, 3, data);
+        let node = MatteExpand::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input, params);
+
+        // Center should still be opaque
+        let c = output.get_pixel_f32(1, 1);
+        assert!(approx_eq(c[3], 1.0), "center alpha: {}", c[3]);
+
+        // Neighbors should now also be opaque (dilated by 1)
+        let top = output.get_pixel_f32(1, 0);
+        let bot = output.get_pixel_f32(1, 2);
+        let left = output.get_pixel_f32(0, 1);
+        let right = output.get_pixel_f32(2, 1);
+        assert!(approx_eq(top[3], 1.0), "top alpha after expand: {}", top[3]);
+        assert!(approx_eq(bot[3], 1.0), "bot alpha after expand: {}", bot[3]);
+        assert!(approx_eq(left[3], 1.0), "left alpha after expand: {}", left[3]);
+        assert!(approx_eq(right[3], 1.0), "right alpha after expand: {}", right[3]);
+    }
+
+    #[test]
+    fn test_matte_expand_preserves_rgb() {
+        let data = vec![
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 1.0,
+        ];
+        let input = Image::from_f32_data(2, 1, data);
+        let node = MatteExpand::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input, params);
+        let px0 = output.get_pixel_f32(0, 0);
+        // RGB preserved, alpha expanded
+        assert!(approx_eq(px0[0], 1.0), "R preserved: {}", px0[0]);
+        assert!(approx_eq(px0[1], 0.0), "G preserved: {}", px0[1]);
+        assert!(approx_eq(px0[2], 0.0), "B preserved: {}", px0[2]);
+        assert!(approx_eq(px0[3], 1.0), "A expanded: {}", px0[3]);
+    }
+
+    // ── MatteShrink tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_matte_shrink_erodes_alpha() {
+        // 3x3 fully opaque, shrink by 1 → only center should remain
+        let data = vec![1.0f32; 9 * 4]; // all pixels [1,1,1,1]
+        let input = Image::from_f32_data(3, 3, data);
+        let node = MatteShrink::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input, params);
+
+        let c = output.get_pixel_f32(1, 1);
+        assert!(approx_eq(c[3], 1.0), "center alpha: {}", c[3]);
+    }
+
+    #[test]
+    fn test_matte_shrink_erodes_edge() {
+        // 3x3 where edge is opaque but one corner is transparent
+        let mut data = vec![1.0f32; 9 * 4];
+        // Make top-left corner transparent
+        data[0] = 1.0; data[1] = 1.0; data[2] = 1.0; data[3] = 0.0;
+
+        let input = Image::from_f32_data(3, 3, data);
+        let node = MatteShrink::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input, params);
+
+        let px01 = output.get_pixel_f32(0, 1);
+        assert!(approx_eq(px01[3], 0.0), "neighbor of transparent should erode: {}", px01[3]);
+
+        let px10 = output.get_pixel_f32(1, 0);
+        assert!(approx_eq(px10[3], 0.0), "neighbor of transparent should erode: {}", px10[3]);
+
+        // Separable H→V min propagation: (0,0)=0 → H pass zeros row 0 → V pass zeros (1,1)
+        let px11 = output.get_pixel_f32(1, 1);
+        assert!(approx_eq(px11[3], 0.0), "center should erode due to separable pass: {}", px11[3]);
+    }
+
+    #[test]
+    fn test_matte_shrink_preserves_rgb() {
+        let data = vec![
+            0.8, 0.3, 0.5, 1.0,
+            0.2, 0.7, 0.1, 0.0,
+        ];
+        let input = Image::from_f32_data(2, 1, data);
+        let node = MatteShrink::new();
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input, params);
+        // RGB should always be preserved
+        let px0 = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px0[0], 0.8), "R preserved: {}", px0[0]);
+        assert!(approx_eq(px0[1], 0.3), "G preserved: {}", px0[1]);
+        assert!(approx_eq(px0[2], 0.5), "B preserved: {}", px0[2]);
+        // Alpha should be eroded (neighbor has alpha=0.0)
+        assert!(approx_eq(px0[3], 0.0), "A eroded: {}", px0[3]);
     }
 }

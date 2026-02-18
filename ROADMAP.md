@@ -17,7 +17,7 @@ Gap analysis and prioritized plan for reaching moderately production-grade compo
 | **Composite** | Blend (19 modes), AlphaOver, **Merge** (14 Porter-Duff ops, bbox control) | Good |
 | **Transform** | Resize, Crop, Flip, Rotate, Translate, Transform2D | Decent |
 | **Generator** | SolidColor, Noise, Gradient, Checkerboard, RasterizeField, FloatConstant, IntegerConstant, Shape | Good |
-| **Matte** | Premultiply, Unpremultiply, SetAlpha, ExtractChannel, ChromaKey, Despill | Decent |
+| **Matte** | Premultiply, Unpremultiply, SetAlpha, ExtractChannel, ChromaKey, Despill, LuminanceKey, DifferenceMatte, EdgeBlur, MatteExpand, MatteShrink | **Good** |
 | **Channel** | SeparateRGBA, CombineRGBA, CopyChannels, ChannelShuffle, ExtractChannel | **Good** |
 | **Utility** | MapRange, Math | Minimal |
 | **Other** | GroupNode system, GpuScript, AiInpaint | Nice extras |
@@ -193,9 +193,9 @@ Foundational work first, then nodes that unlock real workflows.
 
 | # | Item | Type | Why |
 |---|------|------|-----|
-| 7 | Roto/mask shapes with bezier splines + feathering | Node + Frontend | The core masking tool |
-| 8 | Luminance Key + Difference Matte | Nodes | Completes the keying toolkit |
-| 9 | Matte operation nodes (EdgeBlur, shrink, expand) | Nodes | Essential matte refinement |
+| 7 | Roto/mask shapes with bezier splines + feathering | Node + Frontend | The core masking tool (deferred) |
+| ~~8~~ | ~~Luminance Key + Difference Matte~~ ✅ | ~~Nodes~~ | LuminanceKey (brightness/channel keying with soft range), DifferenceMatte (clean plate comparison) |
+| ~~9~~ | ~~Matte operation nodes (EdgeBlur, shrink, expand)~~ ✅ | ~~Nodes~~ | EdgeBlur (alpha-edge-only blur), MatteExpand (dilate), MatteShrink (erode) |
 
 ### Phase 4: Transform & Distort
 
