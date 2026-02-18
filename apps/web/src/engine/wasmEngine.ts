@@ -98,6 +98,10 @@ export class WasmEngine implements EngineBridge {
     this.getEngine().set_position(nodeId, x, y);
   }
 
+  setMuted(nodeId: string, muted: boolean): void {
+    (this.getEngine() as any).set_muted(nodeId, muted);
+  }
+
   loadImageData(nodeId: string, data: Uint8Array): void {
     console.log(`[WASM] loadImageData nodeId=${nodeId} bytes=${data.length}`);
     try {

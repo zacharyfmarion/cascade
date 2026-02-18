@@ -364,7 +364,8 @@ export class MockEngine implements EngineBridge {
       typeId,
       params,
       inputDefaults: {},
-      position: { x, y }
+      position: { x, y },
+      muted: false,
     });
     return { id, typeId };
   }
@@ -413,6 +414,10 @@ export class MockEngine implements EngineBridge {
     if (node) {
       node.position = { x, y };
     }
+  }
+
+  setMuted(_nodeId: string, _muted: boolean): void {
+    // No-op in mock engine
   }
 
   loadImageData(nodeId: string, _data: Uint8Array): void {

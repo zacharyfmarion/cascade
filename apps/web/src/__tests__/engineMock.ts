@@ -174,6 +174,8 @@ export function createMockEngine(): EngineBridge & {
 
     setPosition: () => {},
 
+    setMuted: () => {},
+
     loadImageData: (nodeId: string, data: Uint8Array) => {
       imageDataStore.set(nodeId, data);
     },

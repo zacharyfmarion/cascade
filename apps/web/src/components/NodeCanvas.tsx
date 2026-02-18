@@ -34,6 +34,8 @@ import { GroupInputNode } from './nodes/GroupInputNode';
 import { GroupOutputNode } from './nodes/GroupOutputNode';
 import { GroupNodeComponent } from './nodes/GroupNodeComponent';
 import { ColorPaletteNode } from './nodes/ColorPaletteNode';
+import { CurvesNode } from './nodes/CurvesNode';
+import { FrameNode } from './nodes/FrameNode';
 
 const SPECIAL_NODE_TYPES: NodeTypes = {
   load_image: ImageInputNode,
@@ -44,8 +46,10 @@ const SPECIAL_NODE_TYPES: NodeTypes = {
   export_video: ExportVideoNode,
   color_ramp: ColorRampNode,
   color_palette: ColorPaletteNode,
+  curves: CurvesNode,
   group_input: GroupInputNode,
   group_output: GroupOutputNode,
+  frame: FrameNode,
 };
 
 const PORT_COLORS: Record<string, string> = {
@@ -76,6 +80,7 @@ import type { ContextMenuState } from './CanvasContextMenu';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
+  const framesStore = useGraphStore(s => s.frames);
   const connectionsStore = useGraphStore(s => s.connections);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const { screenToFlowPosition, getNodes, getEdges } = useReactFlow();
@@ -101,11 +106,23 @@ export const NodeCanvas: React.FC = () => {
   const selectNode = useGraphStore(s => s.selectNode);
   const removeNode = useGraphStore(s => s.removeNode);
   const setParam = useGraphStore(s => s.setParam);
+  const frameSelectedNodes = useGraphStore(s => s.frameSelectedNodes);
+
+  const getMeasuredNodeSizes = useCallback(() => {
+    const sizes = new Map<string, { width: number; height: number }>();
+    for (const node of getNodes()) {
+      if (node.measured?.width && node.measured?.height) {
+        sizes.set(node.id, { width: node.measured.width, height: node.measured.height });
+      }
+    }
+    return sizes;
+  }, [getNodes]);
 
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
   const [flowEdges, setFlowEdges] = useState<FlowEdge[]>([]);
   const flowNodesRef = useRef<FlowNode[]>([]);
   const flowEdgesRef = useRef<FlowEdge[]>([]);
+  const dropTargetFrameId = useRef<string | null>(null);
   flowNodesRef.current = flowNodes;
   flowEdgesRef.current = flowEdges;
   const clipboardRef = useRef<ClipboardEntry[]>([]);
@@ -113,6 +130,9 @@ export const NodeCanvas: React.FC = () => {
   const edgeReconnectSuccessful = useRef(true);
   const connectionMadeRef = useRef(false);
   const menuJustOpenedRef = useRef(false);
+
+  // Track Cmd+Shift+Click viewer linking state (Blender-style output cycling)
+  const viewerLinkRef = useRef<{ nodeId: string; outputIndex: number } | null>(null);
 
   const snapToGrid = useSettingsStore(s => s.snapToGrid);
   const gridSize = useSettingsStore(s => s.gridSize);
@@ -226,6 +246,11 @@ export const NodeCanvas: React.FC = () => {
     closeContextMenu();
   }, [contextMenu, screenToFlowPosition, addNode, closeContextMenu, pendingConnection, nodeSpecs, nodesStore, storeConnect]);
 
+  const onFrameSelectionFromMenu = useCallback((nodeIds: string[]) => {
+    useGraphStore.getState().setSelectedNodes(nodeIds);
+    frameSelectedNodes(getMeasuredNodeSizes());
+  }, [frameSelectedNodes, getMeasuredNodeSizes]);
+
   useEffect(() => {
     const handleMouseDown = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -276,8 +301,30 @@ export const NodeCanvas: React.FC = () => {
         },
       };
     });
+    for (const frame of framesStore.values()) {
+      nextNodes.push({
+        id: `frame__${frame.id}`,
+        type: 'frame',
+        position: frame.position,
+        selected: false,
+        zIndex: -1000 + frame.zIndex,
+        style: { width: frame.size.width, height: frame.size.height },
+        data: {
+          label: frame.label,
+          color: frame.color,
+          frameId: frame.id,
+          width: frame.size.width,
+          height: frame.size.height,
+          selected: false,
+          dropTarget: dropTargetFrameId.current === frame.id,
+        },
+        draggable: true,
+        selectable: true,
+        connectable: false,
+      });
+    }
     setFlowNodes(nextNodes);
-  }, [nodesStore, nodeSpecs]);
+  }, [nodesStore, nodeSpecs, framesStore]);
 
   useEffect(() => {
     const prev = flowEdgesRef.current;
@@ -312,10 +359,168 @@ export const NodeCanvas: React.FC = () => {
     let selectionChanged = false;
     nonRemovals.forEach(change => {
       if (change.type === 'position' && change.position) {
-        setPosition(change.id, change.position);
+        if (change.id.startsWith('frame__')) {
+          const frameId = change.id.slice(7);
+          const frame = useGraphStore.getState().frames.get(frameId);
+          if (frame && change.dragging) {
+            const oldPos = frame.position;
+            const newPos = change.position;
+            const dx = newPos.x - oldPos.x;
+            const dy = newPos.y - oldPos.y;
+
+            if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+              const { nodes } = useGraphStore.getState();
+              const flowNodeList = getNodes();
+              for (const [nodeId, node] of nodes) {
+                const flowNode = flowNodeList.find(n => n.id === nodeId);
+                const nw = flowNode?.measured?.width ?? 200;
+                const nh = flowNode?.measured?.height ?? 100;
+                // Use node center for containment check
+                const cx = node.position.x + nw / 2;
+                const cy = node.position.y + nh / 2;
+                if (
+                  cx >= oldPos.x &&
+                  cy >= oldPos.y &&
+                  cx <= oldPos.x + frame.size.width &&
+                  cy <= oldPos.y + frame.size.height
+                ) {
+                  setPosition(nodeId, {
+                    x: node.position.x + dx,
+                    y: node.position.y + dy,
+                  });
+                }
+              }
+            }
+          }
+          useGraphStore.getState().updateFrame(frameId, { position: change.position });
+        } else {
+          setPosition(change.id, change.position);
+
+          // Detect drag over frames for auto-expand highlight
+          if (change.dragging) {
+            const flowNode = getNodes().find(n => n.id === change.id);
+            const nw = flowNode?.measured?.width ?? 200;
+            const nh = flowNode?.measured?.height ?? 100;
+            const cx = change.position.x + nw / 2;
+            const cy = change.position.y + nh / 2;
+            const SNAP_MARGIN = 50;
+            const { frames } = useGraphStore.getState();
+            let hitFrameId: string | null = null;
+            for (const frame of frames.values()) {
+              const fx = frame.position.x - SNAP_MARGIN;
+              const fy = frame.position.y - SNAP_MARGIN;
+              const fw = frame.size.width + SNAP_MARGIN * 2;
+              const fh = frame.size.height + SNAP_MARGIN * 2;
+              if (cx >= fx && cy >= fy && cx <= fx + fw && cy <= fy + fh) {
+                hitFrameId = frame.id;
+                break;
+              }
+            }
+            if (hitFrameId !== dropTargetFrameId.current) {
+              dropTargetFrameId.current = hitFrameId;
+              // Force re-render of frame nodes to update dropTarget flag
+              setFlowNodes(prev => prev.map(n => {
+                if (!n.id.startsWith('frame__')) return n;
+                const fid = n.id.slice(7);
+                return { ...n, data: { ...n.data, dropTarget: fid === hitFrameId } };
+              }));
+            }
+          }
+
+          // On drop: refit frames that contain this node (expand or shrink to fit)
+          if (change.dragging === false) {
+            const droppedPos = change.position;
+            const flowNodeList = getNodes();
+            const droppedFlowNode = flowNodeList.find(n => n.id === change.id);
+            const droppedW = droppedFlowNode?.measured?.width ?? 200;
+            const droppedH = droppedFlowNode?.measured?.height ?? 100;
+            const droppedCx = droppedPos.x + droppedW / 2;
+            const droppedCy = droppedPos.y + droppedH / 2;
+
+            const SNAP_MARGIN = 50;
+            const PADDING = 30;
+            const HEADER = 28;
+            const MIN_W = 200;
+            const MIN_H = 150;
+            const { frames, nodes } = useGraphStore.getState();
+
+            // Find the frame this node was dropped into/near
+            let targetFrameId = dropTargetFrameId.current;
+            if (!targetFrameId) {
+              // Also check if node center is inside any existing frame
+              for (const frame of frames.values()) {
+                if (
+                  droppedCx >= frame.position.x &&
+                  droppedCy >= frame.position.y &&
+                  droppedCx <= frame.position.x + frame.size.width &&
+                  droppedCy <= frame.position.y + frame.size.height
+                ) {
+                  targetFrameId = frame.id;
+                  break;
+                }
+              }
+            }
+            dropTargetFrameId.current = null;
+
+            if (targetFrameId) {
+              const frame = frames.get(targetFrameId);
+              if (frame) {
+                // Collect all nodes whose center is inside the frame (including the dropped node)
+                // Use the expanded snap zone for the dropped node, but strict bounds for existing nodes
+                const containedBounds: { l: number; t: number; r: number; b: number }[] = [];
+
+                for (const [nodeId, node] of nodes) {
+                  const fn = flowNodeList.find(n => n.id === nodeId);
+                  const w = fn?.measured?.width ?? 200;
+                  const h = fn?.measured?.height ?? 100;
+                  const pos = nodeId === change.id ? droppedPos : node.position;
+                  const cx = pos.x + w / 2;
+                  const cy = pos.y + h / 2;
+
+                  // Check if node center is inside frame (with snap margin for the dropped node)
+                  const margin = nodeId === change.id ? SNAP_MARGIN : 0;
+                  if (
+                    cx >= frame.position.x - margin &&
+                    cy >= frame.position.y - margin &&
+                    cx <= frame.position.x + frame.size.width + margin &&
+                    cy <= frame.position.y + frame.size.height + margin
+                  ) {
+                    containedBounds.push({ l: pos.x, t: pos.y, r: pos.x + w, b: pos.y + h });
+                  }
+                }
+
+                if (containedBounds.length > 0) {
+                  const minL = Math.min(...containedBounds.map(b => b.l));
+                  const minT = Math.min(...containedBounds.map(b => b.t));
+                  const maxR = Math.max(...containedBounds.map(b => b.r));
+                  const maxB = Math.max(...containedBounds.map(b => b.b));
+
+                  const newX = minL - PADDING;
+                  const newY = minT - PADDING - HEADER;
+                  const newW = Math.max(MIN_W, (maxR - minL) + PADDING * 2);
+                  const newH = Math.max(MIN_H, (maxB - minT) + PADDING * 2 + HEADER);
+
+                  useGraphStore.getState().updateFrame(targetFrameId, {
+                    position: { x: newX, y: newY },
+                    size: { width: newW, height: newH },
+                  });
+                }
+              }
+            }
+
+            // Clear highlight
+            setFlowNodes(prev => prev.map(n => {
+              if (!n.id.startsWith('frame__')) return n;
+              return { ...n, data: { ...n.data, dropTarget: false } };
+            }));
+          }
+        }
       }
       if (change.type === 'select') {
         selectionChanged = true;
+        if (change.id.startsWith('frame__') && change.selected) {
+          useGraphStore.getState().selectFrame(change.id.slice(7));
+        }
       }
     });
 
@@ -323,12 +528,18 @@ export const NodeCanvas: React.FC = () => {
     setFlowNodes(next);
 
     if (selectionChanged) {
-      const selectedIds = next.filter(n => n.selected).map(n => n.id);
+      const selectedIds = next.filter(n => n.selected && !n.id.startsWith('frame__')).map(n => n.id);
       setSelectedNodes(selectedIds);
     }
 
     removals.forEach(change => {
-      if (change.type === 'remove') removeNode(change.id);
+      if (change.type === 'remove') {
+        if (change.id.startsWith('frame__')) {
+          useGraphStore.getState().removeFrame(change.id.slice(7));
+        } else {
+          removeNode(change.id);
+        }
+      }
     });
   }, [setPosition, setSelectedNodes, removeNode]);
 
@@ -520,11 +731,34 @@ export const NodeCanvas: React.FC = () => {
     }
   }, [addNode, setParam]);
 
+  const linkToViewer = useGraphStore(s => s.linkToViewer);
   const createGroup = useGraphStore(s => s.createGroup);
   const ungroupNode = useGraphStore(s => s.ungroupNode);
   const enterGroup = useGraphStore(s => s.enterGroup);
   const exitGroup = useGraphStore(s => s.exitGroup);
   const isInsideGroup = useGraphStore(s => s.isInsideGroup);
+  const toggleMuteSelected = useGraphStore(s => s.toggleMuteSelected);
+
+  const onNodeClick = useCallback((_event: React.MouseEvent, node: FlowNode) => {
+    const isMod = _event.metaKey || _event.ctrlKey;
+    if (isMod && _event.shiftKey) {
+      _event.stopPropagation();
+
+      const storeNode = nodesStore.get(node.id);
+      if (!storeNode) return;
+      const spec = nodeSpecs.find(s => s.id === storeNode.typeId);
+      if (!spec || spec.outputs.length === 0) return;
+
+      // Determine output index: if same node clicked again, cycle; otherwise start at 0
+      let outputIndex = 0;
+      if (viewerLinkRef.current && viewerLinkRef.current.nodeId === node.id) {
+        outputIndex = (viewerLinkRef.current.outputIndex + 1) % spec.outputs.length;
+      }
+
+      viewerLinkRef.current = { nodeId: node.id, outputIndex };
+      linkToViewer(node.id, outputIndex);
+    }
+  }, [nodesStore, nodeSpecs, linkToViewer]);
 
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: FlowNode) => {
     event.preventDefault();
@@ -553,8 +787,14 @@ export const NodeCanvas: React.FC = () => {
         copySelected(true);
       } else if (mod && e.key === 'v') {
         e.preventDefault();
-        pasteClipboard();
-      } else if (mod && e.key === 'g' && !e.shiftKey && !e.altKey) {
+      pasteClipboard();
+    } else if (e.key === 'f' && !mod && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
+      if (selectedIds.length >= 1) {
+        frameSelectedNodes(getMeasuredNodeSizes());
+      }
+    } else if (mod && e.key === 'g' && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
         if (selectedIds.length >= 1) {
@@ -568,6 +808,11 @@ export const NodeCanvas: React.FC = () => {
           if (node && node.typeId.startsWith('group::')) {
             ungroupNode(selectedIds[0]);
           }
+        }
+      } else if (e.key === 'm' || e.key === 'M') {
+        if (!mod) {
+          e.preventDefault();
+          toggleMuteSelected();
         }
       } else if (e.key === 'Tab') {
         e.preventDefault();
@@ -586,7 +831,7 @@ export const NodeCanvas: React.FC = () => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [copySelected, pasteClipboard, createGroup, ungroupNode, enterGroup, exitGroup, isInsideGroup]);
+  }, [copySelected, pasteClipboard, frameSelectedNodes, getMeasuredNodeSizes, createGroup, ungroupNode, enterGroup, exitGroup, isInsideGroup, toggleMuteSelected]);
 
   return (
     <section
@@ -615,6 +860,7 @@ export const NodeCanvas: React.FC = () => {
             closeContextMenu();
           }
         }}
+        onNodeClick={onNodeClick}
         onPaneContextMenu={onPaneContextMenu}
         onNodeContextMenu={onNodeContextMenu}
         onSelectionContextMenu={onSelectionContextMenu}
@@ -641,6 +887,7 @@ export const NodeCanvas: React.FC = () => {
           menu={contextMenu}
           nodeSpecs={nodeSpecs}
           onAddNode={onAddNodeFromMenu}
+          onFrameSelection={onFrameSelectionFromMenu}
           onClose={closeContextMenu}
         />
       )}

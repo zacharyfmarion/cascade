@@ -80,6 +80,10 @@ export class TauriEngine implements EngineBridge {
     await invoke('set_position', { nodeId, x, y });
   }
 
+  async setMuted(nodeId: string, muted: boolean): Promise<void> {
+    await invoke('set_muted', { nodeId, muted });
+  }
+
   async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, RenderResult>> {
     const buf = await invoke<ArrayBuffer>('set_param_and_render', { nodeId, key, value, frame });
     const results = new Map<string, RenderResult>();

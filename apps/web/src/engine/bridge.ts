@@ -41,6 +41,7 @@ export interface EngineBridge {
   setParam(nodeId: string, key: string, value: ParamValue): Promise<void> | void;
   setInputDefault(nodeId: string, portName: string, value: ParamValue): Promise<void> | void;
   setPosition(nodeId: string, x: number, y: number): Promise<void> | void;
+  setMuted(nodeId: string, muted: boolean): Promise<void> | void;
   setParamAndRender?(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, RenderResult>>;
   registerGpuKernel?(manifestJson: string): Promise<NodeSpec> | NodeSpec;
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;

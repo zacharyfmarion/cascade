@@ -10,6 +10,7 @@ interface CanvasContextMenuProps {
   menu: ContextMenuState;
   nodeSpecs: NodeSpec[];
   onAddNode: (typeId: string) => void;
+  onFrameSelection: (nodeIds: string[]) => void;
   onClose: () => void;
 }
 
@@ -86,22 +87,40 @@ const Separator: React.FC = () => (
 
 const SelectionMenu: React.FC<{
   nodeIds: string[];
+  onFrameSelection: (nodeIds: string[]) => void;
   onClose: () => void;
-}> = ({ nodeIds, onClose }) => {
+}> = ({ nodeIds, onFrameSelection, onClose }) => {
   const createGroup = useGraphStore(s => s.createGroup);
   const ungroupNode = useGraphStore(s => s.ungroupNode);
   const enterGroup = useGraphStore(s => s.enterGroup);
   const removeNode = useGraphStore(s => s.removeNode);
+  const toggleMuteSelected = useGraphStore(s => s.toggleMuteSelected);
   const nodes = useGraphStore(s => s.nodes);
 
   const hasMultiple = nodeIds.length >= 2;
   const singleNode = nodeIds.length === 1 ? nodes.get(nodeIds[0]) : null;
   const isGroupNode = singleNode?.typeId.startsWith('group::') ?? false;
+  const allMuted = nodeIds.every(id => nodes.get(id)?.muted);
+
+  const UNMUTABLE_TYPES = new Set([
+    'load_image', 'load_image_sequence',
+    'viewer', 'export_image', 'export_image_sequence', 'export_video',
+    'group_input', 'group_output',
+  ]);
+  const canMute = nodeIds.some(id => {
+    const node = nodes.get(id);
+    return node && !UNMUTABLE_TYPES.has(node.typeId);
+  });
 
   const handleGroup = useCallback(() => {
     createGroup(nodeIds);
     onClose();
   }, [createGroup, nodeIds, onClose]);
+
+  const handleFrameSelection = useCallback(() => {
+    onFrameSelection(nodeIds);
+    onClose();
+  }, [onFrameSelection, nodeIds, onClose]);
 
   const handleUngroup = useCallback(() => {
     if (singleNode) {
@@ -116,6 +135,11 @@ const SelectionMenu: React.FC<{
     }
     onClose();
   }, [enterGroup, singleNode, onClose]);
+
+  const handleMute = useCallback(() => {
+    toggleMuteSelected();
+    onClose();
+  }, [toggleMuteSelected, onClose]);
 
   const handleDelete = useCallback(() => {
     for (const id of nodeIds) {
@@ -133,6 +157,12 @@ const SelectionMenu: React.FC<{
         onClick={handleGroup}
       />
       <MenuItem
+        label="Frame Selection"
+        shortcut="F"
+        disabled={nodeIds.length === 0}
+        onClick={handleFrameSelection}
+      />
+      <MenuItem
         label="Ungroup"
         shortcut="⌘⌥G"
         disabled={!isGroupNode}
@@ -145,6 +175,12 @@ const SelectionMenu: React.FC<{
         onClick={handleEnterGroup}
       />
       <Separator />
+      <MenuItem
+        label={allMuted ? 'Unmute' : 'Mute'}
+        shortcut="M"
+        disabled={!canMute}
+        onClick={handleMute}
+      />
       <MenuItem
         label={nodeIds.length > 1 ? `Delete ${nodeIds.length} Nodes` : 'Delete Node'}
         shortcut="⌫"
@@ -242,7 +278,7 @@ const AddNodeMenu: React.FC<{
 };
 
 export const CanvasContextMenu = React.forwardRef<HTMLDivElement, CanvasContextMenuProps>(
-  ({ menu, nodeSpecs, onAddNode, onClose }, ref) => {
+  ({ menu, nodeSpecs, onAddNode, onFrameSelection, onClose }, ref) => {
     return (
       <div
         ref={ref}
@@ -257,11 +293,11 @@ export const CanvasContextMenu = React.forwardRef<HTMLDivElement, CanvasContextM
           e.stopPropagation();
         }}
       >
-        {menu.type === 'pane' ? (
+      {menu.type === 'pane' ? (
           <AddNodeMenu nodeSpecs={nodeSpecs} onAddNode={onAddNode} />
-        ) : (
-          <SelectionMenu nodeIds={menu.nodeIds} onClose={onClose} />
-        )}
+      ) : (
+        <SelectionMenu nodeIds={menu.nodeIds} onFrameSelection={onFrameSelection} onClose={onClose} />
+      )}
       </div>
     );
   }

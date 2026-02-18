@@ -5,6 +5,11 @@ export interface ColorStop {
   color: [number, number, number, number];
 }
 
+export interface CurvePoint {
+  x: number;
+  y: number;
+}
+
 export type UiHint =
   | { type: 'Slider' }
   | { type: 'NumberInput' }
@@ -15,7 +20,8 @@ export type UiHint =
   | { type: 'Dropdown'; data: string[] }
   | { type: 'FilePicker' }
   | { type: 'Hidden' }
-  | { type: 'TextArea' };
+  | { type: 'TextArea' }
+  | { type: 'CurveEditor' };
 
 export interface ParamSpec {
   key: string;
@@ -36,6 +42,7 @@ export type ParamDefault =
   | { Color: [number, number, number, number] }
   | { ColorRamp: ColorStop[] }
   | { ColorPalette: [number, number, number, number][] }
+  | { CurvePoints: CurvePoint[] }
   | { String: string };
 
 export interface PortSpec {
@@ -66,16 +73,18 @@ export type ParamValue =
   | { Color: [number, number, number, number] }
   | { ColorRamp: ColorStop[] }
   | { ColorPalette: [number, number, number, number][] }
+  | { CurvePoints: CurvePoint[] }
   | { String: string };
 
 // Helper to extract value from ParamValue (since it's an object like { Float: 1.0 })
-export const extractParamValue = (pv: ParamValue): number | boolean | [number, number, number, number] | ColorStop[] | [number, number, number, number][] | string => {
+export const extractParamValue = (pv: ParamValue): number | boolean | [number, number, number, number] | ColorStop[] | CurvePoint[] | [number, number, number, number][] | string => {
   if ('Float' in pv) return pv.Float;
   if ('Int' in pv) return pv.Int;
   if ('Bool' in pv) return pv.Bool;
   if ('Color' in pv) return pv.Color;
   if ('ColorRamp' in pv) return pv.ColorRamp;
   if ('ColorPalette' in pv) return pv.ColorPalette;
+  if ('CurvePoints' in pv) return pv.CurvePoints;
   if ('String' in pv) return pv.String;
   return 0;
 };
@@ -95,6 +104,7 @@ export interface NodeInstance {
   params: Record<string, ParamValue>;
   inputDefaults: Record<string, ParamValue>;
   position: { x: number; y: number };
+  muted: boolean;
 }
 
 export interface Connection {
@@ -151,4 +161,13 @@ export interface EditingContext {
   savedNodes?: Map<string, NodeInstance>;
   savedConnections?: Connection[];
   savedNodeSpecs?: NodeSpec[];
+}
+
+export interface Frame {
+  id: string;
+  label: string;
+  color: string;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  zIndex: number;
 }
