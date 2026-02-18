@@ -13,13 +13,14 @@ use compositor_core::types::{
 use half::f16;
 
 use crate::context::{CachedPipeline, GpuContext};
-use crate::manifest::KernelManifest;
+use crate::manifest::{matches_image_type, KernelManifest};
 use crate::transpile::glsl_to_wgsl;
 
 pub struct GpuKernelNode {
     spec: NodeSpec,
     wgsl_source: String,
     context: Arc<GpuContext>,
+    optional_inputs: Vec<String>,
 }
 
 // SAFETY: Single-threaded on wasm32. See GpuContext safety comment.
@@ -36,10 +37,17 @@ impl GpuKernelNode {
         let spec = manifest.to_node_spec()?;
         let glsl = manifest.build_glsl()?;
         let wgsl = glsl_to_wgsl(&glsl)?;
+        let optional_inputs: Vec<String> = manifest
+            .inputs
+            .iter()
+            .filter(|port| port.optional && matches_image_type(&port.ty))
+            .map(|port| port.name.clone())
+            .collect();
         Ok(Self {
             spec,
             wgsl_source: wgsl,
             context,
+            optional_inputs,
         })
     }
 
@@ -137,7 +145,11 @@ impl GpuKernelNode {
         Ok(cached)
     }
 
-    fn build_param_buffer(&self, ctx: &EvalContext) -> Result<Vec<u8>, CompositorError> {
+    fn build_param_buffer(
+        &self,
+        ctx: &EvalContext,
+        optional_inputs: &[String],
+    ) -> Result<Vec<u8>, CompositorError> {
         let mut bytes = Vec::new();
         let mut total_scalars = 0usize;
 
@@ -186,6 +198,16 @@ impl GpuKernelNode {
             }
         }
 
+        for name in optional_inputs {
+            let has_value = matches!(
+                ctx.inputs.get(name),
+                Some(Value::Image(_)) | Some(Value::Mask(_))
+            );
+            let value: i32 = if has_value { 1 } else { 0 };
+            bytes.extend_from_slice(&value.to_le_bytes());
+            total_scalars += 1;
+        }
+
         if total_scalars == 0 {
             bytes.extend_from_slice(&0f32.to_le_bytes());
             total_scalars = 1;
@@ -209,15 +231,19 @@ impl Node for GpuKernelNode {
     ) -> NodeFuture<'a>
     {
         Box::pin(async move {
-            let image_inputs = collect_image_inputs(&self.spec, ctx)?;
+            let image_inputs = collect_image_inputs(&self.spec, ctx, &self.optional_inputs)?;
             if image_inputs.is_empty() {
                 return Err(CompositorError::Other(
                     "GPU node needs image input".to_string(),
                 ));
             }
 
-            let width = image_inputs[0].width;
-            let height = image_inputs[0].height;
+            let primary = image_inputs
+                .first()
+                .and_then(|image| *image)
+                .ok_or_else(|| CompositorError::Other("GPU node needs image input".to_string()))?;
+            let width = primary.width;
+            let height = primary.height;
 
             let mut hasher = AHasher::default();
             hasher.write(self.wgsl_source.as_bytes());
@@ -229,15 +255,33 @@ impl Node for GpuKernelNode {
 
             let mut input_views = Vec::new();
             for image in &image_inputs {
-                let texture = create_storage_texture(
-                    &self.context.device,
-                    image.width,
-                    image.height,
-                    wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
-                );
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                upload_image(&self.context.queue, &texture, image)?;
-                input_views.push(view);
+                match image {
+                    Some(image) => {
+                        let texture = create_storage_texture(
+                            &self.context.device,
+                            image.width,
+                            image.height,
+                            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        );
+                        let view =
+                            texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        upload_image(&self.context.queue, &texture, image)?;
+                        input_views.push(view);
+                    }
+                    None => {
+                        let dummy = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 0.0]);
+                        let texture = create_storage_texture(
+                            &self.context.device,
+                            1,
+                            1,
+                            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        );
+                        let view =
+                            texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        upload_image(&self.context.queue, &texture, &dummy)?;
+                        input_views.push(view);
+                    }
+                }
             }
 
             let output_texture = create_storage_texture(
@@ -250,7 +294,7 @@ impl Node for GpuKernelNode {
             );
             let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-            let param_bytes = self.build_param_buffer(ctx)?;
+            let param_bytes = self.build_param_buffer(ctx, &self.optional_inputs)?;
             let uniform_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("GpuKernelNode Uniforms"),
                 size: param_bytes.len() as u64,
@@ -339,7 +383,7 @@ impl Node for GpuKernelNode {
     }
 }
 
-fn create_storage_texture(
+pub(crate) fn create_storage_texture(
     device: &wgpu::Device,
     width: u32,
     height: u32,
@@ -361,7 +405,7 @@ fn create_storage_texture(
     })
 }
 
-fn upload_image(
+pub(crate) fn upload_image(
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     image: &Image,
@@ -389,7 +433,7 @@ fn upload_image(
     Ok(())
 }
 
-async fn read_texture_to_image(
+pub(crate) async fn read_texture_to_image(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
@@ -468,18 +512,25 @@ async fn read_texture_to_image(
 fn collect_image_inputs<'a>(
     spec: &NodeSpec,
     ctx: &'a EvalContext,
-) -> Result<Vec<&'a Image>, CompositorError> {
+    optional_inputs: &[String],
+) -> Result<Vec<Option<&'a Image>>, CompositorError> {
     let mut out = Vec::new();
     for port in &spec.inputs {
         match port.ty {
             ValueType::Image | ValueType::Mask => {
-                let value = ctx
-                    .inputs
-                    .get(&port.name)
-                    .ok_or_else(|| CompositorError::MissingInput(port.name.clone()))?;
+                let value = ctx.inputs.get(&port.name);
                 match value {
-                    Value::Image(image) | Value::Mask(image) => out.push(image),
-                    other => {
+                    Some(Value::Image(image)) | Some(Value::Mask(image)) => {
+                        out.push(Some(image));
+                    }
+                    Some(Value::None) | None => {
+                        if optional_inputs.iter().any(|name| name == &port.name) {
+                            out.push(None);
+                        } else {
+                            return Err(CompositorError::MissingInput(port.name.clone()));
+                        }
+                    }
+                    Some(other) => {
                         return Err(CompositorError::TypeMismatch {
                             expected: format!("{:?}", port.ty),
                             got: format!("{:?}", other.value_type()),
@@ -500,6 +551,7 @@ fn default_param_value(param: &ParamSpec) -> Option<ParamValue> {
         ParamDefault::Bool(v) => Some(ParamValue::Bool(*v)),
         ParamDefault::Color(_) => None,
         ParamDefault::ColorRamp(_) => None,
+        ParamDefault::ColorPalette(_) => None,
         ParamDefault::String(_) => None,
     }
 }
@@ -542,7 +594,7 @@ fn pack_image_data(image: &Image) -> (Vec<u8>, u32, u32) {
     (padded, padded_bytes_per_row, unpadded_bytes_per_row)
 }
 
-fn align_to(value: u32, alignment: u32) -> u32 {
+pub(crate) fn align_to(value: u32, alignment: u32) -> u32 {
     let remainder = value % alignment;
     if remainder == 0 {
         value

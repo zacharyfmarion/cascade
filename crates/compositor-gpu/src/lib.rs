@@ -1,5 +1,6 @@
 pub mod context;
 pub mod kernel_node;
+pub mod kuwahara;
 pub mod manifest;
 pub mod template;
 pub mod transpile;
@@ -9,7 +10,8 @@ use std::sync::Arc;
 use compositor_core::node::NodeRegistry;
 
 use crate::kernel_node::GpuKernelNode;
-use crate::manifest::{builtin_dither_manifest, builtin_pixelate_manifest};
+use crate::kuwahara::GpuKuwaharaNode;
+use crate::manifest::builtin_pixelate_manifest;
 
 pub use crate::context::GpuContext;
 pub use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
@@ -22,16 +24,16 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     });
 
     let ctx = context.clone();
-    registry.register("gpu_kernel::dither", move || {
-        let manifest = builtin_dither_manifest();
-        Arc::new(GpuKernelNode::from_manifest(manifest, ctx.clone()).expect("GPU node"))
+    registry.register("kuwahara", move || {
+        Arc::new(GpuKuwaharaNode::new(ctx.clone()))
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::{builtin_dither_manifest, builtin_pixelate_manifest};
+    use compositor_core::types::Format;
+    use crate::manifest::builtin_pixelate_manifest;
     use crate::transpile::glsl_to_wgsl;
 
     #[test]
@@ -40,15 +42,8 @@ mod tests {
         let glsl = manifest.build_glsl().expect("GLSL should build");
         assert!(glsl.contains("#version 450"));
         assert!(glsl.contains("process("));
-    }
-
-    #[test]
-    fn test_dither_glsl_builds() {
-        let manifest = builtin_dither_manifest();
-        let glsl = manifest.build_glsl().expect("GLSL should build");
-        assert!(glsl.contains("#version 450"));
-        assert!(glsl.contains("process("));
         assert!(glsl.contains("u_palette"));
+        assert!(glsl.contains("has_palette"));
     }
 
     #[test]
@@ -61,33 +56,14 @@ mod tests {
     }
 
     #[test]
-    fn test_dither_transpile_to_wgsl() {
-        let manifest = builtin_dither_manifest();
-        let glsl = manifest.build_glsl().expect("GLSL should build");
-        let wgsl = glsl_to_wgsl(&glsl).expect("GLSL should transpile to WGSL");
-        assert!(wgsl.contains("fn main"));
-        assert!(!wgsl.is_empty());
-    }
-
-    #[test]
     fn test_pixelate_node_spec() {
         let manifest = builtin_pixelate_manifest();
         let spec = manifest.to_node_spec().expect("Spec should build");
         assert_eq!(spec.id, "gpu_kernel::pixelate");
-        assert_eq!(spec.inputs.len(), 1);
-        assert_eq!(spec.outputs.len(), 1);
-        assert_eq!(spec.params.len(), 1);
-        assert_eq!(spec.params[0].key, "pixel_size");
-    }
-
-    #[test]
-    fn test_dither_node_spec() {
-        let manifest = builtin_dither_manifest();
-        let spec = manifest.to_node_spec().expect("Spec should build");
-        assert_eq!(spec.id, "gpu_kernel::dither");
         assert_eq!(spec.inputs.len(), 2);
         assert_eq!(spec.outputs.len(), 1);
-        assert_eq!(spec.params.len(), 2);
+        assert_eq!(spec.params.len(), 4);
+        assert_eq!(spec.params[0].key, "pixel_size");
     }
 
     #[test]
@@ -101,11 +77,13 @@ mod tests {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             outputs: vec![manifest::ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             params: vec![manifest::ManifestParam {
                 key: "strength".to_string(),
@@ -116,6 +94,7 @@ mod tests {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui: Some("Slider".to_string()),
+                options: vec![],
             }],
             kernel: "return vec4(mix(color.rgb, vec3(1.0) - color.rgb, strength), color.a);"
                 .to_string(),
@@ -141,11 +120,13 @@ mod tests {
                         name: "image".to_string(),
                         label: "Image".to_string(),
                         ty: "Image".to_string(),
+                        optional: false,
                     }],
                     outputs: vec![manifest::ManifestPort {
                         name: "image".to_string(),
                         label: "Image".to_string(),
                         ty: "Image".to_string(),
+                        optional: false,
                     }],
                     params: vec![],
                     kernel: "return color;".to_string(),
@@ -181,11 +162,13 @@ mod tests {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             outputs: vec![manifest::ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             params: vec![],
             kernel: "return color;".to_string(),
@@ -215,11 +198,14 @@ mod tests {
         let params = HashMap::new();
 
         let cm = compositor_core::color::BuiltinColorManagement::new();
+        let format = Format::hd();
         let eval_ctx = EvalContext {
             inputs,
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
         };
 
         use compositor_core::node::Node;
@@ -292,11 +278,14 @@ mod tests {
         params.insert("pixel_size".to_string(), ParamValue::Int(4));
 
         let cm = compositor_core::color::BuiltinColorManagement::new();
+        let format = Format::hd();
         let eval_ctx = EvalContext {
             inputs,
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
         };
 
         let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
@@ -313,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dither_kernel_e2e() {
+    fn test_pixelate_with_optional_palette_missing() {
         use compositor_core::node::{EvalContext, Node};
         use compositor_core::types::{FrameTime, ParamValue, Value};
         use std::collections::HashMap;
@@ -326,9 +315,9 @@ mod tests {
             }
         };
 
-        let manifest = builtin_dither_manifest();
+        let manifest = builtin_pixelate_manifest();
         let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
-            .expect("Should create dither node");
+            .expect("Should create pixelate node");
 
         let mut img_data = Vec::new();
         for y in 0..8u32 {
@@ -342,34 +331,34 @@ mod tests {
         }
         let image = compositor_core::types::Image::from_f32_data(8, 8, img_data);
 
-        let palette_data = vec![
-            1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
-        ];
-        let palette = compositor_core::types::Image::from_f32_data(4, 1, palette_data);
-
         let mut inputs = HashMap::new();
         inputs.insert("image".to_string(), Value::Image(image));
-        inputs.insert("palette".to_string(), Value::Image(palette));
         let mut params = HashMap::new();
-        params.insert("dither_amount".to_string(), ParamValue::Float(1.0));
-        params.insert("palette_size".to_string(), ParamValue::Int(4));
+        params.insert("pixel_size".to_string(), ParamValue::Int(2));
 
         let cm = compositor_core::color::BuiltinColorManagement::new();
+        let format = Format::hd();
         let eval_ctx = EvalContext {
             inputs,
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
         };
 
-        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Dither should succeed");
+        let result = pollster::block_on(node.evaluate(&eval_ctx))
+            .expect("Pixelate should succeed without palette");
         let output = result.get("image").expect("Should have image output");
         match output {
             Value::Image(out_img) => {
                 assert_eq!(out_img.width, 8);
                 assert_eq!(out_img.height, 8);
-                let px = out_img.get_pixel_f32(0, 0);
-                assert!(px[3] > 0.9, "Alpha should be preserved");
+                let px00 = out_img.get_pixel_f32(0, 0);
+                let px10 = out_img.get_pixel_f32(1, 0);
+                assert!((px00[0] - px10[0]).abs() < 0.001, "Block should match");
+                assert!((px00[1] - px10[1]).abs() < 0.001, "Block should match");
+                assert!(px00[3] > 0.9, "Alpha should be preserved");
             }
             _ => panic!("Expected image output"),
         }

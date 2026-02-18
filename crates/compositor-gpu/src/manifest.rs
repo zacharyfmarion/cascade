@@ -20,6 +20,8 @@ pub struct ManifestPort {
     pub name: String,
     pub label: String,
     pub ty: String,
+    #[serde(default)]
+    pub optional: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -33,6 +35,8 @@ pub struct ManifestParam {
     pub max: Option<f64>,
     pub step: Option<f64>,
     pub ui: Option<String>,
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 impl KernelManifest {
@@ -46,6 +50,7 @@ impl KernelManifest {
                     name: port.name.clone(),
                     label: port.label.clone(),
                     ty,
+                    ..Default::default()
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -59,6 +64,7 @@ impl KernelManifest {
                     name: port.name.clone(),
                     label: port.label.clone(),
                     ty,
+                    ..Default::default()
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -69,7 +75,7 @@ impl KernelManifest {
             .map(|param| {
                 let ty = parse_value_type(&param.ty)?;
                 let default = parse_param_default(&param.default, &ty)?;
-                let ui_hint = parse_ui_hint(param.ui.as_deref(), &ty);
+                let ui_hint = parse_ui_hint(param.ui.as_deref(), &ty, &param.options);
                 Ok(ParamSpec {
                     key: param.key.clone(),
                     label: param.label.clone(),
@@ -79,6 +85,7 @@ impl KernelManifest {
                     max: param.max,
                     step: param.step,
                     ui_hint,
+                    promotable: true,
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
@@ -118,7 +125,7 @@ impl KernelManifest {
             })
             .collect::<Result<Vec<_>, String>>()?;
 
-        let scalar_inputs = self
+        let mut scalar_inputs = self
             .inputs
             .iter()
             .filter(|port| matches_scalar_type(&port.ty))
@@ -130,6 +137,17 @@ impl KernelManifest {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
+
+        for port in self
+            .inputs
+            .iter()
+            .filter(|port| port.optional && matches_image_type(&port.ty))
+        {
+            scalar_inputs.push(KernelParam {
+                name: format!("has_{}", port.name),
+                ty: ParamType::Int,
+            });
+        }
 
         let extra_images = image_inputs.into_iter().skip(1).collect::<Vec<_>>();
         Ok(build_kernel_template(
@@ -147,63 +165,60 @@ pub fn builtin_pixelate_manifest() -> KernelManifest {
         display_name: "Pixelate (GPU)".to_string(),
         category: "GPU".to_string(),
         description: "Pixelate an image by snapping pixels to block centers".to_string(),
-        inputs: vec![ManifestPort {
-            name: "image".to_string(),
-            label: "Image".to_string(),
-            ty: "Image".to_string(),
-        }],
-        outputs: vec![ManifestPort {
-            name: "image".to_string(),
-            label: "Image".to_string(),
-            ty: "Image".to_string(),
-        }],
-        params: vec![ManifestParam {
-            key: "pixel_size".to_string(),
-            label: "Pixel Size".to_string(),
-            ty: "Int".to_string(),
-            default: serde_json::Value::from(4),
-            min: Some(1.0),
-            max: Some(128.0),
-            step: Some(1.0),
-            ui: Some("NumberInput".to_string()),
-        }],
-        kernel: r#"
-    ivec2 dims = imageSize(u_input);
-    int block = max(pixel_size, 1);
-    ivec2 block_origin = (pixel / block) * block + block / 2;
-    block_origin = clamp(block_origin, ivec2(0), dims - 1);
-    vec4 pixelated = imageLoad(u_input, block_origin);
-    return pixelated;
-"#
-        .trim()
-        .to_string(),
-    }
-}
-
-pub fn builtin_dither_manifest() -> KernelManifest {
-    KernelManifest {
-        id: "gpu_kernel::dither".to_string(),
-        display_name: "Dither (GPU)".to_string(),
-        category: "GPU".to_string(),
-        description: "Apply Bayer dithering to an image using a palette strip".to_string(),
         inputs: vec![
             ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             },
             ManifestPort {
                 name: "palette".to_string(),
                 label: "Palette".to_string(),
                 ty: "Image".to_string(),
+                optional: true,
             },
         ],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
+            optional: false,
         }],
         params: vec![
+            ManifestParam {
+                key: "pixel_size".to_string(),
+                label: "Pixel Size".to_string(),
+                ty: "Int".to_string(),
+                default: serde_json::Value::from(4),
+                min: Some(1.0),
+                max: Some(128.0),
+                step: Some(1.0),
+                ui: Some("NumberInput".to_string()),
+                options: vec![],
+            },
+            ManifestParam {
+                key: "algorithm".to_string(),
+                label: "Algorithm".to_string(),
+                ty: "Int".to_string(),
+                default: serde_json::Value::from(0),
+                min: Some(0.0),
+                max: Some(1.0),
+                step: Some(1.0),
+                ui: Some("Dropdown".to_string()),
+                options: vec!["Two Nearest".to_string(), "Threshold Offset".to_string()],
+            },
+            ManifestParam {
+                key: "matrix_size".to_string(),
+                label: "Matrix Size".to_string(),
+                ty: "Int".to_string(),
+                default: serde_json::Value::from(8),
+                min: Some(2.0),
+                max: Some(8.0),
+                step: Some(1.0),
+                ui: Some("NumberInput".to_string()),
+                options: vec![],
+            },
             ManifestParam {
                 key: "dither_amount".to_string(),
                 label: "Dither Amount".to_string(),
@@ -213,49 +228,91 @@ pub fn builtin_dither_manifest() -> KernelManifest {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui: Some("Slider".to_string()),
-            },
-            ManifestParam {
-                key: "palette_size".to_string(),
-                label: "Palette Size".to_string(),
-                ty: "Int".to_string(),
-                default: serde_json::Value::from(16),
-                min: Some(1.0),
-                max: Some(256.0),
-                step: Some(1.0),
-                ui: Some("NumberInput".to_string()),
+                options: vec![],
             },
         ],
         kernel: r#"
-    ivec2 pal_dims = imageSize(u_palette);
-    int pal_count = min(pal_dims.x, palette_size);
-    pal_count = max(pal_count, 1);
-
-    float best_dist1 = 1e10;
-    float best_dist2 = 1e10;
-    vec3 best_col1 = vec3(0.0);
-    vec3 best_col2 = vec3(0.0);
-
-    for (int i = 0; i < pal_count; i++) {
-        vec4 pal_color = imageLoad(u_palette, ivec2(i, 0));
-        vec3 diff = color.rgb - pal_color.rgb;
-        float dist = dot(diff, diff);
-        if (dist < best_dist1) {
-            best_dist2 = best_dist1;
-            best_col2 = best_col1;
-            best_dist1 = dist;
-            best_col1 = pal_color.rgb;
-        } else if (dist < best_dist2) {
-            best_dist2 = dist;
-            best_col2 = pal_color.rgb;
-        }
+    ivec2 dims = imageSize(u_input);
+    int block = max(pixel_size, 1);
+    ivec2 block_origin = (pixel / block) * block + block / 2;
+    block_origin = clamp(block_origin, ivec2(0), dims - 1);
+    vec4 pixelated = imageLoad(u_input, block_origin);
+    
+    if (has_palette == 0) {
+        return pixelated;
     }
 
-    float threshold = bayer8(pixel.x, pixel.y);
-    float total_dist = best_dist1 + best_dist2;
-    float ratio = (total_dist > 0.0001) ? best_dist1 / total_dist : 0.0;
-    ratio = mix(round(ratio), ratio, dither_amount);
-    vec3 result = (threshold < ratio) ? best_col2 : best_col1;
-    return vec4(result, color.a);
+    // Bayer dithering using virtual pixel coordinates
+    ivec2 vpixel = pixel / block;
+
+    // Bayer matrices for different sizes
+    const int bayer2[4] = int[4](0, 2, 3, 1);
+    const int bayer4[16] = int[16](
+        0, 8, 2, 10,
+        12, 4, 14, 6,
+        3, 11, 1, 9,
+        15, 7, 13, 5
+    );
+
+    int ms = clamp(matrix_size, 2, 8);
+    float threshold;
+    if (ms <= 2) {
+        int idx = (vpixel.y % 2) * 2 + (vpixel.x % 2);
+        threshold = float(bayer2[idx]) / 4.0;
+    } else if (ms <= 4) {
+        int idx = (vpixel.y % 4) * 4 + (vpixel.x % 4);
+        threshold = float(bayer4[idx]) / 16.0;
+    } else {
+        threshold = bayer8(vpixel.x, vpixel.y);
+    }
+
+    ivec2 pal_dims = imageSize(u_palette);
+    int pal_count = max(pal_dims.x, 1);
+
+    if (algorithm == 0) {
+        float best_dist1 = 1e10;
+        float best_dist2 = 1e10;
+        vec3 best_col1 = vec3(0.0);
+        vec3 best_col2 = vec3(0.0);
+
+        for (int i = 0; i < pal_count; i++) {
+            vec4 pal_color = imageLoad(u_palette, ivec2(i, 0));
+            vec3 diff = pixelated.rgb - pal_color.rgb;
+            float dist = dot(diff, diff);
+            if (dist < best_dist1) {
+                best_dist2 = best_dist1;
+                best_col2 = best_col1;
+                best_dist1 = dist;
+                best_col1 = pal_color.rgb;
+            } else if (dist < best_dist2) {
+                best_dist2 = dist;
+                best_col2 = pal_color.rgb;
+            }
+        }
+
+        float total_dist = best_dist1 + best_dist2;
+        float ratio = (total_dist > 0.0001) ? best_dist1 / total_dist : 0.0;
+        ratio = mix(round(ratio), ratio, dither_amount);
+        vec3 result = (threshold < ratio) ? best_col2 : best_col1;
+        return vec4(result, pixelated.a);
+    } else {
+        float spread = dither_amount * 0.5;
+        float offset = (threshold - 0.5) * spread;
+        vec3 adjusted = clamp(pixelated.rgb + offset, 0.0, 1.0);
+
+        float best_dist = 1e10;
+        vec3 best_col = vec3(0.0);
+        for (int i = 0; i < pal_count; i++) {
+            vec4 pal_color = imageLoad(u_palette, ivec2(i, 0));
+            vec3 diff = adjusted - pal_color.rgb;
+            float dist = dot(diff, diff);
+            if (dist < best_dist) {
+                best_dist = dist;
+                best_col = pal_color.rgb;
+            }
+        }
+        return vec4(best_col, pixelated.a);
+    }
 "#
         .trim()
         .to_string(),
@@ -274,7 +331,7 @@ fn parse_value_type(value: &str) -> Result<ValueType, String> {
     }
 }
 
-fn matches_image_type(value: &str) -> bool {
+pub(crate) fn matches_image_type(value: &str) -> bool {
     matches!(value, "Image" | "Mask")
 }
 
@@ -328,13 +385,13 @@ fn parse_param_default(
     }
 }
 
-fn parse_ui_hint(ui: Option<&str>, ty: &ValueType) -> UiHint {
+fn parse_ui_hint(ui: Option<&str>, ty: &ValueType, options: &[String]) -> UiHint {
     match ui {
         Some("Slider") => UiHint::Slider,
         Some("NumberInput") => UiHint::NumberInput,
         Some("Checkbox") => UiHint::Checkbox,
         Some("ColorPicker") => UiHint::ColorPicker,
-        Some("Dropdown") => UiHint::Dropdown(Vec::new()),
+        Some("Dropdown") => UiHint::Dropdown(options.to_vec()),
         Some("FilePicker") => UiHint::FilePicker,
         Some("Hidden") => UiHint::Hidden,
         _ => match ty {
