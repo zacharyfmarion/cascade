@@ -1,7 +1,9 @@
 mod builtin_groups;
+pub mod ai_provider;
 pub mod document;
 
 use compositor_core::color::{BuiltinColorManagement, ColorManagement};
+use compositor_core::ai::AiProvider;
 use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
@@ -9,7 +11,7 @@ use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-pub use compositor_core::types::{FrameTime, NodeSpec, ParamValue, PortSpec, Value};
+pub use compositor_core::types::{Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use compositor_nodes_std::input::LoadImage as InputLoadImage;
@@ -17,6 +19,7 @@ pub use compositor_nodes_std::SequenceInfo;
 use compositor_nodes_std::{
     register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
 };
+use crate::ai_provider::NativeAiProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -34,11 +37,15 @@ pub struct Engine {
     evaluator: Evaluator,
     gpu_context: Option<Arc<GpuContext>>,
     color_management: Box<dyn ColorManagement>,
+    ai_provider: Option<Arc<dyn AiProvider>>,
     group_definitions: HashMap<String, Arc<GroupDefinition>>,
     uuid_map: HashMap<String, NodeId>,
     kernel_manifests: HashMap<String, KernelManifest>,
     pub active_job: Option<Arc<RenderJob>>,
     last_timings: HashMap<String, f64>,
+    active_display: String,
+    active_view: String,
+    project_format: Format,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -54,6 +61,8 @@ pub struct SerializableNode {
     pub id: String,
     pub type_id: String,
     pub params: HashMap<String, ParamValue>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub input_defaults: HashMap<String, ParamValue>,
     pub position: (f64, f64),
 }
 
@@ -172,11 +181,15 @@ impl Engine {
             evaluator: Evaluator::new(),
             gpu_context,
             color_management: Box::new(BuiltinColorManagement::new()),
+            ai_provider: None,
             group_definitions: HashMap::new(),
             uuid_map: HashMap::new(),
             kernel_manifests: HashMap::new(),
             active_job: None,
             last_timings: HashMap::new(),
+            active_display: "sRGB".to_string(),
+            active_view: "Standard".to_string(),
+            project_format: Format::hd(),
         };
         builtin_groups::register_builtin_groups(&mut engine);
         if let Some(kernels_dir) = find_kernels_dir() {
@@ -195,6 +208,7 @@ impl Engine {
     pub fn load_ocio_config(&mut self, path: &str) -> Result<(), CompositorError> {
         let ocio = compositor_ocio::OcioColorManagement::from_file(path)?;
         self.color_management = Box::new(ocio);
+        self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
     }
@@ -203,12 +217,91 @@ impl Engine {
     pub fn load_ocio_from_env(&mut self) -> Result<(), CompositorError> {
         let ocio = compositor_ocio::OcioColorManagement::from_env()?;
         self.color_management = Box::new(ocio);
+        self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
     }
 
+    fn sync_active_display_view(&mut self) {
+        let displays = self.color_management.available_displays();
+        let display = displays
+            .iter()
+            .find(|d| d.to_lowercase().contains("srgb"))
+            .or(displays.first());
+
+        if let Some(display) = display {
+            self.active_display = display.clone();
+            let views = self.color_management.available_views(display);
+            let view = views
+                .iter()
+                .find(|v| v.to_lowercase().contains("un-tone-mapped"))
+                .or_else(|| views.iter().find(|v| v.to_lowercase().contains("untone")))
+                .or(views.first());
+
+            if let Some(view) = view {
+                self.active_view = view.clone();
+            }
+        }
+    }
+
     pub fn color_management(&self) -> &dyn ColorManagement {
         self.color_management.as_ref()
+    }
+
+    pub fn available_color_spaces(&self) -> Vec<compositor_core::color::ColorSpaceInfo> {
+        self.color_management.available_color_spaces()
+    }
+
+    pub fn available_displays(&self) -> Vec<String> {
+        self.color_management.available_displays()
+    }
+
+    pub fn available_views(&self, display: &str) -> Vec<String> {
+        self.color_management.available_views(display)
+    }
+
+    pub fn working_space(&self) -> String {
+        self.color_management.working_space().to_string()
+    }
+
+    pub fn active_display(&self) -> &str {
+        &self.active_display
+    }
+
+    pub fn active_view(&self) -> &str {
+        &self.active_view
+    }
+
+    pub fn set_active_display_view(&mut self, display: String, view: String) {
+        self.active_display = display;
+        self.active_view = view;
+        self.evaluator = Evaluator::new();
+    }
+
+    pub fn set_project_format(&mut self, width: u32, height: u32) {
+        self.project_format = Format::from_dimensions(width, height);
+        self.evaluator = Evaluator::new();
+    }
+
+    pub fn set_ai_api_key(&mut self, provider: &str, key: &str) -> Result<(), CompositorError> {
+        match provider {
+            "openai" | "native" => {
+                let ai = Arc::new(NativeAiProvider::new());
+                ai.set_api_key(key.to_string());
+                let ai_provider: Arc<dyn AiProvider> = ai;
+                self.ai_provider = Some(ai_provider);
+                Ok(())
+            }
+            _ => Err(CompositorError::Other(format!(
+                "Unknown AI provider: {provider}"
+            ))),
+        }
+    }
+
+    pub fn is_ai_configured(&self) -> bool {
+        self.ai_provider
+            .as_ref()
+            .map_or(false, |provider| provider.is_configured())
     }
 
     pub fn register_gpu_kernel(&mut self, manifest_json: &str) -> Result<NodeSpec, String> {
@@ -342,7 +435,7 @@ impl Engine {
                         ))
                     })?;
                 let _input_port = to_spec
-                    .inputs
+                    .all_inputs()
                     .iter()
                     .find(|p| p.name == conn.to_port)
                     .ok_or(CompositorError::PortNotFound {
@@ -410,10 +503,19 @@ impl Engine {
             let mut params = instance.params.clone();
             params.insert("__group_offset_x".to_string(), ParamValue::Float(offset_x));
             params.insert("__group_offset_y".to_string(), ParamValue::Float(offset_y));
+            let image_data = if instance.type_id == "load_image" {
+                self.nodes
+                    .get(&instance.id)
+                    .and_then(|node_arc| node_arc.as_any().downcast_ref::<InputLoadImage>())
+                    .and_then(|load_node| load_node.get_image_bytes())
+            } else {
+                None
+            };
             internal_nodes.push(InternalNode {
                 id: format_node_id(&self.graph, instance.id),
                 type_id: instance.type_id.clone(),
                 params,
+                image_data,
             });
         }
         avg_y /= count;
@@ -430,6 +532,7 @@ impl Engine {
             id: "gi".to_string(),
             type_id: "group_input".to_string(),
             params: gi_params,
+            image_data: None,
         });
 
         let mut go_params = HashMap::new();
@@ -442,6 +545,7 @@ impl Engine {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
             params: go_params,
+            image_data: None,
         });
 
         for boundary in &incoming {
@@ -799,6 +903,41 @@ impl Engine {
         Ok(spec)
     }
 
+    pub fn rename_group(
+        &mut self,
+        group_def_id: &str,
+        new_name: &str,
+    ) -> Result<NodeSpec, CompositorError> {
+        let existing = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let mut updated = (*existing.as_ref()).clone();
+        updated.name = new_name.to_string();
+        let spec = self
+            .register_group(updated)
+            .map_err(CompositorError::Other)?;
+
+        let def_arc = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let group_node_ids: Vec<NodeId> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.type_id == group_def_id)
+            .map(|(id, _)| id)
+            .collect();
+        for node_id in group_node_ids {
+            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
+                .map_err(CompositorError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+        }
+
+        Ok(spec)
+    }
+
     pub fn add_internal_connection(
         &mut self,
         group_def_id: &str,
@@ -884,6 +1023,7 @@ impl Engine {
                 .outputs
                 .iter()
                 .find(|port| port.name == to_port)
+                .cloned()
                 .ok_or_else(|| CompositorError::PortNotFound {
                     node_type: to_internal.type_id.clone(),
                     port_name: to_port.to_string(),
@@ -899,8 +1039,8 @@ impl Engine {
                     ))
                 })?;
             to_spec
-                .inputs
-                .iter()
+                .all_inputs()
+                .into_iter()
                 .find(|port| port.name == to_port)
                 .ok_or_else(|| CompositorError::PortNotFound {
                     node_type: to_internal.type_id.clone(),
@@ -1084,7 +1224,11 @@ impl Engine {
             .list_specs()
             .into_iter()
             .filter(|spec| !spec.id.starts_with("gpu_script::"))
-            .cloned()
+            .map(|spec| {
+                let mut spec = spec.clone();
+                spec.inputs = spec.all_inputs();
+                spec
+            })
             .collect()
     }
 
@@ -1192,6 +1336,17 @@ impl Engine {
         Ok(())
     }
 
+    pub fn set_input_default(
+        &mut self,
+        node_id: &str,
+        port_name: &str,
+        value: ParamValue,
+    ) -> Result<(), CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        self.graph.set_input_default(id, port_name, value);
+        Ok(())
+    }
+
     pub fn set_position(&mut self, node_id: &str, x: f64, y: f64) -> Result<(), CompositorError> {
         let id = self.parse_node_id(node_id)?;
         self.graph.set_position(id, x, y);
@@ -1259,22 +1414,24 @@ impl Engine {
         seq_node.get_sequence_info(pattern)
     }
 
-    pub fn render_viewer(
-        &mut self,
-        viewer_node_id: &str,
-        frame: u64,
-    ) -> Result<RenderResult, CompositorError> {
-        let id = self.parse_node_id(viewer_node_id)?;
-        let cm = self.color_management.as_ref();
-        let eval_result = pollster::block_on(self.evaluator.evaluate(
-            &mut self.graph,
-            &self.registry,
-            &self.nodes,
-            id,
-            "display",
-            FrameTime { frame },
-            cm,
-        ))?;
+     pub fn render_viewer(
+         &mut self,
+         viewer_node_id: &str,
+         frame: u64,
+     ) -> Result<RenderResult, CompositorError> {
+         let id = self.parse_node_id(viewer_node_id)?;
+         let cm = self.color_management.as_ref();
+         let eval_result = pollster::block_on(self.evaluator.evaluate(
+             &mut self.graph,
+             &self.registry,
+             &self.nodes,
+             id,
+             "display",
+             FrameTime { frame },
+             cm,
+             self.ai_provider.as_deref(),
+             &self.project_format,
+         ))?;
         self.last_timings = eval_result
             .node_timings
             .into_iter()
@@ -1289,7 +1446,12 @@ impl Engine {
             Value::Image(image) => {
                 let width = image.width;
                 let height = image.height;
-                let pixels = Viewer::image_to_rgba8(&image, cm);
+                let pixels = Viewer::image_to_rgba8_with_display(
+                    &image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
                 Ok(RenderResult {
                     width,
                     height,
@@ -1302,23 +1464,25 @@ impl Engine {
         }
     }
 
-    pub fn evaluate_node(
-        &mut self,
-        node_id: &str,
-        frame: u64,
-    ) -> Result<compositor_core::eval::EvalResult, CompositorError> {
-        let id = self.parse_node_id(node_id)?;
-        let cm = self.color_management.as_ref();
-        pollster::block_on(self.evaluator.evaluate(
-            &mut self.graph,
-            &self.registry,
-            &self.nodes,
-            id,
-            "display",
-            FrameTime { frame },
-            cm,
-        ))
-    }
+     pub fn evaluate_node(
+         &mut self,
+         node_id: &str,
+         frame: u64,
+     ) -> Result<compositor_core::eval::EvalResult, CompositorError> {
+         let id = self.parse_node_id(node_id)?;
+         let cm = self.color_management.as_ref();
+         pollster::block_on(self.evaluator.evaluate(
+             &mut self.graph,
+             &self.registry,
+             &self.nodes,
+             id,
+             "display",
+             FrameTime { frame },
+             cm,
+             self.ai_provider.as_deref(),
+             &self.project_format,
+         ))
+     }
 
     pub fn render_export(
         &mut self,
@@ -1337,19 +1501,26 @@ impl Engine {
             _ => 0,
         };
 
-        let cm = self.color_management.as_ref();
-        let eval_result = pollster::block_on(self.evaluator.evaluate(
-            &mut self.graph,
-            &self.registry,
-            &self.nodes,
-            id,
-            "display",
-            FrameTime { frame },
-            cm,
-        ))?;
-        match eval_result.value {
-            Value::Image(image) => {
-                let rgba8 = Viewer::image_to_rgba8(&image, cm);
+         let cm = self.color_management.as_ref();
+         let eval_result = pollster::block_on(self.evaluator.evaluate(
+             &mut self.graph,
+             &self.registry,
+             &self.nodes,
+             id,
+             "display",
+             FrameTime { frame },
+             cm,
+             self.ai_provider.as_deref(),
+             &self.project_format,
+         ))?;
+         match eval_result.value {
+             Value::Image(image) => {
+                 let rgba8 = Viewer::image_to_rgba8_with_display(
+                    &image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
                 let mut buf = Vec::new();
                 let extension;
 
@@ -1404,16 +1575,18 @@ impl Engine {
         let mut results = Vec::new();
         let mut merged_timings = HashMap::new();
         let cm = self.color_management.as_ref();
-        for (vid, vid_str) in viewer_ids {
-            match pollster::block_on(self.evaluator.evaluate(
-                &mut self.graph,
-                &self.registry,
-                &self.nodes,
-                vid,
-                "display",
-                FrameTime { frame },
-                cm,
-            )) {
+         for (vid, vid_str) in viewer_ids {
+             match pollster::block_on(self.evaluator.evaluate(
+                 &mut self.graph,
+                 &self.registry,
+                 &self.nodes,
+                 vid,
+                 "display",
+                 FrameTime { frame },
+                 cm,
+                 self.ai_provider.as_deref(),
+                 &self.project_format,
+             )) {
                 Ok(eval_result) => {
                     for (nid, duration) in eval_result.node_timings {
                         merged_timings.insert(
@@ -1424,7 +1597,12 @@ impl Engine {
                     if let Value::Image(image) = eval_result.value {
                         let width = image.width;
                         let height = image.height;
-                        let pixels = Viewer::image_to_rgba8(&image, cm);
+                        let pixels = Viewer::image_to_rgba8_with_display(
+                            &image,
+                            cm,
+                            &self.active_display,
+                            &self.active_view,
+                        );
                         results.push((
                             vid_str,
                             RenderResult {
@@ -1527,6 +1705,8 @@ impl Engine {
         let ext = if format == 1 { "jpg" } else { "png" }.to_string();
         let padding = std::cmp::max(4, (range.end as f64).log10().ceil() as usize + 1);
         let render_cm = Box::new(BuiltinColorManagement::new());
+        let ai_provider = self.ai_provider.clone();
+        let render_project_format = self.project_format.clone();
 
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1547,6 +1727,8 @@ impl Engine {
                         "display",
                         FrameTime { frame },
                         cm,
+                        ai_provider.as_deref(),
+                        &render_project_format,
                     )) {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {
@@ -1627,6 +1809,216 @@ impl Engine {
         Ok(job_id)
     }
 
+    #[cfg(all(feature = "video", target_os = "macos"))]
+    pub fn start_render_video(&mut self, node_id: &str) -> Result<String, CompositorError> {
+        if self
+            .active_job
+            .as_ref()
+            .map_or(false, |j| !j.completed.load(Ordering::Acquire))
+        {
+            return Err(CompositorError::Other(
+                "A render job is already running".to_string(),
+            ));
+        }
+
+        let export_id = self.parse_node_id(node_id)?;
+        let instance = self
+            .graph
+            .nodes
+            .get(export_id)
+            .ok_or_else(|| CompositorError::Other("Export node not found".to_string()))?;
+
+        let output_path = match instance.params.get("output_path") {
+            Some(ParamValue::String(s)) => s.clone(),
+            _ => return Err(CompositorError::Other("Output path not set".to_string())),
+        };
+
+        let start = match instance.params.get("start_frame") {
+            Some(ParamValue::Int(v)) => *v as u64,
+            _ => 0,
+        };
+        let end = match instance.params.get("end_frame") {
+            Some(ParamValue::Int(v)) => *v as u64,
+            _ => 100,
+        };
+        let step = match instance.params.get("step") {
+            Some(ParamValue::Int(v)) => *v as u64,
+            _ => 1,
+        };
+        let range = FrameRange { start, end, step };
+
+        let codec_idx = match instance.params.get("codec") {
+            Some(ParamValue::Int(v)) => *v,
+            _ => 0,
+        };
+        let crf = match instance.params.get("quality") {
+            Some(ParamValue::Int(v)) => *v as u32,
+            _ => 23,
+        };
+        let fps = match instance.params.get("fps") {
+            Some(ParamValue::Int(v)) => *v as u32,
+            _ => 24,
+        };
+
+        let total_frames = if range.step > 0 {
+            (range.end - range.start) / range.step + 1
+        } else {
+            return Err(CompositorError::Other("Step must be > 0".to_string()));
+        };
+
+        let job_id = format!("job_{}", uuid::Uuid::new_v4());
+        let job = Arc::new(RenderJob {
+            id: job_id.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            current_frame: Arc::new(AtomicU64::new(0)),
+            total_frames,
+            completed: Arc::new(AtomicBool::new(false)),
+            error: Arc::new(std::sync::Mutex::new(None)),
+        });
+        self.active_job = Some(job.clone());
+
+        let mut render_graph = self.graph.clone();
+        let render_nodes = self.nodes.clone();
+        let render_registry = Arc::clone(&self.registry);
+        let mut render_evaluator = Evaluator::new();
+        let render_cm = Box::new(BuiltinColorManagement::new());
+        let ai_provider = self.ai_provider.clone();
+        let render_project_format = self.project_format.clone();
+
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cm = render_cm.as_ref();
+
+                let first_frame_result = pollster::block_on(render_evaluator.evaluate(
+                    &mut render_graph,
+                    &render_registry,
+                    &render_nodes,
+                    export_id,
+                    "display",
+                    FrameTime { frame: range.start },
+                    cm,
+                    ai_provider.as_deref(),
+                    &render_project_format,
+                ));
+
+                let (width, height) = match &first_frame_result {
+                    Ok(eval_result) => match &eval_result.value {
+                        Value::Image(image) => (image.width, image.height),
+                        _ => {
+                            let mut err_guard = job.error.lock().unwrap();
+                            *err_guard = Some("First frame output is not an image".to_string());
+                            return;
+                        }
+                    },
+                    Err(e) => {
+                        let mut err_guard = job.error.lock().unwrap();
+                        *err_guard = Some(format!("First frame evaluation failed: {e}"));
+                        return;
+                    }
+                };
+
+                let codec = compositor_video::VideoCodec::from_index(codec_idx);
+                let config = compositor_video::VideoEncoderConfig {
+                    width,
+                    height,
+                    fps,
+                    codec,
+                    crf,
+                };
+
+                let mut encoder = match compositor_video::VideoEncoder::new(&output_path, config) {
+                    Ok(enc) => enc,
+                    Err(e) => {
+                        let mut err_guard = job.error.lock().unwrap();
+                        *err_guard = Some(format!("Failed to create video encoder: {e}"));
+                        return;
+                    }
+                };
+
+                if let Ok(eval_result) = first_frame_result {
+                    if let Value::Image(image) = eval_result.value {
+                        let rgba8 = Viewer::image_to_rgba8(&image, cm);
+                        job.current_frame.store(range.start, Ordering::Relaxed);
+                        if let Err(e) = encoder.encode_frame(&rgba8) {
+                            let mut err_guard = job.error.lock().unwrap();
+                            *err_guard = Some(format!("Frame {} encode failed: {e}", range.start));
+                            return;
+                        }
+                    }
+                }
+
+                let mut frame = range.start + range.step;
+                while frame <= range.end {
+                    if job.cancelled.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    job.current_frame.store(frame, Ordering::Relaxed);
+
+                    match pollster::block_on(render_evaluator.evaluate(
+                        &mut render_graph,
+                        &render_registry,
+                        &render_nodes,
+                        export_id,
+                        "display",
+                        FrameTime { frame },
+                        cm,
+                        ai_provider.as_deref(),
+                        &render_project_format,
+                    )) {
+                        Ok(eval_result) => {
+                            if let Value::Image(image) = eval_result.value {
+                                let rgba8 = Viewer::image_to_rgba8(&image, cm);
+                                if let Err(e) = encoder.encode_frame(&rgba8) {
+                                    let mut err_guard = job.error.lock().unwrap();
+                                    *err_guard =
+                                        Some(format!("Frame {} encode failed: {e}", frame));
+                                    return;
+                                }
+                            } else {
+                                let mut err_guard = job.error.lock().unwrap();
+                                *err_guard =
+                                    Some(format!("Frame {} output is not an image", frame));
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let mut err_guard = job.error.lock().unwrap();
+                            *err_guard = Some(format!("Frame {} evaluation failed: {}", frame, e));
+                            return;
+                        }
+                    }
+
+                    frame += range.step;
+                }
+
+                if !job.cancelled.load(Ordering::Relaxed) {
+                    if let Err(e) = encoder.finish() {
+                        let mut err_guard = job.error.lock().unwrap();
+                        *err_guard = Some(format!("Failed to finalize video: {e}"));
+                        return;
+                    }
+                }
+            }));
+
+            if let Err(panic_info) = result {
+                let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                    format!("Render thread panicked: {}", s)
+                } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    format!("Render thread panicked: {}", s)
+                } else {
+                    "Render thread panicked with unknown error".to_string()
+                };
+                let mut err_guard = job.error.lock().unwrap();
+                *err_guard = Some(msg);
+            }
+
+            job.completed.store(true, Ordering::Release);
+        });
+
+        Ok(job_id)
+    }
+
     pub fn cancel_job(&self) {
         if let Some(ref job) = self.active_job {
             job.cancelled.store(true, Ordering::Relaxed);
@@ -1656,6 +2048,7 @@ impl Engine {
                 id: format_node_id(&self.graph, node.id),
                 type_id: node.type_id.clone(),
                 params: node.params.clone(),
+                input_defaults: node.input_defaults.clone(),
                 position: node.position,
             })
             .collect();
@@ -1756,6 +2149,10 @@ impl Engine {
                 .set_position(new_id, node.position.0, node.position.1);
             for (key, value) in &node.params {
                 self.graph.set_param(new_id, key, value.clone());
+            }
+            for (port_name, value) in &node.input_defaults {
+                self.graph
+                    .set_input_default(new_id, port_name, value.clone());
             }
             if let Some(instance) = self.graph.nodes.get_mut(new_id) {
                 instance.uuid = node.id.clone();
@@ -1877,11 +2274,13 @@ mod tests {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             outputs: vec![ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             params: vec![],
             kernel: "return color;".to_string(),
@@ -1949,11 +2348,13 @@ mod tests {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             outputs: vec![ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
+                optional: false,
             }],
             params: vec![ManifestParam {
                 key: "pixel_size".to_string(),
@@ -1964,6 +2365,7 @@ mod tests {
                 max: Some(128.0),
                 step: Some(1.0),
                 ui: Some("NumberInput".to_string()),
+                options: vec![],
             }],
             kernel: r#"
 ivec2 dims = imageSize(u_input);
@@ -2109,12 +2511,16 @@ return pixelated;
         assert!(spec.is_some(), "Pixelate group should be registered");
         let spec = spec.unwrap();
         assert_eq!(spec.display_name, "Pixelate");
-        assert_eq!(spec.inputs.len(), 1);
-        assert_eq!(spec.inputs[0].name, "image");
+        assert_eq!(spec.inputs.len(), 2);
+        assert!(spec.inputs.iter().any(|p| p.name == "image"));
+        assert!(spec.inputs.iter().any(|p| p.name == "palette"));
         assert_eq!(spec.outputs.len(), 1);
         assert_eq!(spec.outputs[0].name, "image");
-        assert_eq!(spec.params.len(), 1);
-        assert_eq!(spec.params[0].key, "pixel_size");
+        assert_eq!(spec.params.len(), 4);
+        assert!(spec.params.iter().any(|p| p.key == "pixel_size"));
+        assert!(spec.params.iter().any(|p| p.key == "algorithm"));
+        assert!(spec.params.iter().any(|p| p.key == "matrix_size"));
+        assert!(spec.params.iter().any(|p| p.key == "dither_amount"));
 
         let (load_id, _) = engine.add_node("load_image", -200.0, 0.0).unwrap();
         let (pix_id, _) = engine.add_node("group::pixelate", 0.0, 0.0).unwrap();
@@ -2144,64 +2550,24 @@ return pixelated;
             .set_param(&pix_id, "pixel_size", ParamValue::Int(4))
             .expect("set param");
 
-        let result = engine.render_viewer(&viewer_id, 0).expect("render");
-        assert_eq!(result.width, 8);
-        assert_eq!(result.height, 8);
+        let result_no_palette = engine.render_viewer(&viewer_id, 0).expect("render");
+        assert_eq!(result_no_palette.width, 8);
+        assert_eq!(result_no_palette.height, 8);
 
         let px = |x: usize, y: usize| -> (u8, u8, u8, u8) {
             let idx = (y * 8 + x) * 4;
             (
-                result.pixels[idx],
-                result.pixels[idx + 1],
-                result.pixels[idx + 2],
-                result.pixels[idx + 3],
+                result_no_palette.pixels[idx],
+                result_no_palette.pixels[idx + 1],
+                result_no_palette.pixels[idx + 2],
+                result_no_palette.pixels[idx + 3],
             )
         };
         assert_eq!(px(0, 0), px(1, 0), "Same block should match");
         assert_eq!(px(0, 0), px(3, 3), "Same block should match");
         assert_ne!(px(0, 0), px(4, 0), "Different blocks should differ");
         assert_eq!(px(0, 0).3, 255, "Alpha preserved");
-        println!("Pixelate GROUP E2E test PASSED");
-    }
-
-    #[test]
-    fn test_dither_group_e2e() {
-        let mut engine = Engine::new();
-        if engine.gpu_context().is_none() {
-            println!("GPU not available, skipping");
-            return;
-        }
-
-        let spec = engine.registry.get_spec("group::dither");
-        assert!(spec.is_some(), "Dither group should be registered");
-        let spec = spec.unwrap();
-        assert_eq!(spec.display_name, "Dither");
-        assert_eq!(spec.inputs.len(), 2);
-        assert!(spec.inputs.iter().any(|p| p.name == "image"));
-        assert!(spec.inputs.iter().any(|p| p.name == "palette"));
-        assert_eq!(spec.outputs.len(), 1);
-        assert_eq!(spec.outputs[0].name, "image");
-        assert_eq!(spec.params.len(), 2);
-
-        let (load_img_id, _) = engine.add_node("load_image", -400.0, 0.0).unwrap();
-        let (load_pal_id, _) = engine.add_node("load_image", -400.0, 200.0).unwrap();
-        let (dither_id, _) = engine.add_node("group::dither", 0.0, 0.0).unwrap();
-        let (viewer_id, _) = engine.add_node("viewer", 200.0, 0.0).unwrap();
-
-        let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
-            let r = ((x as f32 / 7.0) * 255.0) as u8;
-            let g = ((y as f32 / 7.0) * 255.0) as u8;
-            image::Rgba([r, g, 128, 255])
-        });
-        let mut png_bytes = Vec::new();
-        png_image
-            .write_to(
-                &mut std::io::Cursor::new(&mut png_bytes),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-        engine.load_image_data(&load_img_id, &png_bytes).unwrap();
-
+        let (load_pal_id, _) = engine.add_node("load_image", -200.0, 200.0).unwrap();
         let pal_image = image::RgbaImage::from_fn(4, 1, |x, _| match x {
             0 => image::Rgba([255, 0, 0, 255]),
             1 => image::Rgba([0, 255, 0, 255]),
@@ -2214,39 +2580,27 @@ return pixelated;
                 &mut std::io::Cursor::new(&mut pal_bytes),
                 image::ImageFormat::Png,
             )
-            .unwrap();
-        engine.load_image_data(&load_pal_id, &pal_bytes).unwrap();
+            .expect("encode palette");
+        engine
+            .load_image_data(&load_pal_id, &pal_bytes)
+            .expect("load palette");
+        engine
+            .connect(&load_pal_id, "image", &pix_id, "palette")
+            .expect("connect palette");
+        engine
+            .set_param(&pix_id, "dither_amount", ParamValue::Float(1.0))
+            .expect("set dither amount");
 
-        engine
-            .connect(&load_img_id, "image", &dither_id, "image")
-            .unwrap();
-        engine
-            .connect(&load_pal_id, "image", &dither_id, "palette")
-            .unwrap();
-        engine
-            .connect(&dither_id, "image", &viewer_id, "image")
-            .unwrap();
-        engine
-            .set_param(&dither_id, "dither_amount", ParamValue::Float(1.0))
-            .unwrap();
-        engine
-            .set_param(&dither_id, "palette_size", ParamValue::Int(4))
-            .unwrap();
-
-        let result = engine.render_viewer(&viewer_id, 0).expect("render");
-        assert_eq!(result.width, 8);
-        assert_eq!(result.height, 8);
-
-        let px = |x: usize, y: usize| -> (u8, u8, u8, u8) {
-            let idx = (y * 8 + x) * 4;
-            (
-                result.pixels[idx],
-                result.pixels[idx + 1],
-                result.pixels[idx + 2],
-                result.pixels[idx + 3],
-            )
-        };
-        let p = px(0, 0);
+        let result_palette = engine.render_viewer(&viewer_id, 1).expect("render");
+        assert_eq!(result_palette.width, 8);
+        assert_eq!(result_palette.height, 8);
+        let idx = (0 * 8 + 0) * 4;
+        let p = (
+            result_palette.pixels[idx],
+            result_palette.pixels[idx + 1],
+            result_palette.pixels[idx + 2],
+            result_palette.pixels[idx + 3],
+        );
         assert_eq!(p.3, 255, "Alpha preserved");
         let is_palette_color = (p.0 > 200 && p.1 < 50 && p.2 < 50)
             || (p.0 < 50 && p.1 > 200 && p.2 < 50)
@@ -2257,7 +2611,7 @@ return pixelated;
             "Output pixel should be snapped to a palette color, got {:?}",
             p
         );
-        println!("Dither GROUP E2E test PASSED");
+        println!("Pixelate GROUP E2E test PASSED");
     }
 
     #[test]
@@ -2265,13 +2619,38 @@ return pixelated;
         let engine = Engine::new();
         let specs = engine.list_node_types();
         let has_pixelate = specs.iter().any(|s| s.id == "group::pixelate");
-        let has_dither = specs.iter().any(|s| s.id == "group::dither");
         let has_color_range = specs.iter().any(|s| s.id == "group::color_range");
         assert!(has_pixelate, "Pixelate group should appear in node types");
-        assert!(has_dither, "Dither group should appear in node types");
         assert!(
             has_color_range,
             "Color Range group should appear in node types"
         );
+    }
+
+    #[test]
+    #[cfg(feature = "ocio")]
+    fn test_ocio_loads_from_env() {
+        if std::env::var("OCIO").is_err() {
+            println!("$OCIO not set, skipping OCIO integration test");
+            return;
+        }
+
+        let mut engine = Engine::new();
+        engine.load_ocio_from_env().expect("OCIO config should load from $OCIO");
+
+        let displays = engine.available_displays();
+        assert!(!displays.is_empty(), "OCIO config should provide displays");
+
+        let views = engine.available_views(&displays[0]);
+        assert!(!views.is_empty(), "First display should have views");
+
+        assert!(!engine.active_display().is_empty());
+        assert!(!engine.active_view().is_empty());
+
+        let cs = engine.available_color_spaces();
+        assert!(!cs.is_empty(), "OCIO config should provide color spaces");
+
+        let ws = engine.working_space();
+        assert!(!ws.is_empty(), "Working space should be set");
     }
 }

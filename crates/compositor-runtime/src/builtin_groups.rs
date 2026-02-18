@@ -25,11 +25,13 @@ pub fn color_range_group() -> GroupDefinition {
             id: "gi".to_string(),
             type_id: "group_input".to_string(),
             params: HashMap::new(),
+            image_data: None,
         },
         InternalNode {
             id: "sep".to_string(),
             type_id: "separate_hsva".to_string(),
             params: HashMap::new(),
+            image_data: None,
         },
         // Greater Than: hue > hue_min
         InternalNode {
@@ -40,6 +42,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(0.25)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         // Less Than: hue < hue_max
         InternalNode {
@@ -50,6 +53,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(0.45)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         // Multiply: gt_low * lt_high → hue mask
         InternalNode {
@@ -60,6 +64,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(1.0)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         // Greater Than: saturation > sat_min
         InternalNode {
@@ -70,6 +75,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(0.1)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         // Greater Than: value > val_min
         InternalNode {
@@ -80,6 +86,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(0.1)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         // Multiply: mul_hue * gt_sat → hue+sat mask
         InternalNode {
@@ -90,6 +97,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(1.0)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         // Multiply: mul_sat * gt_val → final mask
         InternalNode {
@@ -100,11 +108,13 @@ pub fn color_range_group() -> GroupDefinition {
                 ("value".to_string(), ParamValue::Float(1.0)),
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
+            image_data: None,
         },
         InternalNode {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
             params: HashMap::new(),
+            image_data: None,
         },
     ];
 
@@ -209,6 +219,7 @@ pub fn color_range_group() -> GroupDefinition {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
+                promotable: true,
             },
         },
         Promotion {
@@ -224,6 +235,7 @@ pub fn color_range_group() -> GroupDefinition {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
+                promotable: true,
             },
         },
         Promotion {
@@ -239,6 +251,7 @@ pub fn color_range_group() -> GroupDefinition {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
+                promotable: true,
             },
         },
         Promotion {
@@ -254,6 +267,7 @@ pub fn color_range_group() -> GroupDefinition {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
+                promotable: true,
             },
         },
     ];
@@ -277,82 +291,24 @@ pub fn pixelate_group() -> GroupDefinition {
             id: "gi".to_string(),
             type_id: "group_input".to_string(),
             params: HashMap::new(),
+            image_data: None,
         },
         InternalNode {
             id: "kernel".to_string(),
             type_id: "gpu_kernel::pixelate".to_string(),
-            params: HashMap::from([("pixel_size".to_string(), ParamValue::Int(4))]),
-        },
-        InternalNode {
-            id: "go".to_string(),
-            type_id: "group_output".to_string(),
-            params: HashMap::new(),
-        },
-    ];
-
-    let connections = vec![
-        InternalConnection {
-            from_node: "gi".to_string(),
-            from_port: "image".to_string(),
-            to_node: "kernel".to_string(),
-            to_port: "image".to_string(),
-        },
-        InternalConnection {
-            from_node: "kernel".to_string(),
-            from_port: "image".to_string(),
-            to_node: "go".to_string(),
-            to_port: "image".to_string(),
-        },
-    ];
-
-    let promotions = vec![Promotion {
-        group_param_key: "pixel_size".to_string(),
-        internal_node_id: "kernel".to_string(),
-        internal_param_key: "pixel_size".to_string(),
-        spec: ParamSpec {
-            key: "pixel_size".to_string(),
-            label: "Pixel Size".to_string(),
-            ty: ValueType::Int,
-            default: ParamDefault::Int(4),
-            min: Some(1.0),
-            max: Some(128.0),
-            step: Some(1.0),
-            ui_hint: UiHint::NumberInput,
-        },
-    }];
-
-    GroupDefinition {
-        id: "group::pixelate".to_string(),
-        name: "Pixelate".to_string(),
-        category: "GPU".to_string(),
-        description: "Pixelate an image by snapping pixels to block centers".to_string(),
-        internal_graph: SerializableInternalGraph { nodes, connections },
-        promotions,
-        is_builtin: true,
-        explicit_inputs: None,
-        explicit_outputs: None,
-    }
-}
-
-pub fn dither_group() -> GroupDefinition {
-    let nodes = vec![
-        InternalNode {
-            id: "gi".to_string(),
-            type_id: "group_input".to_string(),
-            params: HashMap::new(),
-        },
-        InternalNode {
-            id: "kernel".to_string(),
-            type_id: "gpu_kernel::dither".to_string(),
             params: HashMap::from([
+                ("pixel_size".to_string(), ParamValue::Int(4)),
+                ("algorithm".to_string(), ParamValue::Int(0)),
+                ("matrix_size".to_string(), ParamValue::Int(8)),
                 ("dither_amount".to_string(), ParamValue::Float(1.0)),
-                ("palette_size".to_string(), ParamValue::Int(16)),
             ]),
+            image_data: None,
         },
         InternalNode {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
             params: HashMap::new(),
+            image_data: None,
         },
     ];
 
@@ -379,6 +335,57 @@ pub fn dither_group() -> GroupDefinition {
 
     let promotions = vec![
         Promotion {
+            group_param_key: "pixel_size".to_string(),
+            internal_node_id: "kernel".to_string(),
+            internal_param_key: "pixel_size".to_string(),
+            spec: ParamSpec {
+                key: "pixel_size".to_string(),
+                label: "Pixel Size".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(4),
+                min: Some(1.0),
+                max: Some(128.0),
+                step: Some(1.0),
+                ui_hint: UiHint::NumberInput,
+                promotable: true,
+            },
+        },
+        Promotion {
+            group_param_key: "algorithm".to_string(),
+            internal_node_id: "kernel".to_string(),
+            internal_param_key: "algorithm".to_string(),
+            spec: ParamSpec {
+                key: "algorithm".to_string(),
+                label: "Algorithm".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(0),
+                min: Some(0.0),
+                max: Some(1.0),
+                step: Some(1.0),
+                ui_hint: UiHint::Dropdown(vec![
+                    "Two Nearest".to_string(),
+                    "Threshold Offset".to_string(),
+                ]),
+                promotable: true,
+            },
+        },
+        Promotion {
+            group_param_key: "matrix_size".to_string(),
+            internal_node_id: "kernel".to_string(),
+            internal_param_key: "matrix_size".to_string(),
+            spec: ParamSpec {
+                key: "matrix_size".to_string(),
+                label: "Matrix Size".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(8),
+                min: Some(2.0),
+                max: Some(8.0),
+                step: Some(1.0),
+                ui_hint: UiHint::NumberInput,
+                promotable: true,
+            },
+        },
+        Promotion {
             group_param_key: "dither_amount".to_string(),
             internal_node_id: "kernel".to_string(),
             internal_param_key: "dither_amount".to_string(),
@@ -391,30 +398,16 @@ pub fn dither_group() -> GroupDefinition {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-            },
-        },
-        Promotion {
-            group_param_key: "palette_size".to_string(),
-            internal_node_id: "kernel".to_string(),
-            internal_param_key: "palette_size".to_string(),
-            spec: ParamSpec {
-                key: "palette_size".to_string(),
-                label: "Palette Size".to_string(),
-                ty: ValueType::Int,
-                default: ParamDefault::Int(16),
-                min: Some(1.0),
-                max: Some(256.0),
-                step: Some(1.0),
-                ui_hint: UiHint::NumberInput,
+                promotable: true,
             },
         },
     ];
 
     GroupDefinition {
-        id: "group::dither".to_string(),
-        name: "Dither".to_string(),
+        id: "group::pixelate".to_string(),
+        name: "Pixelate".to_string(),
         category: "GPU".to_string(),
-        description: "Apply Bayer dithering to an image using a palette strip".to_string(),
+        description: "Pixelate an image with optional palette dithering".to_string(),
         internal_graph: SerializableInternalGraph { nodes, connections },
         promotions,
         is_builtin: true,
@@ -429,8 +422,5 @@ pub fn register_builtin_groups(engine: &mut Engine) {
     }
     if let Err(err) = engine.register_group(pixelate_group()) {
         eprintln!("[compositor-runtime] Failed to register Pixelate group: {err}");
-    }
-    if let Err(err) = engine.register_group(dither_group()) {
-        eprintln!("[compositor-runtime] Failed to register Dither group: {err}");
     }
 }
