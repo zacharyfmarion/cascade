@@ -1682,6 +1682,218 @@ fn noise_eval_3d(x: f32, y: f32, z: f32, p: &NoiseParams) -> f32 {
     }
 }
 
+pub struct Text;
+
+impl Text {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+static DEFAULT_FONT_DATA: &[u8] = include_bytes!("../assets/LiberationSans-Regular.ttf");
+
+impl Node for Text {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "text".to_string(),
+            display_name: "Text".to_string(),
+            category: "Generator".to_string(),
+            description: "Render text to image".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "text".to_string(),
+                    label: "Text".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::String("Text".to_string()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::TextArea,
+                    promotable: false,
+                },
+                ParamSpec {
+                    key: "font_size".to_string(),
+                    label: "Font Size".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(72.0),
+                    min: Some(1.0),
+                    max: Some(500.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "color".to_string(),
+                    label: "Color".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([1.0, 1.0, 1.0, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "width".to_string(),
+                    label: "Width".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(512),
+                    min: Some(1.0),
+                    max: Some(8192.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "height".to_string(),
+                    label: "Height".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(512),
+                    min: Some(1.0),
+                    max: Some(8192.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "align".to_string(),
+                    label: "Align".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1),
+                    min: Some(0.0),
+                    max: Some(2.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "Left".to_string(),
+                        "Center".to_string(),
+                        "Right".to_string(),
+                    ]),
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let text = ctx
+                .get_param_string("text")
+                .unwrap_or("Text");
+            let font_size = ctx.get_param_float("font_size")? as f32;
+            let color = ctx.get_param_color("color")?;
+            let w = ctx.get_param_int("width")?.max(1) as u32;
+            let h = ctx.get_param_int("height")?.max(1) as u32;
+            let align = ctx.get_param_int("align")?.clamp(0, 2);
+
+            let color_r = color[0] as f32;
+            let color_g = color[1] as f32;
+            let color_b = color[2] as f32;
+            let color_a = color[3] as f32;
+
+            let font = ab_glyph::FontRef::try_from_slice(DEFAULT_FONT_DATA)
+                .map_err(|e| CompositorError::Other(format!("Font error: {}", e)))?;
+
+            use ab_glyph::{Font, ScaleFont};
+            let scaled = font.as_scaled(ab_glyph::PxScale::from(font_size));
+            let ascent = scaled.ascent();
+            let descent = scaled.descent();
+            let line_gap = scaled.line_gap();
+            let line_height = ascent - descent + line_gap;
+
+            let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+
+            let lines: Vec<&str> = text.split('\n').collect();
+            let total_text_height = line_height * lines.len() as f32;
+            let start_y = ((h as f32 - total_text_height) / 2.0) + ascent;
+
+            for (line_idx, line) in lines.iter().enumerate() {
+                let y_offset = start_y + line_idx as f32 * line_height;
+
+                let mut line_width = 0.0f32;
+                let mut prev_glyph: Option<ab_glyph::GlyphId> = None;
+                for ch in line.chars() {
+                    let glyph_id = scaled.glyph_id(ch);
+                    if let Some(prev) = prev_glyph {
+                        line_width += scaled.kern(prev, glyph_id);
+                    }
+                    line_width += scaled.h_advance(glyph_id);
+                    prev_glyph = Some(glyph_id);
+                }
+
+                let x_offset = match align {
+                    0 => 0.0,
+                    2 => w as f32 - line_width,
+                    _ => (w as f32 - line_width) / 2.0,
+                };
+
+                let mut cursor_x = x_offset;
+                let mut prev_glyph: Option<ab_glyph::GlyphId> = None;
+                for ch in line.chars() {
+                    let glyph_id = scaled.glyph_id(ch);
+                    if let Some(prev) = prev_glyph {
+                        cursor_x += scaled.kern(prev, glyph_id);
+                    }
+
+                    let glyph = glyph_id.with_scale_and_position(
+                        ab_glyph::PxScale::from(font_size),
+                        ab_glyph::point(cursor_x, y_offset),
+                    );
+
+                    if let Some(outlined) = scaled.outline_glyph(glyph) {
+                        let bounds = outlined.px_bounds();
+                        outlined.draw(|gx, gy, coverage| {
+                            let px = gx as i32 + bounds.min.x as i32;
+                            let py = gy as i32 + bounds.min.y as i32;
+                            if px >= 0 && px < w as i32 && py >= 0 && py < h as i32 {
+                                let idx = (py as usize * w as usize + px as usize) * 4;
+                                let src_a = coverage * color_a;
+                                let dst_a = data[idx + 3];
+                                let out_a = src_a + dst_a * (1.0 - src_a);
+                                if out_a > 0.0 {
+                                    let inv_out_a = 1.0 / out_a;
+                                    data[idx] =
+                                        (color_r * src_a + data[idx] * dst_a * (1.0 - src_a))
+                                            * inv_out_a;
+                                    data[idx + 1] =
+                                        (color_g * src_a + data[idx + 1] * dst_a * (1.0 - src_a))
+                                            * inv_out_a;
+                                    data[idx + 2] =
+                                        (color_b * src_a + data[idx + 2] * dst_a * (1.0 - src_a))
+                                            * inv_out_a;
+                                    data[idx + 3] = out_a;
+                                }
+                            }
+                        });
+                    }
+
+                    cursor_x += scaled.h_advance(glyph_id);
+                    prev_glyph = Some(glyph_id);
+                }
+            }
+
+            let output = Image::from_f32_data(w, h, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 #[cfg(test)]
 mod noise_tests {
     use super::*;

@@ -30,7 +30,7 @@ pub use filter::GaussianBlur;
 pub use filter_ops::{Dilate, EdgeDetect, Erode, Median, Sharpen};
 pub use generate::{
     Checkerboard, ColorConstant, FloatConstant, Gradient, IntegerConstant, Noise, RasterizeField,
-    SolidColor,
+    SolidColor, Text,
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
@@ -39,7 +39,7 @@ pub use output::{ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use transform::{Crop, Flip, Resize, Rotate, Transform2D, Translate};
-pub use utility::{MapRange, MathNode};
+pub use utility::{Dot, MapRange, MathNode};
 
 pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     // Input/Output
@@ -73,6 +73,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
 
     registry.register("map_range", || Arc::new(MapRange::new()));
     registry.register("math", || Arc::new(MathNode::new()));
+    registry.register("dot", || Arc::new(Dot::new()));
 
     // Filter
     registry.register("gaussian_blur", || Arc::new(GaussianBlur::new()));
@@ -104,6 +105,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("float_constant", || Arc::new(FloatConstant::new()));
     registry.register("integer_constant", || Arc::new(IntegerConstant::new()));
     registry.register("color_constant", || Arc::new(ColorConstant::new()));
+    registry.register("text", || Arc::new(Text::new()));
 
     // Matte
     registry.register("premultiply", || Arc::new(Premultiply::new()));
@@ -2300,5 +2302,55 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_text_renders() {
+        let node = Text::new();
+        let mut params = HashMap::new();
+        params.insert("text".to_string(), ParamValue::String("Hi".to_string()));
+        params.insert("font_size".to_string(), ParamValue::Float(48.0));
+        params.insert(
+            "color".to_string(),
+            ParamValue::Color([1.0, 1.0, 1.0, 1.0]),
+        );
+        params.insert("width".to_string(), ParamValue::Int(128));
+        params.insert("height".to_string(), ParamValue::Int(64));
+        params.insert("align".to_string(), ParamValue::Int(1));
+        let inputs = HashMap::new();
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+        };
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+        let img = match result.get("image").unwrap() {
+            Value::Image(img) => img,
+            _ => panic!("Expected Image output"),
+        };
+        assert_eq!(img.width, 128);
+        assert_eq!(img.height, 64);
+        let has_content = img.data.iter().any(|&v| v > 0.0);
+        assert!(has_content, "Text node should render visible pixels");
+    }
+
+    #[test]
+    fn test_dot_passthrough() {
+        let input = Image::from_f32_data(
+            2,
+            2,
+            vec![
+                1.0, 0.5, 0.25, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 0.1, 0.2, 0.3,
+                0.4,
+            ],
+        );
+        let node = Dot::new();
+        let output = eval_image_node(&node, input.clone(), HashMap::new());
+        assert_eq!(output.data, input.data);
     }
 }

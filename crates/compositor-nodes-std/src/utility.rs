@@ -352,3 +352,52 @@ fn luminance_at(image: &Image, idx: usize) -> f32 {
     let b = image.data[idx + 2];
     0.2126 * r + 0.7152 * g + 0.0722 * b
 }
+
+pub struct Dot;
+
+impl Dot {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for Dot {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "dot".to_string(),
+            display_name: "Dot".to_string(),
+            category: "Utility".to_string(),
+            description: "Pass-through node for graph organization".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
