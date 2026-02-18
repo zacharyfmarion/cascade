@@ -12,7 +12,7 @@
   justify-content: space-between;
   padding: 0 12px;
   background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--bg-secondary);
 }
 
 .toolbar__title {
@@ -77,4 +77,8 @@
   --dv-separator-border: var(--border-default);
   --dv-drag-over-background-color: rgba(var(--accent-primary-rgb, 0, 128, 255), 0.15);
   --dv-drag-over-border-color: var(--accent-primary);
+}
+
+.dockview-theme-compositor .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--bg-secondary);
 }

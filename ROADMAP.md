@@ -12,12 +12,13 @@ Gap analysis and prioritized plan for reaching moderately production-grade compo
 |----------|-------|------------|
 | **Input** | LoadImage, LoadImageSequence | Minimal |
 | **Output** | Viewer, ExportImage, ExportImageSequence, ExportVideo | Decent |
-| **Color** | BrightnessContrast, HueSaturation, Invert, Levels, Curves, ColorBalance, ChannelShuffle, Threshold, Posterize, Gamma, ColorRamp, ColorPalette, SeparateHSVA, CombineHSVA, WhiteBalance, Vibrance, GradientMap, ToneMap, ColorConvert | **Strong** |
+| **Color** | BrightnessContrast, HueSaturation, Invert, Levels, **Curves** (per-channel, monotone cubic), ColorBalance, ChannelShuffle, Threshold, Posterize, Gamma, **Grade**, **Clamp**, ColorRamp, ColorPalette, SeparateHSVA, CombineHSVA, WhiteBalance, Vibrance, GradientMap, ToneMap, ColorConvert | **Strong** |
 | **Filter** | GaussianBlur, Sharpen, EdgeDetect, Dilate, Erode, Median, Vignette, Glow, LensDistortion | Decent |
-| **Composite** | Blend (19 modes), AlphaOver | Minimal |
+| **Composite** | Blend (19 modes), AlphaOver, **Merge** (14 Porter-Duff ops, bbox control) | Good |
 | **Transform** | Resize, Crop, Flip, Rotate, Translate, Transform2D | Decent |
 | **Generator** | SolidColor, Noise, Gradient, Checkerboard, RasterizeField, FloatConstant, IntegerConstant, Shape | Good |
 | **Matte** | Premultiply, Unpremultiply, SetAlpha, ExtractChannel, ChromaKey, Despill | Decent |
+| **Channel** | SeparateRGBA, CombineRGBA, CopyChannels, ChannelShuffle, ExtractChannel | **Good** |
 | **Utility** | MapRange, Math | Minimal |
 | **Other** | GroupNode system, GpuScript, AiInpaint | Nice extras |
 
@@ -36,7 +37,7 @@ Production compositing is 60% masking. Current coverage is thin.
 - **IBK / Advanced Keyer** — ChromaKey uses simple Euclidean distance in RGB. Production keyers work in YCbCr/HSV, output core/soft/eroded mattes, and handle spill, translucency, and hair detail.
 - **Matte operations** — dedicated EdgeBlur (blur just the matte edge), MatteShrink, MatteExpand, InvertMatte applied specifically to alpha channels.
 
-### 2. No Merge / Multi-Input Compositing Node
+### 2. ~~No Merge / Multi-Input Compositing Node~~ ✅ DONE
 
 Blend and AlphaOver are 2-input only with no resolution negotiation.
 
@@ -44,7 +45,7 @@ Blend and AlphaOver are 2-input only with no resolution negotiation.
 - **Merge node** with explicit bounding box control (union, intersection, A, B) and support for mismatched resolutions.
 - **Porter-Duff operations beyond Over** — Stencil, Mask, In, Out, Atop, Xor.
 
-### 3. No Format / Resolution Awareness
+### 3. ~~No Format / Resolution Awareness~~ ✅ DONE
 
 This is architectural. Currently images are bare width×height pixel buffers.
 
@@ -70,12 +71,14 @@ Without tracking, the most basic VFX shot (putting something on a wall, replacin
 
 ## Tier 2: Major Gaps (Painful to Work Without)
 
-### 5. Curves Node is Oversimplified
+### ~~5. Curves Node is Oversimplified~~ ✅ DONE
 
-Current Curves uses 5 fixed control points with a cubic spline. Needs:
-- Arbitrary control point count (add/remove)
-- Per-channel curves (separate R, G, B, master)
-- Interactive curve editor widget in the UI
+~~Current Curves uses 5 fixed control points with a cubic spline. Needs:~~
+- ~~Arbitrary control point count (add/remove)~~
+- ~~Per-channel curves (separate R, G, B, master)~~
+- ~~Interactive curve editor widget in the UI~~
+
+Implemented: Monotone cubic Hermite interpolation (Fritsch-Carlson), 4 independent curves (Master/R/G/B), SVG-based interactive curve editor with click-to-add, drag-to-move, right-click-to-delete, custom CurvesNode React component with channel tabs.
 
 ### 6. No Distort / Warp Nodes
 
@@ -107,7 +110,7 @@ For sequence/video work:
 
 Production compositors link parameters with expressions ("blur sigma = distance × 0.5"). The `promotable` system allows connections but there's no expression language. The Math node only does basic operations.
 
-### 10. Incomplete Channel Handling
+### 10. ~~Incomplete Channel Handling~~ ✅ DONE
 
 - No **Separate/Combine RGBA** nodes (HSVA exists but not RGBA)
 - No **Copy** node to selectively copy channels between images
@@ -129,8 +132,8 @@ Production compositors link parameters with expressions ("blur sigma = distance 
 
 ### 12. Missing Common VFX Nodes
 
-- **Grade** node (lift/gamma/gain per channel — the workhorse of color correction in Nuke)
-- **Clamp** — clamp pixel values to a range
+- ~~**Grade** node (lift/gamma/gain per channel — the workhorse of color correction in Nuke)~~ ✅ DONE
+- ~~**Clamp** — clamp pixel values to a range~~ ✅ DONE
 - **Unpremult → operation → Premult** convenience (toggle on nodes)
 - **Mirror / Tile / Offset** for texture work
 - **Grain** — add/remove film grain
@@ -170,17 +173,17 @@ Foundational work first, then nodes that unlock real workflows.
 
 | # | Item | Type | Why |
 |---|------|------|-----|
-| 1 | Format/resolution awareness on images + Reformat node | Architecture + Node | Unblocks everything — can't composite mismatched resolutions without it |
-| 2 | Merge node with Porter-Duff ops and bbox control | Node | The core compositing operation |
-| 3 | Separate/Combine RGBA + Copy channels | Nodes | Basic channel manipulation required for any real pipeline |
+| 1 | ~~Format/resolution awareness on images + Reformat node~~ | Architecture + Node | ✅ DONE — Format, RectI, data_window, display_window, PixelAspectRatio all implemented |
+| 2 | ~~Merge node with Porter-Duff ops and bbox control~~ | Node | ✅ DONE — 14 operations (Over, Under, In, Out, Atop, Xor, Stencil, Mask, Plus, Multiply, Difference, Screen, Max, Min), 4 bbox modes, opacity, mix, mask input. Verified against canonical Porter-Duff reference. |
+| 3 | ~~Separate/Combine RGBA + Copy channels~~ | Nodes | ✅ DONE — SeparateRGBA, CombineRGBA, CopyChannels (Shuffle2-style, 2 inputs, per-channel source selection from A or B) |
 
 ### Phase 2: Color & Correction
 
 | # | Item | Type | Why |
 |---|------|------|-----|
-| 4 | Proper Curves (per-channel, arbitrary control points, UI widget) | Node + Frontend | Current curves are too limited for real grading |
-| 5 | Grade node (lift/gamma/gain) | Node | The single most-used color node in production |
-| 6 | Clamp node | Node | Trivial to add, frequently needed |
+| ~~4~~ | ~~Proper Curves (per-channel, arbitrary control points, UI widget)~~ ✅ | ~~Node + Frontend~~ | Monotone cubic Hermite, 4 channels, interactive SVG editor |
+| 5 | ~~Grade node (lift/gamma/gain)~~ | Node | ✅ DONE — Per-channel lift/gamma/gain with mask support and field passthrough |
+| 6 | ~~Clamp node~~ | Node | ✅ DONE — Per-channel min/max with optional alpha clamp, mask support, field passthrough |
 
 ### Phase 3: Masking & Keying
 

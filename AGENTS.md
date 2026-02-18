@@ -94,6 +94,16 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 - All param changes go through `graphStore.setParam()` which syncs to engine then triggers viewer re-render.
 - Never bypass the store to call engine methods directly.
 
+## Fix philosophy
+
+- **Never apply a quick fix if it's not the architecturally correct fix.** A band-aid that papers over a design problem is worse than no fix at all — it adds complexity and makes the real fix harder later.
+- When you identify that the correct solution requires a larger refactor, **always surface this to the user**. Explain what the right architecture looks like, why the simple fix is insufficient, and ask whether we should proceed with the refactor instead.
+- Prefer doing things right over doing things fast. A well-designed solution that takes longer is always preferable to a hacky shortcut.
+
+## Parallel agents
+
+Multiple AI agents may be working on this repository simultaneously. If you encounter unexpected changes, new files, or compilation errors that you did not introduce, **ignore them and move on**. Do not attempt to delete, revert, or fix changes made by other agents — they are handling their own work.
+
 ## Conventions
 
 - Rust: Follow `rustfmt` defaults. `cargo clippy` must pass with `-D warnings`.
