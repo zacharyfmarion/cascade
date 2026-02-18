@@ -14,6 +14,7 @@ pub struct NodeInstance {
     pub uuid: String,
     pub type_id: String,
     pub params: HashMap<String, ParamValue>,
+    pub input_defaults: HashMap<String, ParamValue>,
     pub position: (f64, f64),
     pub param_revision: u64,
 }
@@ -35,7 +36,9 @@ pub struct Graph {
 }
 
 pub fn types_compatible(from: &ValueType, to: &ValueType) -> bool {
-    from == to || (*from == ValueType::Field && *to == ValueType::Image)
+    from == to
+        || (*from == ValueType::Field
+            && (*to == ValueType::Image || *to == ValueType::Mask))
 }
 
 impl Graph {
@@ -54,6 +57,7 @@ impl Graph {
             uuid: uuid::Uuid::new_v4().to_string(),
             type_id: type_id.to_string(),
             params: HashMap::new(),
+            input_defaults: HashMap::new(),
             position: (0.0, 0.0),
             param_revision: 0,
         });
@@ -83,7 +87,8 @@ impl Graph {
             None => return,
         };
 
-        let input_names: HashSet<&str> = spec.inputs.iter().map(|p| p.name.as_str()).collect();
+        let all_inputs = spec.all_inputs();
+        let input_names: HashSet<&str> = all_inputs.iter().map(|p| p.name.as_str()).collect();
         let output_names: HashSet<&str> = spec.outputs.iter().map(|p| p.name.as_str()).collect();
 
         self.retain_connections(|c| {
@@ -135,8 +140,8 @@ impl Graph {
                 node_type: from_instance.type_id.clone(),
                 port_name: from_port.to_string(),
             })?;
-        let to_port_spec = to_spec
-            .inputs
+        let to_all_inputs = to_spec.all_inputs();
+        let to_port_spec = to_all_inputs
             .iter()
             .find(|p| p.name == to_port)
             .ok_or_else(|| CompositorError::PortNotFound {
@@ -205,6 +210,14 @@ impl Graph {
     pub fn set_param(&mut self, node_id: NodeId, key: &str, value: ParamValue) {
         if let Some(node) = self.nodes.get_mut(node_id) {
             node.params.insert(key.to_string(), value);
+            node.param_revision = node.param_revision.saturating_add(1);
+            self.mark_dirty(node_id);
+        }
+    }
+
+    pub fn set_input_default(&mut self, node_id: NodeId, port_name: &str, value: ParamValue) {
+        if let Some(node) = self.nodes.get_mut(node_id) {
+            node.input_defaults.insert(port_name.to_string(), value);
             node.param_revision = node.param_revision.saturating_add(1);
             self.mark_dirty(node_id);
         }
@@ -361,6 +374,7 @@ mod tests {
                     name: "output".to_string(),
                     label: "Output".to_string(),
                     ty: ValueType::Float,
+                    ..Default::default()
                 }],
                 params: vec![],
             };
@@ -376,11 +390,13 @@ mod tests {
                     name: "input".to_string(),
                     label: "Input".to_string(),
                     ty: ValueType::Float,
+                    ..Default::default()
                 }],
                 outputs: vec![PortSpec {
                     name: "output".to_string(),
                     label: "Output".to_string(),
                     ty: ValueType::Float,
+                    ..Default::default()
                 }],
                 params: vec![ParamSpec {
                     key: "factor".to_string(),
@@ -391,6 +407,7 @@ mod tests {
                     max: Some(10.0),
                     step: Some(0.1),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 }],
             };
             Arc::new(TestNode { spec })
@@ -405,6 +422,7 @@ mod tests {
                     name: "input".to_string(),
                     label: "Input".to_string(),
                     ty: ValueType::Float,
+                    ..Default::default()
                 }],
                 outputs: vec![],
                 params: vec![],
@@ -500,6 +518,7 @@ mod tests {
                     name: "output".to_string(),
                     label: "Output".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 params: vec![],
             };

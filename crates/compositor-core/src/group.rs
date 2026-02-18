@@ -29,6 +29,8 @@ pub struct InternalNode {
     pub id: String,
     pub type_id: String,
     pub params: HashMap<String, ParamValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

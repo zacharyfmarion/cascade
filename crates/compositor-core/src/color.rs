@@ -3,7 +3,7 @@ use crate::types::ColorSpaceId;
 use rayon::prelude::*;
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ColorSpaceInfo {
     pub id: ColorSpaceId,
     pub family: String,
