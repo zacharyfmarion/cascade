@@ -142,14 +142,18 @@ Production compositors link parameters with expressions ("blur sigma = distance 
 - **Text** node — render text to image
 - **Dot** (pass-through for graph organization)
 
-### 13. Blend Node Correctness Issues
+### ~~13. Blend Node Correctness Issues~~ ✅ DONE
 
-- Output alpha uses `base_a.max(blend_a)` which is incorrect for proper alpha compositing — should follow Porter-Duff rules per blend mode. This produces visible fringing with semi-transparent elements.
-- Output clamps to [0,1] which prevents HDR compositing (values >1.0 are meaningful).
+~~Output alpha uses `base_a.max(blend_a)` which is incorrect for proper alpha compositing — should follow Porter-Duff rules per blend mode. This produces visible fringing with semi-transparent elements.~~
+~~Output clamps to [0,1] which prevents HDR compositing (values >1.0 are meaningful).~~
 
-### 14. GaussianBlur Blurs Alpha
+Fixed: Alpha now uses Porter-Duff "over" formula (`blend_alpha + base_a * (1 - blend_alpha)`). RGB clamping removed to preserve HDR values.
 
-The blur implementation blurs all 4 channels including alpha. For compositing, you almost always want to blur RGB only and keep alpha intact, or blur alpha separately. Blurring premultiplied RGBA together creates dark halos around edges.
+### ~~14. GaussianBlur Dark Halo Artifacts~~ ✅ DONE
+
+~~The blur implementation blurs all 4 channels including alpha. For compositing, you almost always want to blur RGB only and keep alpha intact, or blur alpha separately. Blurring premultiplied RGBA together creates dark halos around edges.~~
+
+Fixed: Off-by-one in sliding window subtraction index corrected. Premultiply/unpremultiply sandwich added so transparent pixels don't bleed black into RGB. Sharpen node also fixed. Glow node switched from O(w×h×r) naive blur to O(w×h) sliding window (~10-20x speedup). Reference test added against naive Gaussian convolution.
 
 ---
 
@@ -212,7 +216,7 @@ Foundational work first, then nodes that unlock real workflows.
 
 | # | Item | Type | Why |
 |---|------|------|-----|
-| 15 | Fix Blend node alpha compositing (Porter-Duff correctness) | Bug fix | Current behavior produces fringing |
-| 16 | Fix GaussianBlur alpha handling | Bug fix | Dark halos around edges |
+| ~~15~~ | ~~Fix Blend node alpha compositing (Porter-Duff correctness)~~ ✅ | ~~Bug fix~~ | Porter-Duff "over" alpha, HDR-safe RGB |
+| ~~16~~ | ~~Fix GaussianBlur alpha handling~~ ✅ | ~~Bug fix~~ | Off-by-one fix, premultiply sandwich, Sharpen/Glow also fixed |
 | 17 | Dot node (pass-through) | Node | Graph organization |
 | 18 | Text node | Node | Commonly requested |
