@@ -24,11 +24,13 @@ impl Node for ColorConvert {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -43,6 +45,7 @@ impl Node for ColorConvert {
                         ColorSpaceId::LINEAR_SRGB.to_string(),
                         ColorSpaceId::SRGB.to_string(),
                     ]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "to_space".to_string(),
@@ -56,6 +59,7 @@ impl Node for ColorConvert {
                         ColorSpaceId::LINEAR_SRGB.to_string(),
                         ColorSpaceId::SRGB.to_string(),
                     ]),
+                    promotable: true,
                 },
             ],
         }
@@ -78,7 +82,7 @@ impl Node for ColorConvert {
             let processor = cm.create_transform(&from_id, &to_id)?;
             processor.apply(&mut data);
 
-            let output = Image::from_f32_data_with_space(image.width, image.height, data, to_id);
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, to_id);
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

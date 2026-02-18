@@ -23,11 +23,13 @@ impl Node for Resize {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -39,6 +41,7 @@ impl Node for Resize {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "height".to_string(),
@@ -49,6 +52,7 @@ impl Node for Resize {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "filter".to_string(),
@@ -63,6 +67,7 @@ impl Node for Resize {
                         "Bilinear".to_string(),
                         "Bicubic".to_string(),
                     ]),
+                    promotable: true,
                 },
             ],
         }
@@ -119,11 +124,13 @@ impl Node for Crop {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -135,6 +142,7 @@ impl Node for Crop {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "y".to_string(),
@@ -145,6 +153,7 @@ impl Node for Crop {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "width".to_string(),
@@ -155,6 +164,7 @@ impl Node for Crop {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "height".to_string(),
@@ -165,6 +175,7 @@ impl Node for Crop {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -177,41 +188,66 @@ impl Node for Crop {
     {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let x = ctx.get_param_int("x")?;
-            let y = ctx.get_param_int("y")?;
-            let width = ctx.get_param_int("width")?;
-            let height = ctx.get_param_int("height")?;
+            let x = ctx.get_param_int("x")? as i32;
+            let y = ctx.get_param_int("y")? as i32;
+            let width = ctx.get_param_int("width")?.max(1) as u32;
+            let height = ctx.get_param_int("height")?.max(1) as u32;
 
-            let src_w = image.width as i64;
-            let src_h = image.height as i64;
-            let max_x = (src_w - 1).max(0);
-            let max_y = (src_h - 1).max(0);
-            let start_x = x.clamp(0, max_x);
-            let start_y = y.clamp(0, max_y);
-            let max_width = (src_w - start_x).max(1);
-            let max_height = (src_h - start_y).max(1);
-            let out_w = width.clamp(1, max_width) as u32;
-            let out_h = height.clamp(1, max_height) as u32;
+            // Crop rect in global coordinates
+            let crop_rect = RectI {
+                min: IVec2 { x, y },
+                max: IVec2 {
+                    x: x + width as i32,
+                    y: y + height as i32,
+                },
+            };
+
+            // Output data_window is intersection of crop rect with input's data_window
+            let out_dw = image.data_window.intersect(crop_rect);
+
+            // If intersection is empty (no overlap), produce a 1×1 transparent image
+            let out_w = out_dw.width_u32().max(1);
+            let out_h = out_dw.height_u32().max(1);
+
+            if out_dw.width_u32() == 0 || out_dw.height_u32() == 0 {
+                let data = vec![0.0f32; 4];
+                let empty_dw = RectI {
+                    min: IVec2 { x: crop_rect.min.x, y: crop_rect.min.y },
+                    max: IVec2 { x: crop_rect.min.x + 1, y: crop_rect.min.y + 1 },
+                };
+                let output = Image::new_with_domain(
+                    image.format.clone(),
+                    empty_dw,
+                    data,
+                    image.color_space.clone(),
+                );
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(output));
+                return Ok(outputs);
+            }
 
             let out_w_usize = out_w as usize;
-            let out_h_usize = out_h as usize;
-            let src_w_usize = src_w as usize;
-            let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
+            let mut data = vec![0.0f32; out_w_usize * out_h as usize * 4];
             data.par_chunks_exact_mut(4)
                 .enumerate()
                 .for_each(|(i, out)| {
-                    let px = i % out_w_usize;
-                    let py = i / out_w_usize;
-                    let sx = start_x as usize + px;
-                    let sy = start_y as usize + py;
-                    let idx = (sy * src_w_usize + sx) * 4;
-                    out[0] = image.data[idx];
-                    out[1] = image.data[idx + 1];
-                    out[2] = image.data[idx + 2];
-                    out[3] = image.data[idx + 3];
+                    let px = (i % out_w_usize) as i32;
+                    let py = (i / out_w_usize) as i32;
+                    let gx = out_dw.min.x + px;
+                    let gy = out_dw.min.y + py;
+                    let rgba = image.get_rgba(gx, gy);
+                    out[0] = rgba[0];
+                    out[1] = rgba[1];
+                    out[2] = rgba[2];
+                    out[3] = rgba[3];
                 });
 
-            let output = Image::from_f32_data(out_w, out_h, data);
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                out_dw,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -246,11 +282,13 @@ impl Node for Flip {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -262,6 +300,7 @@ impl Node for Flip {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "vertical".to_string(),
@@ -272,6 +311,7 @@ impl Node for Flip {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
+                    promotable: true,
                 },
             ],
         }
@@ -303,7 +343,7 @@ impl Node for Flip {
                     out[3] = image.data[idx + 3];
                 });
 
-            let output = Image::from_f32_data(image.width, image.height, data);
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -338,11 +378,13 @@ impl Node for Rotate {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -354,6 +396,7 @@ impl Node for Rotate {
                     max: Some(180.0),
                     step: Some(0.1),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "filter".to_string(),
@@ -364,6 +407,7 @@ impl Node for Rotate {
                     max: Some(1.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Dropdown(vec!["Nearest".to_string(), "Bilinear".to_string()]),
+                    promotable: true,
                 },
             ],
         }
@@ -388,15 +432,17 @@ impl Node for Rotate {
             let rad = angle.to_radians();
             let cos = rad.cos();
             let sin = rad.sin();
-            let in_w = image.width as f32;
-            let in_h = image.height as f32;
-            let cx = (in_w - 1.0) * 0.5;
-            let cy = (in_h - 1.0) * 0.5;
+
+            // Rotate around the center of the input's data_window in global coords
+            let dw = image.data_window;
+            let cx = (dw.min.x as f32 + dw.max.x as f32) * 0.5;
+            let cy = (dw.min.y as f32 + dw.max.y as f32) * 0.5;
+
             let corners = [
-                (0.0, 0.0),
-                (in_w - 1.0, 0.0),
-                (in_w - 1.0, in_h - 1.0),
-                (0.0, in_h - 1.0),
+                (dw.min.x as f32, dw.min.y as f32),
+                (dw.max.x as f32, dw.min.y as f32),
+                (dw.max.x as f32, dw.max.y as f32),
+                (dw.min.x as f32, dw.max.y as f32),
             ];
             let mut min_x = f32::INFINITY;
             let mut max_x = f32::NEG_INFINITY;
@@ -405,47 +451,54 @@ impl Node for Rotate {
             for (x, y) in corners {
                 let dx = x - cx;
                 let dy = y - cy;
-                let rx = dx * cos - dy * sin;
-                let ry = dx * sin + dy * cos;
+                let rx = dx * cos - dy * sin + cx;
+                let ry = dx * sin + dy * cos + cy;
                 min_x = min_x.min(rx);
                 max_x = max_x.max(rx);
                 min_y = min_y.min(ry);
                 max_y = max_y.max(ry);
             }
-            let out_w = ((max_x - min_x).ceil() as i32 + 1).max(1) as u32;
-            let out_h = ((max_y - min_y).ceil() as i32 + 1).max(1) as u32;
+
+            let out_dw = RectI {
+                min: IVec2 { x: min_x.floor() as i32, y: min_y.floor() as i32 },
+                max: IVec2 { x: max_x.ceil() as i32, y: max_y.ceil() as i32 },
+            };
+            let out_w = out_dw.width_u32().max(1);
+            let out_h = out_dw.height_u32().max(1);
 
             let out_w_usize = out_w as usize;
-            let out_h_usize = out_h as usize;
-            let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
+            let in_dw = image.data_window;
+            let in_w = image.width as usize;
+            let mut data = vec![0.0f32; out_w_usize * out_h as usize * 4];
             data.par_chunks_exact_mut(4)
                 .enumerate()
                 .for_each(|(i, out)| {
-                    let x = (i % out_w_usize) as f32;
-                    let y = (i / out_w_usize) as f32;
-                    let rx = x + min_x;
-                    let ry = y + min_y;
-                    let src_x = rx * cos + ry * sin + cx;
-                    let src_y = -rx * sin + ry * cos + cy;
+                    let gx = (i % out_w_usize) as f32 + out_dw.min.x as f32;
+                    let gy = (i / out_w_usize) as f32 + out_dw.min.y as f32;
+
+                    // Inverse rotate: output global → input global
+                    let dx = gx - cx;
+                    let dy = gy - cy;
+                    let src_gx = dx * cos + dy * sin + cx;
+                    let src_gy = -dx * sin + dy * cos + cy;
+
+                    // Convert source global → input local for sampling
+                    let src_lx = src_gx - in_dw.min.x as f32;
+                    let src_ly = src_gy - in_dw.min.y as f32;
 
                     if filter == 0 {
-                        let sx = src_x.round() as i32;
-                        let sy = src_y.round() as i32;
+                        let sx = src_lx.round() as i32;
+                        let sy = src_ly.round() as i32;
                         if sx >= 0 && sy >= 0 && sx < image.width as i32 && sy < image.height as i32
                         {
-                            let idx = (sy as usize * image.width as usize + sx as usize) * 4;
+                            let idx = (sy as usize * in_w + sx as usize) * 4;
                             out[0] = image.data[idx];
                             out[1] = image.data[idx + 1];
                             out[2] = image.data[idx + 2];
                             out[3] = image.data[idx + 3];
-                        } else {
-                            out[0] = 0.0;
-                            out[1] = 0.0;
-                            out[2] = 0.0;
-                            out[3] = 0.0;
                         }
                     } else {
-                        let rgba = sample_bilinear_zero(image, src_x, src_y);
+                        let rgba = sample_bilinear_zero(image, src_lx, src_ly);
                         out[0] = rgba[0];
                         out[1] = rgba[1];
                         out[2] = rgba[2];
@@ -453,7 +506,12 @@ impl Node for Rotate {
                     }
                 });
 
-            let output = Image::from_f32_data(out_w, out_h, data);
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                out_dw,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -488,11 +546,13 @@ impl Node for Translate {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -504,6 +564,7 @@ impl Node for Translate {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "y".to_string(),
@@ -514,6 +575,7 @@ impl Node for Translate {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -528,33 +590,17 @@ impl Node for Translate {
             let image = ctx.get_input_image("image")?;
             let shift_x = ctx.get_param_int("x")?.clamp(-8192, 8192) as i32;
             let shift_y = ctx.get_param_int("y")?.clamp(-8192, 8192) as i32;
-            let width = image.width as usize;
-            let height = image.height as usize;
-            let w_i32 = image.width as i32;
-            let h_i32 = image.height as i32;
-            let mut data = vec![0.0f32; width * height * 4];
-            data.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, out)| {
-                    let x = (i % width) as i32;
-                    let y = (i / width) as i32;
-                    let sx = x - shift_x;
-                    let sy = y - shift_y;
-                    if sx >= 0 && sy >= 0 && sx < w_i32 && sy < h_i32 {
-                        let idx = (sy as usize * width + sx as usize) * 4;
-                        out[0] = image.data[idx];
-                        out[1] = image.data[idx + 1];
-                        out[2] = image.data[idx + 2];
-                        out[3] = image.data[idx + 3];
-                    } else {
-                        out[0] = 0.0;
-                        out[1] = 0.0;
-                        out[2] = 0.0;
-                        out[3] = 0.0;
-                    }
-                });
 
-            let output = Image::from_f32_data(image.width, image.height, data);
+            let new_dw = image.data_window.translate(shift_x, shift_y);
+            let output = Image {
+                width: image.width,
+                height: image.height,
+                data: image.data.clone(),
+                color_space: image.color_space.clone(),
+                format: image.format.clone(),
+                data_window: new_dw,
+            };
+
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -593,7 +639,13 @@ fn resize_nearest(image: &Image, out_w: u32, out_h: u32) -> Image {
             out[2] = image.data[idx + 2];
             out[3] = image.data[idx + 3];
         });
-    Image::from_f32_data(out_w, out_h, data)
+    let out_dw = RectI::from_dimensions(out_w, out_h);
+    Image::new_with_domain(
+        Format::from_dimensions(out_w, out_h),
+        out_dw,
+        data,
+        image.color_space.clone(),
+    )
 }
 
 fn resize_bilinear(image: &Image, out_w: u32, out_h: u32) -> Image {
@@ -617,7 +669,13 @@ fn resize_bilinear(image: &Image, out_w: u32, out_h: u32) -> Image {
             out[2] = rgba[2];
             out[3] = rgba[3];
         });
-    Image::from_f32_data(out_w, out_h, data)
+    let out_dw = RectI::from_dimensions(out_w, out_h);
+    Image::new_with_domain(
+        Format::from_dimensions(out_w, out_h),
+        out_dw,
+        data,
+        image.color_space.clone(),
+    )
 }
 
 fn resize_bicubic(image: &Image, out_w: u32, out_h: u32) -> Image {
@@ -663,7 +721,13 @@ fn resize_bicubic(image: &Image, out_w: u32, out_h: u32) -> Image {
             out[2] = rgba[2];
             out[3] = rgba[3];
         });
-    Image::from_f32_data(out_w, out_h, data)
+    let out_dw = RectI::from_dimensions(out_w, out_h);
+    Image::new_with_domain(
+        Format::from_dimensions(out_w, out_h),
+        out_dw,
+        data,
+        image.color_space.clone(),
+    )
 }
 
 fn read_pixel(image: &Image, x: usize, y: usize) -> [f32; 4] {
@@ -798,11 +862,13 @@ impl Node for Transform2D {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -814,6 +880,7 @@ impl Node for Transform2D {
                     max: Some(4096.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "translate_y".to_string(),
@@ -824,6 +891,7 @@ impl Node for Transform2D {
                     max: Some(4096.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "rotate".to_string(),
@@ -834,6 +902,7 @@ impl Node for Transform2D {
                     max: Some(180.0),
                     step: Some(0.1),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_x".to_string(),
@@ -844,6 +913,7 @@ impl Node for Transform2D {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_y".to_string(),
@@ -854,6 +924,7 @@ impl Node for Transform2D {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "pivot_x".to_string(),
@@ -864,6 +935,7 @@ impl Node for Transform2D {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "pivot_y".to_string(),
@@ -874,6 +946,7 @@ impl Node for Transform2D {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "filter".to_string(),
@@ -884,6 +957,7 @@ impl Node for Transform2D {
                     max: Some(1.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Dropdown(vec!["Nearest".to_string(), "Bilinear".to_string()]),
+                    promotable: true,
                 },
             ],
         }
@@ -917,10 +991,13 @@ impl Node for Transform2D {
                 return Ok(outputs);
             }
 
-            let in_w = image.width as f32;
-            let in_h = image.height as f32;
-            let px = pivot_x * (in_w - 1.0);
-            let py = pivot_y * (in_h - 1.0);
+            let dw = image.data_window;
+            let in_w_f = dw.width_u32() as f32;
+            let in_h_f = dw.height_u32() as f32;
+
+            // Pivot in global coordinates
+            let px = dw.min.x as f32 + pivot_x * (in_w_f - 1.0);
+            let py = dw.min.y as f32 + pivot_y * (in_h_f - 1.0);
 
             let rad = rotate_deg.to_radians();
             let cos_a = rad.cos();
@@ -929,43 +1006,77 @@ impl Node for Transform2D {
             let inv_sx = if sx.abs() > 0.0001 { 1.0 / sx } else { 1.0 };
             let inv_sy = if sy.abs() > 0.0001 { 1.0 / sy } else { 1.0 };
 
-            let out_w = image.width;
-            let out_h = image.height;
-            let out_w_usize = out_w as usize;
-            let out_h_usize = out_h as usize;
+            // Forward-transform input corners to compute output bounding box
+            let corners = [
+                (dw.min.x as f32, dw.min.y as f32),
+                (dw.max.x as f32, dw.min.y as f32),
+                (dw.max.x as f32, dw.max.y as f32),
+                (dw.min.x as f32, dw.max.y as f32),
+            ];
+            let mut min_x = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            for (cx_in, cy_in) in corners {
+                let dx = cx_in - px;
+                let dy = cy_in - py;
+                let scaled_x = dx * sx;
+                let scaled_y = dy * sy;
+                let rot_x = scaled_x * cos_a - scaled_y * sin_a;
+                let rot_y = scaled_x * sin_a + scaled_y * cos_a;
+                let out_x = rot_x + px + tx;
+                let out_y = rot_y + py + ty_val;
+                min_x = min_x.min(out_x);
+                max_x = max_x.max(out_x);
+                min_y = min_y.min(out_y);
+                max_y = max_y.max(out_y);
+            }
 
-            let mut data = vec![0.0f32; out_w_usize * out_h_usize * 4];
+            let out_dw = RectI {
+                min: IVec2 { x: min_x.floor() as i32, y: min_y.floor() as i32 },
+                max: IVec2 { x: max_x.ceil() as i32, y: max_y.ceil() as i32 },
+            };
+            let out_w = out_dw.width_u32().max(1);
+            let out_h = out_dw.height_u32().max(1);
+            let out_w_usize = out_w as usize;
+            let in_dw = image.data_window;
+            let in_w = image.width as usize;
+
+            let mut data = vec![0.0f32; out_w_usize * out_h as usize * 4];
             data.par_chunks_exact_mut(4)
                 .enumerate()
                 .for_each(|(i, out)| {
-                    let ox = (i % out_w_usize) as f32;
-                    let oy = (i / out_w_usize) as f32;
+                    let gx = (i % out_w_usize) as f32 + out_dw.min.x as f32;
+                    let gy = (i / out_w_usize) as f32 + out_dw.min.y as f32;
 
-                    let dx = ox - px - tx;
-                    let dy = oy - py - ty_val;
-
+                    // Inverse transform: output global → input global
+                    let dx = gx - px - tx;
+                    let dy = gy - py - ty_val;
                     let rx = (dx * cos_a + dy * sin_a) * inv_sx;
                     let ry = (-dx * sin_a + dy * cos_a) * inv_sy;
+                    let src_gx = rx + px;
+                    let src_gy = ry + py;
 
-                    let src_x = rx + px;
-                    let src_y = ry + py;
+                    // Global → input local
+                    let src_lx = src_gx - in_dw.min.x as f32;
+                    let src_ly = src_gy - in_dw.min.y as f32;
 
                     if filter == 0 {
-                        let sx_i = src_x.round() as i32;
-                        let sy_i = src_y.round() as i32;
+                        let sx_i = src_lx.round() as i32;
+                        let sy_i = src_ly.round() as i32;
                         if sx_i >= 0
                             && sy_i >= 0
                             && sx_i < image.width as i32
                             && sy_i < image.height as i32
                         {
-                            let idx = (sy_i as usize * image.width as usize + sx_i as usize) * 4;
+                            let idx = (sy_i as usize * in_w + sx_i as usize) * 4;
                             out[0] = image.data[idx];
                             out[1] = image.data[idx + 1];
                             out[2] = image.data[idx + 2];
                             out[3] = image.data[idx + 3];
                         }
                     } else {
-                        let rgba = sample_bilinear_zero(image, src_x, src_y);
+                        let rgba = sample_bilinear_zero(image, src_lx, src_ly);
                         out[0] = rgba[0];
                         out[1] = rgba[1];
                         out[2] = rgba[2];
@@ -973,7 +1084,12 @@ impl Node for Transform2D {
                     }
                 });
 
-            let output = Image::from_f32_data(out_w, out_h, data);
+            let output = Image::new_with_domain(
+                image.format.clone(),
+                out_dw,
+                data,
+                image.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

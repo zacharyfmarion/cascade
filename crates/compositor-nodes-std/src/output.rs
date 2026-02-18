@@ -13,8 +13,18 @@ impl Viewer {
     }
 
     pub fn image_to_rgba8(image: &Image, cm: &dyn ColorManagement) -> Vec<u8> {
+        Self::image_to_rgba8_with_display(image, cm, "sRGB", "Standard")
+    }
+
+    pub fn image_to_rgba8_with_display(
+        image: &Image,
+        cm: &dyn ColorManagement,
+        display: &str,
+        view: &str,
+    ) -> Vec<u8> {
         let mut pixels = image.data.as_ref().clone();
-        if let Ok(processor) = cm.create_display_transform(&image.color_space, "sRGB", "Standard") {
+        let source_space = cm.working_space();
+        if let Ok(processor) = cm.create_display_transform(source_space, display, view) {
             processor.apply(&mut pixels);
         }
         let pixel_count = image.pixel_count();
@@ -43,11 +53,13 @@ impl Node for Viewer {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "display".to_string(),
                 label: "Display".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![],
         }
@@ -94,11 +106,13 @@ impl Node for ExportImage {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "display".to_string(),
                 label: "Display".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -110,6 +124,7 @@ impl Node for ExportImage {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Hidden,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "format".to_string(),
@@ -120,6 +135,7 @@ impl Node for ExportImage {
                     max: Some(1.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Dropdown(vec!["PNG".to_string(), "JPEG".to_string()]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "quality".to_string(),
@@ -130,6 +146,141 @@ impl Node for ExportImage {
                     max: Some(100.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a>
+    {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("display".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct ExportVideo;
+
+impl ExportVideo {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ExportVideo {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "export_video".to_string(),
+            display_name: "Export Video".to_string(),
+            category: "Output".to_string(),
+            description: "Export rendered frames as an encoded video file".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "display".to_string(),
+                label: "Display".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "output_path".to_string(),
+                    label: "Output Path".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::String(String::new()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "codec".to_string(),
+                    label: "Codec".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "H.264".to_string(),
+                        "H.265 (HEVC)".to_string(),
+                    ]),
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "quality".to_string(),
+                    label: "Quality (CRF)".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(23),
+                    min: Some(0.0),
+                    max: Some(51.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "fps".to_string(),
+                    label: "FPS".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(24),
+                    min: Some(1.0),
+                    max: Some(120.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "start_frame".to_string(),
+                    label: "Start Frame".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(100000.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "end_frame".to_string(),
+                    label: "End Frame".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(100),
+                    min: Some(0.0),
+                    max: Some(100000.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "step".to_string(),
+                    label: "Step".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1),
+                    min: Some(1.0),
+                    max: Some(100.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -176,11 +327,13 @@ impl Node for ExportImageSequence {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "display".to_string(),
                 label: "Display".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -192,6 +345,7 @@ impl Node for ExportImageSequence {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Hidden,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "start_frame".to_string(),
@@ -201,7 +355,8 @@ impl Node for ExportImageSequence {
                     min: Some(0.0),
                     max: Some(100000.0),
                     step: Some(1.0),
-                    ui_hint: UiHint::Hidden,
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "end_frame".to_string(),
@@ -211,7 +366,8 @@ impl Node for ExportImageSequence {
                     min: Some(0.0),
                     max: Some(100000.0),
                     step: Some(1.0),
-                    ui_hint: UiHint::Hidden,
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "step".to_string(),
@@ -221,7 +377,8 @@ impl Node for ExportImageSequence {
                     min: Some(1.0),
                     max: Some(100.0),
                     step: Some(1.0),
-                    ui_hint: UiHint::Hidden,
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "format".to_string(),
@@ -232,6 +389,7 @@ impl Node for ExportImageSequence {
                     max: Some(1.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Dropdown(vec!["PNG".to_string(), "JPEG".to_string()]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "quality".to_string(),
@@ -242,6 +400,7 @@ impl Node for ExportImageSequence {
                     max: Some(100.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }

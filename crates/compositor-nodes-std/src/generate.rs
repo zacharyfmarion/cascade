@@ -25,47 +25,19 @@ impl Node for SolidColor {
                 name: "field".to_string(),
                 label: "Field".to_string(),
                 ty: ValueType::Field,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
-                    key: "r".to_string(),
-                    label: "Red".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.5),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "g".to_string(),
-                    label: "Green".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.5),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "b".to_string(),
-                    label: "Blue".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.5),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "a".to_string(),
-                    label: "Alpha".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "color".to_string(),
+                    label: "Color".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([0.5, 0.5, 0.5, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_x".to_string(),
@@ -76,6 +48,7 @@ impl Node for SolidColor {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_y".to_string(),
@@ -86,6 +59,7 @@ impl Node for SolidColor {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_x".to_string(),
@@ -96,6 +70,7 @@ impl Node for SolidColor {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_y".to_string(),
@@ -106,6 +81,7 @@ impl Node for SolidColor {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "rotation".to_string(),
@@ -116,6 +92,7 @@ impl Node for SolidColor {
                     max: Some(360.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -128,10 +105,11 @@ impl Node for SolidColor {
     {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
-            let r = ctx.get_param_float("r")? as f32;
-            let g = ctx.get_param_float("g")? as f32;
-            let b = ctx.get_param_float("b")? as f32;
-            let a = ctx.get_param_float("a")? as f32;
+            let color = ctx.get_param_color("color")?;
+            let r = color[0] as f32;
+            let g = color[1] as f32;
+            let b = color[2] as f32;
+            let a = color[3] as f32;
             let field = Field::with_transform(move |_, _| [r, g, b, a], transform);
             let mut outputs = HashMap::new();
             outputs.insert("field".to_string(), Value::Field(field));
@@ -168,6 +146,7 @@ impl Node for Noise {
                 name: "field".to_string(),
                 label: "Field".to_string(),
                 ty: ValueType::Field,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -179,6 +158,7 @@ impl Node for Noise {
                     max: Some(99999.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "monochrome".to_string(),
@@ -189,6 +169,7 @@ impl Node for Noise {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "intensity".to_string(),
@@ -199,6 +180,7 @@ impl Node for Noise {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_x".to_string(),
@@ -209,6 +191,7 @@ impl Node for Noise {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_y".to_string(),
@@ -219,6 +202,7 @@ impl Node for Noise {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_x".to_string(),
@@ -229,6 +213,7 @@ impl Node for Noise {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_y".to_string(),
@@ -239,6 +224,7 @@ impl Node for Noise {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "rotation".to_string(),
@@ -249,6 +235,7 @@ impl Node for Noise {
                     max: Some(360.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -315,6 +302,7 @@ impl Node for Gradient {
                 name: "field".to_string(),
                 label: "Field".to_string(),
                 ty: ValueType::Field,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -331,66 +319,29 @@ impl Node for Gradient {
                         "Radial".to_string(),
                         "Angular".to_string(),
                     ]),
+                    promotable: true,
                 },
                 ParamSpec {
-                    key: "start_r".to_string(),
-                    label: "Start Red".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "start_color".to_string(),
+                    label: "Start Color".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([0.0, 0.0, 0.0, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
                 ParamSpec {
-                    key: "start_g".to_string(),
-                    label: "Start Green".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "start_b".to_string(),
-                    label: "Start Blue".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "end_r".to_string(),
-                    label: "End Red".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "end_g".to_string(),
-                    label: "End Green".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "end_b".to_string(),
-                    label: "End Blue".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "end_color".to_string(),
+                    label: "End Color".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([1.0, 1.0, 1.0, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_x".to_string(),
@@ -401,6 +352,7 @@ impl Node for Gradient {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_y".to_string(),
@@ -411,6 +363,7 @@ impl Node for Gradient {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_x".to_string(),
@@ -421,6 +374,7 @@ impl Node for Gradient {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_y".to_string(),
@@ -431,6 +385,7 @@ impl Node for Gradient {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "rotation".to_string(),
@@ -441,6 +396,7 @@ impl Node for Gradient {
                     max: Some(360.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -454,12 +410,14 @@ impl Node for Gradient {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
             let direction = ctx.get_param_int("direction")?;
-            let start_r = ctx.get_param_float("start_r")? as f32;
-            let start_g = ctx.get_param_float("start_g")? as f32;
-            let start_b = ctx.get_param_float("start_b")? as f32;
-            let end_r = ctx.get_param_float("end_r")? as f32;
-            let end_g = ctx.get_param_float("end_g")? as f32;
-            let end_b = ctx.get_param_float("end_b")? as f32;
+            let start_color = ctx.get_param_color("start_color")?;
+            let start_r = start_color[0] as f32;
+            let start_g = start_color[1] as f32;
+            let start_b = start_color[2] as f32;
+            let end_color = ctx.get_param_color("end_color")?;
+            let end_r = end_color[0] as f32;
+            let end_g = end_color[1] as f32;
+            let end_b = end_color[2] as f32;
             let max_dist = (0.5f32 * 0.5f32 * 2.0).sqrt();
             let inv_max_dist = if max_dist > 0.0 { 1.0 / max_dist } else { 0.0 };
             let two_pi = 2.0 * PI;
@@ -522,6 +480,7 @@ impl Node for Checkerboard {
                 name: "field".to_string(),
                 label: "Field".to_string(),
                 ty: ValueType::Field,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -533,66 +492,29 @@ impl Node for Checkerboard {
                     max: Some(128.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
-                    key: "color1_r".to_string(),
-                    label: "Color 1 Red".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.8),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "color1".to_string(),
+                    label: "Color 1".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([0.8, 0.8, 0.8, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
                 ParamSpec {
-                    key: "color1_g".to_string(),
-                    label: "Color 1 Green".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.8),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "color1_b".to_string(),
-                    label: "Color 1 Blue".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.8),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "color2_r".to_string(),
-                    label: "Color 2 Red".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.2),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "color2_g".to_string(),
-                    label: "Color 2 Green".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.2),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "color2_b".to_string(),
-                    label: "Color 2 Blue".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.2),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "color2".to_string(),
+                    label: "Color 2".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([0.2, 0.2, 0.2, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_x".to_string(),
@@ -603,6 +525,7 @@ impl Node for Checkerboard {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_y".to_string(),
@@ -613,6 +536,7 @@ impl Node for Checkerboard {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_x".to_string(),
@@ -623,6 +547,7 @@ impl Node for Checkerboard {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_y".to_string(),
@@ -633,6 +558,7 @@ impl Node for Checkerboard {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "rotation".to_string(),
@@ -643,6 +569,7 @@ impl Node for Checkerboard {
                     max: Some(360.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -656,12 +583,14 @@ impl Node for Checkerboard {
         Box::pin(async move {
             let transform = build_field_transform(ctx)?;
             let size = ctx.get_param_int("size")? as u32;
-            let color1_r = ctx.get_param_float("color1_r")? as f32;
-            let color1_g = ctx.get_param_float("color1_g")? as f32;
-            let color1_b = ctx.get_param_float("color1_b")? as f32;
-            let color2_r = ctx.get_param_float("color2_r")? as f32;
-            let color2_g = ctx.get_param_float("color2_g")? as f32;
-            let color2_b = ctx.get_param_float("color2_b")? as f32;
+            let c1 = ctx.get_param_color("color1")?;
+            let color1_r = c1[0] as f32;
+            let color1_g = c1[1] as f32;
+            let color1_b = c1[2] as f32;
+            let c2 = ctx.get_param_color("color2")?;
+            let color2_r = c2[0] as f32;
+            let color2_g = c2[1] as f32;
+            let color2_b = c2[2] as f32;
             let field = Field::with_transform(
                 move |u, v| {
                     let tile_x = (u * size as f32).floor() as u32;
@@ -711,6 +640,7 @@ impl Node for Shape {
                 name: "field".to_string(),
                 label: "Field".to_string(),
                 ty: ValueType::Field,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -726,6 +656,7 @@ impl Node for Shape {
                         "Rectangle".to_string(),
                         "Rounded Rectangle".to_string(),
                     ]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "center_x".to_string(),
@@ -736,6 +667,7 @@ impl Node for Shape {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "center_y".to_string(),
@@ -746,6 +678,7 @@ impl Node for Shape {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "size_x".to_string(),
@@ -756,6 +689,7 @@ impl Node for Shape {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "size_y".to_string(),
@@ -766,6 +700,7 @@ impl Node for Shape {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "corner_radius".to_string(),
@@ -776,6 +711,7 @@ impl Node for Shape {
                     max: Some(0.5),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "feather".to_string(),
@@ -786,6 +722,7 @@ impl Node for Shape {
                     max: Some(0.5),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "invert".to_string(),
@@ -796,6 +733,7 @@ impl Node for Shape {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_x".to_string(),
@@ -806,6 +744,7 @@ impl Node for Shape {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "scale_y".to_string(),
@@ -816,6 +755,7 @@ impl Node for Shape {
                     max: Some(100.0),
                     step: Some(0.1),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_x".to_string(),
@@ -826,6 +766,7 @@ impl Node for Shape {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "offset_y".to_string(),
@@ -836,6 +777,7 @@ impl Node for Shape {
                     max: Some(10.0),
                     step: Some(0.01),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "rotation".to_string(),
@@ -846,6 +788,7 @@ impl Node for Shape {
                     max: Some(360.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -943,11 +886,13 @@ impl Node for RasterizeField {
                 name: "field".to_string(),
                 label: "Field".to_string(),
                 ty: ValueType::Field,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -959,6 +904,7 @@ impl Node for RasterizeField {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "height".to_string(),
@@ -969,6 +915,7 @@ impl Node for RasterizeField {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
                 },
             ],
         }
@@ -1019,6 +966,7 @@ impl Node for FloatConstant {
                 name: "value".to_string(),
                 label: "Value".to_string(),
                 ty: ValueType::Float,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "value".to_string(),
@@ -1029,6 +977,7 @@ impl Node for FloatConstant {
                 max: None,
                 step: Some(0.01),
                 ui_hint: UiHint::NumberInput,
+                promotable: false,
             }],
         }
     }
@@ -1074,6 +1023,7 @@ impl Node for IntegerConstant {
                 name: "value".to_string(),
                 label: "Value".to_string(),
                 ty: ValueType::Int,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "value".to_string(),
@@ -1084,6 +1034,7 @@ impl Node for IntegerConstant {
                 max: None,
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
+                promotable: false,
             }],
         }
     }
@@ -1096,6 +1047,71 @@ impl Node for IntegerConstant {
             let value = ctx.get_param_int("value")? as i32;
             let mut outputs = HashMap::new();
             outputs.insert("value".to_string(), Value::Int(value));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct ColorConstant;
+
+impl ColorConstant {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ColorConstant {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "color_constant".to_string(),
+            display_name: "Color".to_string(),
+            category: "Generator".to_string(),
+            description: "Output a constant color value".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "color".to_string(),
+                label: "Color".to_string(),
+                ty: ValueType::Color,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "color".to_string(),
+                label: "Color".to_string(),
+                ty: ValueType::Color,
+                default: ParamDefault::Color([1.0, 1.0, 1.0, 1.0]),
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: UiHint::ColorPicker,
+                promotable: false,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let color = ctx.get_param_color("color")?;
+            let mut outputs = HashMap::new();
+            outputs.insert(
+                "color".to_string(),
+                Value::Color([
+                    color[0] as f32,
+                    color[1] as f32,
+                    color[2] as f32,
+                    color[3] as f32,
+                ]),
+            );
             Ok(outputs)
         })
     }

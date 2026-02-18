@@ -34,5 +34,10 @@ pub fn apply_mask(original: &Image, processed: &Image, mask: &Image) -> Image {
                 out[c] = orig_val * inv_mask + proc_val * mask_lum;
             }
         });
-    Image::from_f32_data(processed.width, processed.height, data)
+    Image::new_with_domain(
+        processed.format.clone(),
+        processed.data_window,
+        data,
+        processed.color_space.clone(),
+    )
 }

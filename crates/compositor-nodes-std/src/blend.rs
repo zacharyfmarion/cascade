@@ -24,22 +24,26 @@ impl Node for Blend {
                     name: "base".to_string(),
                     label: "Base".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "blend_input".to_string(),
                     label: "Blend".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -71,6 +75,7 @@ impl Node for Blend {
                         "Subtract".to_string(),
                         "Divide".to_string(),
                     ]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "opacity".to_string(),
@@ -81,6 +86,7 @@ impl Node for Blend {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
             ],
         }
@@ -93,69 +99,55 @@ impl Node for Blend {
     {
         Box::pin(async move {
             let base = ctx.get_input_image("base")?;
-            let blend = ctx.get_input_image("blend_input")?;
+            let blend_img = ctx.get_input_image("blend_input")?;
             let mask_image = ctx.get_optional_input_image("mask");
             let mode = ctx.get_param_int("mode")?;
             let opacity = (ctx.get_param_float("opacity")? as f32).clamp(0.0, 1.0);
-            let pixel_count = base.pixel_count();
+
+            let out_dw = base.data_window.union(blend_img.data_window);
+            let out_w = out_dw.width_u32() as usize;
+            let out_h = out_dw.height_u32() as usize;
+            let pixel_count = out_w * out_h;
             let mut data = vec![0.0f32; pixel_count * 4];
-            let base_width = base.width as usize;
-            let blend_width = blend.width as usize;
-            let blend_max_x = blend.width.saturating_sub(1) as usize;
-            let blend_max_y = blend.height.saturating_sub(1) as usize;
-            let base_data = &base.data;
-            let blend_data = &blend.data;
-            let (mask_data, mask_width, mask_max_x, mask_max_y) = match mask_image {
-                Some(mask) => (
-                    Some(&mask.data),
-                    mask.width as usize,
-                    mask.width.saturating_sub(1) as usize,
-                    mask.height.saturating_sub(1) as usize,
-                ),
-                None => (None, 0, 0, 0),
-            };
+
+            let min_x = out_dw.min.x;
+            let min_y = out_dw.min.y;
+
             data.par_chunks_exact_mut(4)
                 .enumerate()
                 .for_each(|(i, out)| {
-                    let idx = i * 4;
-                    let base_r = base_data[idx];
-                    let base_g = base_data[idx + 1];
-                    let base_b = base_data[idx + 2];
-                    let base_a = base_data[idx + 3];
-                    let x = i % base_width;
-                    let y = i / base_width;
-                    let blend_x = x.min(blend_max_x);
-                    let blend_y = y.min(blend_max_y);
-                    let blend_idx = (blend_y * blend_width + blend_x) * 4;
-                    let blend_r = blend_data[blend_idx];
-                    let blend_g = blend_data[blend_idx + 1];
-                    let blend_b = blend_data[blend_idx + 2];
-                    let blend_a = blend_data[blend_idx + 3];
-                    let blended_r = blend_channel(base_r, blend_r, mode);
-                    let blended_g = blend_channel(base_g, blend_g, mode);
-                    let blended_b = blend_channel(base_b, blend_b, mode);
-                    let effective_opacity = if let Some(mask_data) = mask_data {
-                        let mask_x = x.min(mask_max_x);
-                        let mask_y = y.min(mask_max_y);
-                        let mask_idx = (mask_y * mask_width + mask_x) * 4;
-                        let mask_r = mask_data[mask_idx];
-                        let mask_g = mask_data[mask_idx + 1];
-                        let mask_b = mask_data[mask_idx + 2];
-                        let mask_luma = 0.2126 * mask_r + 0.7152 * mask_g + 0.0722 * mask_b;
+                    let lx = (i % out_w) as i32;
+                    let ly = (i / out_w) as i32;
+                    let gx = min_x + lx;
+                    let gy = min_y + ly;
+
+                    let [base_r, base_g, base_b, base_a] = base.get_rgba(gx, gy);
+                    let [bl_r, bl_g, bl_b, bl_a] = blend_img.get_rgba(gx, gy);
+
+                    let blended_r = blend_channel(base_r, bl_r, mode);
+                    let blended_g = blend_channel(base_g, bl_g, mode);
+                    let blended_b = blend_channel(base_b, bl_b, mode);
+
+                    let effective_opacity = if let Some(mask) = mask_image {
+                        let [mr, mg, mb, _] = mask.get_rgba(gx, gy);
+                        let mask_luma = 0.2126 * mr + 0.7152 * mg + 0.0722 * mb;
                         (opacity * mask_luma).clamp(0.0, 1.0)
                     } else {
                         opacity
                     };
-                    let out_r = base_r + (blended_r - base_r) * effective_opacity;
-                    let out_g = base_g + (blended_g - base_g) * effective_opacity;
-                    let out_b = base_b + (blended_b - base_b) * effective_opacity;
-                    let out_a = base_a.max(blend_a);
-                    out[0] = out_r.clamp(0.0, 1.0);
-                    out[1] = out_g.clamp(0.0, 1.0);
-                    out[2] = out_b.clamp(0.0, 1.0);
-                    out[3] = out_a.clamp(0.0, 1.0);
+
+                    out[0] = (base_r + (blended_r - base_r) * effective_opacity).clamp(0.0, 1.0);
+                    out[1] = (base_g + (blended_g - base_g) * effective_opacity).clamp(0.0, 1.0);
+                    out[2] = (base_b + (blended_b - base_b) * effective_opacity).clamp(0.0, 1.0);
+                    out[3] = base_a.max(bl_a).clamp(0.0, 1.0);
                 });
-            let output = Image::from_f32_data(base.width, base.height, data);
+
+            let output = Image::new_with_domain(
+                base.format.clone(),
+                out_dw,
+                data,
+                base.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -191,22 +183,26 @@ impl Node for AlphaOver {
                     name: "background".to_string(),
                     label: "Background".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "foreground".to_string(),
                     label: "Foreground".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "opacity".to_string(),
@@ -217,6 +213,7 @@ impl Node for AlphaOver {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
+                    promotable: true,
             }],
         }
     }
@@ -231,62 +228,47 @@ impl Node for AlphaOver {
             let foreground = ctx.get_input_image("foreground")?;
             let mask_image = ctx.get_optional_input_image("mask");
             let opacity = (ctx.get_param_float("opacity")? as f32).clamp(0.0, 1.0);
-            let pixel_count = background.pixel_count();
+
+            let out_dw = background.data_window.union(foreground.data_window);
+            let out_w = out_dw.width_u32() as usize;
+            let out_h = out_dw.height_u32() as usize;
+            let pixel_count = out_w * out_h;
             let mut data = vec![0.0f32; pixel_count * 4];
-            let bg_width = background.width as usize;
-            let fg_width = foreground.width as usize;
-            let fg_max_x = foreground.width.saturating_sub(1) as usize;
-            let fg_max_y = foreground.height.saturating_sub(1) as usize;
-            let bg_data = &background.data;
-            let fg_data = &foreground.data;
-            let (mask_data, mask_width, mask_max_x, mask_max_y) = match mask_image {
-                Some(mask) => (
-                    Some(&mask.data),
-                    mask.width as usize,
-                    mask.width.saturating_sub(1) as usize,
-                    mask.height.saturating_sub(1) as usize,
-                ),
-                None => (None, 0, 0, 0),
-            };
+
+            let min_x = out_dw.min.x;
+            let min_y = out_dw.min.y;
+
             data.par_chunks_exact_mut(4)
                 .enumerate()
                 .for_each(|(i, out)| {
-                    let idx = i * 4;
-                    let bg_r = bg_data[idx];
-                    let bg_g = bg_data[idx + 1];
-                    let bg_b = bg_data[idx + 2];
-                    let bg_a = bg_data[idx + 3];
-                    let x = i % bg_width;
-                    let y = i / bg_width;
-                    let fg_x = x.min(fg_max_x);
-                    let fg_y = y.min(fg_max_y);
-                    let fg_idx = (fg_y * fg_width + fg_x) * 4;
-                    let fg_r = fg_data[fg_idx];
-                    let fg_g = fg_data[fg_idx + 1];
-                    let fg_b = fg_data[fg_idx + 2];
-                    let fg_a = fg_data[fg_idx + 3];
+                    let lx = (i % out_w) as i32;
+                    let ly = (i / out_w) as i32;
+                    let gx = min_x + lx;
+                    let gy = min_y + ly;
+
+                    let [bg_r, bg_g, bg_b, bg_a] = background.get_rgba(gx, gy);
+                    let [fg_r, fg_g, fg_b, fg_a] = foreground.get_rgba(gx, gy);
+
                     let mut fg_alpha = (fg_a * opacity).clamp(0.0, 1.0);
-                    if let Some(mask_data) = mask_data {
-                        let mask_x = x.min(mask_max_x);
-                        let mask_y = y.min(mask_max_y);
-                        let mask_idx = (mask_y * mask_width + mask_x) * 4;
-                        let mask_r = mask_data[mask_idx];
-                        let mask_g = mask_data[mask_idx + 1];
-                        let mask_b = mask_data[mask_idx + 2];
-                        let mask_luma = 0.2126 * mask_r + 0.7152 * mask_g + 0.0722 * mask_b;
+                    if let Some(mask) = mask_image {
+                        let [mr, mg, mb, _] = mask.get_rgba(gx, gy);
+                        let mask_luma = 0.2126 * mr + 0.7152 * mg + 0.0722 * mb;
                         fg_alpha = (fg_alpha * mask_luma).clamp(0.0, 1.0);
                     }
+
                     let inv_alpha = 1.0 - fg_alpha;
-                    let out_r = fg_r * fg_alpha + bg_r * inv_alpha;
-                    let out_g = fg_g * fg_alpha + bg_g * inv_alpha;
-                    let out_b = fg_b * fg_alpha + bg_b * inv_alpha;
-                    let out_a = fg_alpha + bg_a * inv_alpha;
-                    out[0] = out_r.clamp(0.0, 1.0);
-                    out[1] = out_g.clamp(0.0, 1.0);
-                    out[2] = out_b.clamp(0.0, 1.0);
-                    out[3] = out_a.clamp(0.0, 1.0);
+                    out[0] = (fg_r * fg_alpha + bg_r * inv_alpha).clamp(0.0, 1.0);
+                    out[1] = (fg_g * fg_alpha + bg_g * inv_alpha).clamp(0.0, 1.0);
+                    out[2] = (fg_b * fg_alpha + bg_b * inv_alpha).clamp(0.0, 1.0);
+                    out[3] = (fg_alpha + bg_a * inv_alpha).clamp(0.0, 1.0);
                 });
-            let output = Image::from_f32_data(background.width, background.height, data);
+
+            let output = Image::new_with_domain(
+                background.format.clone(),
+                out_dw,
+                data,
+                background.color_space.clone(),
+            );
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

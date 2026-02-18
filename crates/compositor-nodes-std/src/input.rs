@@ -80,6 +80,7 @@ impl Node for LoadImage {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "image_data".to_string(),
@@ -90,6 +91,7 @@ impl Node for LoadImage {
                 max: None,
                 step: None,
                 ui_hint: UiHint::Hidden,
+                    promotable: true,
             }],
         }
     }
@@ -170,6 +172,42 @@ impl LoadImageSequence {
             directory: Mutex::new(None),
             frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
         }
+    }
+
+    pub fn set_info(&self, _info: SequenceInfo) -> Result<(), CompositorError> {
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+        cache.clear();
+        Ok(())
+    }
+
+    pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<(), CompositorError> {
+        let decoded = image::load_from_memory(bytes)
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let raw = rgba.as_raw();
+        let lut = srgb_to_linear_lut();
+        let pixel_count = (width as usize) * (height as usize);
+        let mut data = vec![0.0f32; pixel_count * 4];
+        data.par_chunks_exact_mut(4)
+            .enumerate()
+            .for_each(|(i, out)| {
+                let idx = i * 4;
+                out[0] = lut[raw[idx] as usize];
+                out[1] = lut[raw[idx + 1] as usize];
+                out[2] = lut[raw[idx + 2] as usize];
+                out[3] = raw[idx + 3] as f32 / 255.0;
+            });
+        let image = Image::from_f32_data(width, height, data);
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+        cache.insert(frame, image);
+        Ok(())
     }
 
     pub fn set_directory(&self, dir: &str) -> Result<SequenceInfo, CompositorError> {
@@ -278,6 +316,7 @@ impl Node for LoadImageSequence {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -289,6 +328,7 @@ impl Node for LoadImageSequence {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Hidden,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "pattern".to_string(),
@@ -299,6 +339,7 @@ impl Node for LoadImageSequence {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Hidden,
+                    promotable: true,
                 },
             ],
         }
@@ -310,19 +351,6 @@ impl Node for LoadImageSequence {
     ) -> NodeFuture<'a>
     {
         Box::pin(async move {
-            let dir_guard = self
-                .directory
-                .lock()
-                .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
-            let dir = dir_guard
-                .as_ref()
-                .ok_or_else(|| CompositorError::MissingInput("directory".to_string()))?
-                .clone();
-            drop(dir_guard);
-
-            let pattern = ctx
-                .get_param_string("pattern")
-                .unwrap_or("frame_{frame}.png");
             let frame = ctx.frame_time.frame;
 
             let mut cache = self
@@ -335,6 +363,33 @@ impl Node for LoadImageSequence {
                 outputs.insert("image".to_string(), Value::Image(image.clone()));
                 return Ok(outputs);
             }
+
+            let dir_guard = self
+                .directory
+                .lock()
+                .map_err(|_| CompositorError::Other("Directory mutex poisoned".to_string()))?;
+
+            let dir = match dir_guard.as_ref() {
+                Some(d) => d.clone(),
+                None => {
+                    return Err(CompositorError::MissingInput(
+                        "No frame data available. Select image sequence files.".to_string(),
+                    ));
+                }
+            };
+            drop(dir_guard);
+
+            let pattern_param = ctx
+                .get_param_string("pattern")
+                .unwrap_or("frame_{frame}.png");
+
+            let detected;
+            let pattern = if pattern_param == "frame_{frame}.png" {
+                detected = detect_sequence_pattern(&dir);
+                &detected
+            } else {
+                pattern_param
+            };
 
             let image = self.load_frame(&dir, pattern, frame)?;
             cache.insert(frame, image.clone());

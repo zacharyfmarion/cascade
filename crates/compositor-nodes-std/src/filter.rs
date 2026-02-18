@@ -24,17 +24,20 @@ impl Node for GaussianBlur {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "sigma".to_string(),
@@ -45,6 +48,7 @@ impl Node for GaussianBlur {
                 max: Some(100.0),
                 step: Some(0.1),
                 ui_hint: UiHint::Slider,
+                    promotable: true,
             }],
         }
     }
@@ -84,7 +88,7 @@ impl Node for GaussianBlur {
             }
 
             let out_data = buf;
-            let output = Image::from_f32_data(image.width, image.height, out_data);
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, out_data, image.color_space.clone());
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
                 crate::mask_utils::apply_mask(original, &output, mask)

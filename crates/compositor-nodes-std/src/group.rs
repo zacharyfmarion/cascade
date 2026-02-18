@@ -4,6 +4,7 @@ use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{GroupDefinition, GroupInterface, InternalConnection, InternalNode};
 use compositor_core::node::{EvalContext, Node, NodeFuture, NodeRegistry};
 use compositor_core::types::*;
+use crate::input::LoadImage;
 use std::any::Any;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -253,6 +254,14 @@ impl GroupNode {
                     .ok_or_else(|| format!("Unknown internal node type: {}", node.type_id))?
             };
 
+            if node.type_id == "load_image" {
+                if let Some(bytes) = node.image_data.as_ref() {
+                    if let Some(load_node) = instance.as_any().downcast_ref::<LoadImage>() {
+                        let _ = load_node.set_image_data(bytes);
+                    }
+                }
+            }
+
             if node.id == group_input_str {
                 group_input_id = Some(node_id);
             }
@@ -334,6 +343,7 @@ impl GroupNode {
             name: conn.from_port.clone(),
             label: conn.from_port.clone(),
             ty: input_port.ty.clone(),
+            ..Default::default()
         })
     }
 
@@ -355,6 +365,7 @@ impl GroupNode {
             name: conn.to_port.clone(),
             label: conn.to_port.clone(),
             ty: output_port.ty.clone(),
+            ..Default::default()
         })
     }
 
@@ -456,6 +467,8 @@ impl Node for GroupNode {
                         &port.name,
                         ctx.frame_time,
                         ctx.color_management,
+                        ctx.ai_provider,
+                        ctx.project_format,
                     )
                     .await?;
                 outputs.insert(port.name.clone(), eval_result.value);

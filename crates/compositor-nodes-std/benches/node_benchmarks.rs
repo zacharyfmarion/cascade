@@ -1,6 +1,6 @@
 use compositor_core::color::BuiltinColorManagement;
 use compositor_core::node::{EvalContext, Node};
-use compositor_core::types::{FrameTime, Image, ParamValue, Value};
+use compositor_core::types::{Format, FrameTime, Image, ParamValue, Value};
 use compositor_nodes_std::*;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use pollster;
@@ -46,11 +46,14 @@ fn make_context<'a>(
     params: &'a HashMap<String, ParamValue>,
 ) -> EvalContext<'a> {
     static COLOR_MANAGEMENT: OnceLock<BuiltinColorManagement> = OnceLock::new();
+    static FORMAT: OnceLock<Format> = OnceLock::new();
     EvalContext {
         inputs,
         params,
         frame_time: FrameTime { frame: 0 },
         color_management: COLOR_MANAGEMENT.get_or_init(BuiltinColorManagement::new),
+        ai_provider: None,
+        project_format: FORMAT.get_or_init(Format::hd),
     }
 }
 
@@ -612,56 +615,6 @@ fn bench_filter_glow(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_filter_kuwahara_classic(c: &mut Criterion) {
-    let mut group = c.benchmark_group("filter_kuwahara_classic");
-    for size in SMALL_SIZES {
-        group.throughput(Throughput::Elements((size * size) as u64));
-        let image = create_test_image(size, size);
-        let node = Kuwahara::new();
-        let mut inputs = HashMap::new();
-        inputs.insert("image".to_string(), Value::Image(image));
-        let mut params = HashMap::new();
-        params.insert("variation".to_string(), ParamValue::Int(0));
-        params.insert("size".to_string(), ParamValue::Int(6));
-        params.insert("uniformity".to_string(), ParamValue::Int(4));
-        params.insert("sharpness".to_string(), ParamValue::Float(0.5));
-        params.insert("eccentricity".to_string(), ParamValue::Float(1.0));
-        let ctx = make_context(inputs, &params);
-
-        group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
-            b.iter(|| {
-                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
-            });
-        });
-    }
-    group.finish();
-}
-
-fn bench_filter_kuwahara_anisotropic(c: &mut Criterion) {
-    let mut group = c.benchmark_group("filter_kuwahara_anisotropic");
-    for size in SMALL_SIZES {
-        group.throughput(Throughput::Elements((size * size) as u64));
-        let image = create_test_image(size, size);
-        let node = Kuwahara::new();
-        let mut inputs = HashMap::new();
-        inputs.insert("image".to_string(), Value::Image(image));
-        let mut params = HashMap::new();
-        params.insert("variation".to_string(), ParamValue::Int(1));
-        params.insert("size".to_string(), ParamValue::Int(6));
-        params.insert("uniformity".to_string(), ParamValue::Int(4));
-        params.insert("sharpness".to_string(), ParamValue::Float(0.5));
-        params.insert("eccentricity".to_string(), ParamValue::Float(1.0));
-        let ctx = make_context(inputs, &params);
-
-        group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
-            b.iter(|| {
-                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
-            });
-        });
-    }
-    group.finish();
-}
-
 fn bench_filter_lens_distortion(c: &mut Criterion) {
     let mut group = c.benchmark_group("filter_lens_distortion");
     for size in STANDARD_SIZES {
@@ -888,10 +841,12 @@ fn bench_generator_solid_color(c: &mut Criterion) {
     let mut params = HashMap::new();
     params.insert("width".to_string(), ParamValue::Int(1024));
     params.insert("height".to_string(), ParamValue::Int(1024));
-    params.insert("r".to_string(), ParamValue::Float(0.5));
-    params.insert("g".to_string(), ParamValue::Float(0.3));
-    params.insert("b".to_string(), ParamValue::Float(0.7));
-    params.insert("a".to_string(), ParamValue::Float(1.0));
+    params.insert("color".to_string(), ParamValue::Color([0.5, 0.3, 0.7, 1.0]));
+    params.insert("scale_x".to_string(), ParamValue::Float(1.0));
+    params.insert("scale_y".to_string(), ParamValue::Float(1.0));
+    params.insert("offset_x".to_string(), ParamValue::Float(0.0));
+    params.insert("offset_y".to_string(), ParamValue::Float(0.0));
+    params.insert("rotation".to_string(), ParamValue::Float(0.0));
     let ctx = make_context(inputs, &params);
 
     group.throughput(Throughput::Elements((1024u32 * 1024u32) as u64));
@@ -1091,9 +1046,10 @@ fn bench_matte_chroma_key(c: &mut Criterion) {
         let mut inputs = HashMap::new();
         inputs.insert("image".to_string(), Value::Image(image));
         let mut params = HashMap::new();
-        params.insert("key_r".to_string(), ParamValue::Float(0.0));
-        params.insert("key_g".to_string(), ParamValue::Float(1.0));
-        params.insert("key_b".to_string(), ParamValue::Float(0.0));
+        params.insert(
+            "key_color".to_string(),
+            ParamValue::Color([0.0, 1.0, 0.0, 1.0]),
+        );
         params.insert("tolerance".to_string(), ParamValue::Float(0.3));
         params.insert("softness".to_string(), ParamValue::Float(0.1));
         let ctx = make_context(inputs, &params);
@@ -1118,9 +1074,10 @@ fn bench_matte_despill(c: &mut Criterion) {
         let mut params = HashMap::new();
         params.insert("method".to_string(), ParamValue::Int(0));
         params.insert("strength".to_string(), ParamValue::Float(1.0));
-        params.insert("key_r".to_string(), ParamValue::Float(0.0));
-        params.insert("key_g".to_string(), ParamValue::Float(1.0));
-        params.insert("key_b".to_string(), ParamValue::Float(0.0));
+        params.insert(
+            "key_color".to_string(),
+            ParamValue::Color([0.0, 1.0, 0.0, 1.0]),
+        );
         let ctx = make_context(inputs, &params);
 
         group.throughput(Throughput::Elements((size * size) as u64));
@@ -1237,8 +1194,6 @@ criterion_group!(
     bench_filter_dilate,
     bench_filter_erode,
     bench_filter_median,
-    bench_filter_kuwahara_classic,
-    bench_filter_kuwahara_anisotropic,
     bench_filter_vignette,
     bench_filter_glow,
     bench_filter_lens_distortion

@@ -19,11 +19,13 @@ impl GpuScriptDraftNode {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 outputs: vec![PortSpec {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 params: vec![],
             },

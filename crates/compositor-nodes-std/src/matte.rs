@@ -23,17 +23,20 @@ impl Node for Premultiply {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![
                 PortSpec {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "matte".to_string(),
                     label: "Matte".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             params: vec![],
@@ -62,8 +65,8 @@ impl Node for Premultiply {
                     out[1] = g * a;
                     out[2] = b * a;
                     out[3] = a;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
+                 });
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -98,11 +101,13 @@ impl Node for Unpremultiply {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![],
         }
@@ -134,9 +139,9 @@ impl Node for Unpremultiply {
                     out[0] = nr;
                     out[1] = ng;
                     out[2] = nb;
-                    out[3] = a;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
+                     out[3] = a;
+                 });
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -172,17 +177,20 @@ impl Node for SetAlpha {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "alpha".to_string(),
                     label: "Alpha".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![],
         }
@@ -223,9 +231,9 @@ impl Node for SetAlpha {
                     out[0] = r;
                     out[1] = g;
                     out[2] = b;
-                    out[3] = a;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
+                     out[3] = a;
+                 });
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -260,11 +268,13 @@ impl Node for ExtractChannel {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "channel".to_string(),
@@ -280,6 +290,7 @@ impl Node for ExtractChannel {
                     "Blue".to_string(),
                     "Alpha".to_string(),
                 ]),
+                promotable: true,
             }],
         }
     }
@@ -303,9 +314,9 @@ impl Node for ExtractChannel {
                     out[0] = value;
                     out[1] = value;
                     out[2] = value;
-                    out[3] = 1.0;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
+                     out[3] = 1.0;
+                 });
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -340,42 +351,25 @@ impl Node for ChromaKey {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
-                    key: "key_r".to_string(),
-                    label: "Key R".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "key_g".to_string(),
-                    label: "Key G".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "key_b".to_string(),
-                    label: "Key B".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "key_color".to_string(),
+                    label: "Key Color".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([0.0, 1.0, 0.0, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "tolerance".to_string(),
@@ -386,6 +380,7 @@ impl Node for ChromaKey {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "softness".to_string(),
@@ -396,6 +391,7 @@ impl Node for ChromaKey {
                     max: Some(0.5),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
             ],
         }
@@ -408,9 +404,10 @@ impl Node for ChromaKey {
     {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let key_r = ctx.get_param_float("key_r")? as f32;
-            let key_g = ctx.get_param_float("key_g")? as f32;
-            let key_b = ctx.get_param_float("key_b")? as f32;
+            let key_color = ctx.get_param_color("key_color")?;
+            let key_r = key_color[0] as f32;
+            let key_g = key_color[1] as f32;
+            let key_b = key_color[2] as f32;
             let tolerance = (ctx.get_param_float("tolerance")? as f32).max(0.0);
             let softness = (ctx.get_param_float("softness")? as f32).max(0.0);
             let soft_end = tolerance + softness;
@@ -451,10 +448,10 @@ impl Node for ChromaKey {
                     out[0] = a_val;
                     out[1] = a_val;
                     out[2] = a_val;
-                    out[3] = 1.0;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
-            let matte_output = Image::from_f32_data(image.width, image.height, matte_data);
+                     out[3] = 1.0;
+                 });
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+            let matte_output = Image::new_with_domain(image.format.clone(), image.data_window, matte_data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             outputs.insert("matte".to_string(), Value::Image(matte_output));
@@ -490,11 +487,13 @@ impl Node for Despill {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -510,6 +509,7 @@ impl Node for Despill {
                         "Blue Screen".to_string(),
                         "Custom".to_string(),
                     ]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "strength".to_string(),
@@ -520,36 +520,18 @@ impl Node for Despill {
                     max: Some(2.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
-                    key: "key_r".to_string(),
-                    label: "Key R".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "key_g".to_string(),
-                    label: "Key G".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                },
-                ParamSpec {
-                    key: "key_b".to_string(),
-                    label: "Key B".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
+                    key: "key_color".to_string(),
+                    label: "Key Color".to_string(),
+                    ty: ValueType::Color,
+                    default: ParamDefault::Color([0.0, 1.0, 0.0, 1.0]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorPicker,
+                    promotable: true,
                 },
             ],
         }
@@ -564,9 +546,10 @@ impl Node for Despill {
             let image = ctx.get_input_image("image")?;
             let method = ctx.get_param_int("method")?.clamp(0, 2);
             let strength = (ctx.get_param_float("strength")? as f32).clamp(0.0, 2.0);
-            let key_r = ctx.get_param_float("key_r")? as f32;
-            let key_g = ctx.get_param_float("key_g")? as f32;
-            let key_b = ctx.get_param_float("key_b")? as f32;
+            let key_color = ctx.get_param_color("key_color")?;
+            let key_r = key_color[0] as f32;
+            let key_g = key_color[1] as f32;
+            let key_b = key_color[2] as f32;
             let pixel_count = image.pixel_count();
             let mut data = vec![0.0f32; pixel_count * 4];
             let image_data = &image.data;
@@ -615,9 +598,9 @@ impl Node for Despill {
                     out[0] = r;
                     out[1] = g;
                     out[2] = b;
-                    out[3] = a;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
+                     out[3] = a;
+                 });
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

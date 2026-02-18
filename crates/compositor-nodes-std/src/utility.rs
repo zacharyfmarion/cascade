@@ -23,11 +23,13 @@ impl Node for MapRange {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -39,6 +41,7 @@ impl Node for MapRange {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "from_max".to_string(),
@@ -49,6 +52,7 @@ impl Node for MapRange {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "to_min".to_string(),
@@ -59,6 +63,7 @@ impl Node for MapRange {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "to_max".to_string(),
@@ -69,6 +74,7 @@ impl Node for MapRange {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "clamp".to_string(),
@@ -79,6 +85,7 @@ impl Node for MapRange {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
+                    promotable: true,
                 },
             ],
         }
@@ -124,7 +131,7 @@ impl Node for MapRange {
                     out[2] = rgb[2];
                     out[3] = a;
                 });
-            let output = Image::from_f32_data(image.width, image.height, data);
+            let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -160,17 +167,20 @@ impl Node for MathNode {
                     name: "a".to_string(),
                     label: "A".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "b".to_string(),
                     label: "B".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -197,6 +207,7 @@ impl Node for MathNode {
                         "Smooth Step".to_string(),
                         "Lerp".to_string(),
                     ]),
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "value".to_string(),
@@ -207,6 +218,7 @@ impl Node for MathNode {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "clamp_result".to_string(),
@@ -217,6 +229,7 @@ impl Node for MathNode {
                     max: None,
                     step: None,
                     ui_hint: UiHint::Checkbox,
+                    promotable: true,
                 },
             ],
         }
@@ -306,7 +319,7 @@ impl Node for MathNode {
                     out[2] = out_rgb[2];
                     out[3] = a_alpha;
                 });
-            let output = Image::from_f32_data(a_image.width, a_image.height, data);
+            let output = Image::new_with_domain(a_image.format.clone(), a_image.data_window, data, a_image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

@@ -1,4 +1,4 @@
-use compositor_core::node::{EvalContext, Node, NodeFuture};
+use compositor_core::node::{EvalContext, ImageOrField, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
 use std::any::Any;
@@ -25,17 +25,20 @@ impl Node for BrightnessContrast {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -47,6 +50,7 @@ impl Node for BrightnessContrast {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "contrast".to_string(),
@@ -57,6 +61,7 @@ impl Node for BrightnessContrast {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
             ],
         }
@@ -68,54 +73,79 @@ impl Node for BrightnessContrast {
     ) -> NodeFuture<'a>
     {
         Box::pin(async move {
-            let image = ctx.get_input_image("image")?;
-            let brightness = ctx.get_param_float("brightness")? as f32;
-            let contrast = ctx.get_param_float("contrast")? as f32;
-            let pixel_count = image.pixel_count();
-            let mut data = vec![0.0f32; pixel_count * 4];
-            data.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, out)| {
-                    let idx = i * 4;
-                    let mut rgba = [
-                        image.data[idx],
-                        image.data[idx + 1],
-                        image.data[idx + 2],
-                        image.data[idx + 3],
-                    ];
-                    for c in 0..3 {
-                        let mut v = (rgba[c] - 0.5) * (1.0 + contrast) + 0.5;
-                        v += brightness;
-                        rgba[c] = v.clamp(0.0, 1.0);
-                    }
-                    out[0] = rgba[0];
-                    out[1] = rgba[1];
-                    out[2] = rgba[2];
-                    out[3] = rgba[3];
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
-            let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
-            } else {
-                output
-            };
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(output));
-            Ok(outputs)
-        })
-    }
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let brightness = ctx.get_param_float("brightness")? as f32;
+                    let contrast = ctx.get_param_float("contrast")? as f32;
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let adjusted = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, a] = (source)(u, v);
+                            let mut out = [r, g, b, a];
+                            for c in 0..3 {
+                                let mut v = (out[c] - 0.5) * (1.0 + contrast) + 0.5;
+                                v += brightness;
+                                out[c] = v.clamp(0.0, 1.0);
+                            }
+                            out
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(adjusted));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let brightness = ctx.get_param_float("brightness")? as f32;
+                    let contrast = ctx.get_param_float("contrast")? as f32;
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let mut rgba = [
+                                image.data[idx],
+                                image.data[idx + 1],
+                                image.data[idx + 2],
+                                image.data[idx + 3],
+                            ];
+                            for c in 0..3 {
+                                let mut v = (rgba[c] - 0.5) * (1.0 + contrast) + 0.5;
+                                v += brightness;
+                                rgba[c] = v.clamp(0.0, 1.0);
+                            }
+                            out[0] = rgba[0];
+                            out[1] = rgba[1];
+                            out[2] = rgba[2];
+                            out[3] = rgba[3];
+                        });
+                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                         let original = ctx.get_input_image("image")?;
+                         crate::mask_utils::apply_mask(original, &output, mask)
+                     } else {
+                         output
+                     };
+                     let mut outputs = HashMap::new();
+                     outputs.insert("image".to_string(), Value::Image(output));
+                     Ok(outputs)
+                 }
+             }
+         })
+     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+     fn as_any(&self) -> &dyn Any {
+         self
+     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
+     fn as_any_mut(&mut self) -> &mut dyn Any {
+         self
+     }
+ }
 
-pub struct HueSaturation;
+ pub struct HueSaturation;
 
 impl HueSaturation {
     pub fn new() -> Self {
@@ -135,17 +165,20 @@ impl Node for HueSaturation {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -157,6 +190,7 @@ impl Node for HueSaturation {
                     max: Some(180.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "saturation".to_string(),
@@ -167,6 +201,7 @@ impl Node for HueSaturation {
                     max: Some(1.0),
                     step: Some(0.01),
                     ui_hint: UiHint::Slider,
+                    promotable: true,
                 },
             ],
         }
@@ -178,54 +213,80 @@ impl Node for HueSaturation {
     ) -> NodeFuture<'a>
     {
         Box::pin(async move {
-            let image = ctx.get_input_image("image")?;
-            let hue_shift = ctx.get_param_float("hue")? as f32;
-            let sat_shift = ctx.get_param_float("saturation")? as f32;
-            let pixel_count = image.pixel_count();
-            let mut data = vec![0.0f32; pixel_count * 4];
-            data.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, out)| {
-                    let idx = i * 4;
-                    let r = image.data[idx];
-                    let g = image.data[idx + 1];
-                    let b = image.data[idx + 2];
-                    let a = image.data[idx + 3];
-                    let (mut h, mut s, l) = rgb_to_hsl(r, g, b);
-                    h = (h + hue_shift) % 360.0;
-                    if h < 0.0 {
-                        h += 360.0;
-                    }
-                    s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
-                    let (nr, ng, nb) = hsl_to_rgb(h, s, l);
-                    out[0] = nr;
-                    out[1] = ng;
-                    out[2] = nb;
-                    out[3] = a;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
-            let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
-            } else {
-                output
-            };
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(output));
-            Ok(outputs)
-        })
-    }
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let hue_shift = ctx.get_param_float("hue")? as f32;
+                    let sat_shift = ctx.get_param_float("saturation")? as f32;
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let adjusted = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, a] = (source)(u, v);
+                            let (mut h, mut s, l) = rgb_to_hsl(r, g, b);
+                            h = (h + hue_shift) % 360.0;
+                            if h < 0.0 {
+                                h += 360.0;
+                            }
+                            s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
+                            let (nr, ng, nb) = hsl_to_rgb(h, s, l);
+                            [nr, ng, nb, a]
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(adjusted));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let hue_shift = ctx.get_param_float("hue")? as f32;
+                    let sat_shift = ctx.get_param_float("saturation")? as f32;
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let r = image.data[idx];
+                            let g = image.data[idx + 1];
+                            let b = image.data[idx + 2];
+                            let a = image.data[idx + 3];
+                            let (mut h, mut s, l) = rgb_to_hsl(r, g, b);
+                            h = (h + hue_shift) % 360.0;
+                            if h < 0.0 {
+                                h += 360.0;
+                            }
+                            s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
+                            let (nr, ng, nb) = hsl_to_rgb(h, s, l);
+                            out[0] = nr;
+                            out[1] = ng;
+                            out[2] = nb;
+                            out[3] = a;
+                        });
+                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                         let original = ctx.get_input_image("image")?;
+                         crate::mask_utils::apply_mask(original, &output, mask)
+                     } else {
+                         output
+                     };
+                     let mut outputs = HashMap::new();
+                     outputs.insert("image".to_string(), Value::Image(output));
+                     Ok(outputs)
+                 }
+             }
+         })
+     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+     fn as_any(&self) -> &dyn Any {
+         self
+     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
+     fn as_any_mut(&mut self) -> &mut dyn Any {
+         self
+     }
+ }
 
-pub struct SeparateHsva;
+ pub struct SeparateHsva;
 
 impl SeparateHsva {
     pub fn new() -> Self {
@@ -244,27 +305,32 @@ impl Node for SeparateHsva {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![
                 PortSpec {
                     name: "hue".to_string(),
                     label: "Hue".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "saturation".to_string(),
                     label: "Saturation".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "value".to_string(),
                     label: "Value".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "alpha".to_string(),
                     label: "Alpha".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             params: vec![],
@@ -305,10 +371,10 @@ impl Node for SeparateHsva {
                         out[3] = 1.0;
                     }
                 });
-            let hue_image = Image::from_f32_data(image.width, image.height, hue_data);
-            let saturation_image = Image::from_f32_data(image.width, image.height, saturation_data);
-            let value_image = Image::from_f32_data(image.width, image.height, value_data);
-            let alpha_image = Image::from_f32_data(image.width, image.height, alpha_data);
+            let hue_image = Image::new_with_domain(image.format.clone(), image.data_window, hue_data, image.color_space.clone());
+            let saturation_image = Image::new_with_domain(image.format.clone(), image.data_window, saturation_data, image.color_space.clone());
+            let value_image = Image::new_with_domain(image.format.clone(), image.data_window, value_data, image.color_space.clone());
+            let alpha_image = Image::new_with_domain(image.format.clone(), image.data_window, alpha_data, image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("hue".to_string(), Value::Image(hue_image));
             outputs.insert("saturation".to_string(), Value::Image(saturation_image));
@@ -347,27 +413,32 @@ impl Node for CombineHsva {
                     name: "hue".to_string(),
                     label: "Hue".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "saturation".to_string(),
                     label: "Saturation".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "value".to_string(),
                     label: "Value".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "alpha".to_string(),
                     label: "Alpha".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![],
         }
@@ -400,7 +471,7 @@ impl Node for CombineHsva {
                     out[2] = b;
                     out[3] = alpha_luma;
                 });
-            let output = Image::from_f32_data(hue_image.width, hue_image.height, data);
+            let output = Image::new_with_domain(hue_image.format.clone(), hue_image.data_window, data, hue_image.color_space.clone());
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -436,17 +507,20 @@ impl Node for Invert {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 },
             ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![],
         }
@@ -458,45 +532,62 @@ impl Node for Invert {
     ) -> NodeFuture<'a>
     {
         Box::pin(async move {
-            let image = ctx.get_input_image("image")?;
-            let pixel_count = image.pixel_count();
-            let mut data = vec![0.0f32; pixel_count * 4];
-            data.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, out)| {
-                    let idx = i * 4;
-                    let r = 1.0 - image.data[idx];
-                    let g = 1.0 - image.data[idx + 1];
-                    let b = 1.0 - image.data[idx + 2];
-                    let a = image.data[idx + 3];
-                    out[0] = r;
-                    out[1] = g;
-                    out[2] = b;
-                    out[3] = a;
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
-            let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
-            } else {
-                output
-            };
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(output));
-            Ok(outputs)
-        })
-    }
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let inverted = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, a] = (source)(u, v);
+                            [1.0 - r, 1.0 - g, 1.0 - b, a]
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(inverted));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let r = 1.0 - image.data[idx];
+                            let g = 1.0 - image.data[idx + 1];
+                            let b = 1.0 - image.data[idx + 2];
+                            let a = image.data[idx + 3];
+                            out[0] = r;
+                            out[1] = g;
+                            out[2] = b;
+                            out[3] = a;
+                        });
+                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                         let original = ctx.get_input_image("image")?;
+                         crate::mask_utils::apply_mask(original, &output, mask)
+                     } else {
+                         output
+                     };
+                     let mut outputs = HashMap::new();
+                     outputs.insert("image".to_string(), Value::Image(output));
+                     Ok(outputs)
+                 }
+             }
+         })
+     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+     fn as_any(&self) -> &dyn Any {
+         self
+     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
+     fn as_any_mut(&mut self) -> &mut dyn Any {
+         self
+     }
+ }
 
-fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+ fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
     let l = (max + min) * 0.5;
@@ -620,11 +711,13 @@ impl Node for ColorRampNode {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: ValueType::Image,
+                ..Default::default()
             }],
             params: vec![
                 ParamSpec {
@@ -645,6 +738,7 @@ impl Node for ColorRampNode {
                     max: None,
                     step: None,
                     ui_hint: UiHint::ColorRamp,
+                    promotable: true,
                 },
                 ParamSpec {
                     key: "interpolation".to_string(),
@@ -655,6 +749,7 @@ impl Node for ColorRampNode {
                     max: Some(1.0),
                     step: Some(1.0),
                     ui_hint: UiHint::Dropdown(vec!["Linear".to_string(), "Constant".to_string()]),
+                    promotable: true,
                 },
             ],
         }
@@ -666,48 +761,75 @@ impl Node for ColorRampNode {
     ) -> NodeFuture<'a>
     {
         Box::pin(async move {
-            let image = ctx.get_input_image("image")?;
-            let stops = ctx.get_param_color_ramp("stops")?;
-            let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
-            let mut sorted_stops = stops.clone();
-            sorted_stops.sort_by(|a, b| {
-                a.position
-                    .partial_cmp(&b.position)
-                    .unwrap_or(Ordering::Equal)
-            });
-            let pixel_count = image.pixel_count();
-            let mut data = vec![0.0f32; pixel_count * 4];
-            data.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, out)| {
-                    let idx = i * 4;
-                    let r = image.data[idx];
-                    let g = image.data[idx + 1];
-                    let b = image.data[idx + 2];
-                    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-                    let rgba = evaluate_color_ramp(&sorted_stops, luminance, interpolation);
-                    out[0] = rgba[0];
-                    out[1] = rgba[1];
-                    out[2] = rgba[2];
-                    out[3] = rgba[3];
-                });
-            let output = Image::from_f32_data(image.width, image.height, data);
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(output));
-            Ok(outputs)
-        })
-    }
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let stops = ctx.get_param_color_ramp("stops")?;
+                    let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
+                    let mut sorted_stops = stops.clone();
+                    sorted_stops.sort_by(|a, b| {
+                        a.position
+                            .partial_cmp(&b.position)
+                            .unwrap_or(Ordering::Equal)
+                    });
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let stops = sorted_stops.clone();
+                    let mapped = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, _] = (source)(u, v);
+                            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            evaluate_color_ramp(&stops, luminance, interpolation)
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(mapped));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let stops = ctx.get_param_color_ramp("stops")?;
+                    let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
+                    let mut sorted_stops = stops.clone();
+                    sorted_stops.sort_by(|a, b| {
+                        a.position
+                            .partial_cmp(&b.position)
+                            .unwrap_or(Ordering::Equal)
+                    });
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let r = image.data[idx];
+                            let g = image.data[idx + 1];
+                            let b = image.data[idx + 2];
+                            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            let rgba = evaluate_color_ramp(&sorted_stops, luminance, interpolation);
+                            out[0] = rgba[0];
+                            out[1] = rgba[1];
+                            out[2] = rgba[2];
+                            out[3] = rgba[3];
+                        });
+                     let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                     let mut outputs = HashMap::new();
+                     outputs.insert("image".to_string(), Value::Image(output));
+                     Ok(outputs)
+                 }
+             }
+         })
+     }
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
+     fn as_any(&self) -> &dyn Any {
+         self
+     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-}
+     fn as_any_mut(&mut self) -> &mut dyn Any {
+         self
+     }
+ }
 
-/// Evaluate the color ramp at t using linear or constant interpolation.
+ /// Evaluate the color ramp at t using linear or constant interpolation.
 fn evaluate_color_ramp(stops: &[ColorStop], t: f32, interpolation: i64) -> [f32; 4] {
     if stops.is_empty() {
         return [0.0, 0.0, 0.0, 1.0];
