@@ -28,10 +28,12 @@ import { ViewerNode } from './nodes/ViewerNode';
 import { ProcessingNode } from './nodes/ProcessingNode';
 import { ExportImageNode } from './nodes/ExportImageNode';
 import { ExportImageSequenceNode } from './nodes/ExportImageSequenceNode';
+import { ExportVideoNode } from './nodes/ExportVideoNode';
 import { ColorRampNode } from './nodes/ColorRampNode';
 import { GroupInputNode } from './nodes/GroupInputNode';
 import { GroupOutputNode } from './nodes/GroupOutputNode';
 import { GroupNodeComponent } from './nodes/GroupNodeComponent';
+import { ColorPaletteNode } from './nodes/ColorPaletteNode';
 
 const SPECIAL_NODE_TYPES: NodeTypes = {
   load_image: ImageInputNode,
@@ -39,7 +41,9 @@ const SPECIAL_NODE_TYPES: NodeTypes = {
   viewer: ViewerNode,
   export_image: ExportImageNode,
   export_image_sequence: ExportImageSequenceNode,
+  export_video: ExportVideoNode,
   color_ramp: ColorRampNode,
+  color_palette: ColorPaletteNode,
   group_input: GroupInputNode,
   group_output: GroupOutputNode,
 };
@@ -268,6 +272,7 @@ export const NodeCanvas: React.FC = () => {
           label: spec?.display_name || node.typeId,
           spec,
           params: node.params,
+          inputDefaults: node.inputDefaults,
         },
       };
     });

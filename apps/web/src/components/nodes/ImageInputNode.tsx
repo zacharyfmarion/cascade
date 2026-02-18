@@ -14,10 +14,23 @@ type NodeData = {
 
 export const ImageInputNode: React.FC<NodeProps> = (props) => {
   const loadImageFile = useGraphStore(s => s.loadImageFile);
+  const getImageData = useGraphStore(s => s.getImageData);
   const data = props.data as NodeData;
   const [fileName, setFileName] = useState<string | null>(null);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (thumbnail) return;
+    let revoked = false;
+    getImageData(props.id).then(bytes => {
+      if (revoked || !bytes) return;
+      const url = URL.createObjectURL(new File([bytes.buffer as ArrayBuffer], 'image.png', { type: 'image/png' }));
+      setThumbnail(url);
+      setFileName('(embedded)');
+    });
+    return () => { revoked = true; };
+  }, [props.id, getImageData, thumbnail]);
 
   useEffect(() => {
     return () => {

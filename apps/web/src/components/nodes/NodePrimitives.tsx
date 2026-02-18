@@ -25,7 +25,7 @@ export const NodeSection: React.FC<NodeSectionProps> = ({ label, children, space
 
 // ── Node Canvas (Shared Preview) ────────────────────────────────
 export const NodeCanvas: React.FC<{
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   hasResult: boolean;
   emptyText?: string;
   height?: number;
@@ -384,11 +384,11 @@ export const NodeDropZone: React.FC<NodeDropZoneProps> = ({
 }) => (
   <button
     type="button"
-    className={`node-dropzone nopan nodrag nowheel${hasContent ? ' node-dropzone--filled' : ''}`}
+    className={`node-dropzone nodrag${hasContent ? ' node-dropzone--filled' : ''}`}
     onClick={onClick}
     onDrop={(e) => { e.preventDefault(); onDrop?.(e); }}
     onDragOver={(e) => e.preventDefault()}
-    onPointerDown={(e) => e.stopPropagation()}
+    onPointerDown={(e) => { if (e.button === 0) e.stopPropagation(); }}
   >
     {children}
   </button>

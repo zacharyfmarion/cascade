@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo } from './bridge';
+import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, ColorManagementInfo } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 
 type DocumentEnvelope = {
@@ -72,6 +72,14 @@ export class TauriEngine implements EngineBridge {
     await invoke('set_param', { nodeId, key, value });
   }
 
+  async setInputDefault(nodeId: string, portName: string, value: ParamValue): Promise<void> {
+    await invoke('set_input_default', { nodeId, portName, value });
+  }
+
+  async setPosition(nodeId: string, x: number, y: number): Promise<void> {
+    await invoke('set_position', { nodeId, x, y });
+  }
+
   async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, RenderResult>> {
     const buf = await invoke<ArrayBuffer>('set_param_and_render', { nodeId, key, value, frame });
     const results = new Map<string, RenderResult>();
@@ -115,6 +123,16 @@ export class TauriEngine implements EngineBridge {
     await invoke('load_image_data', data, {
       headers: { 'x-node-id': nodeId },
     });
+  }
+
+  async getImageData(nodeId: string): Promise<Uint8Array | null> {
+    try {
+      const buf = await invoke<ArrayBuffer>('get_image_data', { nodeId });
+      if (!buf || buf.byteLength === 0) return null;
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
   }
 
   async renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
@@ -172,6 +190,10 @@ export class TauriEngine implements EngineBridge {
     return invoke<string>('render_sequence', { nodeId });
   }
 
+  async renderVideo(nodeId: string): Promise<string> {
+    return invoke<string>('render_video', { nodeId });
+  }
+
   async cancelJob(): Promise<void> {
     await invoke('cancel_render_job');
   }
@@ -207,6 +229,7 @@ export class TauriEngine implements EngineBridge {
         typeId: n.typeId,
         position: { x: n.position[0], y: n.position[1] },
         params: n.params,
+        inputDefaults: n.input_defaults ?? {},
       })),
     };
   }
@@ -222,6 +245,7 @@ export class TauriEngine implements EngineBridge {
         typeId: n.typeId,
         position: { x: n.position[0], y: n.position[1] },
         params: n.params,
+        inputDefaults: n.input_defaults ?? {},
       })),
       connections: (raw.connections ?? []).map((c: any) => ({
         id: c.id ?? crypto.randomUUID(),
@@ -248,6 +272,37 @@ export class TauriEngine implements EngineBridge {
   async removeInternalConnection(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec> {
     const json = await invoke<string>('remove_internal_connection', { groupDefId, toNode, toPort });
     return JSON.parse(json) as NodeSpec;
+  }
+
+  async renameGroup(groupDefId: string, newName: string): Promise<NodeSpec> {
+    const json = await invoke<string>('rename_group', { groupDefId, newName });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async setAiApiKey(provider: string, key: string): Promise<void> {
+    await invoke('set_ai_api_key', { provider, key });
+  }
+
+  async isAiConfigured(): Promise<boolean> {
+    return invoke<boolean>('is_ai_configured');
+  }
+
+  async getColorManagementInfo(): Promise<ColorManagementInfo> {
+    const json = await invoke<string>('get_color_management_info');
+    return JSON.parse(json) as ColorManagementInfo;
+  }
+
+  async getViewsForDisplay(display: string): Promise<string[]> {
+    const json = await invoke<string>('list_views', { display });
+    return JSON.parse(json) as string[];
+  }
+
+  async setDisplayView(display: string, view: string): Promise<void> {
+    await invoke('set_display_view', { display, view });
+  }
+
+  async setProjectFormat(width: number, height: number): Promise<void> {
+    await invoke('set_project_format', { width, height });
   }
 }
 

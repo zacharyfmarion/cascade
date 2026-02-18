@@ -5,8 +5,14 @@ import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
 import { NodeNumberInput, NodeSection } from './NodePrimitives';
 import { useGraphStore } from '../../store/graphStore';
-import type { NodeSpec, ParamValue } from '../../store/types';
+import type { NodeSpec, ParamValue, ParamSpec, ValueType } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
+
+const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox'];
+const SCALAR_TYPES: ValueType[] = ['Float', 'Int', 'Bool'];
+
+const isConnectableParam = (p: ParamSpec): boolean =>
+  p.promotable && SCALAR_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
 
 type NodeData = {
   label: string;
@@ -34,7 +40,7 @@ export const GroupNodeComponent: React.FC<NodeProps> = (props) => {
       onHeaderDoubleClick={handleDoubleClick}
     >
       <NodeSection>
-        {spec.params.map(p => {
+        {spec.params.filter(p => !isConnectableParam(p)).map(p => {
           if (p.ui_hint.type === 'Hidden') return null;
           const val = params[p.key] ?? p.default;
           const rawValue = extractParamValue(val);

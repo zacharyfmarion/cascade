@@ -1,11 +1,18 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useGraphStore } from '../store/graphStore';
 import { NodeSlider } from './nodes/NodeSlider';
+import { NodeColorPicker } from './nodes/NodeColorPicker';
 import { NodeNumberInput } from './nodes/NodePrimitives';
 import { ScriptNodeEditor } from './ScriptNodeEditor';
 import { ColorRampEditor } from './ColorRampEditor';
-import type { ParamSpec, ParamValue, ColorStop, PortSpec } from '../store/types';
+import type { ParamSpec, ParamValue, ColorStop, PortSpec, NodeSpec, ValueType } from '../store/types';
 import { createParamValue, extractParamValue } from '../store/types';
+
+const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox', 'ColorPicker'];
+const SCALAR_TYPES: ValueType[] = ['Float', 'Int', 'Bool', 'Color'];
+
+const isConnectableParam = (p: ParamSpec): boolean =>
+  p.promotable && SCALAR_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
 
 const ParamControl: React.FC<{
   nodeId: string;
@@ -28,6 +35,15 @@ const ParamControl: React.FC<{
           min={paramSpec.min ?? 0}
           max={paramSpec.max ?? 1}
           step={paramSpec.step ?? 0.01}
+          onChange={(v) => onLive(paramSpec.key, createParamValue(paramSpec.ty, v))}
+          onChangeCommit={(v) => onCommit(paramSpec.key, createParamValue(paramSpec.ty, v))}
+        />
+      )}
+
+      {paramSpec.ui_hint.type === 'ColorPicker' && (
+        <NodeColorPicker
+          label={paramSpec.label}
+          value={rawValue as [number, number, number, number]}
           onChange={(v) => onLive(paramSpec.key, createParamValue(paramSpec.ty, v))}
           onChangeCommit={(v) => onCommit(paramSpec.key, createParamValue(paramSpec.ty, v))}
         />
@@ -63,37 +79,72 @@ const ParamControl: React.FC<{
         </label>
       )}
 
-      {paramSpec.ui_hint.type === 'Dropdown' && (
-        <label style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          fontSize: '0.8rem',
-          cursor: 'pointer',
-        }}>
-          <span style={{ color: 'var(--text-secondary)' }}>{paramSpec.label}</span>
-          <select
-            value={Number(rawValue)}
-            onChange={(e) => {
-              const v = parseInt(e.target.value, 10);
-              onChange(paramSpec.key, createParamValue(paramSpec.ty, v));
-            }}
+      {paramSpec.ui_hint.type === 'Dropdown' && (() => {
+        const isStringParam = 'String' in (paramSpec.default as ParamValue);
+        return (
+          <label style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '0.8rem',
+            cursor: 'pointer',
+          }}>
+            <span style={{ color: 'var(--text-secondary)' }}>{paramSpec.label}</span>
+            <select
+              value={isStringParam ? String(rawValue) : Number(rawValue)}
+              onChange={(e) => {
+                if (isStringParam) {
+                  onChange(paramSpec.key, { String: e.target.value });
+                } else {
+                  const v = parseInt(e.target.value, 10);
+                  onChange(paramSpec.key, createParamValue(paramSpec.ty, v));
+                }
+              }}
+              style={{
+                background: 'var(--bg-primary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-default)',
+                borderRadius: '3px',
+                fontSize: '0.8rem',
+                padding: '2px 6px',
+                maxWidth: '120px',
+                cursor: 'pointer',
+              }}
+            >
+              {paramSpec.ui_hint.data.map((opt: string, idx: number) => (
+                <option key={opt} value={isStringParam ? opt : idx}>{opt}</option>
+              ))}
+            </select>
+          </label>
+        );
+      })()}
+
+      {paramSpec.ui_hint.type === 'TextArea' && (
+        <div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+            {paramSpec.label}
+          </div>
+          <textarea
+            value={String(rawValue)}
+            onChange={(e) => onChange(paramSpec.key, { String: e.target.value })}
+            placeholder={paramSpec.label}
+            rows={3}
             style={{
+              width: '100%',
               background: 'var(--bg-primary)',
               color: 'var(--text-primary)',
               border: '1px solid var(--border-default)',
               borderRadius: '3px',
               fontSize: '0.8rem',
-              padding: '2px 6px',
-              maxWidth: '120px',
-              cursor: 'pointer',
+              padding: '6px 8px',
+              resize: 'vertical',
+              fontFamily: 'inherit',
+              outline: 'none',
             }}
-          >
-            {paramSpec.ui_hint.data.map((opt: string, idx: number) => (
-              <option key={opt} value={idx}>{opt}</option>
-            ))}
-          </select>
-        </label>
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
+          />
+        </div>
       )}
 
       {paramSpec.ui_hint.type === 'ColorRamp' && (() => {
@@ -130,6 +181,7 @@ export const Inspector: React.FC = () => {
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);
   const enterGroup = useGraphStore(s => s.enterGroup);
+  const renameGroup = useGraphStore(s => s.renameGroup);
   const editingStack = useGraphStore(s => s.editingStack);
 
   const selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds).pop()! : null;
@@ -139,6 +191,38 @@ export const Inspector: React.FC = () => {
   const isGroupNode = selectedNode?.typeId.startsWith('group::') ?? false;
   const isGroupIO = selectedNode?.typeId === 'group_input' || selectedNode?.typeId === 'group_output';
   const isInsideGroup = editingStack.length > 1;
+
+  const [groupName, setGroupName] = useState('');
+  const renameTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (renameTimerRef.current) {
+      window.clearTimeout(renameTimerRef.current);
+      renameTimerRef.current = null;
+    }
+    if (isGroupNode && spec) {
+      setGroupName(spec.display_name);
+    } else {
+      setGroupName('');
+    }
+  }, [isGroupNode, spec]);
+
+  const commitGroupName = (nextName: string) => {
+    if (!selectedNode || !spec || !isGroupNode) return;
+    if (nextName === spec.display_name) return;
+    renameGroup(selectedNode.id, nextName);
+  };
+
+  const scheduleGroupRename = (nextName: string) => {
+    if (!selectedNode || !spec || !isGroupNode) return;
+    if (renameTimerRef.current) {
+      window.clearTimeout(renameTimerRef.current);
+    }
+    renameTimerRef.current = window.setTimeout(() => {
+      renameTimerRef.current = null;
+      commitGroupName(nextName);
+    }, 500);
+  };
 
   if (selectedNode && selectedNode.typeId.startsWith('gpu_script')) {
     return <ScriptNodeEditor nodeId={selectedNode.id} typeId={selectedNode.typeId} />;
@@ -168,6 +252,44 @@ export const Inspector: React.FC = () => {
 
         {isGroupNode && (
           <div style={{ marginBottom: '16px' }}>
+            <div style={{ marginBottom: '8px' }}>
+              <label style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                fontSize: '0.8rem',
+              }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Name</span>
+                <input
+                  type="text"
+                  value={groupName}
+                  onChange={(e) => {
+                    const nextName = e.target.value;
+                    setGroupName(nextName);
+                    scheduleGroupRename(nextName);
+                  }}
+                  onBlur={(e) => {
+                    if (renameTimerRef.current) {
+                      window.clearTimeout(renameTimerRef.current);
+                      renameTimerRef.current = null;
+                    }
+                    commitGroupName(e.target.value);
+                    e.currentTarget.style.borderColor = 'var(--border-default)';
+                  }}
+                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+                  style={{
+                    background: 'var(--bg-primary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '3px',
+                    padding: '6px 8px',
+                    fontSize: '0.85rem',
+                    width: '100%',
+                    outline: 'none',
+                  }}
+                />
+              </label>
+            </div>
             <button
               type="button"
               onClick={() => enterGroup(selectedNode.id)}
@@ -190,18 +312,19 @@ export const Inspector: React.FC = () => {
         )}
 
         {isGroupIO && isInsideGroup && (
-          <div style={{ marginBottom: '16px', padding: '8px', background: 'var(--bg-surface)', borderRadius: 4 }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: 6, color: 'var(--text-secondary)' }}>
-              {selectedNode.typeId === 'group_input' ? 'Group Inputs' : 'Group Outputs'}
-            </div>
-            <PortList
-              ports={selectedNode.typeId === 'group_input' ? spec.outputs : spec.inputs}
+          <div style={{ marginBottom: '16px' }}>
+            <GroupIOEditor
+              nodeId={selectedNode.id}
+              isInput={selectedNode.typeId === 'group_input'}
+              spec={spec}
             />
           </div>
         )}
 
         <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: '16px' }}>
-          {spec.params.map(p => (
+          {spec.params
+            .filter(p => !isConnectableParam(p))
+            .map(p => (
             <ParamControl
               key={p.key}
               nodeId={selectedNode.id}
@@ -212,53 +335,451 @@ export const Inspector: React.FC = () => {
               onChange={(key, val) => setParam(selectedNode.id, key, val)}
             />
           ))}
-          {spec.params.length === 0 && !isGroupIO && (
+          {spec.params.filter(p => !isConnectableParam(p)).length === 0 && !isGroupIO && (
             <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
               No parameters
             </div>
           )}
         </div>
+
+
       </div>
     </div>
   );
 };
 
-const PortList: React.FC<{ ports: PortSpec[] }> = ({ ports }) => {
-  if (ports.length === 0) {
-    return (
-      <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontStyle: 'italic' }}>
-        No ports defined. Use the node's + button to add ports.
-      </div>
-    );
+const VALUE_TYPES: ValueType[] = ['Image', 'Mask', 'Float', 'Int', 'Bool', 'Color', 'Field'];
+
+type EditablePort = {
+  id: string;
+  name: string;
+  label: string;
+  ty: ValueType;
+  default?: number | boolean;
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+const getDefaultValue = (port: PortSpec): number | boolean | undefined => {
+  if (!port.default) return undefined;
+  if ('Float' in port.default) return port.default.Float;
+  if ('Int' in port.default) return port.default.Int;
+  if ('Bool' in port.default) return port.default.Bool;
+  return undefined;
+};
+
+const toPortSpec = (port: EditablePort): PortSpec => {
+  const base: PortSpec = {
+    name: port.name,
+    label: port.label,
+    ty: port.ty,
+  };
+
+  if (port.ty === 'Float') {
+    if (typeof port.default === 'number') base.default = { Float: port.default };
+    if (typeof port.min === 'number') base.min = port.min;
+    if (typeof port.max === 'number') base.max = port.max;
+    if (typeof port.step === 'number') base.step = port.step;
   }
 
+  if (port.ty === 'Int') {
+    if (typeof port.default === 'number') base.default = { Int: Math.round(port.default) };
+    if (typeof port.min === 'number') base.min = Math.round(port.min);
+    if (typeof port.max === 'number') base.max = Math.round(port.max);
+    if (typeof port.step === 'number') base.step = Math.round(port.step);
+  }
+
+  if (port.ty === 'Bool') {
+    if (typeof port.default === 'boolean') base.default = { Bool: port.default };
+  }
+
+  return base;
+};
+
+const SectionHeader: React.FC<{ children: React.ReactNode; action?: React.ReactNode }> = ({ children, action }) => (
+  <div style={{
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: '20px',
+    marginBottom: '10px',
+    paddingBottom: '4px',
+    borderBottom: '1px solid var(--border-default)'
+  }}>
+    <div style={{
+      fontSize: '0.75rem',
+      fontWeight: 600,
+      color: 'var(--text-primary)',
+      textTransform: 'uppercase',
+      letterSpacing: '0.05em',
+    }}>
+      {children}
+    </div>
+    {action}
+  </div>
+);
+
+const Label: React.FC<{ children: React.ReactNode; title?: string }> = ({ children, title }) => (
+  <div title={title} style={{
+    fontSize: '0.65rem',
+    fontWeight: 600,
+    color: 'var(--text-secondary)',
+    marginBottom: '4px',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  }}>
+    {children}
+  </div>
+);
+
+const InputGroup: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+    {children}
+  </div>
+);
+
+const Row: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
+  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', ...style }}>
+    {children}
+  </div>
+);
+
+const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = ({ children, onRemove }) => (
+  <div style={{
+    background: 'var(--bg-surface)',
+    border: '1px solid var(--border-default)',
+    borderRadius: '4px',
+    padding: '8px',
+    marginBottom: '8px',
+    position: 'relative'
+  }}>
+    <button
+      type="button"
+      onClick={onRemove}
+      title="Remove port"
+      style={{
+        position: 'absolute',
+        top: '6px',
+        right: '6px',
+        background: 'transparent',
+        border: 'none',
+        color: 'var(--text-muted)',
+        cursor: 'pointer',
+        fontSize: '14px',
+        lineHeight: 1,
+        padding: '2px',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-primary)'; }}
+      onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+    >
+      ×
+    </button>
+    <div style={{ marginRight: '16px' }}>
+      {children}
+    </div>
+  </div>
+);
+
+const IconButton: React.FC<{ onClick: () => void; children: React.ReactNode; title?: string }> = ({ onClick, children, title }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    style={{
+      background: 'transparent',
+      border: 'none',
+      color: 'var(--text-secondary)',
+      cursor: 'pointer',
+      padding: '2px 6px',
+      borderRadius: '3px',
+      fontSize: '0.8rem',
+    }}
+    onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
+  >
+    {children}
+  </button>
+);
+
+const TextInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
+  <input
+    {...props}
+    style={{
+      background: 'var(--bg-primary)',
+      border: '1px solid var(--border-default)',
+      borderRadius: '3px',
+      color: 'var(--text-primary)',
+      padding: '6px 8px',
+      fontSize: '0.8rem',
+      width: '100%',
+      outline: 'none',
+      ...props.style,
+    }}
+    onFocus={e => {
+      e.currentTarget.style.borderColor = 'var(--accent-primary)';
+      props.onFocus?.(e);
+    }}
+    onBlur={e => {
+      e.currentTarget.style.borderColor = 'var(--border-default)';
+      props.onBlur?.(e);
+    }}
+  />
+);
+
+const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) => (
+  <select
+    {...props}
+    style={{
+      background: 'var(--bg-primary)',
+      border: '1px solid var(--border-default)',
+      borderRadius: '3px',
+      color: 'var(--text-primary)',
+      padding: '5px 8px',
+      fontSize: '0.8rem',
+      cursor: 'pointer',
+      outline: 'none',
+      width: '100%',
+      ...props.style,
+    }}
+  />
+);
+
+const AddButton: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    style={{
+      fontSize: '0.75rem',
+      background: 'transparent',
+      border: '1px dashed var(--border-default)',
+      color: 'var(--text-secondary)',
+      borderRadius: '4px',
+      padding: '6px 12px',
+      cursor: 'pointer',
+      width: '100%',
+      transition: 'all 0.2s',
+      textAlign: 'center'
+    }}
+    onMouseEnter={e => {
+      e.currentTarget.style.borderColor = 'var(--accent-primary)';
+      e.currentTarget.style.color = 'var(--accent-primary)';
+    }}
+    onMouseLeave={e => {
+      e.currentTarget.style.borderColor = 'var(--border-default)';
+      e.currentTarget.style.color = 'var(--text-secondary)';
+    }}
+  >
+    {children}
+  </button>
+);
+
+const GroupIOEditor: React.FC<{
+  nodeId: string;
+  isInput: boolean;
+  spec: NodeSpec;
+}> = ({ nodeId, isInput, spec }) => {
+  const updateGroupInterface = useGraphStore(s => s.updateGroupInterface);
+  const ports = isInput ? spec.outputs : spec.inputs;
+  const [editablePorts, setEditablePorts] = useState<EditablePort[]>(() => (
+    ports.map((p, i) => ({
+      id: `${nodeId}_${i}`,
+      name: p.name,
+      label: p.label,
+      ty: p.ty,
+      default: getDefaultValue(p),
+      min: p.min,
+      max: p.max,
+      step: p.step,
+    }))
+  ));
+
+  useEffect(() => {
+    setEditablePorts(ports.map((p, i) => ({
+      id: `${nodeId}_${i}_${p.name}`,
+      name: p.name,
+      label: p.label,
+      ty: p.ty,
+      default: getDefaultValue(p),
+      min: p.min,
+      max: p.max,
+      step: p.step,
+    })));
+  }, [nodeId, ports]);
+
+  const commitPorts = useCallback((nextPorts?: EditablePort[]) => {
+    const targetPorts = nextPorts ?? editablePorts;
+    const portSpecs = targetPorts.map(toPortSpec);
+    if (isInput) {
+      updateGroupInterface(portSpecs, null);
+    } else {
+      updateGroupInterface(null, portSpecs);
+    }
+  }, [editablePorts, isInput, updateGroupInterface]);
+
+  const handleAdd = useCallback(() => {
+    const nextIndex = editablePorts.length + 1;
+    const baseName = isInput ? 'input' : 'output';
+    const newPort: EditablePort = {
+      id: crypto.randomUUID(),
+      name: `${baseName}_${nextIndex}`,
+      label: `${isInput ? 'Input' : 'Output'} ${nextIndex}`,
+      ty: 'Image',
+    };
+    const nextPorts = [...editablePorts, newPort];
+    setEditablePorts(nextPorts);
+    commitPorts(nextPorts);
+  }, [commitPorts, editablePorts, isInput]);
+
+  const handleRemove = useCallback((idx: number) => {
+    const nextPorts = editablePorts.filter((_, i) => i !== idx);
+    setEditablePorts(nextPorts);
+    commitPorts(nextPorts);
+  }, [commitPorts, editablePorts]);
+
+  const handleFieldChange = (idx: number, updater: (port: EditablePort) => EditablePort) => {
+    setEditablePorts(prev => prev.map((port, i) => (i === idx ? updater({ ...port }) : port)));
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      {ports.map(port => (
-        <div
-          key={port.name}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: '0.75rem',
-            padding: '2px 4px',
-            borderRadius: 3,
-            background: 'var(--bg-primary)',
-          }}
-        >
-          <span style={{ color: 'var(--text-primary)' }}>{port.label}</span>
-          <span style={{
-            color: 'var(--text-muted)',
-            fontSize: '0.65rem',
-            padding: '1px 4px',
-            background: 'var(--bg-surface)',
-            borderRadius: 2,
-          }}>
-            {port.ty}
-          </span>
+    <div>
+      <SectionHeader action={<IconButton onClick={handleAdd}>+ Add</IconButton>}>
+        {isInput ? 'Group Inputs' : 'Group Outputs'}
+      </SectionHeader>
+
+      {editablePorts.length === 0 && (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '8px' }}>
+          No ports defined.
         </div>
+      )}
+
+      {editablePorts.map((port, idx) => (
+        <PortCard key={port.id} onRemove={() => handleRemove(idx)}>
+          <Row>
+            <InputGroup>
+              <Label>Name</Label>
+              <TextInput
+                value={port.name}
+                placeholder="name"
+                onChange={e => handleFieldChange(idx, p => ({ ...p, name: e.target.value }))}
+                onBlur={() => commitPorts()}
+              />
+            </InputGroup>
+            <InputGroup>
+              <Label>Label</Label>
+              <TextInput
+                value={port.label}
+                placeholder="Label"
+                onChange={e => handleFieldChange(idx, p => ({ ...p, label: e.target.value }))}
+                onBlur={() => commitPorts()}
+              />
+            </InputGroup>
+            <InputGroup>
+              <Label>Type</Label>
+              <Select
+                value={port.ty}
+                onChange={e => {
+                  const nextType = e.target.value as ValueType;
+                  const nextPorts = editablePorts.map((p, i) => {
+                    if (i !== idx) return p;
+                    const next = { ...p, ty: nextType };
+                    if (nextType === 'Bool') {
+                      next.default = typeof p.default === 'boolean' ? p.default : false;
+                      next.min = undefined;
+                      next.max = undefined;
+                      next.step = undefined;
+                      return next;
+                    }
+                    if (nextType === 'Float' || nextType === 'Int') {
+                      next.default = typeof p.default === 'number' ? p.default : 0;
+                      return next;
+                    }
+                    next.default = undefined;
+                    next.min = undefined;
+                    next.max = undefined;
+                    next.step = undefined;
+                    return next;
+                  });
+                  setEditablePorts(nextPorts);
+                  commitPorts(nextPorts);
+                }}
+              >
+                {VALUE_TYPES.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </Select>
+            </InputGroup>
+          </Row>
+
+          {(port.ty === 'Float' || port.ty === 'Int') && (
+            <div style={{ background: 'var(--bg-primary)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
+              <Label>Default &amp; Range</Label>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ flex: 1 }}>
+                  <TextInput
+                    type="number"
+                    value={String(port.default ?? '')}
+                    placeholder="Default"
+                    onChange={e => {
+                      const value = e.target.value;
+                      handleFieldChange(idx, p => ({ ...p, default: value === '' ? undefined : Number(value) }));
+                    }}
+                    onBlur={() => commitPorts()}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextInput
+                    type="number"
+                    value={String(port.min ?? '')}
+                    placeholder="Min"
+                    onChange={e => {
+                      const value = e.target.value;
+                      handleFieldChange(idx, p => ({ ...p, min: value === '' ? undefined : Number(value) }));
+                    }}
+                    onBlur={() => commitPorts()}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextInput
+                    type="number"
+                    value={String(port.max ?? '')}
+                    placeholder="Max"
+                    onChange={e => {
+                      const value = e.target.value;
+                      handleFieldChange(idx, p => ({ ...p, max: value === '' ? undefined : Number(value) }));
+                    }}
+                    onBlur={() => commitPorts()}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {port.ty === 'Bool' && (
+            <div style={{ background: 'var(--bg-primary)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                <input
+                  id={`group-bool-${port.id}`}
+                  type="checkbox"
+                  checked={Boolean(port.default)}
+                  onChange={e => {
+                    const nextPorts = editablePorts.map((p, i) => (
+                      i === idx ? { ...p, default: e.target.checked } : p
+                    ));
+                    setEditablePorts(nextPorts);
+                    commitPorts(nextPorts);
+                  }}
+                  style={{ accentColor: 'var(--accent-primary)' }}
+                />
+                <label htmlFor={`group-bool-${port.id}`} style={{ cursor: 'pointer' }}>Default Value</label>
+              </div>
+            </div>
+          )}
+        </PortCard>
       ))}
+
+      <AddButton onClick={handleAdd}>+ Add {isInput ? 'Input' : 'Output'}</AddButton>
     </div>
   );
 };

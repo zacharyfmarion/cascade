@@ -1,5 +1,5 @@
 import init, { Engine } from '../wasm-pkg/compositor_wasm';
-import type { EngineBridge, AddNodeResult } from './bridge';
+import type { EngineBridge, AddNodeResult, ColorManagementInfo } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
 
@@ -89,6 +89,15 @@ export class WasmEngine implements EngineBridge {
     this.getEngine().set_param(nodeId, key, raw);
   }
 
+  setInputDefault(nodeId: string, portName: string, value: ParamValue): void {
+    const raw = extractParamValue(value);
+    this.getEngine().set_input_default(nodeId, portName, raw);
+  }
+
+  setPosition(nodeId: string, x: number, y: number): void {
+    this.getEngine().set_position(nodeId, x, y);
+  }
+
   loadImageData(nodeId: string, data: Uint8Array): void {
     console.log(`[WASM] loadImageData nodeId=${nodeId} bytes=${data.length}`);
     try {
@@ -98,6 +107,24 @@ export class WasmEngine implements EngineBridge {
       console.error(`[WASM] loadImageData FAILED:`, e);
       throw e;
     }
+  }
+
+  loadPaletteData(nodeId: string, data: Uint8Array): [number, number, number, number][] {
+    const result = (this.getEngine() as any).load_palette_data(nodeId, data);
+    return result as [number, number, number, number][];
+  }
+
+  loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): void {
+    (this.getEngine() as any).load_sequence_frame_data(nodeId, BigInt(frame), data);
+  }
+
+  setSequenceInfo(nodeId: string, info: { frame_count: number; first_frame: number; last_frame: number }): void {
+    (this.getEngine() as any).set_sequence_info(
+      nodeId,
+      BigInt(info.frame_count),
+      BigInt(info.first_frame),
+      BigInt(info.last_frame),
+    );
   }
 
   async renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
@@ -147,14 +174,70 @@ export class WasmEngine implements EngineBridge {
     this.getEngine().import_graph(data);
   }
 
+  getImageData(nodeId: string): Uint8Array | null {
+    try {
+      const bytes = this.getEngine().get_image_data(nodeId);
+      return new Uint8Array(bytes);
+    } catch {
+      return null;
+    }
+  }
+
   exportDocument(): unknown {
-    const graph = this.getEngine().export_graph();
-    return createDocumentEnvelope(graph);
+    const eng = this.getEngine();
+    const graph = eng.export_graph();
+    const doc = createDocumentEnvelope(graph);
+
+    // Embed image data for LoadImage nodes as base64
+    const graphData = graph as { nodes?: Array<{ id: string; type_id: string }> };
+    if (graphData.nodes) {
+      const assets: Record<string, { type: string; source: string; data: string; original_filename: string; hash: string }> = {};
+      for (const node of graphData.nodes) {
+        if (node.type_id === 'load_image') {
+          const imageData = this.getImageData(node.id);
+          if (imageData) {
+            let binary = '';
+            for (let i = 0; i < imageData.length; i++) {
+              binary += String.fromCharCode(imageData[i]);
+            }
+            assets[node.id] = {
+              type: 'image',
+              source: 'embedded',
+              data: btoa(binary),
+              original_filename: '',
+              hash: '',
+            };
+          }
+        }
+      }
+      (doc as Record<string, unknown>).assets = assets;
+    }
+
+    return doc;
   }
 
   importDocument(data: unknown): void {
     const graph = extractGraphData(data);
     this.getEngine().import_graph(graph);
+
+    // Load embedded image assets
+    if (isRecord(data) && isRecord(data.assets)) {
+      const assets = data.assets as Record<string, Record<string, unknown>>;
+      for (const [nodeId, assetRef] of Object.entries(assets)) {
+        if (assetRef.type === 'image' && typeof assetRef.data === 'string') {
+          const binary = atob(assetRef.data);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          try {
+            this.getEngine().load_image_data(nodeId, bytes);
+          } catch (e) {
+            console.warn(`Failed to load embedded image for node ${nodeId}:`, e);
+          }
+        }
+      }
+    }
   }
 
   registerGpuKernel(_manifestJson: string): NodeSpec {
@@ -192,6 +275,7 @@ export class WasmEngine implements EngineBridge {
         typeId: n.typeId,
         position: Array.isArray(n.position) ? { x: n.position[0], y: n.position[1] } : n.position,
         params: n.params,
+        inputDefaults: n.input_defaults ?? {},
       })),
     };
   }
@@ -210,6 +294,7 @@ export class WasmEngine implements EngineBridge {
         typeId: n.typeId,
         position: Array.isArray(n.position) ? { x: n.position[0], y: n.position[1] } : n.position,
         params: n.params,
+        inputDefaults: n.input_defaults ?? {},
       })),
       connections: (raw.connections ?? []).map((c: any) => ({
         id: crypto.randomUUID(),
@@ -231,12 +316,47 @@ export class WasmEngine implements EngineBridge {
     return eng.update_group_interface(groupDefId, inputs, outputs) as NodeSpec;
   }
 
+  async renameGroup(groupDefId: string, newName: string): Promise<NodeSpec> {
+    const eng = this.getEngine() as any;
+    if (typeof eng.rename_group !== 'function') {
+      throw new Error('Group rename not yet supported in WASM engine');
+    }
+    return eng.rename_group(groupDefId, newName) as NodeSpec;
+  }
+
   async addInternalConnection(groupDefId: string, fromNode: string, fromPort: string, toNode: string, toPort: string): Promise<NodeSpec> {
     return this.getEngine().add_internal_connection(groupDefId, fromNode, fromPort, toNode, toPort) as NodeSpec;
   }
 
   async removeInternalConnection(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec> {
     return this.getEngine().remove_internal_connection(groupDefId, toNode, toPort) as NodeSpec;
+  }
+
+  setAiApiKey(provider: string, key: string): void {
+    (this.getEngine() as any).set_ai_api_key(provider, key);
+  }
+
+  isAiConfigured(): boolean {
+    return (this.getEngine() as any).is_ai_configured() as boolean;
+  }
+
+  getColorManagementInfo(): ColorManagementInfo {
+    const eng = this.getEngine() as any;
+    return eng.get_color_management_info() as ColorManagementInfo;
+  }
+
+  getViewsForDisplay(display: string): string[] {
+    const eng = this.getEngine() as any;
+    return eng.get_views_for_display(display) as string[];
+  }
+
+  setDisplayView(display: string, view: string): void {
+    const eng = this.getEngine() as any;
+    eng.set_display_view(display, view);
+  }
+
+  setProjectFormat(width: number, height: number): void {
+    (this.getEngine() as any).set_project_format(width, height);
   }
 }
 

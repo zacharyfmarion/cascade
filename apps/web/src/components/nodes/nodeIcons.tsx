@@ -52,6 +52,7 @@ import {
   Cpu,
   Filter,
   Box,
+  BrainCircuit,
 } from 'lucide-react';
 
 const ICON_SIZE = 12;
@@ -65,6 +66,7 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
   viewer: <Eye size={ICON_SIZE} />,
   export_image: <Download size={ICON_SIZE} />,
   export_image_sequence: <FileOutput size={ICON_SIZE} />,
+  export_video: <FileVideo size={ICON_SIZE} />,
 
   // ── Color ──
   brightness_contrast: <SunMedium size={ICON_SIZE} />,
@@ -78,6 +80,7 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
   posterize: <Grid2x2 size={ICON_SIZE} />,
   gamma: <Sun size={ICON_SIZE} />,
   color_ramp: <Paintbrush size={ICON_SIZE} />,
+  color_palette: <Palette size={ICON_SIZE} />,
   separate_hsva: <SplitSquareVertical size={ICON_SIZE} />,
   combine_hsva: <Merge size={ICON_SIZE} />,
   color_convert: <Pipette size={ICON_SIZE} />,
@@ -131,6 +134,9 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
 
   // ── GPU ──
   gpu_script: <Cpu size={ICON_SIZE} />,
+
+  // ── AI ──
+  ai_inpaint: <BrainCircuit size={ICON_SIZE} />,
 };
 
 const CATEGORY_ICON_MAP: Record<string, React.ReactElement> = {
@@ -144,6 +150,7 @@ const CATEGORY_ICON_MAP: Record<string, React.ReactElement> = {
   Matte: <ShieldPlus size={ICON_SIZE} />,
   GPU: <Cpu size={ICON_SIZE} />,
   Utility: <Calculator size={ICON_SIZE} />,
+  AI: <BrainCircuit size={ICON_SIZE} />,
 };
 
 const DEFAULT_ICON = <Box size={ICON_SIZE} />;

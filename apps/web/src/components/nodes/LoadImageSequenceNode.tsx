@@ -1,10 +1,9 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import {
   NodeButton,
   NodeInfoRow,
-  NodeBadge,
   NodeSection,
   NodeStatus,
 } from './NodePrimitives';
@@ -52,11 +51,14 @@ function inferSequencePattern(paths: string[]): { directory: string; pattern: st
   return { directory, pattern };
 }
 
+const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.exr,.tif,.tiff,.bmp,.webp';
+
 export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { params } = data;
   const setParam = useGraphStore(s => s.setParam);
   const setSequenceDirectory = useGraphStore(s => s.setSequenceDirectory);
+  const setSequenceFiles = useGraphStore(s => s.setSequenceFiles);
   const isRendering = useGraphStore(s => s.isRendering);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
@@ -65,10 +67,9 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
 
   const [loading, setLoading] = useState(false);
   const [selectedCount, setSelectedCount] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleBrowse = useCallback(async () => {
-    if (!isTauri) return;
-
+  const handleBrowseTauri = useCallback(async () => {
     try {
       setLoading(true);
       const { open } = await import('@tauri-apps/plugin-dialog');
@@ -102,26 +103,69 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
     } finally {
       setLoading(false);
     }
-  }, [isTauri, props.id, setParam, setSequenceDirectory]);
+  }, [props.id, setParam, setSequenceDirectory]);
+
+  const handleBrowseWeb = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFilesSelected = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    try {
+      setLoading(true);
+      const files = Array.from(fileList);
+      setSelectedCount(files.length);
+      await setSequenceFiles(props.id, files);
+    } catch (err) {
+      console.error('Failed to load image sequence:', err);
+    } finally {
+      setLoading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  }, [props.id, setSequenceFiles]);
+
+  const handleBrowse = useCallback(() => {
+    if (isTauri) {
+      handleBrowseTauri();
+    } else {
+      handleBrowseWeb();
+    }
+  }, [isTauri, handleBrowseTauri, handleBrowseWeb]);
 
   const dirBasename = directory ? directory.split('/').filter(Boolean).pop() || directory : '';
+  const hasSequence = directory || selectedCount > 0;
 
   return (
     <BaseNode {...props} data={data} headerIcon={getNodeIcon('load_image_sequence', 'Input')}>
+      {!isTauri && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={IMAGE_ACCEPT}
+          onChange={handleFilesSelected}
+          style={{ display: 'none' }}
+        />
+      )}
+
       <NodeSection>
         <NodeButton
           onClick={handleBrowse}
-          disabled={!isTauri || loading || isRendering}
+          disabled={loading || isRendering}
           fullWidth
         >
-          {loading ? 'Opening...' : isRendering ? 'Rendering...' : 'Browse Files'}
+          {loading ? 'Loading...' : isRendering ? 'Rendering...' : 'Browse Files'}
         </NodeButton>
       </NodeSection>
 
-      {directory ? (
+      {hasSequence ? (
         <NodeSection spaced>
-          <NodeInfoRow label="Folder" value={dirBasename} mono />
-          <NodeInfoRow label="Pattern" value={pattern} mono />
+          {directory && <NodeInfoRow label="Folder" value={dirBasename} mono />}
+          {pattern && <NodeInfoRow label="Pattern" value={pattern} mono />}
           {selectedCount > 0 && (
             <NodeStatus variant="info">{selectedCount} files selected</NodeStatus>
           )}
@@ -129,8 +173,6 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
       ) : (
         <NodeStatus variant="info">No sequence loaded</NodeStatus>
       )}
-
-      {!isTauri && <NodeBadge>Desktop only</NodeBadge>}
     </BaseNode>
   );
 };

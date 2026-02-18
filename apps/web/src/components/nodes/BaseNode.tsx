@@ -2,13 +2,18 @@ import React from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { useGraphStore } from '../../store/graphStore';
 import { useSettingsStore } from '../../store/settingsStore';
-import type { NodeSpec, PortSpec } from '../../store/types';
+import type { NodeSpec, PortSpec, ParamValue } from '../../store/types';
+import { extractParamValue, createParamValue } from '../../store/types';
+import { NodeSlider } from './NodeSlider';
+import { NodeCheckbox, NodeNumberInput } from './NodePrimitives';
+import { linearToSrgbChannel, floatToByte, linearToHex, hexToLinear } from './colorUtils';
 
 interface BaseNodeProps {
   id: string;
   data: {
     label: string;
     spec: NodeSpec;
+    inputDefaults?: Record<string, ParamValue>;
     [key: string]: any;
   };
   selected?: boolean;
@@ -20,6 +25,104 @@ interface BaseNodeProps {
   headerTag?: string;
   onHeaderDoubleClick?: () => void;
 }
+
+const InlineInputControl: React.FC<{
+  nodeId: string;
+  portSpec: PortSpec;
+  value?: ParamValue;
+}> = ({ nodeId, portSpec, value }) => {
+  const setInputDefaultLive = useGraphStore(s => s.setInputDefaultLive);
+  const setInputDefaultCommit = useGraphStore(s => s.setInputDefaultCommit);
+
+  const currentValue = value ?? portSpec.default;
+  if (!currentValue) return <span className="node-port__label">{portSpec.label}</span>;
+
+  const rawValue = extractParamValue(currentValue as ParamValue);
+  const uiHint = portSpec.ui_hint?.type ?? (portSpec.ty === 'Float' ? 'Slider' : portSpec.ty === 'Int' ? 'NumberInput' : 'Checkbox');
+
+  if (portSpec.ty === 'Color') {
+    const [r, g, b, a] = (rawValue as [number, number, number, number]) || [0, 0, 0, 1];
+    const sr = floatToByte(linearToSrgbChannel(r));
+    const sg = floatToByte(linearToSrgbChannel(g));
+    const sb = floatToByte(linearToSrgbChannel(b));
+    const hex = linearToHex(r, g, b);
+    
+    return (
+      <div className="nopan nodrag nowheel" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{
+          position: 'relative',
+          width: '14px',
+          height: '14px',
+          backgroundColor: `rgba(${sr}, ${sg}, ${sb}, ${a})`,
+          border: '1px solid var(--border-default)',
+          borderRadius: '2px',
+          overflow: 'hidden',
+        }}>
+          <input
+            type="color"
+            value={hex}
+            onChange={(e) => {
+              const [nr, ng, nb] = hexToLinear(e.target.value);
+              setInputDefaultLive(nodeId, portSpec.name, createParamValue(portSpec.ty, [nr, ng, nb, a]));
+            }}
+            onBlur={(e) => {
+              const [nr, ng, nb] = hexToLinear(e.target.value);
+              setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, [nr, ng, nb, a]));
+            }}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              opacity: 0,
+              cursor: 'pointer',
+              padding: 0,
+              border: 'none',
+            }}
+          />
+        </div>
+        <span className="node-port__label">{portSpec.label}</span>
+      </div>
+    );
+  }
+
+  if (portSpec.ty === 'Bool' || uiHint === 'Checkbox') {
+    return (
+      <NodeCheckbox
+        label={portSpec.label}
+        checked={Boolean(rawValue)}
+        onChange={(checked) => setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, checked))}
+      />
+    );
+  }
+
+  if (uiHint === 'Slider') {
+    return (
+      <NodeSlider
+        label={portSpec.label}
+        value={Number(rawValue)}
+        min={portSpec.min ?? 0}
+        max={portSpec.max ?? 1}
+        step={portSpec.step ?? 0.01}
+        onChange={(v) => setInputDefaultLive(nodeId, portSpec.name, createParamValue(portSpec.ty, v))}
+        onChangeCommit={(v) => setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, v))}
+      />
+    );
+  }
+
+  return (
+    <NodeNumberInput
+      label={portSpec.label}
+      value={Number(rawValue)}
+      min={portSpec.min}
+      max={portSpec.max}
+      step={portSpec.step ?? 1}
+      onChange={(v) => setInputDefaultLive(nodeId, portSpec.name, createParamValue(portSpec.ty, v))}
+      onChangeCommit={(v) => setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, v))}
+    />
+  );
+};
 
 export const getPortColor = (type: string) => {
    switch (type) {
@@ -56,6 +159,12 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
   const { spec } = data;
   const timing = useGraphStore(s => s.nodeTimings.get(id));
   const showTimings = useSettingsStore(s => s.showTimings);
+  const connections = useGraphStore(s => s.connections);
+  const connectedInputs = new Set(
+    connections
+      .filter(c => c.toNode === id)
+      .map(c => c.toPort)
+  );
 
   let badge = null;
   if (showTimings && timing !== undefined) {
@@ -111,24 +220,36 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
       </div>
 
       <div className="base-node__body">
-        {spec.inputs.map((input: PortSpec) => (
-          <div key={input.name} className="node-port">
-            <Handle
-              type="target"
-              position={Position.Left}
-              id={input.name}
-              className="node-port__handle"
-              style={{
-                background: getPortColor(input.ty),
-                left: '-11px',
-              }}
-              title={`${input.label} (${input.ty})`}
-            />
-            <span className="node-port__label">
-              {input.label}
-            </span>
-          </div>
-        ))}
+        {spec.inputs.map((input: PortSpec) => {
+          const isConnected = connectedInputs.has(input.name);
+          const isScalar = input.ty === 'Float' || input.ty === 'Int' || input.ty === 'Bool' || input.ty === 'Color';
+          const hasDefault = isScalar && !isConnected && (input.default != null || data.inputDefaults?.[input.name] != null || data.params?.[input.name] != null);
+
+          return (
+            <div key={input.name} className="node-port">
+              <Handle
+                type="target"
+                position={Position.Left}
+                id={input.name}
+                className="node-port__handle"
+                style={{
+                  background: getPortColor(input.ty),
+                  left: '-11px',
+                }}
+                title={`${input.label} (${input.ty})`}
+              />
+              {hasDefault ? (
+                <InlineInputControl
+                  nodeId={id}
+                  portSpec={input}
+                  value={data.inputDefaults?.[input.name] ?? data.params?.[input.name]}
+                />
+              ) : (
+                <span className="node-port__label">{input.label}</span>
+              )}
+            </div>
+          );
+        })}
 
         {children}
 

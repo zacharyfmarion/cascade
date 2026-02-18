@@ -11,9 +11,11 @@ export type UiHint =
   | { type: 'Checkbox' }
   | { type: 'ColorPicker' }
   | { type: 'ColorRamp' }
+  | { type: 'ColorPalette' }
   | { type: 'Dropdown'; data: string[] }
   | { type: 'FilePicker' }
-  | { type: 'Hidden' };
+  | { type: 'Hidden' }
+  | { type: 'TextArea' };
 
 export interface ParamSpec {
   key: string;
@@ -24,6 +26,7 @@ export interface ParamSpec {
   max?: number;
   step?: number;
   ui_hint: UiHint;
+  promotable: boolean;
 }
 
 export type ParamDefault =
@@ -32,12 +35,18 @@ export type ParamDefault =
   | { Bool: boolean }
   | { Color: [number, number, number, number] }
   | { ColorRamp: ColorStop[] }
+  | { ColorPalette: [number, number, number, number][] }
   | { String: string };
 
 export interface PortSpec {
   name: string;
   label: string;
   ty: ValueType;
+  default?: ParamDefault;
+  min?: number;
+  max?: number;
+  step?: number;
+  ui_hint?: UiHint;
 }
 
 export interface NodeSpec {
@@ -56,15 +65,17 @@ export type ParamValue =
   | { Bool: boolean }
   | { Color: [number, number, number, number] }
   | { ColorRamp: ColorStop[] }
+  | { ColorPalette: [number, number, number, number][] }
   | { String: string };
 
 // Helper to extract value from ParamValue (since it's an object like { Float: 1.0 })
-export const extractParamValue = (pv: ParamValue): number | boolean | [number, number, number, number] | ColorStop[] | string => {
+export const extractParamValue = (pv: ParamValue): number | boolean | [number, number, number, number] | ColorStop[] | [number, number, number, number][] | string => {
   if ('Float' in pv) return pv.Float;
   if ('Int' in pv) return pv.Int;
   if ('Bool' in pv) return pv.Bool;
   if ('Color' in pv) return pv.Color;
   if ('ColorRamp' in pv) return pv.ColorRamp;
+  if ('ColorPalette' in pv) return pv.ColorPalette;
   if ('String' in pv) return pv.String;
   return 0;
 };
@@ -82,6 +93,7 @@ export interface NodeInstance {
   id: string;
   typeId: string;
   params: Record<string, ParamValue>;
+  inputDefaults: Record<string, ParamValue>;
   position: { x: number; y: number };
 }
 
@@ -119,12 +131,13 @@ export interface RestoredNode {
   typeId: string;
   position: { x: number; y: number };
   params: Record<string, ParamValue>;
+  inputDefaults: Record<string, ParamValue>;
 }
 
 export interface GroupInternalGraph {
   groupDefId: string;
   name: string;
-  nodes: { id: string; typeId: string; position: { x: number; y: number }; params: Record<string, ParamValue> }[];
+  nodes: { id: string; typeId: string; position: { x: number; y: number }; params: Record<string, ParamValue>; inputDefaults: Record<string, ParamValue> }[];
   connections: Connection[];
   inputs: PortSpec[];
   outputs: PortSpec[];
@@ -135,4 +148,7 @@ export interface EditingContext {
   label: string;
   groupNodeId?: string;
   groupDefId?: string;
+  savedNodes?: Map<string, NodeInstance>;
+  savedConnections?: Connection[];
+  savedNodeSpecs?: NodeSpec[];
 }

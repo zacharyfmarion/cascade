@@ -15,7 +15,8 @@ const NODE_SPECS: NodeSpec[] = [
         label: 'File',
         ty: 'Image',
         default: { String: '' },
-        ui_hint: { type: 'FilePicker' }
+        ui_hint: { type: 'FilePicker' },
+        promotable: true,
       }
     ]
   },
@@ -44,7 +45,8 @@ const NODE_SPECS: NodeSpec[] = [
         min: -1.0,
         max: 1.0,
         step: 0.01,
-        ui_hint: { type: 'Slider' }
+        ui_hint: { type: 'Slider' },
+        promotable: true,
       },
       {
         key: 'contrast',
@@ -54,7 +56,8 @@ const NODE_SPECS: NodeSpec[] = [
         min: -1.0,
         max: 1.0,
         step: 0.01,
-        ui_hint: { type: 'Slider' }
+        ui_hint: { type: 'Slider' },
+        promotable: true,
       }
     ]
   },
@@ -74,7 +77,8 @@ const NODE_SPECS: NodeSpec[] = [
         min: -180.0,
         max: 180.0,
         step: 1.0,
-        ui_hint: { type: 'Slider' }
+        ui_hint: { type: 'Slider' },
+        promotable: true,
       },
       {
         key: 'saturation',
@@ -84,7 +88,8 @@ const NODE_SPECS: NodeSpec[] = [
         min: -1.0,
         max: 1.0,
         step: 0.01,
-        ui_hint: { type: 'Slider' }
+        ui_hint: { type: 'Slider' },
+        promotable: true,
       }
     ]
   },
@@ -113,7 +118,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.1,
          max: 100.0,
          step: 0.1,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        }
      ]
    },
@@ -161,7 +167,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'from_max',
@@ -171,7 +178,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'to_min',
@@ -181,7 +189,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'to_max',
@@ -191,14 +200,16 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'clamp',
          label: 'Clamp',
          ty: 'Bool',
          default: { Bool: false },
-         ui_hint: { type: 'Checkbox' }
+         ui_hint: { type: 'Checkbox' },
+         promotable: true,
        }
      ]
    },
@@ -218,7 +229,8 @@ const NODE_SPECS: NodeSpec[] = [
          label: 'Operation',
          ty: 'Int',
          default: { Int: 0 },
-         ui_hint: { type: 'Dropdown', data: ['Add', 'Subtract', 'Multiply', 'Divide', 'Power', 'Min', 'Max', 'Average', 'Difference', 'Screen', 'Overlay', 'Soft Light', 'Hard Light', 'Dodge'] }
+         ui_hint: { type: 'Dropdown', data: ['Add', 'Subtract', 'Multiply', 'Divide', 'Power', 'Min', 'Max', 'Average', 'Difference', 'Screen', 'Overlay', 'Soft Light', 'Hard Light', 'Dodge'] },
+         promotable: true,
        },
        {
          key: 'value',
@@ -228,14 +240,16 @@ const NODE_SPECS: NodeSpec[] = [
          min: -10.0,
          max: 10.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'clamp_result',
          label: 'Clamp Result',
          ty: 'Bool',
          default: { Bool: true },
-         ui_hint: { type: 'Checkbox' }
+         ui_hint: { type: 'Checkbox' },
+         promotable: true,
        }
      ]
    },
@@ -255,7 +269,8 @@ const NODE_SPECS: NodeSpec[] = [
            { position: 0, color: [0, 0, 0, 1] },
            { position: 1, color: [1, 1, 1, 1] }
          ]},
-         ui_hint: { type: 'ColorRamp' }
+         ui_hint: { type: 'ColorRamp' },
+         promotable: true,
        },
        {
          key: 'interpolation',
@@ -265,7 +280,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0,
          max: 1,
          step: 1,
-         ui_hint: { type: 'Dropdown', data: ['Linear', 'Constant'] }
+         ui_hint: { type: 'Dropdown', data: ['Linear', 'Constant'] },
+         promotable: true,
        }
      ]
    },
@@ -285,7 +301,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'hue_max',
@@ -295,7 +312,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'sat_min',
@@ -305,7 +323,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        },
        {
          key: 'val_min',
@@ -315,7 +334,8 @@ const NODE_SPECS: NodeSpec[] = [
          min: 0.0,
          max: 1.0,
          step: 0.01,
-         ui_hint: { type: 'Slider' }
+         ui_hint: { type: 'Slider' },
+         promotable: true,
        }
      ]
    }
@@ -343,6 +363,7 @@ export class MockEngine implements EngineBridge {
       id,
       typeId,
       params,
+      inputDefaults: {},
       position: { x, y }
     });
     return { id, typeId };
@@ -377,6 +398,20 @@ export class MockEngine implements EngineBridge {
     const node = this.nodes.get(nodeId);
     if (node) {
       node.params[key] = value;
+    }
+  }
+
+  setInputDefault(nodeId: string, portName: string, value: ParamValue): void {
+    const node = this.nodes.get(nodeId);
+    if (node) {
+      node.inputDefaults[portName] = value;
+    }
+  }
+
+  setPosition(nodeId: string, x: number, y: number): void {
+    const node = this.nodes.get(nodeId);
+    if (node) {
+      node.position = { x, y };
     }
   }
 
@@ -420,6 +455,16 @@ export class MockEngine implements EngineBridge {
     return new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ]);
+  }
+
+  setAiApiKey(_provider: string, _key: string): void {
+  }
+
+  isAiConfigured(): boolean {
+    return false;
+  }
+
+  setProjectFormat(_width: number, _height: number): void {
   }
 }
 

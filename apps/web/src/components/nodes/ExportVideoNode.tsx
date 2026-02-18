@@ -6,6 +6,7 @@ import {
   NodeDropdown,
   NodeButton,
   NodeProgress,
+  NodeBadge,
   NodeStatus,
   NodeSection,
   NodeDisabledOverlay,
@@ -21,13 +22,13 @@ type NodeData = {
   params: Record<string, ParamValue>;
 };
 
-export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
+export const ExportVideoNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { spec, params } = data;
   const setParam = useGraphStore(s => s.setParam);
   const isRendering = useGraphStore(s => s.isRendering);
   const renderProgress = useGraphStore(s => s.renderProgress);
-  const renderSequence = useGraphStore(s => s.renderSequence);
+  const renderVideo = useGraphStore(s => s.renderVideo);
   const cancelRender = useGraphStore(s => s.cancelRender);
   const result = useGraphStore(s => s.renderResults.get(props.id));
   const sequenceStart = useGraphStore(s => s.sequenceStart);
@@ -39,27 +40,25 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
 
   const [browsing, setBrowsing] = useState(false);
 
-  const formatParam = params['format'];
-  const formatIdx = formatParam ? Number(extractParamValue(formatParam)) : 0;
-  const outputDir = params['output_dir'] ? String(extractParamValue(params['output_dir'])) : '';
+  const codecParam = params['codec'];
+  const codecIdx = codecParam ? Number(extractParamValue(codecParam)) : 0;
+  const outputPath = params['output_path'] ? String(extractParamValue(params['output_path'])) : '';
   const startFrame = params['start_frame'] ? Number(extractParamValue(params['start_frame'])) : 0;
   const endFrame = params['end_frame'] ? Number(extractParamValue(params['end_frame'])) : 100;
   const step = params['step'] ? Number(extractParamValue(params['step'])) : 1;
 
   useEffect(() => {
-    if (!hasSequenceNodes) return;
+    if (!hasSequenceNodes || sequenceLength === 0) return;
     const prev = prevSeqRef.current;
     if (prev && prev.start === sequenceStart && prev.end === sequenceLength) return;
     prevSeqRef.current = { start: sequenceStart, end: sequenceLength };
-    (async () => {
-      await setParam(props.id, 'start_frame', createParamValue('Int', sequenceStart));
-      await setParam(props.id, 'end_frame', createParamValue('Int', sequenceLength));
-    })();
+    setParam(props.id, 'start_frame', createParamValue('Int', sequenceStart));
+    setParam(props.id, 'end_frame', createParamValue('Int', sequenceLength));
   }, [hasSequenceNodes, sequenceStart, sequenceLength, props.id, setParam]);
 
-  const formatSpec = spec.params.find(p => p.key === 'format');
+  const codecSpec = spec.params.find(p => p.key === 'codec');
 
-  const isValid = (isTauri ? outputDir.length > 0 : true) && startFrame <= endFrame && step > 0;
+  const isValid = outputPath.length > 0 && startFrame <= endFrame && step > 0;
 
   const progressPercent = renderProgress
     ? Math.round((renderProgress.current_frame / Math.max(renderProgress.total_frames, 1)) * 100)
@@ -83,17 +82,16 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
     if (!isTauri) return;
     try {
       setBrowsing(true);
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: 'Select Output Directory',
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const selected = await save({
+        filters: [{ name: 'Video', extensions: ['mp4'] }],
+        title: 'Save Video File',
       });
       if (selected && typeof selected === 'string') {
-        setParam(props.id, 'output_dir', createParamValue('String', selected));
+        setParam(props.id, 'output_path', createParamValue('String', selected));
       }
     } catch (err) {
-      console.error('Failed to open folder dialog:', err);
+      console.error('Failed to open save dialog:', err);
     } finally {
       setBrowsing(false);
     }
@@ -101,43 +99,43 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
 
   const handleRender = useCallback(() => {
     if (!isValid) return;
-    renderSequence(props.id);
-  }, [isValid, renderSequence, props.id]);
+    renderVideo(props.id);
+  }, [isValid, renderVideo, props.id]);
 
-  const dirBasename = outputDir ? outputDir.split('/').filter(Boolean).pop() || outputDir : '';
+  const fileBasename = outputPath ? outputPath.split('/').filter(Boolean).pop() || outputPath : '';
 
   return (
-    <BaseNode {...props} data={data} headerIcon={getNodeIcon('export_image_sequence', 'Output')}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon('export_video', 'Output')}>
       <NodeCanvas canvasRef={canvasRef} hasResult={!!result} />
 
       <NodeDisabledOverlay disabled={isRendering}>
-        {formatSpec && formatSpec.ui_hint.type === 'Dropdown' && (
+        {codecSpec && codecSpec.ui_hint.type === 'Dropdown' && (
           <NodeSection>
             <NodeDropdown
-              label={formatSpec.label}
-              value={formatIdx}
-              options={formatSpec.ui_hint.data}
-              onChange={(v) => setParam(props.id, 'format', createParamValue('Int', v))}
+              label={codecSpec.label}
+              value={codecIdx}
+              options={codecSpec.ui_hint.data}
+              onChange={(v) => setParam(props.id, 'codec', createParamValue('Int', v))}
               disabled={isRendering}
             />
           </NodeSection>
         )}
       </NodeDisabledOverlay>
 
-      {isTauri && (
-        <NodeSection label="Output" spaced>
-          <NodeButton
-            onClick={handleBrowse}
-            disabled={browsing || isRendering}
-            variant="secondary"
-            fullWidth
-          >
-            {browsing ? 'Opening...' : outputDir ? dirBasename : 'Select Output Folder'}
-          </NodeButton>
+      <NodeSection label="Output" spaced>
+        <NodeButton
+          onClick={handleBrowse}
+          disabled={!isTauri || browsing || isRendering}
+          variant="secondary"
+          fullWidth
+        >
+          {browsing ? 'Saving...' : outputPath ? fileBasename : 'Select Output File'}
+        </NodeButton>
 
-          {outputDir && <div className="node-filepath">{outputDir}</div>}
-        </NodeSection>
-      )}
+        {outputPath && <div className="node-filepath">{outputPath}</div>}
+      </NodeSection>
+
+      {!isTauri && <NodeBadge>Desktop only</NodeBadge>}
 
       {isRendering ? (
         <NodeSection spaced>
@@ -155,7 +153,7 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
       ) : isValid ? (
         <NodeSection spaced>
           <NodeButton onClick={handleRender} fullWidth>
-            {isTauri ? 'Render Sequence' : 'Render & Download Zip'}
+            Render Video
           </NodeButton>
         </NodeSection>
       ) : null}

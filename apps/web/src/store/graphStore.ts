@@ -10,7 +10,8 @@ import type {
   EditingContext,
   GroupInternalGraph,
 } from './types';
-import type { EngineBridge, JobProgress, SequenceInfo } from '../engine/bridge';
+import type { EngineBridge, JobProgress, SequenceInfo, ColorManagementInfo } from '../engine/bridge';
+import { sequenceFrameManager } from '../engine/sequenceFrameManager';
 
 let engine: EngineBridge | null = null;
 
@@ -47,6 +48,14 @@ function withGroupIOSpecs(specs: NodeSpec[], internalGraph: GroupInternalGraph):
     groupOutputSpec,
   ];
 }
+
+const cloneEditingStack = (stack: EditingContext[]): EditingContext[] =>
+  stack.map(ctx => ({
+    ...ctx,
+    savedNodes: ctx.savedNodes ? new Map(ctx.savedNodes) : undefined,
+    savedConnections: ctx.savedConnections ? [...ctx.savedConnections] : undefined,
+    savedNodeSpecs: ctx.savedNodeSpecs ? [...ctx.savedNodeSpecs] : undefined,
+  }));
 
 import { useSettingsStore } from './settingsStore';
 const renderGenerations = new Map<string, number>();
@@ -111,6 +120,7 @@ type GraphNodeData = {
   id: string;
   type_id: string;
   params?: Record<string, ParamValue>;
+  input_defaults?: Record<string, ParamValue>;
   position: [number, number];
 };
 
@@ -181,6 +191,10 @@ interface UndoSnapshot {
   nodes: Map<string, NodeInstance>;
   connections: Connection[];
   editingStack: EditingContext[];
+  /** Compressed original image bytes per LoadImage node id */
+  imageData: Map<string, Uint8Array>;
+  /** Sequence metadata per LoadImageSequence node id */
+  sequenceInfoMap: Map<string, SequenceInfo>;
 }
 
 interface GraphState {
@@ -197,6 +211,7 @@ interface GraphState {
   renderProgress: JobProgress | null;
   isRendering: boolean;
   previewScale: number;
+  dirty: boolean;
 
   hasSequenceNodes: boolean;
   sequenceLength: number;
@@ -216,10 +231,15 @@ interface GraphState {
   setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamLive: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamCommit: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
+  setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
+  setInputDefaultLive: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
+  setInputDefaultCommit: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
   setPosition: (nodeId: string, position: { x: number; y: number }) => void;
   selectNode: (id: string | null) => void;
   setSelectedNodes: (ids: string[]) => void;
   loadImageFile: (nodeId: string, file: File) => void;
+  getImageData: (nodeId: string) => Promise<Uint8Array | null>;
+  loadPaletteFile: (nodeId: string, file: File) => void;
   triggerRender: (viewerNodeId: string) => void;
   saveProject: () => void;
   loadProject: (file: File) => void;
@@ -227,7 +247,9 @@ interface GraphState {
   exportImage: (nodeId: string) => void;
   setCurrentFrame: (frame: number) => void;
   setSequenceDirectory: (nodeId: string, directory: string) => Promise<void>;
+  setSequenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   renderSequence: (nodeId: string) => Promise<void>;
+  renderVideo: (nodeId: string) => Promise<void>;
   cancelRender: () => Promise<void>;
   compileScriptNode: (nodeId: string, manifestJson: string) => Promise<NodeSpec>;
   undo: () => void;
@@ -249,11 +271,19 @@ interface GraphState {
   navigateToBreadcrumb: (index: number) => Promise<void>;
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
+  renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
   isInsideGroup: () => boolean;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
+  setAiApiKey: (provider: string, key: string) => Promise<void>;
+  isAiConfigured: () => Promise<boolean>;
+
+  colorManagement: ColorManagementInfo | null;
+  setDisplayView: (display: string, view: string) => Promise<void>;
+  getViewsForDisplay: (display: string) => Promise<string[]>;
+  loadColorManagementInfo: () => Promise<void>;
+  setProjectFormat: (width: number, height: number) => Promise<void>;
 }
 
-const MAX_UNDO = 50;
 const undoStack: UndoSnapshot[] = [];
 const redoStack: UndoSnapshot[] = [];
 
@@ -262,6 +292,7 @@ let preCommitSnapshot: UndoSnapshot | null = null;
 let pendingLiveRender: (() => void) | null = null;
 let playbackTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let playbackAborted = false;
+let webRenderCancelled = false;
 
 let renderLock: Promise<void> = Promise.resolve();
 
@@ -270,7 +301,7 @@ export const useGraphStore = create<GraphState>()(
     const triggerAllViewers = () => {
       const { nodes } = get();
       for (const [viewerId, node] of nodes) {
-        if (node.typeId === 'viewer' || node.typeId === 'export_image' || node.typeId === 'export_image_sequence') {
+        if (node.typeId === 'viewer' || node.typeId === 'export_image' || node.typeId === 'export_image_sequence' || node.typeId === 'export_video') {
           get().triggerRender(viewerId);
         }
       }
@@ -296,6 +327,7 @@ export const useGraphStore = create<GraphState>()(
             id: node.id,
             typeId: node.type_id,
             params,
+            inputDefaults: node.input_defaults ?? {},
             position: { x, y },
           });
         }
@@ -319,6 +351,7 @@ export const useGraphStore = create<GraphState>()(
         selectedNodeIds: new Set(),
         renderResults: new Map(),
         editingStack: [{ id: 'root', label: 'Root' }],
+        dirty: false,
       });
 
       triggerAllViewers();
@@ -340,11 +373,28 @@ export const useGraphStore = create<GraphState>()(
       }
     };
 
+    const pushSequenceFrames = async (frame: number) => {
+      const eng = getEngine();
+      if (!eng.loadSequenceFrameData) return;
+      const { nodes } = get();
+      for (const [nodeId, node] of nodes) {
+        if (node.typeId !== 'load_image_sequence') continue;
+        if (!sequenceFrameManager.hasSequence(nodeId)) continue;
+        const data = await sequenceFrameManager.getFrameData(nodeId, frame);
+        if (data) {
+          await eng.loadSequenceFrameData(nodeId, frame, data);
+        }
+      }
+    };
+
     const renderAllViewersAsync = () => {
       renderLock = renderLock.then(async () => {
         const { nodes } = get();
         const frame = get().currentFrame;
         const scale = get().previewScale;
+
+        await pushSequenceFrames(frame);
+
         const newResults = new Map(get().renderResults);
         let changed = false;
         for (const [viewerId, node] of nodes) {
@@ -394,30 +444,85 @@ export const useGraphStore = create<GraphState>()(
       });
     };
 
+    const collectImageData = async (): Promise<Map<string, Uint8Array>> => {
+      const eng = getEngine();
+      const imgData = new Map<string, Uint8Array>();
+      if (!eng.getImageData) return imgData;
+      for (const [nodeId, node] of get().nodes) {
+        if (node.typeId !== 'load_image') continue;
+        try {
+          const result = eng.getImageData(nodeId);
+          const bytes = result instanceof Promise ? await result : result;
+          if (bytes) imgData.set(nodeId, bytes);
+        } catch {
+          // Node may not have image loaded yet
+        }
+      }
+      return imgData;
+    };
+
+    const captureSnapshot = async (): Promise<UndoSnapshot> => ({
+      engineState: await getEngine().exportGraph(),
+      nodes: new Map(get().nodes),
+      connections: [...get().connections],
+      editingStack: cloneEditingStack(get().editingStack),
+      imageData: await collectImageData(),
+      sequenceInfoMap: new Map(get().sequenceInfoMap),
+    });
+
     const pushUndo = async () => {
-      const snapshot: UndoSnapshot = {
-        engineState: await getEngine().exportGraph(),
-        nodes: new Map(get().nodes),
-        connections: [...get().connections],
-        editingStack: [...get().editingStack],
-      };
+      const snapshot = await captureSnapshot();
       undoStack.push(snapshot);
-      if (undoStack.length > MAX_UNDO) undoStack.shift();
+      if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
       redoStack.length = 0;
-      set({ canUndo: undoStack.length > 0, canRedo: false });
+      set({ canUndo: undoStack.length > 0, canRedo: false, dirty: true });
     };
 
     const restoreSnapshot = async (snapshot: UndoSnapshot) => {
       await getEngine().importGraph(snapshot.engineState);
+
+      const eng = getEngine();
+      for (const [nodeId, bytes] of snapshot.imageData) {
+        try {
+          await Promise.resolve(eng.loadImageData(nodeId, bytes));
+        } catch {
+          // Node may not exist in this snapshot state
+        }
+      }
+
       set({
         nodes: new Map(snapshot.nodes),
         connections: [...snapshot.connections],
-        editingStack: [...snapshot.editingStack],
+        editingStack: cloneEditingStack(snapshot.editingStack),
         selectedNodeIds: new Set(),
         renderResults: new Map(),
         canUndo: undoStack.length > 0,
         canRedo: redoStack.length > 0,
+        sequenceInfoMap: new Map(snapshot.sequenceInfoMap),
       });
+
+      recomputeSequenceState();
+
+      for (const [nodeId, node] of snapshot.nodes) {
+        if (node.typeId !== 'load_image_sequence') continue;
+        if (sequenceFrameManager.hasSequence(nodeId)) {
+          const frame = get().currentFrame;
+          const data = await sequenceFrameManager.getFrameData(nodeId, frame);
+          if (data && eng.loadSequenceFrameData) {
+            await eng.loadSequenceFrameData(nodeId, frame, data);
+          }
+        } else if (eng.setSequenceDirectory && snapshot.sequenceInfoMap.has(nodeId)) {
+          const dirParam = node.params['directory'];
+          if (dirParam && 'String' in dirParam && dirParam.String) {
+            try {
+              await eng.setSequenceDirectory(nodeId, dirParam.String);
+            } catch {
+              // Directory may no longer exist
+            }
+          }
+        }
+      }
+
       triggerAllViewers();
     };
 
@@ -435,6 +540,7 @@ export const useGraphStore = create<GraphState>()(
       renderProgress: null,
       isRendering: false,
       previewScale: 1,
+      dirty: false,
       hasSequenceNodes: false,
       sequenceLength: 0,
       sequenceStart: 0,
@@ -445,11 +551,31 @@ export const useGraphStore = create<GraphState>()(
       editingStack: [{ id: 'root', label: 'Root' }],
 
       nodeTimings: new Map(),
+      colorManagement: null,
 
       initEngine: async () => {
         engine = await createEngine();
         const specs = await engine.listNodeTypes();
         set({ engineReady: true, nodeSpecs: specs });
+
+        const settings = useSettingsStore.getState();
+
+        if (settings.aiApiKey && engine.setAiApiKey) {
+          await engine.setAiApiKey('openai', settings.aiApiKey);
+        }
+
+        if (engine.setProjectFormat) {
+          await engine.setProjectFormat(settings.projectWidth, settings.projectHeight);
+        }
+
+        if (engine.getColorManagementInfo) {
+          try {
+            const info = await engine.getColorManagementInfo();
+            set({ colorManagement: info });
+          } catch (e) {
+            console.warn('Failed to load color management info:', e);
+          }
+        }
       },
 
       addNode: async (typeId, position) => {
@@ -480,11 +606,21 @@ export const useGraphStore = create<GraphState>()(
           });
         }
 
+        const inputDefaults: Record<string, ParamValue> = {};
+        if (spec) {
+          for (const input of spec.inputs) {
+            if (input.default) {
+              inputDefaults[input.name] = input.default as ParamValue;
+            }
+          }
+        }
+
         const newNodes = new Map(get().nodes);
         newNodes.set(result.id, {
           id: result.id,
           typeId: actualTypeId,
           params,
+          inputDefaults,
           position
         });
 
@@ -525,6 +661,7 @@ export const useGraphStore = create<GraphState>()(
         });
 
         if (removedNode?.typeId === 'load_image_sequence') {
+          sequenceFrameManager.clear(id);
           recomputeSequenceState();
         }
       },
@@ -622,10 +759,15 @@ export const useGraphStore = create<GraphState>()(
             engineState: null,
             nodes: new Map(get().nodes),
             connections: [...get().connections],
-            editingStack: [...get().editingStack],
+            editingStack: cloneEditingStack(get().editingStack),
+            imageData: new Map(),
+            sequenceInfoMap: new Map(get().sequenceInfoMap),
           };
           Promise.resolve(getEngine().exportGraph()).then(state => {
             if (preCommitSnapshot) preCommitSnapshot.engineState = state;
+          });
+          collectImageData().then(data => {
+            if (preCommitSnapshot) preCommitSnapshot.imageData = data;
           });
         }
 
@@ -690,7 +832,7 @@ export const useGraphStore = create<GraphState>()(
             preCommitSnapshot.engineState = await getEngine().exportGraph();
           }
           undoStack.push(preCommitSnapshot);
-          if (undoStack.length > MAX_UNDO) undoStack.shift();
+          if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
           redoStack.length = 0;
           preCommitSnapshot = null;
         }
@@ -700,7 +842,7 @@ export const useGraphStore = create<GraphState>()(
         if (node) {
           node.params = { ...node.params, [key]: value };
           newNodes.set(nodeId, { ...node });
-          set({ nodes: newNodes, canUndo: undoStack.length > 0, canRedo: false, previewScale: 1 });
+          set({ nodes: newNodes, canUndo: undoStack.length > 0, canRedo: false, previewScale: 1, dirty: true });
         } else {
           set({ previewScale: 1 });
         }
@@ -738,6 +880,108 @@ export const useGraphStore = create<GraphState>()(
         }
       },
 
+      setInputDefault: async (nodeId, portName, value) => {
+        await pushUndo();
+        await getEngine().setInputDefault(nodeId, portName, value);
+        const newNodes = new Map(get().nodes);
+        const node = newNodes.get(nodeId);
+        if (node) {
+          node.inputDefaults = { ...node.inputDefaults, [portName]: value };
+          newNodes.set(nodeId, { ...node });
+          set({ nodes: newNodes });
+        }
+        triggerAllViewers();
+      },
+
+      setInputDefaultLive: async (nodeId, portName, value) => {
+        if (!preCommitSnapshot) {
+          preCommitSnapshot = {
+            engineState: null,
+            nodes: new Map(get().nodes),
+            connections: [...get().connections],
+            editingStack: cloneEditingStack(get().editingStack),
+            imageData: new Map(),
+            sequenceInfoMap: new Map(get().sequenceInfoMap),
+          };
+          Promise.resolve(getEngine().exportGraph()).then(state => {
+            if (preCommitSnapshot) preCommitSnapshot.engineState = state;
+          });
+          collectImageData().then(data => {
+            if (preCommitSnapshot) preCommitSnapshot.imageData = data;
+          });
+        }
+
+        const newNodes = new Map(get().nodes);
+        const node = newNodes.get(nodeId);
+        const liveScale = useSettingsStore.getState().livePreviewScale;
+        const shouldSetPreviewScale = get().previewScale !== liveScale;
+        if (node) {
+          node.inputDefaults = { ...node.inputDefaults, [portName]: value };
+          newNodes.set(nodeId, { ...node });
+          if (shouldSetPreviewScale) {
+            set({ nodes: newNodes, previewScale: liveScale });
+          } else {
+            set({ nodes: newNodes });
+          }
+        } else if (shouldSetPreviewScale) {
+          set({ previewScale: liveScale });
+        }
+
+        getEngine().setInputDefault(nodeId, portName, value);
+        pendingLiveRender = () => triggerAllViewers();
+
+        if (liveRenderRaf === null) {
+          liveRenderRaf = requestAnimationFrame(() => {
+            liveRenderRaf = null;
+            pendingLiveRender?.();
+            pendingLiveRender = null;
+          });
+        }
+
+        if (idlePreviewTimer) clearTimeout(idlePreviewTimer);
+        idlePreviewTimer = setTimeout(() => {
+          idlePreviewTimer = null;
+          set({ previewScale: 1 });
+          triggerAllViewers();
+        }, useSettingsStore.getState().previewIdleDelay);
+      },
+
+      setInputDefaultCommit: async (nodeId, portName, value) => {
+        if (preCommitSnapshot) {
+          if (!preCommitSnapshot.engineState) {
+            preCommitSnapshot.engineState = await getEngine().exportGraph();
+          }
+          undoStack.push(preCommitSnapshot);
+          if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
+          redoStack.length = 0;
+          preCommitSnapshot = null;
+        }
+
+        const newNodes = new Map(get().nodes);
+        const node = newNodes.get(nodeId);
+        if (node) {
+          node.inputDefaults = { ...node.inputDefaults, [portName]: value };
+          newNodes.set(nodeId, { ...node });
+          set({ nodes: newNodes, canUndo: undoStack.length > 0, canRedo: false, previewScale: 1, dirty: true });
+        } else {
+          set({ previewScale: 1 });
+        }
+
+        if (liveRenderRaf !== null) {
+          cancelAnimationFrame(liveRenderRaf);
+          liveRenderRaf = null;
+          pendingLiveRender = null;
+        }
+
+        if (idlePreviewTimer) {
+          clearTimeout(idlePreviewTimer);
+          idlePreviewTimer = null;
+        }
+
+        await getEngine().setInputDefault(nodeId, portName, value);
+        triggerAllViewers();
+      },
+
       setPosition: (nodeId, position) => {
         const newNodes = new Map(get().nodes);
         const node = newNodes.get(nodeId);
@@ -745,6 +989,7 @@ export const useGraphStore = create<GraphState>()(
           node.position = position;
           newNodes.set(nodeId, { ...node });
           set({ nodes: newNodes });
+          getEngine().setPosition(nodeId, position.x, position.y);
         }
       },
 
@@ -760,9 +1005,37 @@ export const useGraphStore = create<GraphState>()(
         file.arrayBuffer().then(async buffer => {
           const data = new Uint8Array(buffer);
           await getEngine().loadImageData(nodeId, data);
+          set({ dirty: true });
           triggerAllViewers();
         }).catch(e => {
           console.error('loadImageFile failed:', e);
+        });
+      },
+
+      getImageData: async (nodeId) => {
+        const eng = getEngine();
+        if (eng.getImageData) {
+          return Promise.resolve(eng.getImageData(nodeId)) ?? null;
+        }
+        return null;
+      },
+
+      loadPaletteFile: (nodeId, file) => {
+        file.arrayBuffer().then(async buffer => {
+          const data = new Uint8Array(buffer);
+          const eng = getEngine();
+          if (!eng.loadPaletteData) return;
+          const colors = await eng.loadPaletteData(nodeId, data);
+          const newNodes = new Map(get().nodes);
+          const node = newNodes.get(nodeId);
+          if (node) {
+            node.params = { ...node.params, colors: { ColorPalette: colors } as ParamValue };
+            newNodes.set(nodeId, { ...node });
+            set({ nodes: newNodes, dirty: true });
+          }
+          triggerAllViewers();
+        }).catch(e => {
+          console.error('loadPaletteFile failed:', e);
         });
       },
 
@@ -838,18 +1111,202 @@ export const useGraphStore = create<GraphState>()(
         triggerAllViewers();
       },
 
+      setSequenceFiles: async (nodeId, files) => {
+        const eng = getEngine();
+        const { info, pattern } = sequenceFrameManager.setFiles(nodeId, files);
+
+        if (eng.setSequenceInfo) {
+          await eng.setSequenceInfo(nodeId, info);
+        }
+
+        await get().setParam(nodeId, 'pattern', { String: pattern } as ParamValue);
+
+        if (info.frame_count > 0) {
+          const frameData = await sequenceFrameManager.getFrameData(nodeId, info.first_frame);
+          if (frameData && eng.loadSequenceFrameData) {
+            await eng.loadSequenceFrameData(nodeId, info.first_frame, frameData);
+          }
+        }
+
+        const newInfoMap = new Map(get().sequenceInfoMap);
+        newInfoMap.set(nodeId, info);
+        set({ sequenceInfoMap: newInfoMap });
+        recomputeSequenceState();
+
+        const { currentFrame, sequenceStart, sequenceLength } = get();
+        if (info.frame_count > 0 && (currentFrame < sequenceStart || currentFrame > sequenceLength)) {
+          set({ currentFrame: sequenceStart });
+        }
+
+        triggerAllViewers();
+      },
+
       renderSequence: async (nodeId) => {
         const eng = getEngine();
-        if (!eng.renderSequence) {
-          set({ lastError: 'Sequence rendering is only available in the desktop app' });
+
+        if (eng.renderSequence) {
+          set({ isRendering: true, renderProgress: null, lastError: null });
+          try {
+            await eng.renderSequence(nodeId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error('[renderSequence] start failed:', msg);
+            set({
+              isRendering: false,
+              lastError: msg,
+              renderProgress: {
+                job_id: '',
+                current_frame: 0,
+                total_frames: 0,
+                completed: true,
+                error: msg,
+              },
+            });
+            return;
+          }
+
+          if (!eng.getJobProgress) {
+            set({ isRendering: false });
+            return;
+          }
+
+          const pollInterval = setInterval(async () => {
+            try {
+              const progress = await eng.getJobProgress!();
+              if (!progress) return;
+              set({ renderProgress: progress });
+              if (progress.completed) {
+                clearInterval(pollInterval);
+                set({
+                  isRendering: false,
+                  lastError: progress.error ?? null,
+                });
+              }
+            } catch {
+              clearInterval(pollInterval);
+              set({ isRendering: false });
+            }
+          }, 250);
+          return;
+        }
+
+        const node = get().nodes.get(nodeId);
+        if (!node) return;
+
+        const { hasSequenceNodes, sequenceStart, sequenceLength } = get();
+
+        let startFrame = node.params['start_frame'] && 'Int' in node.params['start_frame']
+          ? node.params['start_frame'].Int : 0;
+        let endFrame = node.params['end_frame'] && 'Int' in node.params['end_frame']
+          ? node.params['end_frame'].Int : 100;
+
+        // Use detected sequence range when available — the node params may not
+        // have been synced yet due to the async useEffect in the component.
+        if (hasSequenceNodes && sequenceLength > 0) {
+          startFrame = sequenceStart;
+          endFrame = sequenceLength;
+        }
+
+        const step = node.params['step'] && 'Int' in node.params['step']
+          ? node.params['step'].Int : 1;
+        const formatIdx = node.params['format'] && 'Int' in node.params['format']
+          ? node.params['format'].Int : 0;
+
+        if (step <= 0 || startFrame > endFrame) {
+          set({ lastError: 'Invalid frame range' });
+          return;
+        }
+
+        const totalFrames = Math.floor((endFrame - startFrame) / step) + 1;
+        const ext = formatIdx === 1 ? 'jpg' : 'png';
+        const padding = Math.max(4, String(endFrame).length);
+
+        webRenderCancelled = false;
+        set({
+          isRendering: true,
+          lastError: null,
+          renderProgress: {
+            job_id: 'web',
+            current_frame: 0,
+            total_frames: totalFrames,
+            completed: false,
+            error: null,
+          },
+        });
+
+        try {
+          const JSZip = (await import('jszip')).default;
+          const zip = new JSZip();
+          let renderedCount = 0;
+
+          for (let frame = startFrame; frame <= endFrame; frame += step) {
+            if (webRenderCancelled) break;
+
+            await pushSequenceFrames(frame);
+            const bytes = await eng.exportImage(nodeId, frame);
+
+            const frameStr = String(frame).padStart(padding, '0');
+            zip.file(`${frameStr}.${ext}`, bytes);
+
+            renderedCount++;
+            set({
+              renderProgress: {
+                job_id: 'web',
+                current_frame: renderedCount,
+                total_frames: totalFrames,
+                completed: false,
+                error: null,
+              },
+            });
+          }
+
+          if (!webRenderCancelled) {
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `sequence.zip`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+
+          set({
+            isRendering: false,
+            renderProgress: {
+              job_id: 'web',
+              current_frame: renderedCount,
+              total_frames: totalFrames,
+              completed: true,
+              error: webRenderCancelled ? 'Cancelled' : null,
+            },
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          set({
+            isRendering: false,
+            lastError: msg,
+            renderProgress: {
+              job_id: 'web',
+              current_frame: 0,
+              total_frames: totalFrames,
+              completed: true,
+              error: msg,
+            },
+          });
+        }
+      },
+
+      renderVideo: async (nodeId) => {
+        const eng = getEngine();
+        if (!eng.renderVideo) {
+          set({ lastError: 'Video rendering is only available in the desktop app' });
           return;
         }
         set({ isRendering: true, renderProgress: null, lastError: null });
         try {
-          await eng.renderSequence(nodeId);
+          await eng.renderVideo(nodeId);
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          console.error('[renderSequence] start failed:', msg);
           set({
             isRendering: false,
             lastError: msg,
@@ -893,6 +1350,7 @@ export const useGraphStore = create<GraphState>()(
         if (eng.cancelJob) {
           await eng.cancelJob();
         }
+        webRenderCancelled = true;
         set({ isRendering: false });
       },
 
@@ -906,6 +1364,7 @@ export const useGraphStore = create<GraphState>()(
             }).then(async path => {
               if (path) {
                 await eng.saveProject?.(path);
+                set({ dirty: false });
               }
             });
           });
@@ -925,6 +1384,7 @@ export const useGraphStore = create<GraphState>()(
           link.download = 'project.compositor';
           link.click();
           URL.revokeObjectURL(url);
+          set({ dirty: false });
         });
       },
 
@@ -942,7 +1402,7 @@ export const useGraphStore = create<GraphState>()(
           specs.push(spec);
         }
 
-        set({ nodeSpecs: specs });
+        set({ nodeSpecs: specs, dirty: true });
         triggerAllViewers();
         return spec;
       },
@@ -1057,13 +1517,7 @@ export const useGraphStore = create<GraphState>()(
       undo: () => {
         const snapshot = undoStack.pop();
         if (!snapshot) return;
-        Promise.resolve(getEngine().exportGraph()).then(async engineState => {
-          const current: UndoSnapshot = {
-            engineState,
-            nodes: new Map(get().nodes),
-            connections: [...get().connections],
-            editingStack: [...get().editingStack],
-          };
+        captureSnapshot().then(async current => {
           redoStack.push(current);
           await restoreSnapshot(snapshot);
         });
@@ -1072,13 +1526,7 @@ export const useGraphStore = create<GraphState>()(
       redo: () => {
         const snapshot = redoStack.pop();
         if (!snapshot) return;
-        Promise.resolve(getEngine().exportGraph()).then(async engineState => {
-          const current: UndoSnapshot = {
-            engineState,
-            nodes: new Map(get().nodes),
-            connections: [...get().connections],
-            editingStack: [...get().editingStack],
-          };
+        captureSnapshot().then(async current => {
           undoStack.push(current);
           await restoreSnapshot(snapshot);
         });
@@ -1116,6 +1564,7 @@ export const useGraphStore = create<GraphState>()(
             id: n.id,
             typeId: n.typeId,
             params,
+            inputDefaults: n.inputDefaults ?? {},
             position: n.position,
           });
         }
@@ -1135,6 +1584,9 @@ export const useGraphStore = create<GraphState>()(
           label: internalGraph.name,
           groupNodeId,
           groupDefId: internalGraph.groupDefId,
+          savedNodes: new Map(get().nodes),
+          savedConnections: [...get().connections],
+          savedNodeSpecs: [...get().nodeSpecs],
         };
 
         set({
@@ -1162,6 +1614,21 @@ export const useGraphStore = create<GraphState>()(
         const eng = getEngine();
 
         if (index === 0) {
+          const childContext = stack[index + 1];
+          if (childContext?.savedNodes) {
+            const specs = childContext.savedNodeSpecs ?? await Promise.resolve(eng.listNodeTypes());
+            set({
+              editingStack: newStack,
+              nodes: childContext.savedNodes,
+              connections: childContext.savedConnections ?? [],
+              nodeSpecs: specs,
+              selectedNodeIds: new Set(),
+              renderResults: new Map(),
+            });
+            triggerAllViewers();
+            return;
+          }
+
           const graphData = await Promise.resolve(eng.exportGraph());
           const data = graphData as any;
           const specs = await Promise.resolve(eng.listNodeTypes());
@@ -1181,6 +1648,7 @@ export const useGraphStore = create<GraphState>()(
                 id: node.id,
                 typeId: node.type_id,
                 params,
+                inputDefaults: node.input_defaults ?? {},
                 position: { x: node.position[0], y: node.position[1] },
               });
             }
@@ -1208,6 +1676,21 @@ export const useGraphStore = create<GraphState>()(
           });
           triggerAllViewers();
         } else {
+          const childContext = stack[index + 1];
+          if (childContext?.savedNodes) {
+            const specs = childContext.savedNodeSpecs ?? await Promise.resolve(eng.listNodeTypes());
+            set({
+              editingStack: newStack,
+              nodes: childContext.savedNodes,
+              connections: childContext.savedConnections ?? [],
+              nodeSpecs: specs,
+              selectedNodeIds: new Set(),
+              renderResults: new Map(),
+            });
+            triggerAllViewers();
+            return;
+          }
+
           const targetContext = newStack[newStack.length - 1];
           if (targetContext.groupNodeId && eng.getGroupInternalGraph) {
             const internalGraph = await eng.getGroupInternalGraph(targetContext.groupNodeId);
@@ -1219,6 +1702,7 @@ export const useGraphStore = create<GraphState>()(
                 id: n.id,
                 typeId: n.typeId,
                 params: n.params,
+                inputDefaults: n.inputDefaults ?? {},
                 position: n.position,
               });
             }
@@ -1241,6 +1725,7 @@ export const useGraphStore = create<GraphState>()(
               selectedNodeIds: new Set(),
               renderResults: new Map(),
             });
+            triggerAllViewers();
           }
         }
       },
@@ -1278,6 +1763,7 @@ export const useGraphStore = create<GraphState>()(
           id: result.groupNodeId,
           typeId: result.groupDefinitionId,
           params,
+          inputDefaults: {},
           position: { x: centroidX, y: centroidY },
         });
 
@@ -1331,6 +1817,7 @@ export const useGraphStore = create<GraphState>()(
             id: restored.id,
             typeId: restored.typeId,
             params: restored.params,
+            inputDefaults: restored.inputDefaults,
             position: restored.position,
           });
         }
@@ -1359,6 +1846,23 @@ export const useGraphStore = create<GraphState>()(
         });
 
         triggerAllViewers();
+      },
+
+      renameGroup: async (groupNodeId, newName) => {
+        const node = get().nodes.get(groupNodeId);
+        if (!node || !node.typeId.startsWith('group::')) return;
+
+        const eng = getEngine();
+        if (!eng.renameGroup) {
+          set({ lastError: 'Group rename not supported by this engine' });
+          return;
+        }
+
+        await pushUndo();
+        await eng.renameGroup(node.typeId, newName);
+
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        set({ nodeSpecs: specs });
       },
 
       updateGroupInterface: async (inputs, outputs) => {
@@ -1399,6 +1903,7 @@ export const useGraphStore = create<GraphState>()(
             id: n.id,
             typeId: n.typeId,
             params,
+            inputDefaults: n.inputDefaults ?? {},
             position: n.position,
           });
         }
@@ -1455,6 +1960,58 @@ export const useGraphStore = create<GraphState>()(
 
           applyGraphData(graphData);
         });
+      },
+
+      setAiApiKey: async (provider, key) => {
+        const eng = getEngine();
+        if (eng.setAiApiKey) {
+          await eng.setAiApiKey(provider, key);
+        }
+      },
+
+      isAiConfigured: async () => {
+        const eng = getEngine();
+        if (eng.isAiConfigured) {
+          return eng.isAiConfigured();
+        }
+        return false;
+      },
+
+      loadColorManagementInfo: async () => {
+        const eng = getEngine();
+        if (eng.getColorManagementInfo) {
+          const info = await eng.getColorManagementInfo();
+          set({ colorManagement: info });
+        }
+      },
+
+      getViewsForDisplay: async (display: string) => {
+        const eng = getEngine();
+        if (eng.getViewsForDisplay) {
+          return eng.getViewsForDisplay(display);
+        }
+        return [];
+      },
+
+      setDisplayView: async (display: string, view: string) => {
+        const eng = getEngine();
+        if (eng.setDisplayView) {
+          await eng.setDisplayView(display, view);
+          const cm = get().colorManagement;
+          if (cm) {
+            set({ colorManagement: { ...cm, activeDisplay: display, activeView: view } });
+          }
+          renderAllViewersAsync();
+        }
+      },
+
+      setProjectFormat: async (width: number, height: number) => {
+        const eng = getEngine();
+        if (eng.setProjectFormat) {
+          await eng.setProjectFormat(width, height);
+          useSettingsStore.getState().setProjectFormat(width, height);
+          renderAllViewersAsync();
+        }
       },
     };
   })
