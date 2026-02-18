@@ -1,4 +1,7 @@
-use compositor_core::color::BuiltinColorManagement;
+mod ai_provider;
+
+use compositor_core::ai::AiProvider;
+use compositor_core::color::{BuiltinColorManagement, ColorManagement};
 use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
@@ -6,16 +9,17 @@ use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-use compositor_core::types::{FrameTime, NodeSpec, ParamValue, PortSpec, Value};
+use compositor_core::types::{Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{GpuContext, KernelManifest};
-use compositor_nodes_std::{register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImage, Viewer};
+use compositor_nodes_std::{register_standard_nodes, ColorPaletteNode, GpuScriptDraftNode, GroupNode, LoadImage, LoadImageSequence, SequenceInfo, Viewer};
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
+use crate::ai_provider::WasmAiProvider;
 
 #[wasm_bindgen]
 pub struct Engine {
@@ -28,6 +32,11 @@ pub struct Engine {
     uuid_map: HashMap<String, NodeId>,
     gpu_context: Option<Arc<GpuContext>>,
     kernel_manifests: HashMap<String, KernelManifest>,
+    ai_provider: Option<Arc<dyn AiProvider>>,
+    color_management: BuiltinColorManagement,
+    active_display: String,
+    active_view: String,
+    project_format: Format,
 }
 
 #[wasm_bindgen]
@@ -47,6 +56,11 @@ impl Engine {
             uuid_map: HashMap::new(),
             gpu_context: None,
             kernel_manifests: HashMap::new(),
+            ai_provider: None,
+            color_management: BuiltinColorManagement::new(),
+            active_display: "sRGB".to_string(),
+            active_view: "Standard".to_string(),
+            project_format: Format::hd(),
         }
     }
 
@@ -56,6 +70,25 @@ impl Engine {
         compositor_gpu::register_gpu_nodes(Arc::make_mut(&mut self.registry), shared.clone());
         self.gpu_context = Some(shared);
         Ok(())
+    }
+
+    pub fn set_ai_api_key(&mut self, provider: &str, key: &str) -> Result<(), JsValue> {
+        match provider {
+            "openai" | "wasm" => {
+                let ai = Arc::new(WasmAiProvider::new());
+                ai.set_api_key(key.to_string());
+                let ai_provider: Arc<dyn AiProvider> = ai;
+                self.ai_provider = Some(ai_provider);
+                Ok(())
+            }
+            _ => Err(JsValue::from_str("Unknown AI provider")),
+        }
+    }
+
+    pub fn is_ai_configured(&self) -> bool {
+        self.ai_provider
+            .as_ref()
+            .map_or(false, |provider| provider.is_configured())
     }
 
     pub fn compile_script_node(
@@ -116,7 +149,11 @@ impl Engine {
             .list_specs()
             .into_iter()
             .filter(|spec| !spec.id.starts_with("gpu_script::"))
-            .cloned()
+            .map(|spec| {
+                let mut spec = spec.clone();
+                spec.inputs = spec.all_inputs();
+                spec
+            })
             .collect();
         serde_wasm_bindgen::to_value(&specs).unwrap_or(JsValue::NULL)
     }
@@ -243,6 +280,19 @@ impl Engine {
         Ok(())
     }
 
+    pub fn set_input_default(&mut self, node_id: &str, port_name: &str, value: JsValue) -> Result<(), JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let param_spec = self
+            .graph
+            .nodes
+            .get(id)
+            .and_then(|n| self.registry.get_spec(&n.type_id))
+            .and_then(|spec| spec.params.iter().find(|p| p.key == port_name));
+        let param_value = convert_param_value(param_spec, value)?;
+        self.graph.set_input_default(id, port_name, param_value);
+        Ok(())
+    }
+
     pub fn set_position(&mut self, node_id: &str, x: f64, y: f64) {
         if let Ok(id) = parse_node_id(&self.uuid_map, node_id) {
             self.graph.set_position(id, x, y);
@@ -259,27 +309,110 @@ impl Engine {
             .as_any()
             .downcast_ref::<LoadImage>()
             .ok_or_else(|| JsValue::from_str("Node is not LoadImage"))?;
-        load_node.set_image_data(data).map_err(to_js_error)
+        load_node.set_image_data(data).map_err(to_js_error)?;
+        self.graph.mark_dirty(id);
+        Ok(())
     }
 
-    pub async fn render_viewer(
+    pub fn get_image_data(&self, node_id: &str) -> Result<Vec<u8>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let load_node = node
+            .as_any()
+            .downcast_ref::<LoadImage>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImage"))?;
+        load_node
+            .get_image_bytes()
+            .ok_or_else(|| JsValue::from_str("No image data available"))
+    }
+
+    pub fn load_palette_data(&mut self, node_id: &str, data: &[u8]) -> Result<JsValue, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let palette_node = node
+            .as_any()
+            .downcast_ref::<ColorPaletteNode>()
+            .ok_or_else(|| JsValue::from_str("Node is not ColorPaletteNode"))?;
+        let colors = palette_node.load_palette_data(data).map_err(to_js_error)?;
+        let param = ParamValue::ColorPalette(colors);
+        self.graph.set_param(id, "colors", param);
+        self.graph.mark_dirty(id);
+        let colors_ref = match self.graph.nodes.get(id).and_then(|n| n.params.get("colors")) {
+            Some(ParamValue::ColorPalette(c)) => c,
+            _ => return Err(JsValue::from_str("Failed to read back palette")),
+        };
+        serde_wasm_bindgen::to_value(colors_ref).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn load_sequence_frame_data(
         &mut self,
-        viewer_node_id: &str,
+        node_id: &str,
         frame: u64,
-    ) -> Result<Vec<u8>, JsValue> {
-        let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
-        let cm = BuiltinColorManagement::new();
-        let eval_result = self
-            .evaluator
-            .evaluate(
-                &mut self.graph,
-                &self.registry,
-                &self.nodes,
-                id,
-                "display",
-                FrameTime { frame },
-                &cm,
-            )
+        data: &[u8],
+    ) -> Result<(), JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let seq_node = node
+            .as_any()
+            .downcast_ref::<LoadImageSequence>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageSequence"))?;
+        seq_node.set_frame_data(frame, data).map_err(to_js_error)
+    }
+
+    pub fn set_sequence_info(
+        &mut self,
+        node_id: &str,
+        frame_count: u64,
+        first_frame: u64,
+        last_frame: u64,
+    ) -> Result<(), JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let seq_node = node
+            .as_any()
+            .downcast_ref::<LoadImageSequence>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageSequence"))?;
+        seq_node
+            .set_info(SequenceInfo {
+                frame_count,
+                first_frame,
+                last_frame,
+            })
+            .map_err(to_js_error)
+    }
+
+     pub async fn render_viewer(
+         &mut self,
+         viewer_node_id: &str,
+         frame: u64,
+     ) -> Result<Vec<u8>, JsValue> {
+         let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
+         let cm = &self.color_management;
+         let eval_result = self
+             .evaluator
+             .evaluate(
+                 &mut self.graph,
+                 &self.registry,
+                 &self.nodes,
+                 id,
+                 "display",
+                 FrameTime { frame },
+                 cm,
+                 self.ai_provider.as_deref(),
+                 &self.project_format,
+             )
             .await
             .map_err(to_js_error)?;
         self.last_timings = eval_result
@@ -293,7 +426,12 @@ impl Engine {
             })
             .collect();
         match eval_result.value {
-            Value::Image(image) => Ok(Viewer::image_to_rgba8(&image, &cm)),
+            Value::Image(image) => Ok(Viewer::image_to_rgba8_with_display(
+                &image,
+                cm,
+                &self.active_display,
+                &self.active_view,
+            )),
             _ => Err(JsValue::from_str("Viewer output is not an image")),
         }
     }
@@ -302,23 +440,59 @@ impl Engine {
         serde_wasm_bindgen::to_value(&self.last_timings).unwrap_or(JsValue::NULL)
     }
 
-    pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
-        let id = match parse_node_id(&self.uuid_map, viewer_node_id) {
-            Ok(v) => v,
-            Err(_) => return JsValue::NULL,
+    pub fn get_color_management_info(&self) -> JsValue {
+        let cm = &self.color_management;
+        let displays = cm.available_displays();
+        let views: Vec<String> = if let Some(d) = displays.first() {
+            cm.available_views(d)
+        } else {
+            vec![]
         };
-        let cm = BuiltinColorManagement::new();
-        let eval_result = self
-            .evaluator
-            .evaluate(
-                &mut self.graph,
-                &self.registry,
-                &self.nodes,
-                id,
-                "display",
-                FrameTime { frame },
-                &cm,
-            )
+        let info = serde_json::json!({
+            "workingSpace": cm.working_space().to_string(),
+            "activeDisplay": &self.active_display,
+            "activeView": &self.active_view,
+            "displays": displays,
+            "colorSpaces": cm.available_color_spaces(),
+        });
+        serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL)
+    }
+
+    pub fn get_views_for_display(&self, display: &str) -> JsValue {
+        let views = self.color_management.available_views(display);
+        serde_wasm_bindgen::to_value(&views).unwrap_or(JsValue::NULL)
+    }
+
+    pub fn set_display_view(&mut self, display: &str, view: &str) {
+        self.active_display = display.to_string();
+        self.active_view = view.to_string();
+        self.evaluator = Evaluator::new();
+    }
+
+    pub fn set_project_format(&mut self, width: u32, height: u32) {
+        self.project_format = Format::from_dimensions(width, height);
+        self.evaluator = Evaluator::new();
+    }
+
+     pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
+         let id = match parse_node_id(&self.uuid_map, viewer_node_id) {
+             Ok(v) => v,
+             Err(_) => return JsValue::NULL,
+         };
+         let cm = &self.color_management;
+         let eval_result = self
+             .evaluator
+             .evaluate(
+                 &mut self.graph,
+                 &self.registry,
+                 &self.nodes,
+                 id,
+                 "display",
+                 FrameTime { frame },
+                 cm,
+                 self.ai_provider.as_deref(),
+                 &self.project_format,
+             )
             .await;
         if let Ok(eval_result) = eval_result {
             if let Value::Image(image) = eval_result.value {
@@ -344,6 +518,7 @@ impl Engine {
                 id: format_node_id(&self.graph, node.id),
                 type_id: node.type_id.clone(),
                 params: node.params.clone(),
+                input_defaults: node.input_defaults.clone(),
                 position: node.position,
             })
             .collect();
@@ -384,24 +559,31 @@ impl Engine {
             _ => 0,
         };
 
-        let cm = BuiltinColorManagement::new();
-        let eval_result = self
-            .evaluator
-            .evaluate(
-                &mut self.graph,
-                &self.registry,
-                &self.nodes,
-                id,
-                "display",
-                FrameTime { frame },
-                &cm,
-            )
-            .await
-            .map_err(to_js_error)?;
+         let cm = &self.color_management;
+         let eval_result = self
+             .evaluator
+             .evaluate(
+                 &mut self.graph,
+                 &self.registry,
+                 &self.nodes,
+                 id,
+                 "display",
+                 FrameTime { frame },
+                 cm,
+                 self.ai_provider.as_deref(),
+                 &self.project_format,
+             )
+             .await
+             .map_err(to_js_error)?;
 
-        match eval_result.value {
-            Value::Image(image) => {
-                let rgba8 = Viewer::image_to_rgba8(&image, &cm);
+         match eval_result.value {
+             Value::Image(image) => {
+                 let rgba8 = Viewer::image_to_rgba8_with_display(
+                    &image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
                 let mut buf = Vec::new();
 
                 if format == 1 {
@@ -449,14 +631,13 @@ impl Engine {
             for (key, value) in node.params.iter() {
                 self.graph.set_param(new_id, key, value.clone());
             }
-            if let Some(uuid) = self
-                .graph
-                .nodes
-                .get(new_id)
-                .map(|instance| instance.uuid.clone())
-            {
-                self.uuid_map.insert(uuid, new_id);
+            for (port_name, value) in node.input_defaults.iter() {
+                self.graph.set_input_default(new_id, port_name, value.clone());
             }
+            if let Some(instance) = self.graph.nodes.get_mut(new_id) {
+                instance.uuid = node.id.clone();
+            }
+            self.uuid_map.insert(node.id.clone(), new_id);
             if let Some(def) = self.group_definitions.get(&node.type_id) {
                 let group_node = GroupNode::from_definition(def.clone(), &self.registry)
                     .map_err(|err| JsValue::from_str(&err))?;
@@ -525,6 +706,13 @@ impl Engine {
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         let spec = self
             .update_interface_internal(group_def_id, inputs, outputs)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn rename_group(&mut self, group_def_id: &str, new_name: &str) -> Result<JsValue, JsValue> {
+        let spec = self
+            .rename_group_internal(group_def_id, new_name)
             .map_err(to_js_error)?;
         serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
     }
@@ -689,10 +877,19 @@ impl Engine {
             let mut params = info.params.clone();
             params.insert("__group_offset_x".to_string(), ParamValue::Float(ox));
             params.insert("__group_offset_y".to_string(), ParamValue::Float(oy));
+            let image_data = if info.type_id == "load_image" {
+                self.nodes
+                    .get(&info.id)
+                    .and_then(|node_arc| node_arc.as_any().downcast_ref::<LoadImage>())
+                    .and_then(|load_node| load_node.get_image_bytes())
+            } else {
+                None
+            };
             int_nodes.push(InternalNode {
                 id: format_node_id(&self.graph, info.id),
                 type_id: info.type_id.clone(),
                 params,
+                image_data,
             });
         }
         avg_y /= node_count;
@@ -709,6 +906,7 @@ impl Engine {
             id: "gi".to_string(),
             type_id: "group_input".to_string(),
             params: gi_params,
+            image_data: None,
         });
 
         let mut go_params = HashMap::new();
@@ -721,6 +919,7 @@ impl Engine {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
             params: go_params,
+            image_data: None,
         });
 
         for b in &incoming {
@@ -1073,6 +1272,39 @@ impl Engine {
         Ok(spec)
     }
 
+    fn rename_group_internal(
+        &mut self,
+        group_def_id: &str,
+        new_name: &str,
+    ) -> Result<NodeSpec, CompositorError> {
+        let existing = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let mut updated = (*existing.as_ref()).clone();
+        updated.name = new_name.to_string();
+        let spec = self.register_group(updated).map_err(CompositorError::Other)?;
+
+        let def_arc = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CompositorError::Other("Group definition not found".to_string()))?;
+        let group_node_ids: Vec<NodeId> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.type_id == group_def_id)
+            .map(|(id, _)| id)
+            .collect();
+        for node_id in group_node_ids {
+            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
+                .map_err(CompositorError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+        }
+
+        Ok(spec)
+    }
+
     fn add_internal_connection_internal(
         &mut self,
         group_def_id: &str,
@@ -1334,6 +1566,8 @@ struct SerializableNode {
     id: String,
     type_id: String,
     params: HashMap<String, ParamValue>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    input_defaults: HashMap<String, ParamValue>,
     position: (f64, f64),
 }
 
@@ -1417,6 +1651,24 @@ fn convert_param_value(
                 }
             }
             compositor_core::types::ValueType::Color => {
+                if matches!(spec.ui_hint, compositor_core::types::UiHint::ColorPalette) {
+                    if Array::is_array(&value) {
+                        let outer = Array::from(&value);
+                        let mut colors = Vec::with_capacity(outer.length() as usize);
+                        for i in 0..outer.length() {
+                            let inner = Array::from(&outer.get(i));
+                            if inner.length() == 4 {
+                                let mut c = [0.0f64; 4];
+                                for j in 0..4 {
+                                    c[j as usize] = inner.get(j as u32).as_f64()
+                                        .ok_or_else(|| JsValue::from_str("Invalid palette color component"))?;
+                                }
+                                colors.push(c);
+                            }
+                        }
+                        return Ok(ParamValue::ColorPalette(colors));
+                    }
+                }
                 if Array::is_array(&value) {
                     let array = Array::from(&value);
                     if array.length() == 4 {

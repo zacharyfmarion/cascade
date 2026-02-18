@@ -10,6 +10,9 @@ members = [
     "crates/compositor-ocio",
     "apps/tauri/src-tauri",
 ]
+exclude = [
+    "crates/compositor-video",
+]
 
 # Optimize dependencies in dev builds so image/rayon/etc aren't unusably slow.
 # Our own crates stay at opt-level 0 for fast compile times.
