@@ -107,6 +107,13 @@ impl<'a> EvalContext<'a> {
             _ => Err(CompositorError::MissingParam(key.to_string())),
         }
     }
+
+    pub fn get_param_curve_points(&self, key: &str) -> Result<&Vec<CurvePoint>, CompositorError> {
+        match self.params.get(key) {
+            Some(ParamValue::CurvePoints(points)) => Ok(points),
+            _ => Err(CompositorError::MissingParam(key.to_string())),
+        }
+    }
 }
 
 pub trait Node: Send + Sync + Any {

@@ -103,11 +103,7 @@ impl Node for Levels {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -173,7 +169,8 @@ impl Node for Levels {
                         .enumerate()
                         .for_each(|(i, out)| {
                             let idx = i * 4;
-                            let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
+                            let mut rgb =
+                                [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                             let a = image.data[idx + 3];
                             for c in 0..3 {
                                 let mut v = (rgb[c] - in_black) * inv_input_range;
@@ -187,7 +184,12 @@ impl Node for Levels {
                             out[2] = rgb[2];
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -211,6 +213,192 @@ impl Node for Levels {
     }
 }
 
+fn default_curve_points() -> Vec<CurvePoint> {
+    vec![
+        CurvePoint { x: 0.0, y: 0.0 },
+        CurvePoint { x: 1.0, y: 1.0 },
+    ]
+}
+
+fn is_identity_curve(points: &[CurvePoint]) -> bool {
+    if points.len() <= 1 {
+        return true;
+    }
+    if points.len() != 2 {
+        return false;
+    }
+    let epsilon = 1e-9;
+    let matches = |point: &CurvePoint, x: f64, y: f64| {
+        (point.x - x).abs() < epsilon && (point.y - y).abs() < epsilon
+    };
+    (matches(&points[0], 0.0, 0.0) && matches(&points[1], 1.0, 1.0))
+        || (matches(&points[0], 1.0, 1.0) && matches(&points[1], 0.0, 0.0))
+}
+
+/// Build a LUT using monotone cubic Hermite interpolation (Fritsch-Carlson method).
+/// This guarantees smooth curves that never overshoot between control points.
+fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
+    let mut lut = vec![0.0f32; CURVE_LUT_SIZE];
+
+    if points.len() <= 1 {
+        for i in 0..CURVE_LUT_SIZE {
+            lut[i] = i as f32 / CURVE_LUT_SCALE;
+        }
+        return lut;
+    }
+
+    // Sort by x
+    let mut sorted: Vec<(f64, f64)> = points.iter().map(|p| (p.x, p.y)).collect();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Deduplicate: if multiple points share the same x, keep the last
+    let mut knots: Vec<(f64, f64)> = Vec::with_capacity(sorted.len());
+    for (x, y) in sorted {
+        if let Some(last) = knots.last_mut() {
+            if (x - last.0).abs() < 1e-12 {
+                last.1 = y;
+                continue;
+            }
+        }
+        knots.push((x, y));
+    }
+
+    let n = knots.len();
+    if n <= 1 {
+        for i in 0..CURVE_LUT_SIZE {
+            lut[i] = i as f32 / CURVE_LUT_SCALE;
+        }
+        return lut;
+    }
+
+    // Two points → linear
+    if n == 2 {
+        let (x0, y0) = knots[0];
+        let (x1, y1) = knots[1];
+        let dx = x1 - x0;
+        let slope = if dx.abs() < 1e-12 { 0.0 } else { (y1 - y0) / dx };
+        for i in 0..CURVE_LUT_SIZE {
+            let x = i as f64 / CURVE_LUT_SCALE as f64;
+            lut[i] = (y0 + slope * (x - x0)) as f32;
+        }
+        return lut;
+    }
+
+    // Compute deltas between consecutive knots
+    let mut deltas = vec![0.0f64; n - 1];
+    for k in 0..n - 1 {
+        let dx = knots[k + 1].0 - knots[k].0;
+        if dx.abs() < 1e-12 {
+            deltas[k] = 0.0;
+        } else {
+            deltas[k] = (knots[k + 1].1 - knots[k].1) / dx;
+        }
+    }
+
+    // Compute initial tangents
+    let mut tangents = vec![0.0f64; n];
+    tangents[0] = deltas[0];
+    tangents[n - 1] = deltas[n - 2];
+    for k in 1..n - 1 {
+        tangents[k] = (deltas[k - 1] + deltas[k]) / 2.0;
+    }
+
+    // Fritsch-Carlson monotonicity constraints
+    for k in 0..n - 1 {
+        if deltas[k].abs() < 1e-12 {
+            tangents[k] = 0.0;
+            tangents[k + 1] = 0.0;
+        } else {
+            let alpha = tangents[k] / deltas[k];
+            let beta = tangents[k + 1] / deltas[k];
+            let sum_sq = alpha * alpha + beta * beta;
+            if sum_sq > 9.0 {
+                let tau = 3.0 / sum_sq.sqrt();
+                tangents[k] = tau * alpha * deltas[k];
+                tangents[k + 1] = tau * beta * deltas[k];
+            }
+        }
+    }
+
+    // Evaluate LUT using cubic Hermite interpolation
+    for i in 0..CURVE_LUT_SIZE {
+        let x = i as f64 / CURVE_LUT_SCALE as f64;
+
+        // Extrapolate left
+        if x <= knots[0].0 {
+            let slope = tangents[0];
+            lut[i] = (knots[0].1 + slope * (x - knots[0].0)) as f32;
+            continue;
+        }
+
+        // Extrapolate right
+        if x >= knots[n - 1].0 {
+            let slope = tangents[n - 1];
+            lut[i] = (knots[n - 1].1 + slope * (x - knots[n - 1].0)) as f32;
+            continue;
+        }
+
+        // Find segment
+        let mut seg = 0;
+        while seg + 1 < n && x > knots[seg + 1].0 {
+            seg += 1;
+        }
+
+        let dx = knots[seg + 1].0 - knots[seg].0;
+        if dx.abs() < 1e-12 {
+            lut[i] = knots[seg].1 as f32;
+            continue;
+        }
+
+        let t = (x - knots[seg].0) / dx;
+        let t2 = t * t;
+        let t3 = t2 * t;
+
+        // Hermite basis functions
+        let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+        let h10 = t3 - 2.0 * t2 + t;
+        let h01 = -2.0 * t3 + 3.0 * t2;
+        let h11 = t3 - t2;
+
+        let y = h00 * knots[seg].1
+            + h10 * dx * tangents[seg]
+            + h01 * knots[seg + 1].1
+            + h11 * dx * tangents[seg + 1];
+
+        lut[i] = y as f32;
+    }
+
+    lut
+}
+
+fn apply_lut(value: f32, lut: &[f32]) -> f32 {
+    if value <= 0.0 {
+        let slope = (lut[1] - lut[0]) * CURVE_LUT_SCALE;
+        lut[0] + value * slope
+    } else if value >= 1.0 {
+        let last = lut.len() - 1;
+        let slope = (lut[last] - lut[last - 1]) * CURVE_LUT_SCALE;
+        lut[last] + (value - 1.0) * slope
+    } else {
+        let idx = (value * CURVE_LUT_SCALE) as usize;
+        lut[idx]
+    }
+}
+
+fn make_curve_param(key: &str, label: &str) -> ParamSpec {
+    ParamSpec {
+        key: key.to_string(),
+        label: label.to_string(),
+        ty: ValueType::Float,
+        default: ParamDefault::CurvePoints(default_curve_points()),
+        min: None,
+        max: None,
+        step: None,
+        ui_hint: UiHint::CurveEditor,
+        promotable: false,
+    }
+}
+
 pub struct Curves;
 
 impl Curves {
@@ -225,7 +413,7 @@ impl Node for Curves {
             id: "curves".to_string(),
             display_name: "Curves".to_string(),
             category: "Color".to_string(),
-            description: "Adjust curves".to_string(),
+            description: "Per-channel curve adjustment with monotone cubic interpolation".to_string(),
             inputs: vec![
                 PortSpec {
                     name: "image".to_string(),
@@ -248,95 +436,91 @@ impl Node for Curves {
             }],
             params: vec![
                 ParamSpec {
-                    key: "black_point".to_string(),
-                    label: "Black Point".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                    promotable: true,
+                    key: "channel".to_string(),
+                    label: "Channel".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Dropdown(vec![
+                        "Master".to_string(),
+                        "Red".to_string(),
+                        "Green".to_string(),
+                        "Blue".to_string(),
+                    ]),
+                    promotable: false,
                 },
-                ParamSpec {
-                    key: "shadows".to_string(),
-                    label: "Shadows".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.25),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                    promotable: true,
-                },
-                ParamSpec {
-                    key: "midtones".to_string(),
-                    label: "Midtones".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.5),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                    promotable: true,
-                },
-                ParamSpec {
-                    key: "highlights".to_string(),
-                    label: "Highlights".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(0.75),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                    promotable: true,
-                },
-                ParamSpec {
-                    key: "white_point".to_string(),
-                    label: "White Point".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(1.0),
-                    min: Some(0.0),
-                    max: Some(1.0),
-                    step: Some(0.01),
-                    ui_hint: UiHint::Slider,
-                    promotable: true,
-                },
+                make_curve_param("master_curve", "Master"),
+                make_curve_param("red_curve", "Red"),
+                make_curve_param("green_curve", "Green"),
+                make_curve_param("blue_curve", "Blue"),
             ],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
+            let master_pts = ctx.get_param_curve_points("master_curve")?;
+            let red_pts = ctx.get_param_curve_points("red_curve")?;
+            let green_pts = ctx.get_param_curve_points("green_curve")?;
+            let blue_pts = ctx.get_param_curve_points("blue_curve")?;
+
+            let has_master = !is_identity_curve(master_pts);
+            let has_red = !is_identity_curve(red_pts);
+            let has_green = !is_identity_curve(green_pts);
+            let has_blue = !is_identity_curve(blue_pts);
+
+            // Build LUTs only for non-identity curves
+            let master_lut = if has_master {
+                Some(build_monotone_cubic_lut(master_pts))
+            } else {
+                None
+            };
+            let red_lut = if has_red {
+                Some(build_monotone_cubic_lut(red_pts))
+            } else {
+                None
+            };
+            let green_lut = if has_green {
+                Some(build_monotone_cubic_lut(green_pts))
+            } else {
+                None
+            };
+            let blue_lut = if has_blue {
+                Some(build_monotone_cubic_lut(blue_pts))
+            } else {
+                None
+            };
+
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
-                    let black_point = ctx.get_param_float("black_point")? as f32;
-                    let shadows = ctx.get_param_float("shadows")? as f32;
-                    let midtones = ctx.get_param_float("midtones")? as f32;
-                    let highlights = ctx.get_param_float("highlights")? as f32;
-                    let white_point = ctx.get_param_float("white_point")? as f32;
-                    let lut = Arc::new(build_curves_lut(
-                        black_point,
-                        shadows,
-                        midtones,
-                        highlights,
-                        white_point,
-                    ));
+                    let master_lut = master_lut.map(Arc::new);
+                    let red_lut = red_lut.map(Arc::new);
+                    let green_lut = green_lut.map(Arc::new);
+                    let blue_lut = blue_lut.map(Arc::new);
                     let source = field.sample_fn.clone();
                     let transform = field.transform.clone();
                     let wrapped = Field::with_transform(
                         move |u, v| {
-                            let [r, g, b, a] = (source)(u, v);
-                            let mut rgb = [r, g, b];
-                            for c in 0..3 {
-                                let lut_idx = (rgb[c].clamp(0.0, 1.0) * CURVE_LUT_SCALE) as usize;
-                                rgb[c] = lut[lut_idx];
+                            let [mut r, mut g, mut b, a] = (source)(u, v);
+                            // Apply master curve to all channels
+                            if let Some(ref lut) = master_lut {
+                                r = apply_lut(r, lut);
+                                g = apply_lut(g, lut);
+                                b = apply_lut(b, lut);
                             }
-                            [rgb[0], rgb[1], rgb[2], a]
+                            // Apply per-channel curves
+                            if let Some(ref lut) = red_lut {
+                                r = apply_lut(r, lut);
+                            }
+                            if let Some(ref lut) = green_lut {
+                                g = apply_lut(g, lut);
+                            }
+                            if let Some(ref lut) = blue_lut {
+                                b = apply_lut(b, lut);
+                            }
+                            [r, g, b, a]
                         },
                         transform,
                     );
@@ -345,30 +529,43 @@ impl Node for Curves {
                     Ok(outputs)
                 }
                 ImageOrField::Image(image) => {
-                    let black_point = ctx.get_param_float("black_point")? as f32;
-                    let shadows = ctx.get_param_float("shadows")? as f32;
-                    let midtones = ctx.get_param_float("midtones")? as f32;
-                    let highlights = ctx.get_param_float("highlights")? as f32;
-                    let white_point = ctx.get_param_float("white_point")? as f32;
-                    let lut = build_curves_lut(black_point, shadows, midtones, highlights, white_point);
                     let pixel_count = image.pixel_count();
                     let mut data = vec![0.0f32; pixel_count * 4];
                     data.par_chunks_exact_mut(4)
                         .enumerate()
                         .for_each(|(i, out)| {
                             let idx = i * 4;
-                            let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
+                            let mut r = image.data[idx];
+                            let mut g = image.data[idx + 1];
+                            let mut b = image.data[idx + 2];
                             let a = image.data[idx + 3];
-                            for c in 0..3 {
-                                let lut_idx = (rgb[c].clamp(0.0, 1.0) * CURVE_LUT_SCALE) as usize;
-                                rgb[c] = lut[lut_idx];
+                            // Apply master curve to all channels
+                            if let Some(ref lut) = master_lut {
+                                r = apply_lut(r, lut);
+                                g = apply_lut(g, lut);
+                                b = apply_lut(b, lut);
                             }
-                            out[0] = rgb[0];
-                            out[1] = rgb[1];
-                            out[2] = rgb[2];
+                            // Apply per-channel curves
+                            if let Some(ref lut) = red_lut {
+                                r = apply_lut(r, lut);
+                            }
+                            if let Some(ref lut) = green_lut {
+                                g = apply_lut(g, lut);
+                            }
+                            if let Some(ref lut) = blue_lut {
+                                b = apply_lut(b, lut);
+                            }
+                            out[0] = r;
+                            out[1] = g;
+                            out[2] = b;
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -531,11 +728,7 @@ impl Node for ColorBalance {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -556,7 +749,8 @@ impl Node for ColorBalance {
                             let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
                             let shadow_weight = (1.0 - luminance * 2.0).clamp(0.0, 1.0);
                             let highlight_weight = (luminance * 2.0 - 1.0).clamp(0.0, 1.0);
-                            let mid_weight = (1.0 - shadow_weight - highlight_weight).clamp(0.0, 1.0);
+                            let mid_weight =
+                                (1.0 - shadow_weight - highlight_weight).clamp(0.0, 1.0);
                             r += shadow_r * shadow_weight
                                 + mid_r * mid_weight
                                 + highlight_r * highlight_weight;
@@ -600,7 +794,8 @@ impl Node for ColorBalance {
                             let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
                             let shadow_weight = (1.0 - luminance * 2.0).clamp(0.0, 1.0);
                             let highlight_weight = (luminance * 2.0 - 1.0).clamp(0.0, 1.0);
-                            let mid_weight = (1.0 - shadow_weight - highlight_weight).clamp(0.0, 1.0);
+                            let mid_weight =
+                                (1.0 - shadow_weight - highlight_weight).clamp(0.0, 1.0);
                             r += shadow_r * shadow_weight
                                 + mid_r * mid_weight
                                 + highlight_r * highlight_weight;
@@ -618,7 +813,12 @@ impl Node for ColorBalance {
                             out[2] = b;
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -746,11 +946,7 @@ impl Node for ChannelShuffle {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -801,7 +997,12 @@ impl Node for ChannelShuffle {
                             out[2] = channels[sources[2]];
                             out[3] = channels[sources[3]];
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -869,16 +1070,12 @@ impl Node for Threshold {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -917,7 +1114,12 @@ impl Node for Threshold {
                             out[2] = value;
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -985,16 +1187,12 @@ impl Node for Posterize {
                 max: Some(256.0),
                 step: Some(1.0),
                 ui_hint: UiHint::NumberInput,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -1027,7 +1225,8 @@ impl Node for Posterize {
                         .enumerate()
                         .for_each(|(i, out)| {
                             let idx = i * 4;
-                            let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
+                            let mut rgb =
+                                [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                             let a = image.data[idx + 3];
                             for c in 0..3 {
                                 let v = rgb[c].clamp(0.0, 1.0);
@@ -1038,7 +1237,12 @@ impl Node for Posterize {
                             out[2] = rgb[2];
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -1106,16 +1310,12 @@ impl Node for Gamma {
                 max: Some(10.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -1168,7 +1368,8 @@ impl Node for Gamma {
                             .enumerate()
                             .for_each(|(i, out)| {
                                 let idx = i * 4;
-                                let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
+                                let mut rgb =
+                                    [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                                 let a = image.data[idx + 3];
                                 for c in 0..3 {
                                     rgb[c] = rgb[c].powf(inv_gamma);
@@ -1179,7 +1380,12 @@ impl Node for Gamma {
                                 out[3] = a;
                             });
                     }
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -1265,11 +1471,7 @@ impl Node for WhiteBalance {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -1322,7 +1524,12 @@ impl Node for WhiteBalance {
                             out[2] = b;
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -1390,16 +1597,12 @@ impl Node for Vibrance {
                 max: Some(1.0),
                 step: Some(0.01),
                 ui_hint: UiHint::Slider,
-                    promotable: true,
+                promotable: true,
             }],
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -1442,7 +1645,12 @@ impl Node for Vibrance {
                             out[2] = nb;
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -1616,11 +1824,7 @@ impl Node for GradientMap {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -1711,7 +1915,12 @@ impl Node for GradientMap {
                             out[2] = out_b;
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -1801,11 +2010,7 @@ impl Node for ToneMap {
         }
     }
 
-    fn evaluate<'a>(
-        &'a self,
-        ctx: &'a EvalContext<'a>,
-    ) -> NodeFuture<'a>
-    {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             match ctx.get_input_image_or_field("image")? {
                 ImageOrField::Field(field) => {
@@ -1881,7 +2086,12 @@ impl Node for ToneMap {
                             out[2] = b.clamp(0.0, 1.0);
                             out[3] = a;
                         });
-                    let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
                         crate::mask_utils::apply_mask(original, &output, mask)
@@ -1905,39 +2115,7 @@ impl Node for ToneMap {
     }
 }
 
-fn build_curves_lut(
-    black_point: f32,
-    shadows: f32,
-    midtones: f32,
-    highlights: f32,
-    white_point: f32,
-) -> Vec<f32> {
-    let mut lut = vec![0.0f32; CURVE_LUT_SIZE];
-    for i in 0..CURVE_LUT_SIZE {
-        let x = i as f32 / CURVE_LUT_SCALE;
-        lut[i] = eval_curve(x, black_point, shadows, midtones, highlights, white_point);
-    }
-    lut
-}
 
-fn eval_curve(
-    x: f32,
-    black_point: f32,
-    shadows: f32,
-    midtones: f32,
-    highlights: f32,
-    white_point: f32,
-) -> f32 {
-    if x <= 0.25 {
-        lerp(black_point, shadows, x / 0.25)
-    } else if x <= 0.5 {
-        lerp(shadows, midtones, (x - 0.25) / 0.25)
-    } else if x <= 0.75 {
-        lerp(midtones, highlights, (x - 0.5) / 0.25)
-    } else {
-        lerp(highlights, white_point, (x - 0.75) / 0.25)
-    }
-}
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
@@ -2007,5 +2185,467 @@ fn clamp_channel_source(value: i64) -> usize {
         3
     } else {
         value as usize
+    }
+}
+
+pub struct Grade;
+
+impl Grade {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for Grade {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "grade".to_string(),
+            display_name: "Grade".to_string(),
+            category: "Color".to_string(),
+            description: "Lift/Gamma/Gain color correction per channel".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "mask".to_string(),
+                    label: "Mask".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "lift_r".to_string(),
+                    label: "Lift R".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(1.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "lift_g".to_string(),
+                    label: "Lift G".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(1.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "lift_b".to_string(),
+                    label: "Lift B".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(1.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gamma_r".to_string(),
+                    label: "Gamma R".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.1),
+                    max: Some(4.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gamma_g".to_string(),
+                    label: "Gamma G".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.1),
+                    max: Some(4.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gamma_b".to_string(),
+                    label: "Gamma B".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.1),
+                    max: Some(4.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gain_r".to_string(),
+                    label: "Gain R".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.0),
+                    max: Some(4.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gain_g".to_string(),
+                    label: "Gain G".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.0),
+                    max: Some(4.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "gain_b".to_string(),
+                    label: "Gain B".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.0),
+                    max: Some(4.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let lift = [
+                        ctx.get_param_float("lift_r")? as f32,
+                        ctx.get_param_float("lift_g")? as f32,
+                        ctx.get_param_float("lift_b")? as f32,
+                    ];
+                    let gamma = [
+                        ctx.get_param_float("gamma_r")? as f32,
+                        ctx.get_param_float("gamma_g")? as f32,
+                        ctx.get_param_float("gamma_b")? as f32,
+                    ];
+                    let gain = [
+                        ctx.get_param_float("gain_r")? as f32,
+                        ctx.get_param_float("gain_g")? as f32,
+                        ctx.get_param_float("gain_b")? as f32,
+                    ];
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let wrapped = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, a] = (source)(u, v);
+                            let mut rgb = [r, g, b];
+                            for c in 0..3 {
+                                // Nuke-style Grade: output = gain * (input + lift)^(1/gamma)
+                                let inv_gamma = if gamma[c].abs() > f32::EPSILON {
+                                    1.0 / gamma[c]
+                                } else {
+                                    1.0
+                                };
+                                let lifted = rgb[c] + lift[c];
+                                let lifted_positive = lifted.max(0.0);
+                                rgb[c] = gain[c] * lifted_positive.powf(inv_gamma);
+                            }
+                            [rgb[0], rgb[1], rgb[2], a]
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(wrapped));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let lift = [
+                        ctx.get_param_float("lift_r")? as f32,
+                        ctx.get_param_float("lift_g")? as f32,
+                        ctx.get_param_float("lift_b")? as f32,
+                    ];
+                    let gamma = [
+                        ctx.get_param_float("gamma_r")? as f32,
+                        ctx.get_param_float("gamma_g")? as f32,
+                        ctx.get_param_float("gamma_b")? as f32,
+                    ];
+                    let gain = [
+                        ctx.get_param_float("gain_r")? as f32,
+                        ctx.get_param_float("gain_g")? as f32,
+                        ctx.get_param_float("gain_b")? as f32,
+                    ];
+                    let inv_gamma = [
+                        if gamma[0].abs() > f32::EPSILON { 1.0 / gamma[0] } else { 1.0 },
+                        if gamma[1].abs() > f32::EPSILON { 1.0 / gamma[1] } else { 1.0 },
+                        if gamma[2].abs() > f32::EPSILON { 1.0 / gamma[2] } else { 1.0 },
+                    ];
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let mut rgb = [
+                                image.data[idx],
+                                image.data[idx + 1],
+                                image.data[idx + 2],
+                            ];
+                            let a = image.data[idx + 3];
+                            for c in 0..3 {
+                                let lifted = rgb[c] + lift[c];
+                                let lifted_positive = lifted.max(0.0);
+                                rgb[c] = gain[c] * lifted_positive.powf(inv_gamma[c]);
+                            }
+                            out[0] = rgb[0];
+                            out[1] = rgb[1];
+                            out[2] = rgb[2];
+                            out[3] = a;
+                        });
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
+                    let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                        let original = ctx.get_input_image("image")?;
+                        crate::mask_utils::apply_mask(original, &output, mask)
+                    } else {
+                        output
+                    };
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct Clamp;
+
+impl Clamp {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for Clamp {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "clamp".to_string(),
+            display_name: "Clamp".to_string(),
+            category: "Color".to_string(),
+            description: "Clamp pixel values to a range".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "mask".to_string(),
+                    label: "Mask".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "min_r".to_string(),
+                    label: "Min R".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "min_g".to_string(),
+                    label: "Min G".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "min_b".to_string(),
+                    label: "Min B".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "max_r".to_string(),
+                    label: "Max R".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "max_g".to_string(),
+                    label: "Max G".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "max_b".to_string(),
+                    label: "Max B".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "clamp_alpha".to_string(),
+                    label: "Clamp Alpha".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let min_vals = [
+                        ctx.get_param_float("min_r")? as f32,
+                        ctx.get_param_float("min_g")? as f32,
+                        ctx.get_param_float("min_b")? as f32,
+                    ];
+                    let max_vals = [
+                        ctx.get_param_float("max_r")? as f32,
+                        ctx.get_param_float("max_g")? as f32,
+                        ctx.get_param_float("max_b")? as f32,
+                    ];
+                    let clamp_alpha = ctx.get_param_bool("clamp_alpha")?;
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let wrapped = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, a] = (source)(u, v);
+                            let out_a = if clamp_alpha { a.clamp(0.0, 1.0) } else { a };
+                            [
+                                r.clamp(min_vals[0], max_vals[0]),
+                                g.clamp(min_vals[1], max_vals[1]),
+                                b.clamp(min_vals[2], max_vals[2]),
+                                out_a,
+                            ]
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(wrapped));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let min_vals = [
+                        ctx.get_param_float("min_r")? as f32,
+                        ctx.get_param_float("min_g")? as f32,
+                        ctx.get_param_float("min_b")? as f32,
+                    ];
+                    let max_vals = [
+                        ctx.get_param_float("max_r")? as f32,
+                        ctx.get_param_float("max_g")? as f32,
+                        ctx.get_param_float("max_b")? as f32,
+                    ];
+                    let clamp_alpha = ctx.get_param_bool("clamp_alpha")?;
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let r = image.data[idx];
+                            let g = image.data[idx + 1];
+                            let b = image.data[idx + 2];
+                            let a = image.data[idx + 3];
+                            out[0] = r.clamp(min_vals[0], max_vals[0]);
+                            out[1] = g.clamp(min_vals[1], max_vals[1]);
+                            out[2] = b.clamp(min_vals[2], max_vals[2]);
+                            out[3] = if clamp_alpha { a.clamp(0.0, 1.0) } else { a };
+                        });
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    );
+                    let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                        let original = ctx.get_input_image("image")?;
+                        crate::mask_utils::apply_mask(original, &output, mask)
+                    } else {
+                        output
+                    };
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
     }
 }

@@ -545,6 +545,12 @@ pub struct ColorStop {
     pub color: [f64; 4],
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CurvePoint {
+    pub x: f64,
+    pub y: f64,
+}
+
 impl Value {
     pub fn value_type(&self) -> ValueType {
         match self {
@@ -615,6 +621,7 @@ pub enum UiHint {
     ColorPalette,
     Hidden,
     TextArea,
+    CurveEditor,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -643,6 +650,7 @@ pub enum ParamDefault {
     Color([f64; 4]),
     ColorRamp(Vec<ColorStop>),
     ColorPalette(Vec<[f64; 4]>),
+    CurvePoints(Vec<CurvePoint>),
     String(String),
 }
 
@@ -734,6 +742,7 @@ pub enum ParamValue {
     Color([f64; 4]),
     ColorRamp(Vec<ColorStop>),
     ColorPalette(Vec<[f64; 4]>),
+    CurvePoints(Vec<CurvePoint>),
     String(String),
 }
 
