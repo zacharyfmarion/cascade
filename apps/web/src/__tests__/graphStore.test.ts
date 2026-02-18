@@ -1,0 +1,450 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
+import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
+import { useSettingsStore } from '../store/settingsStore';
+
+if (!('window' in globalThis)) {
+  Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
+}
+
+let mockEngine = createMockEngine();
+
+vi.mock('../engine/wasmEngine', () => ({
+  initWasmEngine: vi.fn(),
+  get wasmEngine() {
+    return mockEngine;
+  },
+}));
+
+type GraphStore = typeof import('../store/graphStore')['useGraphStore'];
+
+let useGraphStore: GraphStore;
+
+const createInitialState = () => ({
+  nodes: new Map<string, NodeInstance>(),
+  connections: [] as Connection[],
+  selectedNodeIds: new Set<string>(),
+  nodeSpecs: [] as NodeSpec[],
+  engineReady: false,
+  renderResults: new Map(),
+  lastError: null,
+  canUndo: false,
+  canRedo: false,
+  currentFrame: 0,
+  renderProgress: null,
+  isRendering: false,
+  previewScale: 1,
+  dirty: false,
+  hasSequenceNodes: false,
+  sequenceLength: 0,
+  sequenceStart: 0,
+  sequenceInfoMap: new Map(),
+  isPlaying: false,
+  fps: useSettingsStore.getState().defaultFps,
+  loopPlayback: useSettingsStore.getState().loopPlayback,
+  editingStack: [{ id: 'root', label: 'Root' }],
+  nodeTimings: new Map(),
+});
+
+const flushPromises = async (ticks = 1) => {
+  for (let i = 0; i < ticks; i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+};
+
+beforeEach(async () => {
+  vi.resetModules();
+  mockEngine = createMockEngine();
+  const mod = await import('../store/graphStore');
+  useGraphStore = mod.useGraphStore;
+  useGraphStore.setState(createInitialState());
+  resetNodeCounter();
+  await useGraphStore.getState().initEngine();
+});
+
+describe('graphStore initialization', () => {
+  it('initEngine sets engineReady and loads node specs', () => {
+    const state = useGraphStore.getState();
+    expect(state.engineReady).toBe(true);
+    expect(state.nodeSpecs.length).toBe(NODE_SPECS.length);
+    expect(state.nodeSpecs.map(s => s.id)).toContain('load_image');
+  });
+
+  it('initial state has empty nodes and connections with no errors', () => {
+    const state = useGraphStore.getState();
+    expect(state.nodes.size).toBe(0);
+    expect(state.connections.length).toBe(0);
+    expect(state.lastError).toBeNull();
+  });
+});
+
+describe('graphStore node CRUD', () => {
+  it('addNode creates node with type, position, defaults', async () => {
+    const id = await useGraphStore.getState().addNode('load_image', { x: 10, y: 20 });
+    const node = useGraphStore.getState().nodes.get(id);
+    expect(node?.typeId).toBe('load_image');
+    expect(node?.position).toEqual({ x: 10, y: 20 });
+    expect(node?.params.file).toEqual({ String: '' } as ParamValue);
+  });
+
+  it('addNode returns the node id', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    expect(id.length).toBeGreaterThan(0);
+    expect(useGraphStore.getState().nodes.has(id)).toBe(true);
+  });
+
+  it('addNode populates default params for multi-param nodes', async () => {
+    const id = await useGraphStore.getState().addNode('brightness_contrast', { x: 1, y: 2 });
+    const node = useGraphStore.getState().nodes.get(id);
+    expect(node?.params.brightness).toEqual({ Float: 0 } as ParamValue);
+    expect(node?.params.contrast).toEqual({ Float: 0 } as ParamValue);
+  });
+
+  it('removeNode deletes the node from the map', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    await useGraphStore.getState().removeNode(id);
+    expect(useGraphStore.getState().nodes.has(id)).toBe(false);
+  });
+
+  it('removeNode removes connections involving the node', async () => {
+    const fromId = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const toId = await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+    expect(useGraphStore.getState().connections.length).toBe(1);
+    await useGraphStore.getState().removeNode(fromId);
+    expect(useGraphStore.getState().connections.length).toBe(0);
+  });
+
+  it('removeNode removes node from selection', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().selectNode(id);
+    await useGraphStore.getState().removeNode(id);
+    expect(useGraphStore.getState().selectedNodeIds.has(id)).toBe(false);
+  });
+
+  it('removeNode for sequence node recomputes sequence state', async () => {
+    const id = await useGraphStore.getState().addNode('load_image_sequence', { x: 0, y: 0 });
+    useGraphStore.setState({
+      sequenceInfoMap: new Map([
+        [id, { frame_count: 10, first_frame: 1, last_frame: 10 }],
+      ]),
+    });
+    expect(useGraphStore.getState().hasSequenceNodes).toBe(true);
+    await useGraphStore.getState().removeNode(id);
+    const state = useGraphStore.getState();
+    expect(state.hasSequenceNodes).toBe(false);
+    expect(state.sequenceLength).toBe(0);
+    expect(state.sequenceStart).toBe(0);
+  });
+});
+
+describe('graphStore connections', () => {
+  it('connect adds a connection with correct endpoints', async () => {
+    const fromId = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const toId = await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+    const conn = useGraphStore.getState().connections[0];
+    expect(conn.fromNode).toBe(fromId);
+    expect(conn.toNode).toBe(toId);
+    expect(conn.fromPort).toBe('image');
+    expect(conn.toPort).toBe('image');
+  });
+
+  it('connect is idempotent and avoids duplicate connections', async () => {
+    const fromId = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const toId = await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+    expect(useGraphStore.getState().connections.length).toBe(1);
+  });
+
+  it('disconnect removes a connection by id', async () => {
+    const fromId = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const toId = await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+    const connId = useGraphStore.getState().connections[0].id;
+    await useGraphStore.getState().disconnect(connId);
+    expect(useGraphStore.getState().connections.length).toBe(0);
+  });
+
+  it('disconnect is a no-op for unknown connection', async () => {
+    await useGraphStore.getState().disconnect('missing');
+    expect(useGraphStore.getState().connections.length).toBe(0);
+  });
+});
+
+describe('graphStore parameters and positioning', () => {
+  it('setParam updates the node param value', async () => {
+    const id = await useGraphStore.getState().addNode('brightness_contrast', { x: 0, y: 0 });
+    await useGraphStore.getState().setParam(id, 'brightness', { Float: 0.5 });
+    expect(useGraphStore.getState().nodes.get(id)?.params.brightness).toEqual({ Float: 0.5 } as ParamValue);
+  });
+
+  it('setParam calls engine.setParam', async () => {
+    const id = await useGraphStore.getState().addNode('brightness_contrast', { x: 0, y: 0 });
+    const spy = vi.spyOn(mockEngine, 'setParam');
+    await useGraphStore.getState().setParam(id, 'brightness', { Float: 0.2 });
+    expect(spy).toHaveBeenCalledWith(id, 'brightness', { Float: 0.2 });
+  });
+
+  it('setPosition updates the node position', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().setPosition(id, { x: 5, y: 6 });
+    expect(useGraphStore.getState().nodes.get(id)?.position).toEqual({ x: 5, y: 6 });
+  });
+
+  it('setPosition for non-existent node is a no-op', () => {
+    useGraphStore.getState().setPosition('missing', { x: 1, y: 1 });
+    expect(useGraphStore.getState().nodes.size).toBe(0);
+  });
+});
+
+describe('graphStore input defaults', () => {
+  it('setInputDefault updates node inputDefaults', async () => {
+    const id = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
+    await useGraphStore.getState().setInputDefault(id, 'image', { String: 'default' });
+    expect(useGraphStore.getState().nodes.get(id)?.inputDefaults.image).toEqual({ String: 'default' } as ParamValue);
+  });
+
+  it('setInputDefault calls engine.setInputDefault', async () => {
+    const id = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
+    const spy = vi.spyOn(mockEngine, 'setInputDefault');
+    await useGraphStore.getState().setInputDefault(id, 'image', { String: 'x' });
+    expect(spy).toHaveBeenCalledWith(id, 'image', { String: 'x' });
+  });
+});
+
+describe('graphStore selection', () => {
+  it('selectNode sets selectedNodeIds to single id', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().selectNode(id);
+    expect(useGraphStore.getState().selectedNodeIds).toEqual(new Set([id]));
+  });
+
+  it('selectNode with null clears selection', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().selectNode(id);
+    useGraphStore.getState().selectNode(null);
+    expect(useGraphStore.getState().selectedNodeIds.size).toBe(0);
+  });
+
+  it('setSelectedNodes sets multiple ids', async () => {
+    const id1 = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id2 = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
+    useGraphStore.getState().setSelectedNodes([id1, id2]);
+    expect(useGraphStore.getState().selectedNodeIds).toEqual(new Set([id1, id2]));
+  });
+});
+
+describe('graphStore undo/redo', () => {
+  it('after addNode, canUndo is true', async () => {
+    await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    expect(useGraphStore.getState().canUndo).toBe(true);
+  });
+
+  it('undo removes the node', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().undo();
+    await flushPromises(2);
+    expect(useGraphStore.getState().nodes.has(id)).toBe(false);
+  });
+
+  it('redo restores the node after undo', async () => {
+    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().undo();
+    await flushPromises(2);
+    useGraphStore.getState().redo();
+    await flushPromises(2);
+    expect(useGraphStore.getState().nodes.has(id)).toBe(true);
+  });
+
+  it('undo with empty stack is a no-op', async () => {
+    useGraphStore.getState().undo();
+    await flushPromises(1);
+    expect(useGraphStore.getState().nodes.size).toBe(0);
+  });
+
+  it('redo with empty stack is a no-op', async () => {
+    useGraphStore.getState().redo();
+    await flushPromises(1);
+    expect(useGraphStore.getState().nodes.size).toBe(0);
+  });
+
+  it('new mutation after undo clears redo stack', async () => {
+    await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    useGraphStore.getState().undo();
+    await flushPromises(2);
+    await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+    expect(useGraphStore.getState().canRedo).toBe(false);
+  });
+
+  it('dirty flag is set on mutations', async () => {
+    await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    expect(useGraphStore.getState().dirty).toBe(true);
+  });
+});
+
+describe('graphStore frame and playback controls', () => {
+  it('setCurrentFrame updates currentFrame', () => {
+    useGraphStore.getState().setCurrentFrame(12);
+    expect(useGraphStore.getState().currentFrame).toBe(12);
+  });
+
+  it('stepForward increments currentFrame by 1', () => {
+    useGraphStore.setState({ currentFrame: 1, sequenceLength: 10 });
+    useGraphStore.getState().stepForward();
+    expect(useGraphStore.getState().currentFrame).toBe(2);
+  });
+
+  it('stepBackward decrements currentFrame by 1', () => {
+    useGraphStore.setState({ currentFrame: 2, sequenceStart: 0 });
+    useGraphStore.getState().stepBackward();
+    expect(useGraphStore.getState().currentFrame).toBe(1);
+  });
+
+  it('stepForward does not go past sequenceLength', () => {
+    useGraphStore.setState({ currentFrame: 5, sequenceLength: 5 });
+    useGraphStore.getState().stepForward();
+    expect(useGraphStore.getState().currentFrame).toBe(5);
+  });
+
+  it('stepBackward does not go below sequenceStart', () => {
+    useGraphStore.setState({ currentFrame: 2, sequenceStart: 2 });
+    useGraphStore.getState().stepBackward();
+    expect(useGraphStore.getState().currentFrame).toBe(2);
+  });
+
+  it('goToStart sets currentFrame to sequenceStart', () => {
+    useGraphStore.setState({ currentFrame: 10, sequenceStart: 3 });
+    useGraphStore.getState().goToStart();
+    expect(useGraphStore.getState().currentFrame).toBe(3);
+  });
+
+  it('goToEnd sets currentFrame to sequenceLength', () => {
+    useGraphStore.setState({ sequenceLength: 7, currentFrame: 1 });
+    useGraphStore.getState().goToEnd();
+    expect(useGraphStore.getState().currentFrame).toBe(7);
+  });
+
+  it('goToEnd uses 999 when no sequenceLength', () => {
+    useGraphStore.setState({ sequenceLength: 0, currentFrame: 1 });
+    useGraphStore.getState().goToEnd();
+    expect(useGraphStore.getState().currentFrame).toBe(999);
+  });
+
+  it('setFps updates fps', () => {
+    useGraphStore.getState().setFps(48);
+    expect(useGraphStore.getState().fps).toBe(48);
+  });
+
+  it('setLoopPlayback updates loopPlayback', () => {
+    useGraphStore.getState().setLoopPlayback(true);
+    expect(useGraphStore.getState().loopPlayback).toBe(true);
+  });
+
+  it('togglePlayback toggles play and pause states', async () => {
+    useGraphStore.getState().togglePlayback();
+    expect(useGraphStore.getState().isPlaying).toBe(true);
+    useGraphStore.getState().togglePlayback();
+    await flushPromises(1);
+    expect(useGraphStore.getState().isPlaying).toBe(false);
+  });
+});
+
+describe('graphStore group editing state', () => {
+  it('isInsideGroup returns false at root', () => {
+    expect(useGraphStore.getState().isInsideGroup()).toBe(false);
+  });
+
+  it('editingStack starts with root context', () => {
+    const stack = useGraphStore.getState().editingStack;
+    expect(stack.length).toBe(1);
+    expect(stack[0].id).toBe('root');
+  });
+
+  it('exitGroup at root is a no-op', () => {
+    useGraphStore.getState().exitGroup();
+    expect(useGraphStore.getState().editingStack.length).toBe(1);
+  });
+});
+
+describe('graphStore helper behaviors', () => {
+  it('extractGraphData handles document envelope format', async () => {
+    const doc = {
+      compositor: { format_version: '1.0.0' },
+      graph: {
+        nodes: [
+          { id: 'n1', type_id: 'brightness_contrast', position: [1, 2], params: { brightness: { Float: 0.25 } } },
+        ],
+        connections: [],
+      },
+    };
+    const file = new File([JSON.stringify(doc)], 'project.compositor', { type: 'application/json' });
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(2);
+    const node = useGraphStore.getState().nodes.get('n1');
+    expect(node?.params.brightness).toEqual({ Float: 0.25 } as ParamValue);
+    expect(node?.params.contrast).toEqual({ Float: 0 } as ParamValue);
+  });
+
+  it('extractGraphData handles bare graph format', async () => {
+    const graph = {
+      nodes: [
+        { id: 'n2', type_id: 'load_image', position: [3, 4], params: { file: { String: 'path' } } },
+      ],
+      connections: [],
+    };
+    const file = new File([JSON.stringify(graph)], 'project.compositor', { type: 'application/json' });
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(2);
+    const node = useGraphStore.getState().nodes.get('n2');
+    expect(node?.position).toEqual({ x: 3, y: 4 });
+    expect(node?.params.file).toEqual({ String: 'path' } as ParamValue);
+  });
+
+  it('buildGroupIOSpecs creates group input/output specs with correct ports', async () => {
+    const internalGraph: GroupInternalGraph = {
+      groupDefId: 'group::test',
+      name: 'Test Group',
+      nodes: [
+        { id: 'inner-1', typeId: 'invert', position: { x: 0, y: 0 }, params: {}, inputDefaults: {} },
+      ],
+      connections: [],
+      inputs: [{ name: 'in', label: 'In', ty: 'Image' }],
+      outputs: [{ name: 'out', label: 'Out', ty: 'Image' }],
+    };
+
+    mockEngine.getGroupInternalGraph = async () => internalGraph;
+    const groupNodeId = await useGraphStore.getState().addNode('group::test', { x: 0, y: 0 });
+    await useGraphStore.getState().enterGroup(groupNodeId);
+    const specs = useGraphStore.getState().nodeSpecs;
+    const groupInput = specs.find(s => s.id === 'group_input');
+    const groupOutput = specs.find(s => s.id === 'group_output');
+    expect(groupInput?.outputs).toEqual(internalGraph.inputs as PortSpec[]);
+    expect(groupOutput?.inputs).toEqual(internalGraph.outputs as PortSpec[]);
+  });
+});
+
+describe('graphStore error states', () => {
+  it('getEngine throws when engine not initialized', async () => {
+    vi.resetModules();
+    mockEngine = createMockEngine();
+    const mod = await import('../store/graphStore');
+    const store = mod.useGraphStore;
+    store.setState(createInitialState());
+    resetNodeCounter();
+    await expect(store.getState().addNode('invert', { x: 0, y: 0 })).rejects.toThrow('Engine not initialized');
+  });
+
+  it('renderVideo sets error when engine does not support it', async () => {
+    const id = await useGraphStore.getState().addNode('export_image', { x: 0, y: 0 });
+    await useGraphStore.getState().renderVideo(id);
+    expect(useGraphStore.getState().lastError).toBe('Video rendering is only available in the desktop app');
+  });
+
+  it('cancelRender sets isRendering to false', async () => {
+    useGraphStore.setState({ isRendering: true });
+    await useGraphStore.getState().cancelRender();
+    expect(useGraphStore.getState().isRendering).toBe(false);
+  });
+});
