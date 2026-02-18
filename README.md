@@ -10,6 +10,8 @@ compositor/
 │   ├── compositor-core/          # Graph engine, evaluator, node trait, type system
 │   ├── compositor-nodes-std/     # 34 built-in CPU nodes + Criterion benchmarks
 │   ├── compositor-gpu/           # wgpu compute shader pipeline (GLSL → naga → WGSL)
+│   ├── compositor-ocio/          # OpenColorIO integration (display/view transforms)
+│   ├── compositor-ocio-sys/      # OpenColorIO C FFI bindings (auto-stubs if not installed)
 │   ├── compositor-wasm/          # wasm-bindgen bridge for browser
 │   └── compositor-runtime/       # Native runtime engine (used by Tauri + CLI bench)
 ├── apps/
@@ -25,6 +27,7 @@ compositor/
 - **Evaluator**: Pull-based from viewer nodes. Per-output caching keyed on `(frame_time, param_revision, upstream_hash)`.
 - **Self-describing nodes**: Each node declares its own inputs, outputs, params, and UI hints via `NodeSpec`. The frontend renders controls automatically — adding a new Rust node requires zero frontend changes.
 - **GPU kernels**: Users write GLSL `process()` functions. Naga transpiles to WGSL. wgpu dispatches compute shaders. JSON manifests declare ports/params.
+- **Color management**: Pluggable `ColorManagement` trait with a builtin sRGB implementation and optional OpenColorIO backend. All compositing happens in linear working space; display/view transforms are applied only at the viewer output. Configure via Settings → Color in the UI.
 
 ### Node library (34 CPU + GPU kernels)
 
@@ -48,6 +51,32 @@ compositor/
 - [Node.js](https://nodejs.org/) 22+
 - [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/) (for browser builds)
 - [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (for desktop builds)
+- [OpenColorIO](https://opencolorio.org/) v2 (for color management in the desktop app)
+
+### Color management setup (macOS)
+
+The desktop app uses OpenColorIO for color management. Install it and set up an OCIO config:
+
+```bash
+# Install OpenColorIO
+brew install opencolorio
+
+# Create a config directory and download the ACES CG config
+mkdir -p ~/.config/ocio
+python3 -c "
+import PyOpenColorIO as ocio
+c = ocio.Config.CreateFromBuiltinConfig('cg-config-v2.1.0_aces-v1.3_ocio-v2.3')
+with open('$HOME/.config/ocio/config.ocio', 'w') as f:
+    f.write(c.serialize())
+"
+
+# Add to your shell config (~/.zshrc)
+export OCIO="$HOME/.config/ocio/config.ocio"
+```
+
+The `$OCIO` environment variable tells the desktop app which config to load at startup. If it's not set or OpenColorIO isn't installed, the app falls back to builtin sRGB color management.
+
+You can use any OCIO v2 config — ACES CG is a good default. Studio-specific configs work as well.
 
 ### Web (WASM)
 
@@ -60,6 +89,8 @@ cd apps/web
 yarn install
 yarn dev
 ```
+
+The WASM build uses builtin color management only (no OCIO).
 
 ### Desktop (Tauri)
 
