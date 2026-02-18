@@ -218,5 +218,5 @@ Foundational work first, then nodes that unlock real workflows.
 |---|------|------|-----|
 | ~~15~~ | ~~Fix Blend node alpha compositing (Porter-Duff correctness)~~ ✅ | ~~Bug fix~~ | Porter-Duff "over" alpha, HDR-safe RGB |
 | ~~16~~ | ~~Fix GaussianBlur alpha handling~~ ✅ | ~~Bug fix~~ | Off-by-one fix, premultiply sandwich, Sharpen/Glow also fixed |
-| 17 | Dot node (pass-through) | Node | Graph organization |
-| 18 | Text node | Node | Commonly requested |
+| ~~17~~ | ~~Dot node (pass-through)~~ ✅ | ~~Node~~ | Pass-through for graph organization |
+| ~~18~~ | ~~Text node~~ ✅ | ~~Node~~ | Render text to RGBA with ab_glyph, embedded font, multi-line, alignment |
