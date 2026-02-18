@@ -3,7 +3,7 @@ use compositor_core::eval::Evaluator;
 use compositor_core::graph::Graph;
 use compositor_core::node::{EvalContext, Node, NodeRegistry};
 use compositor_core::types::{
-    FrameTime, ParamDefault, ParamSpec, ParamValue, PortSpec, UiHint, Value, ValueType,
+    Format, FrameTime, ParamDefault, ParamSpec, ParamValue, PortSpec, UiHint, Value, ValueType,
 };
 use compositor_nodes_std::{register_standard_nodes, BrightnessContrast, LoadImage, Viewer};
 use image::codecs::png::PngEncoder;
@@ -51,6 +51,8 @@ fn graph_connects_and_evaluates_chain() {
         "display",
         FrameTime { frame: 0 },
         &cm,
+        None,
+        &Format::hd(),
     ))
     .unwrap();
     match eval_result.value {
@@ -83,6 +85,8 @@ fn cache_hit_skips_evaluation() {
         "value",
         FrameTime { frame: 0 },
         &cm,
+        None,
+        &Format::hd(),
     ))
     .unwrap();
     block_on(evaluator.evaluate(
@@ -93,6 +97,8 @@ fn cache_hit_skips_evaluation() {
         "value",
         FrameTime { frame: 0 },
         &cm,
+        None,
+        &Format::hd(),
     ))
     .unwrap();
 
@@ -160,6 +166,7 @@ impl Node for CounterNode {
                 name: "value".to_string(),
                 label: "Value".to_string(),
                 ty: ValueType::Float,
+                ..Default::default()
             }],
             params: vec![ParamSpec {
                 key: "value".to_string(),
@@ -170,6 +177,7 @@ impl Node for CounterNode {
                 max: None,
                 step: None,
                 ui_hint: UiHint::NumberInput,
+                    promotable: true,
             }],
         }
     }

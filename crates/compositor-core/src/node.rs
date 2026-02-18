@@ -15,11 +15,18 @@ pub type NodeFuture<'a> =
 pub type NodeFuture<'a> =
     Pin<Box<dyn Future<Output = Result<HashMap<String, Value>, CompositorError>> + 'a>>;
 
+pub enum ImageOrField<'a> {
+    Image(&'a Image),
+    Field(&'a Field),
+}
+
 pub struct EvalContext<'a> {
     pub inputs: HashMap<String, Value>,
     pub params: &'a HashMap<String, ParamValue>,
     pub frame_time: FrameTime,
     pub color_management: &'a dyn ColorManagement,
+    pub ai_provider: Option<&'a dyn crate::ai::AiProvider>,
+    pub project_format: &'a Format,
 }
 
 impl<'a> EvalContext<'a> {
@@ -32,6 +39,17 @@ impl<'a> EvalContext<'a> {
 
     pub fn get_optional_input_image(&self, name: &str) -> Option<&Image> {
         self.inputs.get(name).and_then(|v| v.as_image())
+    }
+
+    pub fn get_input_image_or_field(
+        &self,
+        name: &str,
+    ) -> Result<ImageOrField<'_>, CompositorError> {
+        match self.inputs.get(name) {
+            Some(Value::Image(img)) => Ok(ImageOrField::Image(img)),
+            Some(Value::Field(f)) => Ok(ImageOrField::Field(f)),
+            _ => Err(CompositorError::MissingInput(name.to_string())),
+        }
     }
 
     pub fn get_input_field(&self, name: &str) -> Result<&Field, CompositorError> {
@@ -69,9 +87,23 @@ impl<'a> EvalContext<'a> {
         }
     }
 
+    pub fn get_param_color(&self, key: &str) -> Result<[f64; 4], CompositorError> {
+        match self.params.get(key) {
+            Some(ParamValue::Color(v)) => Ok(*v),
+            _ => Err(CompositorError::MissingParam(key.to_string())),
+        }
+    }
+
     pub fn get_param_color_ramp(&self, key: &str) -> Result<&Vec<ColorStop>, CompositorError> {
         match self.params.get(key) {
             Some(ParamValue::ColorRamp(stops)) => Ok(stops),
+            _ => Err(CompositorError::MissingParam(key.to_string())),
+        }
+    }
+
+    pub fn get_param_color_palette(&self, key: &str) -> Result<&Vec<[f64; 4]>, CompositorError> {
+        match self.params.get(key) {
+            Some(ParamValue::ColorPalette(colors)) => Ok(colors),
             _ => Err(CompositorError::MissingParam(key.to_string())),
         }
     }

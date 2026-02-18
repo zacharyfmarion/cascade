@@ -2,7 +2,7 @@ use crate::color::ColorManagement;
 use crate::error::CompositorError;
 use crate::graph::{Graph, NodeId};
 use crate::node::{EvalContext, Node, NodeRegistry};
-use crate::types::{FrameTime, ParamDefault, ParamValue, Value};
+use crate::types::{Format, FrameTime, ParamDefault, ParamValue, Value, ValueType};
 use ahash::AHasher;
 use slotmap::Key;
 use std::collections::{HashMap, HashSet};
@@ -25,6 +25,7 @@ struct CacheKey {
     frame_time: FrameTime,
     param_revision: u64,
     upstream_hash: u64,
+    project_format_hash: u64,
 }
 
 impl Evaluator {
@@ -43,6 +44,8 @@ impl Evaluator {
         output_port: &str,
         frame_time: FrameTime,
         color_management: &dyn ColorManagement,
+        ai_provider: Option<&dyn crate::ai::AiProvider>,
+        project_format: &Format,
     ) -> Result<EvalResult, CompositorError> {
         let mut visited = HashSet::new();
         let mut order = Vec::new();
@@ -59,10 +62,16 @@ impl Evaluator {
                 .ok_or_else(|| CompositorError::InvalidConnection(instance.type_id.clone()))?;
 
             let upstream_hash = self.compute_upstream_hash(graph, node_id, spec, frame_time)?;
+            let pf_hash = {
+                let mut h = AHasher::default();
+                project_format.hash(&mut h);
+                h.finish()
+            };
             let key = CacheKey {
                 frame_time,
                 param_revision: instance.param_revision,
                 upstream_hash,
+                project_format_hash: pf_hash,
             };
 
             let cache_hit = !graph.is_dirty(node_id)
@@ -83,8 +92,9 @@ impl Evaluator {
                 .ok_or(CompositorError::NodeNotFound(node_id))?;
 
             let mut inputs = HashMap::new();
-            for input in spec.inputs.iter() {
+            for input in spec.all_inputs().iter() {
                 if let Some((up_node, up_port)) = graph.get_upstream(node_id, &input.name) {
+                    // 1. Upstream connection takes priority
                     let value = self
                         .cache
                         .get(&(up_node, up_port.clone()))
@@ -97,15 +107,81 @@ impl Evaluator {
                             ))
                         })?;
                     inputs.insert(input.name.clone(), value);
+                } else if let Some(param_val) = instance.input_defaults.get(&input.name) {
+                    // 2. Per-instance input default
+                    inputs.insert(input.name.clone(), Self::param_value_to_value(param_val));
+                } else if let Some(spec_default) = &input.default {
+                    // 3. Spec-level default from PortSpec
+                    inputs.insert(input.name.clone(), Self::param_default_to_value(spec_default));
                 }
             }
 
-            let merged_params = Self::merge_params(instance, spec);
+            // Auto-rasterize Field values arriving at Image/Mask ports.
+            // Derive rasterization domain from the first Image input, or
+            // fall back to project_format when no Image inputs exist.
+            let ref_domain: Option<(Format, crate::types::RectI)> =
+                inputs.values().find_map(|v| match v {
+                    Value::Image(img) | Value::Mask(img) => {
+                        Some((img.format.clone(), img.data_window))
+                    }
+                    _ => None,
+                });
+            let (raster_format, raster_dw) = ref_domain.unwrap_or_else(|| {
+                (project_format.clone(), project_format.display_window)
+            });
+
+            let all_inputs = spec.all_inputs();
+            for port in all_inputs.iter() {
+                if matches!(port.ty, ValueType::Image | ValueType::Mask) {
+                    if let Some(Value::Field(field)) = inputs.get(&port.name) {
+                        let rasterized =
+                            field.rasterize_to_domain(raster_format.clone(), raster_dw);
+                        let converted = if port.ty == ValueType::Mask {
+                            Value::Mask(rasterized)
+                        } else {
+                            Value::Image(rasterized)
+                        };
+                        inputs.insert(port.name.clone(), converted);
+                    }
+                }
+            }
+
+            let mut merged_params = Self::merge_params(instance, spec);
+            for param in &spec.params {
+                if !crate::types::NodeSpec::is_connectable_param(param) {
+                    continue;
+                }
+                if let Some((up_node, up_port)) = graph.get_upstream(node_id, &param.key) {
+                    if let Some((_, cached_value)) =
+                        self.cache.get(&(up_node, up_port.clone()))
+                    {
+                        let param_value = match cached_value {
+                            Value::Float(v) => Some(ParamValue::Float(*v as f64)),
+                            Value::Int(v) => Some(ParamValue::Int(*v as i64)),
+                            Value::Bool(v) => Some(ParamValue::Bool(*v)),
+                            Value::Color(c) => Some(ParamValue::Color([
+                                c[0] as f64,
+                                c[1] as f64,
+                                c[2] as f64,
+                                c[3] as f64,
+                            ])),
+                            _ => None,
+                        };
+                        if let Some(pv) = param_value {
+                            merged_params.insert(param.key.clone(), pv);
+                        }
+                    }
+                } else if let Some(input_default) = instance.input_defaults.get(&param.key) {
+                    merged_params.insert(param.key.clone(), input_default.clone());
+                }
+            }
             let ctx = EvalContext {
                 inputs,
                 params: &merged_params,
                 frame_time,
                 color_management,
+                ai_provider,
+                project_format,
             };
             let start = Instant::now();
             let outputs = node.evaluate(&ctx).await?;
@@ -155,7 +231,7 @@ impl Evaluator {
         let spec = registry
             .get_spec(&instance.type_id)
             .ok_or_else(|| CompositorError::InvalidConnection(instance.type_id.clone()))?;
-        for input in spec.inputs.iter() {
+        for input in spec.all_inputs().iter() {
             if let Some((upstream_node, _)) = graph.get_upstream(node_id, &input.name) {
                 self.visit_postorder(graph, registry, upstream_node, visited, order)?;
             }
@@ -173,7 +249,7 @@ impl Evaluator {
     ) -> Result<u64, CompositorError> {
         let mut hasher = AHasher::default();
         frame_time.hash(&mut hasher);
-        for input in spec.inputs.iter() {
+        for input in spec.all_inputs().iter() {
             if let Some((up_node, up_port)) = graph.get_upstream(node_id, &input.name) {
                 let cache_key = self
                     .cache
@@ -220,7 +296,28 @@ impl Evaluator {
             ParamDefault::Bool(v) => ParamValue::Bool(*v),
             ParamDefault::Color(v) => ParamValue::Color(*v),
             ParamDefault::ColorRamp(v) => ParamValue::ColorRamp(v.clone()),
+            ParamDefault::ColorPalette(v) => ParamValue::ColorPalette(v.clone()),
             ParamDefault::String(v) => ParamValue::String(v.clone()),
+        }
+    }
+
+    fn param_value_to_value(pv: &ParamValue) -> Value {
+        match pv {
+            ParamValue::Float(v) => Value::Float(*v as f32),
+            ParamValue::Int(v) => Value::Int(*v as i32),
+            ParamValue::Bool(v) => Value::Bool(*v),
+            ParamValue::Color(v) => Value::Color([v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32]),
+            _ => Value::None,
+        }
+    }
+
+    fn param_default_to_value(pd: &ParamDefault) -> Value {
+        match pd {
+            ParamDefault::Float(v) => Value::Float(*v as f32),
+            ParamDefault::Int(v) => Value::Int(*v as i32),
+            ParamDefault::Bool(v) => Value::Bool(*v),
+            ParamDefault::Color(v) => Value::Color([v[0] as f32, v[1] as f32, v[2] as f32, v[3] as f32]),
+            _ => Value::None,
         }
     }
 }
@@ -298,6 +395,7 @@ mod tests {
                     name: "output".to_string(),
                     label: "Output".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 params: vec![],
             };
@@ -313,11 +411,13 @@ mod tests {
                     name: "input".to_string(),
                     label: "Input".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 outputs: vec![PortSpec {
                     name: "output".to_string(),
                     label: "Output".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 params: vec![crate::types::ParamSpec {
                     key: "factor".to_string(),
@@ -328,6 +428,7 @@ mod tests {
                     max: Some(10.0),
                     step: Some(0.1),
                     ui_hint: crate::types::UiHint::Slider,
+                    promotable: true,
                 }],
             };
             Arc::new(MockNode::new(spec, Value::Image(create_simple_image())))
@@ -342,11 +443,13 @@ mod tests {
                     name: "input".to_string(),
                     label: "Input".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 outputs: vec![PortSpec {
                     name: "output".to_string(),
                     label: "Output".to_string(),
                     ty: ValueType::Image,
+                    ..Default::default()
                 }],
                 params: vec![],
             };
@@ -404,6 +507,8 @@ mod tests {
             "output",
             FrameTime { frame: 0 },
             &cm,
+            None,
+            &Format::hd(),
         ));
 
         assert!(result.is_ok());
@@ -454,6 +559,8 @@ mod tests {
             "output",
             frame_time,
             &cm,
+            None,
+            &Format::hd(),
         ));
         assert!(result1.is_ok());
 
@@ -467,6 +574,8 @@ mod tests {
             "output",
             frame_time,
             &cm,
+            None,
+            &Format::hd(),
         ));
         assert!(result2.is_ok());
 
@@ -525,6 +634,8 @@ mod tests {
             "output",
             frame_time,
             &cm,
+            None,
+            &Format::hd(),
         ));
         assert!(result1.is_ok());
 
@@ -545,6 +656,8 @@ mod tests {
             "output",
             frame_time,
             &cm,
+            None,
+            &Format::hd(),
         ));
         assert!(result2.is_ok());
     }
@@ -575,6 +688,8 @@ mod tests {
             "output",
             FrameTime { frame: 0 },
             &cm,
+            None,
+            &Format::hd(),
         ));
 
         assert!(result.is_ok());
@@ -583,6 +698,155 @@ mod tests {
             assert_eq!(img.width, 2);
             assert_eq!(img.height, 2);
         }
+    }
+
+    #[test]
+    fn test_field_auto_rasterized_to_image_for_mask_port() {
+        use crate::types::Field;
+
+        let mut registry = NodeRegistry::new();
+
+        registry.register("field_source", || {
+            let spec = crate::types::NodeSpec {
+                id: "field_source".to_string(),
+                display_name: "Field Source".to_string(),
+                category: "Generator".to_string(),
+                description: "Outputs a field".to_string(),
+                inputs: vec![],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Field,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            let field = Field::new(|u, _v| [u, u, u, 1.0]);
+            Arc::new(MockNode::new(spec, Value::Field(field)))
+        });
+
+        registry.register("image_source", || {
+            let spec = crate::types::NodeSpec {
+                id: "image_source".to_string(),
+                display_name: "Image Source".to_string(),
+                category: "Input".to_string(),
+                description: "Outputs a 4x4 image".to_string(),
+                inputs: vec![],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            Arc::new(MockNode::new(
+                spec,
+                Value::Image(Image::from_f32_data(4, 4, vec![0.5f32; 64])),
+            ))
+        });
+
+        struct MaskConsumerNode {
+            spec: crate::types::NodeSpec,
+        }
+
+        impl crate::node::Node for MaskConsumerNode {
+            fn spec(&self) -> crate::types::NodeSpec {
+                self.spec.clone()
+            }
+
+            fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+                Box::pin(async move {
+                    let _image = ctx.get_input_image("image")?;
+                    let mask_val = ctx.inputs.get("mask");
+                    match mask_val {
+                        Some(Value::Image(img)) => {
+                            assert_eq!(img.width, 4);
+                            assert_eq!(img.height, 4);
+                        }
+                        other => panic!(
+                            "Expected mask to be auto-rasterized to Image, got: {:?}",
+                            other.map(|v| v.value_type())
+                        ),
+                    }
+                    let mut outputs = HashMap::new();
+                    outputs.insert("output".to_string(), Value::Image(Image::new(4, 4)));
+                    Ok(outputs)
+                })
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+        }
+
+        registry.register("mask_consumer", || {
+            let spec = crate::types::NodeSpec {
+                id: "mask_consumer".to_string(),
+                display_name: "Mask Consumer".to_string(),
+                category: "Filter".to_string(),
+                description: "Has image + mask inputs".to_string(),
+                inputs: vec![
+                    PortSpec {
+                        name: "image".to_string(),
+                        label: "Image".to_string(),
+                        ty: ValueType::Image,
+                        ..Default::default()
+                    },
+                    PortSpec {
+                        name: "mask".to_string(),
+                        label: "Mask".to_string(),
+                        ty: ValueType::Image,
+                        ..Default::default()
+                    },
+                ],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            Arc::new(MaskConsumerNode { spec })
+        });
+
+        let mut graph = Graph::new();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let image_src = graph.add_node("image_source");
+        let field_src = graph.add_node("field_source");
+        let consumer = graph.add_node("mask_consumer");
+
+        graph
+            .connect(&registry, image_src, "output", consumer, "image")
+            .unwrap();
+        graph
+            .connect(&registry, field_src, "output", consumer, "mask")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(image_src, registry.create("image_source").unwrap());
+        node_instances.insert(field_src, registry.create("field_source").unwrap());
+        node_instances.insert(consumer, registry.create("mask_consumer").unwrap());
+
+        let result = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            consumer,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+        ));
+
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -626,6 +890,8 @@ mod tests {
             "output",
             frame_time_1,
             &cm,
+            None,
+            &Format::hd(),
         ));
         assert!(result1.is_ok());
 
@@ -639,10 +905,309 @@ mod tests {
             "output",
             frame_time_2,
             &cm,
+            None,
+            &Format::hd(),
         ));
         assert!(result2.is_ok());
 
         let cache_size_frame_2 = evaluator.cache.len();
         assert!(cache_size_frame_2 >= cache_size_frame_1);
+    }
+
+    #[test]
+    fn test_field_rasterized_inherits_image_domain() {
+        use crate::types::{Field, IVec2, RectI};
+
+        let mut registry = NodeRegistry::new();
+
+        registry.register("field_source", || {
+            let spec = crate::types::NodeSpec {
+                id: "field_source".to_string(),
+                display_name: "Field Source".to_string(),
+                category: "Generator".to_string(),
+                description: "".to_string(),
+                inputs: vec![],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Field,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            let field = Field::new(|u, _v| [u, u, u, 1.0]);
+            Arc::new(MockNode::new(spec, Value::Field(field)))
+        });
+
+        let offset_format = Format::hd();
+        let offset_dw = RectI {
+            min: IVec2::new(50, 50),
+            max: IVec2::new(54, 54),
+        };
+        registry.register("offset_image_source", || {
+            let spec = crate::types::NodeSpec {
+                id: "offset_image_source".to_string(),
+                display_name: "Offset Image".to_string(),
+                category: "Input".to_string(),
+                description: "".to_string(),
+                inputs: vec![],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            Arc::new(MockNode::new(
+                spec,
+                Value::Image(Image::new_with_domain(
+                    Format::hd(),
+                    RectI {
+                        min: IVec2::new(50, 50),
+                        max: IVec2::new(54, 54),
+                    },
+                    vec![0.5f32; 64],
+                    crate::types::ColorSpaceId::default_working(),
+                )),
+            ))
+        });
+
+        struct DomainChecker {
+            spec: crate::types::NodeSpec,
+        }
+
+        impl crate::node::Node for DomainChecker {
+            fn spec(&self) -> crate::types::NodeSpec {
+                self.spec.clone()
+            }
+
+            fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+                Box::pin(async move {
+                    let image = ctx.get_input_image("image")?;
+                    let mask_val = ctx.inputs.get("mask");
+                    match mask_val {
+                        Some(Value::Image(mask_img)) => {
+                            assert_eq!(
+                                mask_img.data_window, image.data_window,
+                                "mask should be rasterized to image's data_window"
+                            );
+                            assert_eq!(
+                                mask_img.format, image.format,
+                                "mask should inherit image's format"
+                            );
+                        }
+                        other => panic!(
+                            "Expected auto-rasterized Image, got: {:?}",
+                            other.map(|v| v.value_type())
+                        ),
+                    }
+                    let mut outputs = HashMap::new();
+                    outputs.insert("output".to_string(), Value::Image(image.clone()));
+                    Ok(outputs)
+                })
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+        }
+
+        registry.register("domain_checker", || {
+            let spec = crate::types::NodeSpec {
+                id: "domain_checker".to_string(),
+                display_name: "Domain Checker".to_string(),
+                category: "Test".to_string(),
+                description: "".to_string(),
+                inputs: vec![
+                    PortSpec {
+                        name: "image".to_string(),
+                        label: "Image".to_string(),
+                        ty: ValueType::Image,
+                        ..Default::default()
+                    },
+                    PortSpec {
+                        name: "mask".to_string(),
+                        label: "Mask".to_string(),
+                        ty: ValueType::Image,
+                        ..Default::default()
+                    },
+                ],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            Arc::new(DomainChecker { spec })
+        });
+
+        let mut graph = Graph::new();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let img_src = graph.add_node("offset_image_source");
+        let field_src = graph.add_node("field_source");
+        let checker = graph.add_node("domain_checker");
+
+        graph
+            .connect(&registry, img_src, "output", checker, "image")
+            .unwrap();
+        graph
+            .connect(&registry, field_src, "output", checker, "mask")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(img_src, registry.create("offset_image_source").unwrap());
+        node_instances.insert(field_src, registry.create("field_source").unwrap());
+        node_instances.insert(checker, registry.create("domain_checker").unwrap());
+
+        let result = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            checker,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+        ));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_field_rasterized_to_project_format_when_no_image_inputs() {
+        use crate::types::Field;
+
+        struct FieldOnlyConsumer {
+            spec: crate::types::NodeSpec,
+        }
+
+        impl crate::node::Node for FieldOnlyConsumer {
+            fn spec(&self) -> crate::types::NodeSpec {
+                self.spec.clone()
+            }
+
+            fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+                Box::pin(async move {
+                    match ctx.inputs.get("image") {
+                        Some(Value::Image(img)) => {
+                            assert_eq!(
+                                img.format,
+                                *ctx.project_format,
+                                "rasterized field should use project_format"
+                            );
+                            assert_eq!(
+                                img.data_window,
+                                ctx.project_format.display_window,
+                                "rasterized field should use project_format display_window"
+                            );
+                            let mut outputs = HashMap::new();
+                            outputs.insert("output".to_string(), Value::Image(img.clone()));
+                            Ok(outputs)
+                        }
+                        other => panic!(
+                            "Expected auto-rasterized Image, got: {:?}",
+                            other.map(|v| v.value_type())
+                        ),
+                    }
+                })
+            }
+
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+        }
+
+        let mut registry = NodeRegistry::new();
+
+        registry.register("field_source", || {
+            let spec = crate::types::NodeSpec {
+                id: "field_source".to_string(),
+                display_name: "Field Source".to_string(),
+                category: "Generator".to_string(),
+                description: "".to_string(),
+                inputs: vec![],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Field,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            let field = Field::new(|u, v| [u, v, 0.0, 1.0]);
+            Arc::new(MockNode::new(spec, Value::Field(field)))
+        });
+
+        registry.register("field_consumer", || {
+            let spec = crate::types::NodeSpec {
+                id: "field_consumer".to_string(),
+                display_name: "Field Consumer".to_string(),
+                category: "Test".to_string(),
+                description: "".to_string(),
+                inputs: vec![PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                }],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            Arc::new(FieldOnlyConsumer { spec })
+        });
+
+        let mut graph = Graph::new();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let field_src = graph.add_node("field_source");
+        let consumer = graph.add_node("field_consumer");
+
+        graph
+            .connect(&registry, field_src, "output", consumer, "image")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(field_src, registry.create("field_source").unwrap());
+        node_instances.insert(consumer, registry.create("field_consumer").unwrap());
+
+        let project_format = Format::from_dimensions(1280, 720);
+        let result = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            consumer,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &project_format,
+        ));
+
+        assert!(result.is_ok());
+        let eval_result = result.unwrap();
+        if let Value::Image(img) = eval_result.value {
+            assert_eq!(img.width, 1280);
+            assert_eq!(img.height, 720);
+        } else {
+            panic!("Expected Image output");
+        }
     }
 }
