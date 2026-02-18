@@ -536,6 +536,34 @@ body {
   box-shadow: var(--node-shadowSelected);
 }
 
+.base-node--muted {
+  opacity: 0.5;
+  position: relative;
+}
+
+.base-node--muted .base-node__header {
+  filter: saturate(0.3);
+}
+
+.base-node--muted::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom right,
+    transparent calc(50% - 1px),
+    var(--node-mute-stripe) calc(50% - 1px),
+    var(--node-mute-stripe) calc(50% + 1px),
+    transparent calc(50% + 1px)
+  );
+  border-radius: inherit;
+  z-index: 10;
+}
+
 .base-node__header {
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-default);
@@ -699,55 +727,127 @@ body {
 
 /* ── Color Ramp ──────────────────────────────────────────────── */
 .node-color-ramp__bar {
+  position: relative;
   width: 100%;
   height: 28px;
-  border-radius: 3px;
+  border-radius: 4px;
   border: 1px solid var(--border-default);
   cursor: crosshair;
-  outline: none;
+  background-color: var(--bg-tertiary);
+  /* Checkerboard pattern for transparency */
+  background-image:
+    linear-gradient(45deg, var(--bg-secondary) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-secondary) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-secondary) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-secondary) 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+  overflow: hidden;
+}
+
+/* The actual gradient overlay */
+.node-color-ramp__gradient {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .node-color-ramp__stops {
   position: relative;
-  height: 14px;
-  margin-top: 2px;
+  height: 16px;
+  margin-top: -8px; /* Pull stops up to overlap bottom edge */
+  pointer-events: none; /* Allow clicks to pass through */
+  z-index: 10;
 }
 
 .node-color-ramp__stop {
   position: absolute;
   top: 0;
   transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: grab;
-  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  pointer-events: auto;
+  z-index: 5;
+  transition: transform 0.1s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.node-color-ramp__stop:active {
+  cursor: grabbing;
+}
+
+.node-color-ramp__stop:hover {
+  z-index: 15;
+  transform: translateX(-50%) scale(1.1);
 }
 
 .node-color-ramp__stop--selected {
-  z-index: 10;
+  z-index: 20;
+}
+
+/* Diamond handle shape */
+.node-color-ramp__stop-handle {
+  width: 10px;
+  height: 10px;
+  transform: rotate(45deg);
+  border: 2px solid var(--bg-surface);
+  border-radius: 2px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+  background-color: currentColor; /* Inherits color from inline style */
+}
+
+.node-color-ramp__stop--selected .node-color-ramp__stop-handle {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 2px 5px rgba(0,0,0,0.6);
 }
 
 .node-color-ramp__editor {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  background: var(--bg-secondary);
-  border-radius: 3px;
+  gap: 8px;
+  padding: 8px;
+  margin-top: 8px;
+  background: var(--bg-surface);
+  border-radius: 4px;
   border: 1px solid var(--border-default);
-  font-size: 0.7rem;
+  animation: slideDown 0.15s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .node-color-swatch {
   position: relative;
-  width: 20px;
-  height: 20px;
-  border-radius: 2px;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
   overflow: hidden;
   border: 1px solid var(--border-default);
   flex-shrink: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1);
+  /* Checkerboard for alpha */
+  background-image:
+    linear-gradient(45deg, var(--bg-tertiary) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-tertiary) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-tertiary) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-tertiary) 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+  background-color: var(--bg-surface);
+}
+
+.node-color-swatch__preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .node-color-swatch__input {
@@ -761,10 +861,15 @@ body {
 
 .node-color-swatch__position {
   color: var(--text-secondary);
-  font-family: monospace;
+  font-family: 'SF Mono', monospace;
+  font-size: 0.7rem;
   flex: 1;
+  background: var(--bg-primary);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-default);
+  text-align: center;
 }
-
 /* Shared node-control tokens */
 :root {
   --node-label-font-size: 0.72rem;
@@ -775,4 +880,115 @@ body {
   --timing-fast: #2e7d32;
   --timing-medium: #ff8f00;
   --timing-slow: #c62828;
+  --node-mute-stripe: #c62828;
+}
+
+/* ── Viewer Toolbar ──────────────────────────────────────────── */
+.viewer-toolbar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 28px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  gap: 2px;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.viewer-toolbar__btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.viewer-toolbar__btn:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+.viewer-toolbar__separator {
+  width: 1px;
+  height: 16px;
+  background: var(--border-default);
+  margin: 0 4px;
+}
+
+.viewer-toolbar__zoom-display {
+  font-size: 0.7rem;
+  color: var(--text-primary);
+  padding: 0 8px;
+  min-width: 40px;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+
+.viewer-toolbar__zoom-display:hover {
+  background: var(--bg-surface);
+}
+
+.viewer-toolbar__dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 4px 0;
+  min-width: 80px;
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-toolbar__dropdown-item {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  width: 100%;
+}
+
+.viewer-toolbar__dropdown-item:hover {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+/* ── Viewer Checkerboard (transparency indicator) ────────────── */
+.viewer-checkerboard {
+  background-color: var(--bg-canvas);
+  background-image:
+    linear-gradient(45deg, var(--bg-primary) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-primary) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-primary) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-primary) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }

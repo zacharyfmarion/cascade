@@ -8,29 +8,23 @@
     "bg.surface": "#1e1e3a",
     "bg.canvas": "#0d0f1a",
     "bg.canvasGrid": "#222222",
-
     "text.primary": "#e0e0e0",
     "text.secondary": "#a0a0b0",
     "text.muted": "#606080",
-
     "accent.primary": "#6c5ce7",
     "accent.hover": "#7c6cf7",
-
     "border.default": "#2a2a4a",
     "border.active": "#4a4a7a",
-
     "status.danger": "#e74c3c",
     "status.success": "#2ecc71",
     "status.errorBg": "rgba(231, 76, 60, 0.9)",
-
     "port.image": "#00d4aa",
     "port.float": "#a0a0a0",
     "port.int": "#4ca04c",
     "port.bool": "#cc66cc",
     "port.color": "#cccc00",
     "port.mask": "#ffffff",
-     "port.field": "#9b59b6",
-
+    "port.field": "#9b59b6",
     "node.bg": "#22223a",
     "node.selected": "#32325a",
     "node.shadow": "0 2px 8px rgba(0,0,0,0.3)",
@@ -46,13 +40,12 @@
     "node.header.group": "rgba(108, 92, 231, 0.22)",
     "node.header.groupInput": "rgba(46, 204, 113, 0.22)",
     "node.header.groupOutput": "rgba(231, 76, 60, 0.22)",
-
     "slider.fill": "rgba(108, 92, 231, 0.5)",
     "slider.fillHover": "rgba(108, 92, 231, 0.7)",
     "slider.bg": "rgba(0, 0, 0, 0.2)",
-
     "shadow.overlay": "rgba(0,0,0,0.6)",
     "shadow.contextMenu": "0 4px 12px rgba(0,0,0,0.5)",
-    "minimap.mask": "rgba(0,0,0,0.6)"
+    "minimap.mask": "rgba(0,0,0,0.6)",
+    "frame.default": "rgba(108, 92, 231, 0.08)"
   }
 }

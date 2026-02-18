@@ -48,6 +48,7 @@ export interface ThemeTokens {
    'port.field': string;
 
   // ── Node chrome ──────────────────────────────────────────────
+  'frame.default': string;
   'node.bg': string;
   'node.selected': string;
   'node.shadow': string;
@@ -128,6 +129,7 @@ export const THEME_TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
    'port.mask',
    'port.field',
 
+  'frame.default',
   'node.bg',
   'node.selected',
   'node.shadow',

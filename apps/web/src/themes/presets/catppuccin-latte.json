@@ -8,29 +8,23 @@
     "bg.surface": "#dce0e8",
     "bg.canvas": "#eff1f5",
     "bg.canvasGrid": "#ccd0da",
-
     "text.primary": "#4c4f69",
     "text.secondary": "#5c5f77",
     "text.muted": "#9ca0b0",
-
     "accent.primary": "#8839ef",
     "accent.hover": "#7231c8",
-
     "border.default": "#ccd0da",
     "border.active": "#1e66f5",
-
     "status.danger": "#d20f39",
     "status.success": "#40a02b",
     "status.errorBg": "rgba(210, 15, 57, 0.9)",
-
-     "port.image": "#04a5e5",
-     "port.float": "#5c5f77",
-     "port.int": "#40a02b",
-     "port.bool": "#ea76cb",
-     "port.color": "#df8e1d",
-     "port.mask": "#4c4f69",
-     "port.field": "#7d3c98",
-
+    "port.image": "#04a5e5",
+    "port.float": "#5c5f77",
+    "port.int": "#40a02b",
+    "port.bool": "#ea76cb",
+    "port.color": "#df8e1d",
+    "port.mask": "#4c4f69",
+    "port.field": "#7d3c98",
     "node.bg": "#dce0e8",
     "node.selected": "#ccd0da",
     "node.shadow": "0 2px 8px rgba(0,0,0,0.08)",
@@ -46,13 +40,12 @@
     "node.header.group": "rgba(30, 102, 245, 0.15)",
     "node.header.groupInput": "rgba(64, 160, 43, 0.15)",
     "node.header.groupOutput": "rgba(210, 15, 57, 0.15)",
-
     "slider.fill": "rgba(136, 57, 239, 0.2)",
     "slider.fillHover": "rgba(136, 57, 239, 0.35)",
     "slider.bg": "rgba(0, 0, 0, 0.06)",
-
     "shadow.overlay": "rgba(0,0,0,0.2)",
     "shadow.contextMenu": "0 4px 12px rgba(0,0,0,0.12)",
-    "minimap.mask": "rgba(255,255,255,0.5)"
+    "minimap.mask": "rgba(255,255,255,0.5)",
+    "frame.default": "rgba(108, 92, 231, 0.12)"
   }
 }

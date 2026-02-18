@@ -116,6 +116,8 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CompositorTheme {
     'port.mask': isDark ? '#ffffff' : '#073642',
     'port.field': isDark ? '#9b59b6' : '#7d3c98',
 
+    'frame.default': isDark ? 'rgba(108, 92, 231, 0.08)' : 'rgba(108, 92, 231, 0.12)',
+
     'node.bg': surfaceBg,
     'node.selected': isDark ? lighten(surfaceBg, 0.08) : darken(surfaceBg, 0.08),
     'node.shadow': isDark ? '0 2px 8px rgba(0,0,0,0.35)' : '0 2px 8px rgba(0,0,0,0.1)',
