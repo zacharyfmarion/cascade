@@ -206,6 +206,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
 
         use compositor_core::node::Node;
@@ -286,6 +287,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
 
         let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
@@ -345,6 +347,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
 
         let result = pollster::block_on(node.evaluate(&eval_ctx))

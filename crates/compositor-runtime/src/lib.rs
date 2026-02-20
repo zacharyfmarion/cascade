@@ -287,7 +287,7 @@ impl Engine {
 
     pub fn set_ai_api_key(&mut self, provider: &str, key: &str) -> Result<(), CompositorError> {
         match provider {
-            "openai" | "native" => {
+            "replicate" | "native" => {
                 let ai = Arc::new(NativeAiProvider::new());
                 ai.set_api_key(key.to_string());
                 let ai_provider: Arc<dyn AiProvider> = ai;
@@ -1439,6 +1439,7 @@ impl Engine {
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
+            &HashMap::new(),
         ))?;
         self.last_timings = eval_result
             .node_timings
@@ -1489,6 +1490,7 @@ impl Engine {
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
+            &HashMap::new(),
         ))
     }
 
@@ -1520,6 +1522,7 @@ impl Engine {
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
+            &HashMap::new(),
         ))?;
         match eval_result.value {
             Value::Image(image) => {
@@ -1594,6 +1597,7 @@ impl Engine {
                 cm,
                 self.ai_provider.as_deref(),
                 &self.project_format,
+                &HashMap::new(),
             )) {
                 Ok(eval_result) => {
                     for (nid, duration) in eval_result.node_timings {
@@ -1737,6 +1741,7 @@ impl Engine {
                         cm,
                         ai_provider.as_deref(),
                         &render_project_format,
+                        &HashMap::new(),
                     )) {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {
@@ -1907,6 +1912,7 @@ impl Engine {
                     cm,
                     ai_provider.as_deref(),
                     &render_project_format,
+                    &HashMap::new(),
                 ));
 
                 let (width, height) = match &first_frame_result {
@@ -1973,6 +1979,7 @@ impl Engine {
                         cm,
                         ai_provider.as_deref(),
                         &render_project_format,
+                        &HashMap::new(),
                     )) {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {

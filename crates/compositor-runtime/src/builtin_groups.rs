@@ -36,7 +36,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Greater Than: hue > hue_min
         InternalNode {
             id: "gt_low".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(8)), // Greater Than
                 ("value".to_string(), ParamValue::Float(0.25)),
@@ -47,7 +47,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Less Than: hue < hue_max
         InternalNode {
             id: "lt_high".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(9)), // Less Than
                 ("value".to_string(), ParamValue::Float(0.45)),
@@ -58,7 +58,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Multiply: gt_low * lt_high → hue mask
         InternalNode {
             id: "mul_hue".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(2)), // Multiply
                 ("value".to_string(), ParamValue::Float(1.0)),
@@ -69,7 +69,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Greater Than: saturation > sat_min
         InternalNode {
             id: "gt_sat".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(8)), // Greater Than
                 ("value".to_string(), ParamValue::Float(0.1)),
@@ -80,7 +80,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Greater Than: value > val_min
         InternalNode {
             id: "gt_val".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(8)), // Greater Than
                 ("value".to_string(), ParamValue::Float(0.1)),
@@ -91,7 +91,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Multiply: mul_hue * gt_sat → hue+sat mask
         InternalNode {
             id: "mul_sat".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(2)), // Multiply
                 ("value".to_string(), ParamValue::Float(1.0)),
@@ -102,7 +102,7 @@ pub fn color_range_group() -> GroupDefinition {
         // Multiply: mul_sat * gt_val → final mask
         InternalNode {
             id: "mul_final".to_string(),
-            type_id: "math".to_string(),
+            type_id: "image_math".to_string(),
             params: HashMap::from([
                 ("operation".to_string(), ParamValue::Int(2)), // Multiply
                 ("value".to_string(), ParamValue::Float(1.0)),

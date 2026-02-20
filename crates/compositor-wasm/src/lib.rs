@@ -4,7 +4,7 @@ use crate::ai_provider::WasmAiProvider;
 use compositor_core::ai::AiProvider;
 use compositor_core::color::{BuiltinColorManagement, ColorManagement};
 use compositor_core::error::CompositorError;
-use compositor_core::eval::Evaluator;
+use compositor_core::eval::{CacheKey, Evaluator};
 use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
@@ -24,6 +24,29 @@ use std::sync::Arc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
+#[derive(Debug, Clone)]
+enum RunStatus {
+    Idle,
+    Running,
+    Complete,
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
+struct NodeExecutionState {
+    status: RunStatus,
+    last_run_cache_key: Option<CacheKey>,
+}
+
+impl NodeExecutionState {
+    fn new() -> Self {
+        Self {
+            status: RunStatus::Idle,
+            last_run_cache_key: None,
+        }
+    }
+}
+
 #[wasm_bindgen]
 pub struct Engine {
     graph: Graph,
@@ -36,6 +59,8 @@ pub struct Engine {
     gpu_context: Option<Arc<GpuContext>>,
     kernel_manifests: HashMap<String, KernelManifest>,
     ai_provider: Option<Arc<dyn AiProvider>>,
+    ai_node_cache: HashMap<NodeId, HashMap<String, Value>>,
+    node_exec_state: HashMap<NodeId, NodeExecutionState>,
     color_management: BuiltinColorManagement,
     active_display: String,
     active_view: String,
@@ -60,6 +85,8 @@ impl Engine {
             gpu_context: None,
             kernel_manifests: HashMap::new(),
             ai_provider: None,
+            ai_node_cache: HashMap::new(),
+            node_exec_state: HashMap::new(),
             color_management: BuiltinColorManagement::new(),
             active_display: "sRGB".to_string(),
             active_view: "Standard".to_string(),
@@ -77,7 +104,7 @@ impl Engine {
 
     pub fn set_ai_api_key(&mut self, provider: &str, key: &str) -> Result<(), JsValue> {
         match provider {
-            "openai" | "wasm" => {
+            "replicate" | "wasm" => {
                 let ai = Arc::new(WasmAiProvider::new());
                 ai.set_api_key(key.to_string());
                 let ai_provider: Arc<dyn AiProvider> = ai;
@@ -423,6 +450,7 @@ impl Engine {
                 cm,
                 self.ai_provider.as_deref(),
                 &self.project_format,
+                &self.ai_node_cache,
             )
             .await
             .map_err(to_js_error)?;
@@ -503,6 +531,7 @@ impl Engine {
                 cm,
                 self.ai_provider.as_deref(),
                 &self.project_format,
+                &self.ai_node_cache,
             )
             .await;
         if let Ok(eval_result) = eval_result {
@@ -588,6 +617,7 @@ impl Engine {
                 cm,
                 self.ai_provider.as_deref(),
                 &self.project_format,
+                &self.ai_node_cache,
             )
             .await
             .map_err(to_js_error)?;
@@ -685,6 +715,121 @@ impl Engine {
                 .map_err(to_js_error)?;
         }
         Ok(())
+    }
+
+    pub async fn run_ai_node(&mut self, node_id: &str) -> Result<(), JsValue> {
+        let nid = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
+        state.status = RunStatus::Running;
+
+        let instance = self
+            .graph
+            .nodes
+            .get(nid)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let spec = self
+            .registry
+            .get_spec(&instance.type_id)
+            .ok_or_else(|| JsValue::from_str("Unknown node type"))?;
+
+        let mut inputs = HashMap::new();
+        for input in spec.all_inputs().iter() {
+            if let Some((up_node, up_port)) = self.graph.get_upstream(nid, &input.name) {
+                if let Some(cached_val) = self.evaluator.get_cached(up_node, &up_port) {
+                    inputs.insert(input.name.clone(), cached_val.clone());
+                }
+            }
+        }
+
+        let merged_params = Evaluator::merge_params(instance, spec);
+        let node_arc = self
+            .nodes
+            .get(&nid)
+            .ok_or_else(|| JsValue::from_str("Node instance not found"))?
+            .clone();
+
+        let cm = &self.color_management;
+        let ctx = compositor_core::node::EvalContext {
+            inputs,
+            params: &merged_params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: cm,
+            ai_provider: self.ai_provider.as_deref(),
+            project_format: &self.project_format,
+            ai_cached_outputs: None,
+        };
+
+        match node_arc.evaluate(&ctx).await {
+            Ok(outputs) => {
+                self.ai_node_cache.insert(nid, outputs);
+                let cache_key = self.evaluator.compute_node_cache_key(
+                    &self.graph,
+                    &self.registry,
+                    nid,
+                    FrameTime { frame: 0 },
+                    &self.project_format,
+                ).ok();
+                let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
+                state.status = RunStatus::Complete;
+                state.last_run_cache_key = cache_key;
+                self.graph.mark_dirty(nid);
+                Ok(())
+            }
+            Err(e) => {
+                let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
+                state.status = RunStatus::Error(e.to_string());
+                Err(to_js_error(e))
+            }
+        }
+    }
+
+    pub fn get_node_execution_state(&self, node_id: &str) -> JsValue {
+        match parse_node_id(&self.uuid_map, node_id) {
+            Ok(nid) => {
+                let state = self.node_exec_state.get(&nid);
+                let status = match state.map(|s| &s.status) {
+                    Some(RunStatus::Running) => "running",
+                    Some(RunStatus::Complete) => "complete",
+                    Some(RunStatus::Error(_)) => "error",
+                    _ => "idle",
+                };
+                let is_stale = match state {
+                    Some(s) => {
+                        if s.last_run_cache_key.is_none() {
+                            false
+                        } else {
+                            match self.evaluator.compute_node_cache_key(
+                                &self.graph,
+                                &self.registry,
+                                nid,
+                                FrameTime { frame: 0 },
+                                &self.project_format,
+                            ) {
+                                Ok(current_key) => s.last_run_cache_key.as_ref() != Some(&current_key),
+                                Err(_) => false,
+                            }
+                        }
+                    }
+                    None => false,
+                };
+                let error_msg = match state.map(|s| &s.status) {
+                    Some(RunStatus::Error(msg)) => msg.as_str(),
+                    _ => "",
+                };
+                let obj = js_sys::Object::new();
+                js_sys::Reflect::set(&obj, &"status".into(), &JsValue::from_str(status)).ok();
+                js_sys::Reflect::set(&obj, &"isStale".into(), &JsValue::from_bool(is_stale)).ok();
+                js_sys::Reflect::set(&obj, &"error".into(), &JsValue::from_str(error_msg)).ok();
+                obj.into()
+            }
+            Err(_) => {
+                let obj = js_sys::Object::new();
+                js_sys::Reflect::set(&obj, &"status".into(), &JsValue::from_str("idle")).ok();
+                js_sys::Reflect::set(&obj, &"isStale".into(), &JsValue::from_bool(false)).ok();
+                js_sys::Reflect::set(&obj, &"error".into(), &JsValue::from_str("")).ok();
+                obj.into()
+            }
+        }
     }
 
     pub fn create_group_from_nodes(

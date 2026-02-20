@@ -1,10 +1,8 @@
-use base64::{engine::general_purpose, Engine as _};
 use compositor_core::ai::{
-    AiFuture, AiImageRequest, AiImageResult, AiJobId, AiJobStatus, AiProvider,
+    AiFuture, AiPredictionOutput, AiPredictionRequest, AiPredictionResult, AiJobId, AiJobStatus,
+    AiProvider,
 };
 use compositor_core::error::CompositorError;
-use image::GenericImageView;
-use reqwest::blocking::multipart::{Form, Part};
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -44,103 +42,80 @@ impl NativeAiProvider {
             .ok_or_else(|| CompositorError::Other("AI provider not configured".to_string()))
     }
 
-    fn submit_blocking(&self, request: AiImageRequest) -> Result<AiImageResult, CompositorError> {
+    fn predict_blocking(
+        &self,
+        request: AiPredictionRequest,
+    ) -> Result<AiPredictionResult, CompositorError> {
         let api_key = self.get_api_key()?;
-        let (response, format_size) = if request.input_image.is_some() {
-            let mut form = Form::new()
-                .text("prompt", request.prompt)
-                .text("model", request.model)
-                .text("response_format", "b64_json");
 
-            if let Some(quality) = request.quality {
-                form = form.text("quality", quality);
-            }
+        let payload = serde_json::json!({
+            "version": request.version,
+            "input": request.input,
+        });
 
-            if let (Some(width), Some(height)) = (request.width, request.height) {
-                form = form.text("size", format!("{width}x{height}"));
-            }
-
-            if let Some(image) = request.input_image {
-                let part = Part::bytes(image)
-                    .file_name("image.png")
-                    .mime_str("image/png")
-                    .map_err(|e| CompositorError::Other(e.to_string()))?;
-                form = form.part("image", part);
-            }
-
-            if let Some(mask) = request.mask {
-                let part = Part::bytes(mask)
-                    .file_name("mask.png")
-                    .mime_str("image/png")
-                    .map_err(|e| CompositorError::Other(e.to_string()))?;
-                form = form.part("mask", part);
-            }
-
-            let response = self
-                .client
-                .post("https://api.openai.com/v1/images/edits")
-                .bearer_auth(api_key)
-                .multipart(form)
-                .send()
-                .map_err(|e| CompositorError::Other(e.to_string()))?;
-            (response, (request.width, request.height))
-        } else {
-            let size = match (request.width, request.height) {
-                (Some(width), Some(height)) => format!("{width}x{height}"),
-                _ => "1024x1024".to_string(),
-            };
-
-            let payload = GenerationRequest {
-                prompt: request.prompt,
-                model: request.model,
-                size,
-                response_format: "b64_json".to_string(),
-                quality: request.quality,
-            };
-            let response = self
-                .client
-                .post("https://api.openai.com/v1/images/generations")
-                .bearer_auth(api_key)
-                .json(&payload)
-                .send()
-                .map_err(|e| CompositorError::Other(e.to_string()))?;
-            (response, (request.width, request.height))
-        };
+        let response = self
+            .client
+            .post("https://api.replicate.com/v1/predictions")
+            .bearer_auth(&api_key)
+            .header("Content-Type", "application/json")
+            .header("Prefer", "wait")
+            .json(&payload)
+            .send()
+            .map_err(|e| CompositorError::Other(e.to_string()))?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().unwrap_or_default();
             return Err(CompositorError::Other(format!(
-                "AI request failed ({status}): {body}"
+                "Replicate API error ({status}): {body}"
             )));
         }
 
-        let decoded: ImageResponse = response
+        let parsed: ReplicateResponse = response
             .json()
-            .map_err(|e| CompositorError::Other(e.to_string()))?;
-        let b64 = decoded
-            .data
-            .first()
-            .and_then(|d| d.b64_json.as_ref())
-            .ok_or_else(|| CompositorError::Other("AI response missing image data".to_string()))?;
-        let image_bytes = general_purpose::STANDARD
-            .decode(b64)
-            .map_err(|e| CompositorError::Other(e.to_string()))?;
+            .map_err(|e| CompositorError::Other(format!("Failed to parse response: {e}")))?;
 
-        let (width, height) = match format_size {
-            (Some(width), Some(height)) => (width, height),
-            _ => {
-                let img = image::load_from_memory(&image_bytes)
-                    .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
-                img.dimensions()
+        match parsed.status.as_str() {
+            "succeeded" => {
+                let output = parsed.output.ok_or_else(|| {
+                    CompositorError::Other(
+                        "Prediction succeeded but output is null".to_string(),
+                    )
+                })?;
+                Ok(AiPredictionResult { output })
             }
-        };
+            "failed" | "canceled" => {
+                let error_msg = parsed.error.unwrap_or_else(|| parsed.status.clone());
+                Err(CompositorError::Other(format!(
+                    "Prediction {}: {error_msg}",
+                    parsed.status
+                )))
+            }
+            _ => Err(CompositorError::Other(format!(
+                "Unexpected prediction status: {}",
+                parsed.status
+            ))),
+        }
+    }
 
-        Ok(AiImageResult {
-            image_bytes,
-            width,
-            height,
-        })
+    fn fetch_url_blocking(&self, url: &str) -> Result<Vec<u8>, CompositorError> {
+        let response = self
+            .client
+            .get(url)
+            .send()
+            .map_err(|e| CompositorError::Other(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            return Err(CompositorError::Other(format!(
+                "Failed to fetch URL ({status}): {url}"
+            )));
+        }
+
+        response
+            .bytes()
+            .map(|b| b.to_vec())
+            .map_err(|e| CompositorError::Other(e.to_string()))
     }
 }
 
@@ -158,9 +133,9 @@ impl AiProvider for NativeAiProvider {
             .unwrap_or(false)
     }
 
-    fn submit_job(&self, request: AiImageRequest) -> Result<AiJobId, CompositorError> {
+    fn submit_job(&self, request: AiPredictionRequest) -> Result<AiJobId, CompositorError> {
         let job_id = uuid::Uuid::new_v4().to_string();
-        let status = match self.submit_blocking(request) {
+        let status = match self.predict_blocking(request) {
             Ok(result) => AiJobStatus::Completed { result },
             Err(err) => AiJobStatus::Failed {
                 error: err.to_string(),
@@ -194,29 +169,19 @@ impl AiProvider for NativeAiProvider {
         Ok(())
     }
 
-    fn generate_sync(&self, request: AiImageRequest) -> AiFuture<'_, AiImageResult> {
-        Box::pin(async move { self.submit_blocking(request) })
+    fn predict(&self, request: AiPredictionRequest) -> AiFuture<'_, AiPredictionResult> {
+        Box::pin(async move { self.predict_blocking(request) })
+    }
+
+    fn fetch_url(&self, url: &str) -> AiFuture<'_, Vec<u8>> {
+        let url = url.to_string();
+        Box::pin(async move { self.fetch_url_blocking(&url) })
     }
 }
 
 #[derive(Deserialize)]
-struct ImageResponse {
-    data: Vec<ImageData>,
-}
-
-#[derive(Deserialize)]
-struct ImageData {
-    #[serde(rename = "b64_json")]
-    b64_json: Option<String>,
-}
-
-#[derive(serde::Serialize)]
-struct GenerationRequest {
-    prompt: String,
-    model: String,
-    size: String,
-    #[serde(rename = "response_format")]
-    response_format: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    quality: Option<String>,
+struct ReplicateResponse {
+    status: String,
+    output: Option<AiPredictionOutput>,
+    error: Option<String>,
 }
