@@ -88,13 +88,13 @@ Beyond LensDistortion:
 - **Mesh Warp** — freeform grid deformation
 - **Spherize / Twirl / Wave** — creative distortions
 
-### 7. No Motion Blur
+### ~~7. No Motion Blur~~ ✅ PARTIALLY DONE
 
 - **Vector blur / Directional blur** — blur along a vector field (from 3D motion vectors)
-- **Radial blur** — zoom-style blur
-- **Directional blur** — blur in a specific direction
+- ~~**Radial blur** — zoom-style blur~~ ✅ DONE
+- ~~**Directional blur** — blur in a specific direction~~ ✅ DONE
 
-Only isotropic Gaussian blur exists.
+~~Only isotropic Gaussian blur exists.~~ Directional and radial blur implemented. Vector blur (from motion vectors) remains for future CG integration work.
 
 ### 8. No Time Operations
 
@@ -203,7 +203,7 @@ Foundational work first, then nodes that unlock real workflows.
 |---|------|------|-----|
 | 10 | Corner Pin transform | Node | Screen replacement, sign replacement |
 | 11 | STMap / IDistort | Node | CG integration workflow |
-| 12 | Directional blur + Radial blur | Nodes | Common finishing effects |
+| ~~12~~ | ~~Directional blur + Radial blur~~ ✅ | ~~Nodes~~ | DirectionalBlur (angle + length), RadialBlur (zoom-style, center point) |
 
 ### Phase 5: Time & Tracking
 
@@ -220,3 +220,13 @@ Foundational work first, then nodes that unlock real workflows.
 | ~~16~~ | ~~Fix GaussianBlur alpha handling~~ ✅ | ~~Bug fix~~ | Off-by-one fix, premultiply sandwich, Sharpen/Glow also fixed |
 | ~~17~~ | ~~Dot node (pass-through)~~ ✅ | ~~Node~~ | Pass-through for graph organization |
 | ~~18~~ | ~~Text node~~ ✅ | ~~Node~~ | Render text to RGBA with ab_glyph, embedded font, multi-line, alignment |
+
+---
+
+## Pre-Release: AI Proxy Architecture
+
+The AI nodes (Depth Estimate, Inpaint) call the Replicate API. In the browser, requests are proxied through a Cloudflare Worker (`workers/replicate-proxy/`) to avoid CORS. The Tauri desktop app calls Replicate directly (no CORS in native HTTP).
+
+**Before release, rethink this approach:**
+- The shared Cloudflare Worker means all users' API requests route through a single proxy. At scale this could hit free-tier limits (100K req/day) and creates a single point of failure.
+- Options to evaluate: (1) let users deploy their own worker via one-click template, (2) move AI calls to a lightweight backend, (3) use Replicate's streaming API with server-sent events from a backend, (4) for the web version, require the desktop app for AI features.

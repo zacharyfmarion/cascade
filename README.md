@@ -99,6 +99,17 @@ cd apps/tauri/src-tauri
 cargo tauri dev
 ```
 
+### AI nodes (Replicate)
+
+AI-powered nodes (Depth Estimate, Inpaint) use the [Replicate](https://replicate.com) API. To enable them locally:
+
+1. Create a Replicate account and get an API token from https://replicate.com/account/api-tokens
+2. Start the dev server (`yarn dev`) — the Vite config proxies `/api/replicate/*` to Replicate's API to avoid browser CORS restrictions
+3. In the app, go to **Settings → AI** and paste your Replicate API token
+4. Add an AI node (e.g. AI Depth Estimate), connect an input image, and click **Run**
+
+The Tauri desktop app calls Replicate directly and does not need the proxy.
+
 ### Run tests
 
 ```bash
