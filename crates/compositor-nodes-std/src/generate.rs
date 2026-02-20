@@ -1242,6 +1242,60 @@ impl Node for ColorConstant {
     }
 }
 
+pub struct BooleanConstant;
+
+impl BooleanConstant {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for BooleanConstant {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "boolean_constant".to_string(),
+            display_name: "Boolean".to_string(),
+            category: "Generator".to_string(),
+            description: "Output a constant boolean value".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Bool,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Bool,
+                default: ParamDefault::Bool(false),
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: UiHint::Checkbox,
+                promotable: false,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let value = ctx.get_param_bool("value")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("value".to_string(), Value::Bool(value));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 fn build_field_transform(ctx: &EvalContext) -> Result<FieldTransform, CompositorError> {
     let scale_x = ctx.get_param_float("scale_x")? as f32;
     let scale_y = ctx.get_param_float("scale_y")? as f32;

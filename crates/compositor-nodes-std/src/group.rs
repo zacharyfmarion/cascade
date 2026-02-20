@@ -457,6 +457,7 @@ impl Node for GroupNode {
                         ctx.color_management,
                         ctx.ai_provider,
                         ctx.project_format,
+                        &HashMap::new(),
                     )
                     .await?;
                 outputs.insert(port.name.clone(), eval_result.value);

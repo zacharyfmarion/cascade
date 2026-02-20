@@ -162,7 +162,167 @@ impl Node for MathNode {
             id: "math".to_string(),
             display_name: "Math".to_string(),
             category: "Utility".to_string(),
-            description: "Apply math operations".to_string(),
+            description: "Apply math operations on float values".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "a".to_string(),
+                    label: "A".to_string(),
+                    ty: ValueType::Float,
+                    default: Some(ParamDefault::Float(0.0)),
+                    min: None,
+                    max: None,
+                    step: Some(0.01),
+                    ui_hint: Some(UiHint::NumberInput),
+                },
+                PortSpec {
+                    name: "b".to_string(),
+                    label: "B".to_string(),
+                    ty: ValueType::Float,
+                    default: Some(ParamDefault::Float(0.0)),
+                    min: None,
+                    max: None,
+                    step: Some(0.01),
+                    ui_hint: Some(UiHint::NumberInput),
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Float,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "operation".to_string(),
+                    label: "Operation".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(13.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "Add".to_string(),
+                        "Subtract".to_string(),
+                        "Multiply".to_string(),
+                        "Divide".to_string(),
+                        "Power".to_string(),
+                        "Min".to_string(),
+                        "Max".to_string(),
+                        "Abs".to_string(),
+                        "Greater Than".to_string(),
+                        "Less Than".to_string(),
+                        "Clamp".to_string(),
+                        "Step".to_string(),
+                        "Smooth Step".to_string(),
+                        "Lerp".to_string(),
+                    ]),
+                    promotable: false,
+                },
+                ParamSpec {
+                    key: "clamp_result".to_string(),
+                    label: "Clamp Result".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
+                    promotable: false,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let a_val = ctx.get_input_float("a")?;
+            let b_val = ctx.get_input_float("b")?;
+            let operation = ctx.get_param_int("operation")?.clamp(0, 13);
+            let clamp_result = ctx.get_param_bool("clamp_result")?;
+            let mut result = match operation {
+                0 => a_val + b_val,
+                1 => a_val - b_val,
+                2 => a_val * b_val,
+                3 => {
+                    if b_val.abs() > f32::EPSILON {
+                        a_val / b_val
+                    } else {
+                        0.0
+                    }
+                }
+                4 => a_val.powf(b_val),
+                5 => a_val.min(b_val),
+                6 => a_val.max(b_val),
+                7 => a_val.abs(),
+                8 => {
+                    if a_val > b_val {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                9 => {
+                    if a_val < b_val {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                10 => a_val.clamp(0.0, b_val.max(0.0)),
+                11 => {
+                    if a_val >= b_val {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                }
+                12 => smoothstep(0.0, b_val, a_val),
+                13 => (a_val + b_val) * 0.5,
+                _ => a_val,
+            };
+            if clamp_result {
+                result = result.clamp(0.0, 1.0);
+            }
+            let mut outputs = HashMap::new();
+            outputs.insert("value".to_string(), Value::Float(result));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// Per-pixel luminance helper for ImageMath.
+fn luminance_at(image: &Image, idx: usize) -> f32 {
+    let r = image.data[idx];
+    let g = image.data[idx + 1];
+    let b = image.data[idx + 2];
+    0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/// Image-based math node: applies math operations per-pixel on images.
+/// Used internally by builtin groups like Color Range.
+pub struct ImageMath;
+
+impl ImageMath {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ImageMath {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "image_math".to_string(),
+            display_name: "Image Math".to_string(),
+            category: "Utility".to_string(),
+            description: "Apply math operations per-pixel on images".to_string(),
             inputs: vec![
                 PortSpec {
                     name: "a".to_string(),
@@ -344,13 +504,6 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     }
     let t = ((x - edge0) / denom).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
-}
-
-fn luminance_at(image: &Image, idx: usize) -> f32 {
-    let r = image.data[idx];
-    let g = image.data[idx + 1];
-    let b = image.data[idx + 2];
-    0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
 pub struct Dot;

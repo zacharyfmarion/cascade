@@ -19,7 +19,7 @@ pub mod script;
 pub mod transform;
 pub mod utility;
 
-pub use ai::AiInpaint;
+pub use ai::{AiDepthEstimate, AiInpaint};
 pub use blend::{AlphaOver, Blend, Merge};
 pub use color::{
     BrightnessContrast, ColorRampNode, CombineHsva, HueSaturation, Invert, SeparateHsva,
@@ -27,10 +27,10 @@ pub use color::{
 pub use color_convert::ColorConvert;
 pub use color_ops::{ChannelShuffle, Clamp, ColorBalance, Curves, Gamma, Grade, Levels, Posterize, Threshold};
 pub use filter::GaussianBlur;
-pub use filter_ops::{Dilate, EdgeDetect, Erode, Median, Sharpen};
+pub use filter_ops::{Dilate, DirectionalBlur, EdgeDetect, Erode, Median, RadialBlur, Sharpen};
 pub use generate::{
-    Checkerboard, ColorConstant, FloatConstant, Gradient, IntegerConstant, Noise, RasterizeField,
-    SolidColor, Text,
+    BooleanConstant, Checkerboard, ColorConstant, FloatConstant, Gradient, IntegerConstant, Noise,
+    RasterizeField, SolidColor, Text,
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
@@ -39,7 +39,7 @@ pub use output::{ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use transform::{Crop, Flip, Resize, Rotate, Transform2D, Translate};
-pub use utility::{Dot, MapRange, MathNode};
+pub use utility::{Dot, ImageMath, MapRange, MathNode};
 
 pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     // Input/Output
@@ -48,6 +48,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("viewer", || Arc::new(Viewer::new()));
 
     registry.register("ai_inpaint", || Arc::new(AiInpaint::new()));
+    registry.register("ai_depth_estimate", || Arc::new(AiDepthEstimate::new()));
 
     // Color
     registry.register("color_convert", || Arc::new(ColorConvert::new()));
@@ -73,6 +74,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
 
     registry.register("map_range", || Arc::new(MapRange::new()));
     registry.register("math", || Arc::new(MathNode::new()));
+    registry.register("image_math", || Arc::new(ImageMath::new()));
     registry.register("dot", || Arc::new(Dot::new()));
 
     // Filter
@@ -82,6 +84,8 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("dilate", || Arc::new(Dilate::new()));
     registry.register("erode", || Arc::new(Erode::new()));
     registry.register("median", || Arc::new(Median::new()));
+    registry.register("directional_blur", || Arc::new(DirectionalBlur::new()));
+    registry.register("radial_blur", || Arc::new(RadialBlur::new()));
 
     // Composite
     registry.register("blend", || Arc::new(Blend::new()));
@@ -105,6 +109,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("float_constant", || Arc::new(FloatConstant::new()));
     registry.register("integer_constant", || Arc::new(IntegerConstant::new()));
     registry.register("color_constant", || Arc::new(ColorConstant::new()));
+    registry.register("boolean_constant", || Arc::new(BooleanConstant::new()));
     registry.register("text", || Arc::new(Text::new()));
 
     // Matte
@@ -173,6 +178,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         result.get("image").unwrap().clone()
@@ -194,6 +200,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         result.get("image").unwrap().clone()
@@ -598,6 +605,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         match result.get("image").unwrap() {
@@ -904,6 +912,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         match result.get("image").unwrap() {
@@ -1774,6 +1783,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(sep.evaluate(&ctx)).unwrap();
         let red = match result.get("red").unwrap() {
@@ -1827,6 +1837,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let sep_result = block_on(sep.evaluate(&ctx)).unwrap();
         let red = sep_result.get("red").unwrap().clone();
@@ -1847,6 +1858,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let comb_result = block_on(comb.evaluate(&ctx2)).unwrap();
         let output = match comb_result.get("image").unwrap() {
@@ -2332,6 +2344,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let img = match result.get("image").unwrap() {
@@ -2378,6 +2391,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let image = match result.get("image").unwrap() {
@@ -2410,6 +2424,7 @@ mod tests {
             color_management: &cm,
             ai_provider: None,
             project_format: &format,
+            ai_cached_outputs: None,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let img = match result.get("image").unwrap() {
@@ -2759,5 +2774,240 @@ mod tests {
         assert!(approx_eq(px0[2], 0.5), "B preserved: {}", px0[2]);
         // Alpha should be eroded (neighbor has alpha=0.0)
         assert!(approx_eq(px0[3], 0.0), "A eroded: {}", px0[3]);
+    }
+
+    #[test]
+    fn test_directional_blur_zero_length_identity() {
+        let input = Image::from_f32_data(4, 4, vec![[0.5f32, 0.3, 0.7, 1.0]; 16].concat());
+        let node = DirectionalBlur::new();
+        let mut params = HashMap::new();
+        params.insert("length".to_string(), ParamValue::Float(0.0));
+        params.insert("angle".to_string(), ParamValue::Float(0.0));
+
+        let output = eval_image_node(&node, input.clone(), params);
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                let orig = input.get_pixel_f32(x, y);
+                let out = output.get_pixel_f32(x, y);
+                for c in 0..4 {
+                    assert!(
+                        approx_eq(orig[c], out[c]),
+                        "zero-length directional blur should be identity at ({},{}) ch {}: {} vs {}",
+                        x, y, c, orig[c], out[c]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_directional_blur_horizontal() {
+        let w = 64u32;
+        let h = 1u32;
+        let mut data = vec![0.0f32; (w as usize) * 4];
+        let mid = (w / 2) as usize;
+        data[mid * 4] = 1.0;
+        data[mid * 4 + 1] = 1.0;
+        data[mid * 4 + 2] = 1.0;
+        data[mid * 4 + 3] = 1.0;
+
+        let input = Image::from_f32_data(w, h, data);
+        let node = DirectionalBlur::new();
+        let mut params = HashMap::new();
+        params.insert("length".to_string(), ParamValue::Float(6.0));
+        params.insert("angle".to_string(), ParamValue::Float(0.0));
+
+        let output = eval_image_node(&node, input, params);
+
+        let center = output.get_pixel_f32(mid as u32, 0);
+        assert!(center[0] > 0.0, "center should have some brightness");
+
+        let spread_left = output.get_pixel_f32((mid - 2) as u32, 0);
+        let spread_right = output.get_pixel_f32((mid + 2) as u32, 0);
+        assert!(
+            spread_left[0] > 0.0 && spread_right[0] > 0.0,
+            "blur should spread horizontally: left={}, right={}",
+            spread_left[0],
+            spread_right[0]
+        );
+
+        let far_edge = output.get_pixel_f32(0, 0);
+        assert!(
+            far_edge[0] < center[0],
+            "far edge should be less bright than center: far={}, center={}",
+            far_edge[0],
+            center[0]
+        );
+    }
+
+    #[test]
+    fn test_directional_blur_format_propagation() {
+        let input = make_offset_image([0.5, 0.5, 0.5, 1.0]);
+        let node = DirectionalBlur::new();
+        let mut params = HashMap::new();
+        params.insert("length".to_string(), ParamValue::Float(5.0));
+        params.insert("angle".to_string(), ParamValue::Float(45.0));
+
+        let output = eval_image_node(&node, input.clone(), params);
+        assert_eq!(output.format, input.format);
+        assert_eq!(output.data_window, input.data_window);
+        assert_eq!(output.color_space, input.color_space);
+    }
+
+    #[test]
+    fn test_directional_blur_no_dark_halo() {
+        let w = 16u32;
+        let h = 16u32;
+        let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                if x < 8 {
+                    data[i] = 1.0;
+                    data[i + 1] = 1.0;
+                    data[i + 2] = 1.0;
+                    data[i + 3] = 1.0;
+                }
+            }
+        }
+        let input = Image::from_f32_data(w, h, data);
+        let node = DirectionalBlur::new();
+        let mut params = HashMap::new();
+        params.insert("length".to_string(), ParamValue::Float(8.0));
+        params.insert("angle".to_string(), ParamValue::Float(0.0));
+
+        let output = eval_image_node(&node, input, params);
+
+        let y = 8;
+        for x in 5..11 {
+            let px = output.get_rgba(x as i32, y as i32);
+            if px[3] > 0.01 {
+                assert!(
+                    px[0] > 0.8 && px[1] > 0.8 && px[2] > 0.8,
+                    "Dark halo at ({},{}): rgba=[{:.3},{:.3},{:.3},{:.3}]",
+                    x, y, px[0], px[1], px[2], px[3]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_radial_blur_zero_strength_identity() {
+        let input = Image::from_f32_data(4, 4, vec![[0.5f32, 0.3, 0.7, 1.0]; 16].concat());
+        let node = RadialBlur::new();
+        let mut params = HashMap::new();
+        params.insert("strength".to_string(), ParamValue::Float(0.0));
+        params.insert("center_x".to_string(), ParamValue::Float(0.5));
+        params.insert("center_y".to_string(), ParamValue::Float(0.5));
+
+        let output = eval_image_node(&node, input.clone(), params);
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                let orig = input.get_pixel_f32(x, y);
+                let out = output.get_pixel_f32(x, y);
+                for c in 0..4 {
+                    assert!(
+                        approx_eq(orig[c], out[c]),
+                        "zero-strength radial blur should be identity at ({},{}) ch {}: {} vs {}",
+                        x, y, c, orig[c], out[c]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_radial_blur_spreads_from_center() {
+        let w = 32u32;
+        let h = 32u32;
+        let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+        // Create a ring of bright pixels away from center — radial blur
+        // samples inward toward center, so outer pixels will pick up
+        // brightness from this ring.
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let dx = x as f32 - 15.5;
+                let dy = y as f32 - 15.5;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > 6.0 && dist < 10.0 {
+                    let i = (y * w as usize + x) * 4;
+                    data[i] = 1.0;
+                    data[i + 1] = 1.0;
+                    data[i + 2] = 1.0;
+                    data[i + 3] = 1.0;
+                }
+            }
+        }
+        let input = Image::from_f32_data(w, h, data);
+        let node = RadialBlur::new();
+        let mut params = HashMap::new();
+        params.insert("strength".to_string(), ParamValue::Float(0.5));
+        params.insert("center_x".to_string(), ParamValue::Float(0.5));
+        params.insert("center_y".to_string(), ParamValue::Float(0.5));
+
+        let output = eval_image_node(&node, input.clone(), params);
+
+        // Pixels outside the ring should pick up brightness from inward samples
+        let outer = output.get_pixel_f32(28, 16);
+        let orig_outer = input.get_pixel_f32(28, 16);
+        assert!(
+            outer[0] > orig_outer[0],
+            "outer pixel should gain brightness from radial sampling: {} vs original {}",
+            outer[0],
+            orig_outer[0]
+        );
+    }
+
+    #[test]
+    fn test_radial_blur_format_propagation() {
+        let input = make_offset_image([0.5, 0.5, 0.5, 1.0]);
+        let node = RadialBlur::new();
+        let mut params = HashMap::new();
+        params.insert("strength".to_string(), ParamValue::Float(0.3));
+        params.insert("center_x".to_string(), ParamValue::Float(0.5));
+        params.insert("center_y".to_string(), ParamValue::Float(0.5));
+
+        let output = eval_image_node(&node, input.clone(), params);
+        assert_eq!(output.format, input.format);
+        assert_eq!(output.data_window, input.data_window);
+        assert_eq!(output.color_space, input.color_space);
+    }
+
+    #[test]
+    fn test_radial_blur_no_dark_halo() {
+        let w = 16u32;
+        let h = 16u32;
+        let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = (y * w as usize + x) * 4;
+                if x < 8 {
+                    data[i] = 1.0;
+                    data[i + 1] = 1.0;
+                    data[i + 2] = 1.0;
+                    data[i + 3] = 1.0;
+                }
+            }
+        }
+        let input = Image::from_f32_data(w, h, data);
+        let node = RadialBlur::new();
+        let mut params = HashMap::new();
+        params.insert("strength".to_string(), ParamValue::Float(0.5));
+        params.insert("center_x".to_string(), ParamValue::Float(0.25));
+        params.insert("center_y".to_string(), ParamValue::Float(0.5));
+
+        let output = eval_image_node(&node, input, params);
+
+        let y = 8;
+        for x in 5..11 {
+            let px = output.get_rgba(x as i32, y as i32);
+            if px[3] > 0.01 {
+                assert!(
+                    px[0] > 0.8 && px[1] > 0.8 && px[2] > 0.8,
+                    "Dark halo at ({},{}): rgba=[{:.3},{:.3},{:.3},{:.3}]",
+                    x, y, px[0], px[1], px[2], px[3]
+                );
+            }
+        }
     }
 }
