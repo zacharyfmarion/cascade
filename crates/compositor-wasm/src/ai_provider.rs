@@ -49,10 +49,20 @@ mod imp {
         ) -> Result<AiPredictionResult, CompositorError> {
             let api_key = self.get_api_key()?;
 
-            let payload = serde_json::json!({
-                "version": request.version,
-                "input": request.input,
-            });
+            let (url, payload) = if let Some(ref model) = request.model {
+                (
+                    get_model_predictions_url(model),
+                    serde_json::json!({ "input": request.input }),
+                )
+            } else {
+                (
+                    get_predictions_url(),
+                    serde_json::json!({
+                        "version": request.version,
+                        "input": request.input,
+                    }),
+                )
+            };
             let body = serde_json::to_string(&payload)
                 .map_err(|e| CompositorError::Other(e.to_string()))?;
 
@@ -77,7 +87,6 @@ mod imp {
             })?;
             init.set_headers(&headers);
 
-            let url = get_predictions_url();
             let http_request = Request::new_with_str_and_init(&url, &init)
                 .map_err(|e| CompositorError::Other(format!("Request init failed: {e:?}")))?;
 
@@ -221,15 +230,26 @@ mod imp {
 
     const WORKER_URL: &str = "https://compositor-api-proxy.compositor-proxy.workers.dev";
 
-    fn get_predictions_url() -> String {
-        let is_local = web_sys::window()
+    fn is_local_dev() -> bool {
+        web_sys::window()
             .and_then(|w| w.location().hostname().ok())
             .map(|h| h == "localhost" || h == "127.0.0.1")
-            .unwrap_or(false);
-        if is_local {
+            .unwrap_or(false)
+    }
+
+    fn get_predictions_url() -> String {
+        if is_local_dev() {
             "/api/replicate/v1/predictions".to_string()
         } else {
             format!("{WORKER_URL}/v1/predictions")
+        }
+    }
+
+    fn get_model_predictions_url(model: &str) -> String {
+        if is_local_dev() {
+            format!("/api/replicate/v1/models/{model}/predictions")
+        } else {
+            format!("{WORKER_URL}/v1/models/{model}/predictions")
         }
     }
 

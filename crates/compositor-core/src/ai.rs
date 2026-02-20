@@ -63,7 +63,12 @@ impl From<bool> for AiInputValue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiPredictionRequest {
     /// The Replicate model version hash (e.g., "b239ea33cff3...").
+    /// Ignored when `model` is set.
     pub version: String,
+    /// Optional model identifier for official models (e.g., "bria/remove-background").
+    /// When set, uses the model-level endpoint: POST /v1/models/{model}/predictions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Input parameters for the model. Keys and value types depend on the model.
     /// Images should be passed as base64 data URIs: "data:image/png;base64,..."
     pub input: HashMap<String, AiInputValue>,

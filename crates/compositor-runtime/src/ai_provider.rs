@@ -48,14 +48,24 @@ impl NativeAiProvider {
     ) -> Result<AiPredictionResult, CompositorError> {
         let api_key = self.get_api_key()?;
 
-        let payload = serde_json::json!({
-            "version": request.version,
-            "input": request.input,
-        });
+        let (url, payload) = if let Some(ref model) = request.model {
+            (
+                format!("https://api.replicate.com/v1/models/{model}/predictions"),
+                serde_json::json!({ "input": request.input }),
+            )
+        } else {
+            (
+                "https://api.replicate.com/v1/predictions".to_string(),
+                serde_json::json!({
+                    "version": request.version,
+                    "input": request.input,
+                }),
+            )
+        };
 
         let response = self
             .client
-            .post("https://api.replicate.com/v1/predictions")
+            .post(&url)
             .bearer_auth(&api_key)
             .header("Content-Type", "application/json")
             .header("Prefer", "wait")
