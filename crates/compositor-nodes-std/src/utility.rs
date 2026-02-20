@@ -554,3 +554,167 @@ impl Node for Dot {
         self
     }
 }
+
+pub struct ProjectInfo;
+
+impl ProjectInfo {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ProjectInfo {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "project_info".to_string(),
+            display_name: "Project Info".to_string(),
+            category: "Utility".to_string(),
+            description: "Output project metadata (resolution, frame, pixel aspect ratio)"
+                .to_string(),
+            inputs: vec![],
+            outputs: vec![
+                PortSpec {
+                    name: "width".to_string(),
+                    label: "Width".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "height".to_string(),
+                    label: "Height".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "pixel_aspect".to_string(),
+                    label: "Pixel Aspect".to_string(),
+                    ty: ValueType::Float,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "frame".to_string(),
+                    label: "Frame".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+            ],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let fmt = ctx.project_format;
+            let mut outputs = HashMap::new();
+            outputs.insert("width".to_string(), Value::Int(fmt.width() as i32));
+            outputs.insert("height".to_string(), Value::Int(fmt.height() as i32));
+            outputs.insert(
+                "pixel_aspect".to_string(),
+                Value::Float(fmt.pixel_aspect.as_f32()),
+            );
+            outputs.insert(
+                "frame".to_string(),
+                Value::Int(ctx.frame_time.frame as i32),
+            );
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct ImageInfo;
+
+impl ImageInfo {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ImageInfo {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "image_info".to_string(),
+            display_name: "Image Info".to_string(),
+            category: "Utility".to_string(),
+            description: "Output image metadata (dimensions, data window, pixel count)".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![
+                PortSpec {
+                    name: "width".to_string(),
+                    label: "Width".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "height".to_string(),
+                    label: "Height".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "aspect_ratio".to_string(),
+                    label: "Aspect Ratio".to_string(),
+                    ty: ValueType::Float,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "pixel_count".to_string(),
+                    label: "Pixel Count".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "dw_x".to_string(),
+                    label: "DW X".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "dw_y".to_string(),
+                    label: "DW Y".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                },
+            ],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let w = image.width as i32;
+            let h = image.height as i32;
+            let aspect = if h > 0 { w as f32 / h as f32 } else { 0.0 };
+
+            let mut outputs = HashMap::new();
+            outputs.insert("width".to_string(), Value::Int(w));
+            outputs.insert("height".to_string(), Value::Int(h));
+            outputs.insert("aspect_ratio".to_string(), Value::Float(aspect));
+            outputs.insert("pixel_count".to_string(), Value::Int(w * h));
+            outputs.insert("dw_x".to_string(), Value::Int(image.data_window.min.x));
+            outputs.insert("dw_y".to_string(), Value::Int(image.data_window.min.y));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
