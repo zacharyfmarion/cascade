@@ -53,6 +53,7 @@ fn graph_connects_and_evaluates_chain() {
         &cm,
         None,
         &Format::hd(),
+        &HashMap::new(),
     ))
     .unwrap();
     match eval_result.value {
@@ -87,6 +88,7 @@ fn cache_hit_skips_evaluation() {
         &cm,
         None,
         &Format::hd(),
+        &HashMap::new(),
     ))
     .unwrap();
     block_on(evaluator.evaluate(
@@ -99,6 +101,7 @@ fn cache_hit_skips_evaluation() {
         &cm,
         None,
         &Format::hd(),
+        &HashMap::new(),
     ))
     .unwrap();
 

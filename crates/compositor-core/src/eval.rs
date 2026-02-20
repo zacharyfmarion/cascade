@@ -21,11 +21,11 @@ pub struct Evaluator {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct CacheKey {
-    frame_time: FrameTime,
-    param_revision: u64,
-    upstream_hash: u64,
-    project_format_hash: u64,
+pub struct CacheKey {
+    pub frame_time: FrameTime,
+    pub param_revision: u64,
+    pub upstream_hash: u64,
+    pub project_format_hash: u64,
 }
 
 impl Evaluator {
@@ -46,6 +46,7 @@ impl Evaluator {
         color_management: &dyn ColorManagement,
         ai_provider: Option<&dyn crate::ai::AiProvider>,
         project_format: &Format,
+        ai_node_cache: &HashMap<NodeId, HashMap<String, Value>>,
     ) -> Result<EvalResult, CompositorError> {
         let mut visited = HashSet::new();
         let mut order = Vec::new();
@@ -198,6 +199,11 @@ impl Evaluator {
                 color_management,
                 ai_provider,
                 project_format,
+                ai_cached_outputs: {
+                    static EMPTY: std::sync::LazyLock<HashMap<String, Value>> =
+                        std::sync::LazyLock::new(HashMap::new);
+                    Some(ai_node_cache.get(&node_id).unwrap_or(&EMPTY))
+                },
             };
             let start = Instant::now();
             let outputs = node.evaluate(&ctx).await?;
@@ -287,7 +293,42 @@ impl Evaluator {
         Ok(hasher.finish())
     }
 
-    fn merge_params(
+    pub fn get_cached(&self, node_id: NodeId, output_port: &str) -> Option<&Value> {
+        self.cache
+            .get(&(node_id, output_port.to_string()))
+            .map(|(_, v)| v)
+    }
+
+    pub fn compute_node_cache_key(
+        &self,
+        graph: &Graph,
+        registry: &NodeRegistry,
+        node_id: NodeId,
+        frame_time: FrameTime,
+        project_format: &Format,
+    ) -> Result<CacheKey, CompositorError> {
+        let instance = graph
+            .nodes
+            .get(node_id)
+            .ok_or(CompositorError::NodeNotFound(node_id))?;
+        let spec = registry
+            .get_spec(&instance.type_id)
+            .ok_or_else(|| CompositorError::InvalidConnection(instance.type_id.clone()))?;
+        let upstream_hash = self.compute_upstream_hash(graph, node_id, spec, frame_time)?;
+        let pf_hash = {
+            let mut h = AHasher::default();
+            project_format.hash(&mut h);
+            h.finish()
+        };
+        Ok(CacheKey {
+            frame_time,
+            param_revision: instance.param_revision,
+            upstream_hash,
+            project_format_hash: pf_hash,
+        })
+    }
+
+    pub fn merge_params(
         instance: &crate::graph::NodeInstance,
         spec: &crate::types::NodeSpec,
     ) -> HashMap<String, ParamValue> {
@@ -526,6 +567,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
@@ -578,6 +620,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
         assert!(result1.is_ok());
 
@@ -593,6 +636,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
         assert!(result2.is_ok());
 
@@ -653,6 +697,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
         assert!(result1.is_ok());
 
@@ -675,6 +720,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
         assert!(result2.is_ok());
     }
@@ -707,6 +753,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
@@ -861,6 +908,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
@@ -909,6 +957,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
         assert!(result1.is_ok());
 
@@ -924,6 +973,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
         assert!(result2.is_ok());
 
@@ -1094,6 +1144,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
@@ -1214,6 +1265,7 @@ mod tests {
             &cm,
             None,
             &project_format,
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
@@ -1281,6 +1333,7 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
@@ -1349,8 +1402,340 @@ mod tests {
             &cm,
             None,
             &Format::hd(),
+            &HashMap::new(),
         ));
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_compute_node_cache_key_consistent_for_unchanged_state() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        // Evaluate once to populate caches
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            processor_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let frame_time = FrameTime { frame: 0 };
+        let format = Format::hd();
+
+        let key1 = evaluator
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .unwrap();
+        let key2 = evaluator
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .unwrap();
+
+        assert_eq!(key1, key2, "Cache key should be identical for unchanged state");
+    }
+
+    #[test]
+    fn test_compute_node_cache_key_changes_on_param_change() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            processor_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let frame_time = FrameTime { frame: 0 };
+        let format = Format::hd();
+
+        let key_before = evaluator
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .unwrap();
+
+        // Change a param on the processor node
+        graph.set_param(processor_id, "factor", ParamValue::Float(2.0));
+
+        let key_after = evaluator
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .unwrap();
+
+        assert_ne!(
+            key_before, key_after,
+            "Cache key should change after param modification"
+        );
+        assert_ne!(
+            key_before.param_revision, key_after.param_revision,
+            "param_revision should differ"
+        );
+    }
+
+    #[test]
+    fn test_compute_node_cache_key_changes_on_frame_time_change() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            processor_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let format = Format::hd();
+
+        let key_frame_0 = evaluator
+            .compute_node_cache_key(&graph, &registry, processor_id, FrameTime { frame: 0 }, &format)
+            .unwrap();
+        let key_frame_1 = evaluator
+            .compute_node_cache_key(&graph, &registry, processor_id, FrameTime { frame: 1 }, &format)
+            .unwrap();
+
+        assert_ne!(
+            key_frame_0, key_frame_1,
+            "Cache key should differ for different frame times"
+        );
+        assert_ne!(
+            key_frame_0.frame_time, key_frame_1.frame_time,
+            "frame_time field should differ"
+        );
+    }
+
+    #[test]
+    fn test_compute_node_cache_key_changes_on_upstream_connection_change() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+        let sink_id = graph.add_node("sink");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+        graph
+            .connect(&registry, processor_id, "output", sink_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let frame_time = FrameTime { frame: 0 };
+        let format = Format::hd();
+
+        // Evaluate to populate cache
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            frame_time,
+            &cm,
+            None,
+            &format,
+            &HashMap::new(),
+        ));
+
+        let key_before = evaluator
+            .compute_node_cache_key(&graph, &registry, sink_id, frame_time, &format)
+            .unwrap();
+
+        // Change a param on the upstream source node — this changes the upstream hash for sink
+        graph.set_param(source_id, "value", ParamValue::Float(1.0));
+
+        // Re-evaluate so the evaluator's internal cache keys reflect the upstream change
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            frame_time,
+            &cm,
+            None,
+            &format,
+            &HashMap::new(),
+        ));
+
+        let key_after = evaluator
+            .compute_node_cache_key(&graph, &registry, sink_id, frame_time, &format)
+            .unwrap();
+
+        assert_ne!(
+            key_before, key_after,
+            "Cache key should change when upstream node params change"
+        );
+    }
+
+    #[test]
+    fn test_compute_node_cache_key_changes_on_project_format_change() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let frame_time = FrameTime { frame: 0 };
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            source_id,
+            "output",
+            frame_time,
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let key_hd = evaluator
+            .compute_node_cache_key(&graph, &registry, source_id, frame_time, &Format::hd())
+            .unwrap();
+        let key_custom = evaluator
+            .compute_node_cache_key(
+                &graph,
+                &registry,
+                source_id,
+                frame_time,
+                &Format::from_dimensions(1280, 720),
+            )
+            .unwrap();
+
+        assert_ne!(
+            key_hd, key_custom,
+            "Cache key should differ for different project formats"
+        );
+        assert_ne!(
+            key_hd.project_format_hash, key_custom.project_format_hash,
+            "project_format_hash should differ"
+        );
     }
 }

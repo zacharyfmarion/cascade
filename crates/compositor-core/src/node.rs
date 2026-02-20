@@ -27,6 +27,7 @@ pub struct EvalContext<'a> {
     pub color_management: &'a dyn ColorManagement,
     pub ai_provider: Option<&'a dyn crate::ai::AiProvider>,
     pub project_format: &'a Format,
+    pub ai_cached_outputs: Option<&'a HashMap<String, Value>>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -50,6 +51,20 @@ impl<'a> EvalContext<'a> {
             Some(Value::Field(f)) => Ok(ImageOrField::Field(f)),
             _ => Err(CompositorError::MissingInput(name.to_string())),
         }
+    }
+
+    pub fn get_input_float(&self, name: &str) -> Result<f32, CompositorError> {
+        self.inputs
+            .get(name)
+            .and_then(|v| v.as_float())
+            .ok_or_else(|| CompositorError::MissingInput(name.to_string()))
+    }
+
+    pub fn get_input_bool(&self, name: &str) -> Result<bool, CompositorError> {
+        self.inputs
+            .get(name)
+            .and_then(|v| v.as_bool())
+            .ok_or_else(|| CompositorError::MissingInput(name.to_string()))
     }
 
     pub fn get_input_field(&self, name: &str) -> Result<&Field, CompositorError> {
