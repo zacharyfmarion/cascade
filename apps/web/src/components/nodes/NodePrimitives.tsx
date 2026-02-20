@@ -53,7 +53,7 @@ export const NodeDropdown: React.FC<NodeDropdownProps> = ({
   label, value, options, onChange, disabled,
 }) => (
   <label
-    className="node-dropdown nopan nodrag nowheel"
+    className="node-dropdown nopan nodrag"
     onPointerDown={(e) => e.stopPropagation()}
   >
     <span className="node-dropdown__label" style={{ opacity: disabled ? 0.5 : 1 }}>{label}</span>
@@ -84,7 +84,7 @@ export const NodeSelect: React.FC<NodeSelectProps> = ({
   label, value, options, onChange, disabled,
 }) => (
   <label
-    className="node-dropdown nopan nodrag nowheel"
+    className="node-dropdown nopan nodrag"
     onPointerDown={(e) => e.stopPropagation()}
   >
     {label && <span className="node-dropdown__label" style={{ opacity: disabled ? 0.5 : 1 }}>{label}</span>}
@@ -114,7 +114,7 @@ interface NodeTextInputProps {
 export const NodeTextInput: React.FC<NodeTextInputProps> = ({
   label, value, onChange, placeholder, disabled,
 }) => (
-  <div className="node-text-input nopan nodrag nowheel" onPointerDown={(e) => e.stopPropagation()}>
+  <div className="node-text-input nopan nodrag" onPointerDown={(e) => e.stopPropagation()}>
     {label && <div className="node-text-input__label">{label}</div>}
     <input
       type="text"
@@ -138,7 +138,7 @@ interface NodeCheckboxProps {
 
 export const NodeCheckbox: React.FC<NodeCheckboxProps> = ({ label, checked, onChange, disabled }) => (
   <label
-    className="node-checkbox nopan nodrag nowheel"
+    className="node-checkbox nopan nodrag"
     onPointerDown={(e) => e.stopPropagation()}
     style={{ opacity: disabled ? 0.5 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
   >
@@ -203,7 +203,7 @@ export const NodeNumberInput: React.FC<NodeNumberInputProps> = ({
   }, [localValue, commit]);
 
   return (
-    <div className="node-number nopan nodrag nowheel" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="node-number nopan nodrag" onPointerDown={(e) => e.stopPropagation()}>
       <div className="node-number__label">{label}</div>
       <input
         type="number"
@@ -247,7 +247,7 @@ export const NodeButton: React.FC<NodeButtonProps> = ({
 }) => (
   <button
     type="button"
-    className={`node-btn node-btn--${variant} ${fullWidth ? 'node-btn--full' : ''} ${icon ? 'node-btn--icon' : ''} nopan nodrag nowheel`}
+    className={`node-btn node-btn--${variant} ${fullWidth ? 'node-btn--full' : ''} ${icon ? 'node-btn--icon' : ''} nopan nodrag`}
     onClick={onClick}
     onPointerDown={(e) => e.stopPropagation()}
     disabled={disabled}

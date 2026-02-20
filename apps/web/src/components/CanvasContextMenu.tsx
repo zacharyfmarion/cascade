@@ -284,7 +284,7 @@ export const CanvasContextMenu = React.forwardRef<HTMLDivElement, CanvasContextM
         ref={ref}
         role="menu"
         tabIndex={-1}
-        className="nopan nodrag nowheel"
+        className="nopan nodrag"
         style={{ ...menuContainerStyle, left: menu.x, top: menu.y }}
         onMouseDown={e => e.stopPropagation()}
         onClick={e => e.stopPropagation()}

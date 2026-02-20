@@ -149,7 +149,7 @@ export const NodeSlider: React.FC<NodeSliderProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`node-slider nopan nodrag nowheel ${isDragging ? 'node-slider--dragging' : ''}`}
+      className={`node-slider nopan nodrag ${isDragging ? 'node-slider--dragging' : ''}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -163,7 +163,7 @@ export const NodeSlider: React.FC<NodeSliderProps> = ({
       {isEditing ? (
         <input
           type="text"
-          className="node-slider__input nopan nodrag nowheel"
+          className="node-slider__input nopan nodrag"
           value={editText}
           onChange={(e) => setEditText(e.target.value)}
           onKeyDown={handleEditKeyDown}

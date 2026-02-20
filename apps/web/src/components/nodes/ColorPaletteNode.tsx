@@ -88,7 +88,7 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
   return (
     <BaseNode {...props} data={data} minWidth="240px" maxWidth="280px" headerIcon={getNodeIcon('color_palette', 'Color')}>
       <div
-        className="nopan nodrag nowheel"
+        className="nopan nodrag"
         style={{ userSelect: 'none' }}
         onPointerDown={(e) => e.stopPropagation()}
       >

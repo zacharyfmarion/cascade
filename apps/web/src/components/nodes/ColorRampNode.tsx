@@ -284,7 +284,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
   return (
     <BaseNode {...props} data={data} minWidth="280px" maxWidth="320px" headerIcon={getNodeIcon('color_ramp', 'Color')}>
       <div
-        className="nopan nodrag nowheel"
+        className="nopan nodrag"
         style={{ userSelect: 'none' }}
         onPointerDown={(e) => e.stopPropagation()}
       >

@@ -65,4 +65,13 @@ function wasmHotRebuild(): PluginOption {
 
 export default defineConfig({
   plugins: [react(), wasm(), topLevelAwait(), wasmHotRebuild()],
+  server: {
+    proxy: {
+      '/api/replicate': {
+        target: 'https://api.replicate.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/replicate/, ''),
+      },
+    },
+  },
 });

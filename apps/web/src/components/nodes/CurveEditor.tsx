@@ -274,7 +274,7 @@ export const CurveEditor: React.FC<CurveEditorProps> = ({
       height={height}
       tabIndex={0}
       style={{ cursor: draggingIdx !== null ? 'grabbing' : 'crosshair', display: 'block', outline: 'none' }}
-      className="nopan nodrag nowheel"
+      className="nopan nodrag"
       onClick={handleSvgClick}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

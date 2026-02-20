@@ -48,7 +48,7 @@ const InlineInputControl: React.FC<{
     const hex = linearToHex(r, g, b);
     
     return (
-      <div className="nopan nodrag nowheel" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div className="nopan nodrag" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <div style={{
           position: 'relative',
           width: '14px',
@@ -61,13 +61,15 @@ const InlineInputControl: React.FC<{
           <input
             type="color"
             value={hex}
-            onChange={(e) => {
-              const [nr, ng, nb] = hexToLinear(e.target.value);
+            onInput={(e) => {
+              const [nr, ng, nb] = hexToLinear((e.target as HTMLInputElement).value);
               setInputDefaultLive(nodeId, portSpec.name, createParamValue(portSpec.ty, [nr, ng, nb, a]));
             }}
-            onBlur={(e) => {
+            onChange={(e) => {
               const [nr, ng, nb] = hexToLinear(e.target.value);
-              setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, [nr, ng, nb, a]));
+              const value = createParamValue(portSpec.ty, [nr, ng, nb, a]);
+              setInputDefaultLive(nodeId, portSpec.name, value);
+              setInputDefaultCommit(nodeId, portSpec.name, value);
             }}
             style={{
               position: 'absolute',

@@ -31,19 +31,16 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
     };
   }, [r, g, b, a]);
 
-  const handleColorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const [nr, ng, nb] = hexToLinear(e.target.value);
+  const handleColorInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
+    const [nr, ng, nb] = hexToLinear((e.target as HTMLInputElement).value);
     onChange([nr, ng, nb, a]);
   }, [a, onChange]);
 
-  // Native picker doesn't really have a "commit" separate from change usually, 
-  // but we can fire commit on blur or close if we could detect it. 
-  // For now, native input fires onChange when closed/accepted mostly.
-  // We can just proxy onChange to onChangeCommit if present for the color picker part.
   const handleColorCommit = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const [nr, ng, nb] = hexToLinear(e.target.value);
+    onChange([nr, ng, nb, a]);
     onChangeCommit?.([nr, ng, nb, a]);
-  }, [a, onChangeCommit]);
+  }, [a, onChange, onChangeCommit]);
 
   const handleAlphaChange = useCallback((newAlpha: number) => {
     onChange([r, g, b, newAlpha]);
@@ -54,7 +51,7 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
   }, [r, g, b, onChangeCommit]);
 
   return (
-    <div className="node-color-picker nopan nodrag nowheel">
+    <div className="node-color-picker nopan nodrag">
       <div style={{ 
         display: 'flex', 
         alignItems: 'center', 
@@ -79,8 +76,8 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
           <input
             type="color"
             value={hexValue}
-            onChange={handleColorChange}
-            onBlur={handleColorCommit} // Approximate commit on blur
+            onInput={handleColorInput}
+            onChange={handleColorCommit}
             style={{
               position: 'absolute',
               top: 0,
