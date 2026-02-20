@@ -15,11 +15,11 @@ Gap analysis and prioritized plan for reaching moderately production-grade compo
 | **Color** | BrightnessContrast, HueSaturation, Invert, Levels, **Curves** (per-channel, monotone cubic), ColorBalance, ChannelShuffle, Threshold, Posterize, Gamma, **Grade**, **Clamp**, ColorRamp, ColorPalette, SeparateHSVA, CombineHSVA, WhiteBalance, Vibrance, GradientMap, ToneMap, ColorConvert | **Strong** |
 | **Filter** | GaussianBlur, Sharpen, EdgeDetect, Dilate, Erode, Median, Vignette, Glow, LensDistortion | Decent |
 | **Composite** | Blend (19 modes), AlphaOver, **Merge** (14 Porter-Duff ops, bbox control) | Good |
-| **Transform** | Resize, Crop, Flip, Rotate, Translate, Transform2D | Decent |
-| **Generator** | SolidColor, Noise, Gradient, Checkerboard, RasterizeField, FloatConstant, IntegerConstant, Shape | Good |
+| **Transform** | Resize, Crop, Flip, Rotate, Translate, Transform2D, **CornerPin**, **STMap** | Good |
+| **Generator** | SolidColor, Noise, Gradient, Checkerboard, RasterizeField, FloatConstant, IntegerConstant, Shape, **UVMap** | Good |
 | **Matte** | Premultiply, Unpremultiply, SetAlpha, ExtractChannel, ChromaKey, Despill, LuminanceKey, DifferenceMatte, EdgeBlur, MatteExpand, MatteShrink | **Good** |
 | **Channel** | SeparateRGBA, CombineRGBA, CopyChannels, ChannelShuffle, ExtractChannel | **Good** |
-| **Utility** | MapRange, Math | Minimal |
+| **Utility** | MapRange, Math, ImageMath, Dot, **ProjectInfo**, **ImageInfo** | Decent |
 | **Other** | GroupNode system, GpuScript, AiInpaint | Nice extras |
 
 ---
@@ -80,11 +80,12 @@ Without tracking, the most basic VFX shot (putting something on a wall, replacin
 
 Implemented: Monotone cubic Hermite interpolation (Fritsch-Carlson), 4 independent curves (Master/R/G/B), SVG-based interactive curve editor with click-to-add, drag-to-move, right-click-to-delete, custom CurvesNode React component with channel tabs.
 
-### 6. No Distort / Warp Nodes
+### 6. ~~Distort / Warp Nodes~~ PARTIALLY DONE
 
 Beyond LensDistortion:
-- **IDistort / STMap** — distort using a UV map image (essential for CG integration)
-- **Corner Pin / Perspective Transform** — 4-point warp
+- ~~**IDistort / STMap** — distort using a UV map image (essential for CG integration)~~ ✅ DONE
+- ~~**Corner Pin / Perspective Transform** — 4-point warp~~ ✅ DONE
+- ~~**UV Map generator** — identity UV pass for STMap workflows~~ ✅ DONE
 - **Mesh Warp** — freeform grid deformation
 - **Spherize / Twirl / Wave** — creative distortions
 
@@ -139,8 +140,9 @@ Production compositors link parameters with expressions ("blur sigma = distance 
 - **Grain** — add/remove film grain
 - **Denoise** — spatial or temporal denoising
 - **MotionBlur2D** on transforms (Translate/Rotate produce hard edges)
-- **Text** node — render text to image
-- **Dot** (pass-through for graph organization)
+- ~~**Text** node — render text to image~~ ✅ DONE
+- ~~**Dot** (pass-through for graph organization)~~ ✅ DONE
+- ~~**ProjectInfo / ImageInfo** — expose project and image metadata as node outputs~~ ✅ DONE
 
 ### ~~13. Blend Node Correctness Issues~~ ✅ DONE
 
@@ -201,8 +203,8 @@ Foundational work first, then nodes that unlock real workflows.
 
 | # | Item | Type | Why |
 |---|------|------|-----|
-| 10 | Corner Pin transform | Node | Screen replacement, sign replacement |
-| 11 | STMap / IDistort | Node | CG integration workflow |
+| ~~10~~ | ~~Corner Pin transform~~ ✅ | ~~Node~~ | Screen replacement, sign replacement |
+| ~~11~~ | ~~STMap / IDistort~~ ✅ | ~~Node~~ | CG integration workflow |
 | ~~12~~ | ~~Directional blur + Radial blur~~ ✅ | ~~Nodes~~ | DirectionalBlur (angle + length), RadialBlur (zoom-style, center point) |
 
 ### Phase 5: Time & Tracking

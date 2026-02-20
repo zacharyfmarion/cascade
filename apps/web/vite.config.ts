@@ -4,6 +4,7 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 import { type PluginOption } from 'vite';
 import { exec } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 
 function wasmHotRebuild(): PluginOption {
@@ -13,6 +14,7 @@ function wasmHotRebuild(): PluginOption {
 
   let building = false;
   let pendingRebuild = false;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   function rebuild(server: import('vite').ViteDevServer) {
     if (building) {
@@ -34,6 +36,7 @@ function wasmHotRebuild(): PluginOption {
         server.config.logger.error(stderr);
       } else {
         server.config.logger.info(`\x1b[32m[wasm] Built successfully (${elapsed}ms)\x1b[0m`);
+        server.ws.send({ type: 'full-reload', path: '*' });
       }
 
       if (pendingRebuild) {
@@ -47,17 +50,16 @@ function wasmHotRebuild(): PluginOption {
     name: 'wasm-hot-rebuild',
     apply: 'serve',
     configureServer(server) {
-      const watcher = server.watcher;
-      watcher.add(path.join(cratesDir, '**/*.rs'));
-      watcher.add(path.join(cratesDir, '**/Cargo.toml'));
+      fs.watch(cratesDir, { recursive: true }, (_event, filename) => {
+        if (!filename) return;
+        if (filename.includes('target/') || filename.includes('wasm-pkg/')) return;
+        if (!filename.endsWith('.rs') && !filename.endsWith('Cargo.toml')) return;
 
-      watcher.on('change', (filePath: string) => {
-        if (
-          filePath.startsWith(cratesDir) &&
-          (filePath.endsWith('.rs') || filePath.endsWith('Cargo.toml'))
-        ) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          server.config.logger.info(`\x1b[36m[wasm] Change detected: ${filename}\x1b[0m`);
           rebuild(server);
-        }
+        }, 100);
       });
     },
   };
