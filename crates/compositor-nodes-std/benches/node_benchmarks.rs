@@ -54,6 +54,7 @@ fn make_context<'a>(
         color_management: COLOR_MANAGEMENT.get_or_init(BuiltinColorManagement::new),
         ai_provider: None,
         project_format: FORMAT.get_or_init(Format::hd),
+        ai_cached_outputs: None,
     }
 }
 
