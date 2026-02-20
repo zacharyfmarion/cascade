@@ -74,6 +74,8 @@ export interface EngineBridge {
   getLastRenderTimings?(): Record<string, number>;
   setAiApiKey?(provider: string, key: string): Promise<void> | void;
   isAiConfigured?(): Promise<boolean> | boolean;
+  runAiNode?(nodeId: string): Promise<void>;
+  getNodeExecutionState?(nodeId: string): { status: string; isStale: boolean; error: string };
   getColorManagementInfo?(): Promise<ColorManagementInfo> | ColorManagementInfo;
   getViewsForDisplay?(display: string): Promise<string[]> | string[];
   setDisplayView?(display: string, view: string): Promise<void> | void;

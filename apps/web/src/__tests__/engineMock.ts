@@ -106,6 +106,15 @@ const NODE_SPECS: NodeSpec[] = [
       },
     ],
   },
+  {
+    id: 'ai_depth_estimate',
+    display_name: 'AI Depth Estimate',
+    category: 'AI',
+    description: 'Estimate depth from an image using AI',
+    inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    outputs: [{ name: 'depth', label: 'Depth', ty: 'Image' }],
+    params: [],
+  },
 ];
 
 let nodeCounter = 0;
@@ -197,6 +206,11 @@ export function createMockEngine(): EngineBridge & {
     },
 
     exportImage: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+
+    setAiApiKey: async () => {},
+    isAiConfigured: () => true,
+    runAiNode: async () => {},
+    getNodeExecutionState: () => ({ status: 'idle', isStale: false, error: '' }),
   };
 }
 

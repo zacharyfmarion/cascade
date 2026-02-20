@@ -228,6 +228,9 @@ interface GraphState {
   loopPlayback: boolean;
 
   nodeTimings: Map<string, number>;
+  aiNodeStatuses: Record<string, string>;
+  aiNodeStale: Record<string, boolean>;
+  refreshAiNodeStale: () => void;
 
   initEngine: () => Promise<void>;
   addNode: (typeId: string, position: { x: number; y: number }) => Promise<string>;
@@ -289,6 +292,7 @@ interface GraphState {
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
   setAiApiKey: (provider: string, key: string) => Promise<void>;
   isAiConfigured: () => Promise<boolean>;
+  runAiNode: (nodeId: string) => Promise<void>;
 
   colorManagement: ColorManagementInfo | null;
   setDisplayView: (display: string, view: string) => Promise<void>;
@@ -469,6 +473,7 @@ export const useGraphStore = create<GraphState>()(
           set({ renderResults: newResults, lastError: null });
           updateNodeTimings();
         }
+        get().refreshAiNodeStale();
       });
     };
 
@@ -612,6 +617,8 @@ export const useGraphStore = create<GraphState>()(
       editingStack: [{ id: 'root', label: 'Root' }],
 
       nodeTimings: new Map(),
+      aiNodeStatuses: {},
+      aiNodeStale: {},
       colorManagement: null,
 
       initEngine: async () => {
@@ -622,7 +629,7 @@ export const useGraphStore = create<GraphState>()(
         const settings = useSettingsStore.getState();
 
         if (settings.aiApiKey && engine.setAiApiKey) {
-          await engine.setAiApiKey('openai', settings.aiApiKey);
+          await engine.setAiApiKey('replicate', settings.aiApiKey);
         }
 
         if (engine.setProjectFormat) {
@@ -869,8 +876,10 @@ export const useGraphStore = create<GraphState>()(
             }).catch(() => {});
           };
         } else {
-          getEngine().setParam(nodeId, key, value);
-          pendingLiveRender = () => triggerAllViewers();
+          pendingLiveRender = () => {
+            getEngine().setParam(nodeId, key, value);
+            triggerAllViewers();
+          };
         }
 
         if (liveRenderRaf === null) {
@@ -991,8 +1000,10 @@ export const useGraphStore = create<GraphState>()(
           set({ previewScale: liveScale });
         }
 
-        getEngine().setInputDefault(nodeId, portName, value);
-        pendingLiveRender = () => triggerAllViewers();
+        pendingLiveRender = () => {
+          getEngine().setInputDefault(nodeId, portName, value);
+          triggerAllViewers();
+        };
 
         if (liveRenderRaf === null) {
           liveRenderRaf = requestAnimationFrame(() => {
@@ -1247,6 +1258,7 @@ export const useGraphStore = create<GraphState>()(
         const scale = get().previewScale;
         const generation = nextRenderGeneration(viewerNodeId);
         renderLock = renderLock.then(async () => {
+          if (renderGenerations.get(viewerNodeId) !== generation) return;
           try {
             const result = await Promise.resolve(getEngine().renderViewer(viewerNodeId, frame));
             const scaled = result ? await downscaleRenderResult(result, scale) : null;
@@ -1553,11 +1565,13 @@ export const useGraphStore = create<GraphState>()(
           lastError: null,
           hasSequenceNodes: false,
           sequenceInfoMap: new Map(),
-          nodeTimings: new Map(),
-        });
-      },
+           nodeTimings: new Map(),
+           aiNodeStatuses: {},
+           aiNodeStale: {},
+         });
+       },
 
-      saveProject: () => {
+       saveProject: () => {
         const eng = getEngine();
         if (isTauri() && eng.saveProject) {
           import('@tauri-apps/plugin-dialog').then(({ save }) => {
@@ -2200,6 +2214,39 @@ export const useGraphStore = create<GraphState>()(
           return eng.isAiConfigured();
         }
         return false;
+      },
+
+      refreshAiNodeStale: () => {
+        const eng = getEngine();
+        if (!eng.getNodeExecutionState) return;
+        const state = get();
+        const newStale: Record<string, boolean> = {};
+        for (const nodeId of Object.keys(state.aiNodeStatuses)) {
+          const execState = eng.getNodeExecutionState(nodeId);
+          newStale[nodeId] = execState.isStale;
+        }
+        set({ aiNodeStale: newStale });
+      },
+
+      runAiNode: async (nodeId) => {
+        const eng = getEngine();
+        if (!eng.runAiNode) return;
+        set(state => ({
+          aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'running' }
+        }));
+        try {
+          await eng.runAiNode(nodeId);
+          set(state => ({
+            aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'complete' },
+            aiNodeStale: { ...state.aiNodeStale, [nodeId]: false },
+          }));
+          renderAllViewersAsync();
+        } catch (e) {
+          const execState = eng.getNodeExecutionState?.(nodeId);
+          set(state => ({
+            aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${execState?.error ?? e}` }
+          }));
+        }
       },
 
       loadColorManagementInfo: async () => {

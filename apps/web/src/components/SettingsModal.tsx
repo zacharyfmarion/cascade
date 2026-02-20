@@ -448,7 +448,7 @@ function AiTab() {
 
   const handleSave = useCallback(() => {
     setAiApiKey(localKey);
-    setEngineAiKey('openai', localKey).then(() => {
+    setEngineAiKey('replicate', localKey).then(() => {
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     });
@@ -457,12 +457,12 @@ function AiTab() {
   return (
     <div>
       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-        Enter your OpenAI API key to enable AI-powered nodes like AI Inpaint.
+        Enter your Replicate API token to enable AI-powered nodes like Depth Estimate and Inpaint.
       </div>
       <label style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
-        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>OpenAI API Key</span>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Replicate API Token</span>
         <input
-          type="text"
+          type="password"
           value={localKey}
           onChange={e => { setLocalKey(e.target.value); setSaved(false); }}
           onKeyDown={e => {
@@ -479,7 +479,7 @@ function AiTab() {
               });
             }
           }}
-          placeholder="sk-..."
+          placeholder="r8_..."
           style={{
             ...numberInputStyle,
             width: '100%',

@@ -425,6 +425,66 @@ describe('graphStore helper behaviors', () => {
   });
 });
 
+describe('graphStore AI node operations', () => {
+  it('runAiNode sets status to running then complete', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    const runPromise = useGraphStore.getState().runAiNode(id);
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('running');
+    await runPromise;
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+  });
+
+  it('runAiNode sets error status on failure', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    mockEngine.runAiNode = async () => { throw new Error('API failure'); };
+    mockEngine.getNodeExecutionState = () => ({ status: 'error', isStale: false, error: 'API failure' });
+    await useGraphStore.getState().runAiNode(id);
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toMatch(/^error:/);
+  });
+
+  it('runAiNode clears stale flag on success', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    useGraphStore.setState({
+      aiNodeStatuses: { [id]: 'complete' },
+      aiNodeStale: { [id]: true },
+    });
+    await useGraphStore.getState().runAiNode(id);
+    expect(useGraphStore.getState().aiNodeStale[id]).toBe(false);
+  });
+
+  it('refreshAiNodeStale updates stale flags from engine', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    useGraphStore.setState({
+      aiNodeStatuses: { [id]: 'complete' },
+      aiNodeStale: { [id]: false },
+    });
+    mockEngine.getNodeExecutionState = () => ({ status: 'complete', isStale: true, error: '' });
+    useGraphStore.getState().refreshAiNodeStale();
+    expect(useGraphStore.getState().aiNodeStale[id]).toBe(true);
+  });
+
+  it('newProject clears AI node state', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    useGraphStore.setState({
+      aiNodeStatuses: { [id]: 'complete' },
+      aiNodeStale: { [id]: true },
+    });
+    await useGraphStore.getState().newProject();
+    const state = useGraphStore.getState();
+    expect(Object.keys(state.aiNodeStatuses).length).toBe(0);
+    expect(Object.keys(state.aiNodeStale).length).toBe(0);
+  });
+
+  it('runAiNode is a no-op when engine lacks runAiNode', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    const originalRunAiNode = mockEngine.runAiNode;
+    delete (mockEngine as any).runAiNode;
+    await useGraphStore.getState().runAiNode(id);
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBeUndefined();
+    mockEngine.runAiNode = originalRunAiNode;
+  });
+});
+
 describe('graphStore error states', () => {
   it('getEngine throws when engine not initialized', async () => {
     vi.resetModules();

@@ -364,6 +364,19 @@ export class WasmEngine implements EngineBridge {
     return (this.getEngine() as any).is_ai_configured() as boolean;
   }
 
+  async runAiNode(nodeId: string): Promise<void> {
+    await (this.getEngine() as any).run_ai_node(nodeId);
+  }
+
+  getNodeExecutionState(nodeId: string): { status: string; isStale: boolean; error: string } {
+    const result = (this.getEngine() as any).get_node_execution_state(nodeId);
+    return {
+      status: result.status ?? 'idle',
+      isStale: result.isStale ?? false,
+      error: result.error ?? '',
+    };
+  }
+
   getColorManagementInfo(): ColorManagementInfo {
     const eng = this.getEngine() as any;
     return eng.get_color_management_info() as ColorManagementInfo;

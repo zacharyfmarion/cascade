@@ -22,12 +22,17 @@ type NodeData = {
   inputDefaults?: Record<string, ParamValue>;
 };
 
+const isAiCategory = (category: string) => category === 'AI';
+
 export const ProcessingNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { spec, params } = data;
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);
   const setParam = useGraphStore(s => s.setParam);
+  const runAiNode = useGraphStore(s => s.runAiNode);
+  const aiStatus = useGraphStore(s => s.aiNodeStatuses[props.id] ?? 'idle');
+  const isStale = useGraphStore(s => s.aiNodeStale[props.id] ?? false);
 
   const handleLive = useCallback(
     (key: string, ty: string, value: number | [number, number, number, number]) => {
@@ -148,6 +153,63 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
 
           return null;
         })}
+        {isAiCategory(spec.category) && (
+          <div className="nopan nodrag" style={{ marginTop: 4 }}>
+            {isStale && (
+              <div style={{
+                fontSize: '0.65rem',
+                color: 'var(--status-danger)',
+                marginBottom: 3,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}>
+                <span style={{ fontSize: '0.8rem' }}>⚠</span>
+                Inputs changed — re-run to update
+              </div>
+            )}
+            <button
+              type="button"
+              className="ai-run-btn"
+              disabled={aiStatus === 'running'}
+              onClick={() => runAiNode(props.id)}
+              style={{
+                width: '100%',
+                padding: '5px 8px',
+                border: isStale
+                  ? '1px solid var(--status-danger)'
+                  : aiStatus === 'complete'
+                    ? '1px solid var(--status-success)'
+                    : '1px solid transparent',
+                borderRadius: 4,
+                cursor: aiStatus === 'running' ? 'wait' : 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                background: 'var(--accent-primary)',
+                color: 'var(--bg-primary)',
+                opacity: aiStatus === 'running' ? 0.7 : 1,
+              }}
+            >
+              {aiStatus === 'running'
+                ? 'Running…'
+                : isStale
+                  ? 'Re-run (stale)'
+                  : aiStatus === 'complete'
+                    ? 'Re-run'
+                    : 'Run'}
+            </button>
+            {aiStatus.startsWith('error:') && (
+              <div style={{
+                fontSize: '0.65rem',
+                color: 'var(--status-danger)',
+                marginTop: 2,
+                wordBreak: 'break-word',
+              }}>
+                {aiStatus.slice(6)}
+              </div>
+            )}
+          </div>
+        )}
       </NodeSection>
     </BaseNode>
   );
