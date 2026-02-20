@@ -1,6 +1,7 @@
 use compositor_core::error::CompositorError;
 use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
+use rayon::prelude::*;
 use std::any::Any;
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -1296,6 +1297,60 @@ impl Node for BooleanConstant {
     }
 }
 
+pub struct TextArea;
+
+impl TextArea {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for TextArea {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "text_area".to_string(),
+            display_name: "Text".to_string(),
+            category: "Generator".to_string(),
+            description: "Output a text string value".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "text".to_string(),
+                label: "Text".to_string(),
+                ty: ValueType::String,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "text".to_string(),
+                label: String::new(),
+                ty: ValueType::String,
+                default: ParamDefault::String(String::new()),
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: UiHint::TextArea,
+                promotable: false,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let text = ctx.get_param_string("text").unwrap_or("").to_string();
+            let mut outputs = HashMap::new();
+            outputs.insert("text".to_string(), Value::String(text));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
 fn build_field_transform(ctx: &EvalContext) -> Result<FieldTransform, CompositorError> {
     let scale_x = ctx.get_param_float("scale_x")? as f32;
     let scale_y = ctx.get_param_float("scale_y")? as f32;
@@ -1750,7 +1805,7 @@ impl Node for Text {
     fn spec(&self) -> NodeSpec {
         NodeSpec {
             id: "text".to_string(),
-            display_name: "Text".to_string(),
+            display_name: "Rasterize Text".to_string(),
             category: "Generator".to_string(),
             description: "Render text to image".to_string(),
             inputs: vec![],
@@ -1931,6 +1986,90 @@ impl Node for Text {
                     prev_glyph = Some(glyph_id);
                 }
             }
+
+            let output = Image::from_f32_data(w, h, data);
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct UVMap;
+
+impl UVMap {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for UVMap {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "uv_map".to_string(),
+            display_name: "UV Map".to_string(),
+            category: "Generator".to_string(),
+            description: "Generate an identity UV map (R=U, G=V)".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "width".to_string(),
+                    label: "Width".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1920),
+                    min: Some(1.0),
+                    max: Some(8192.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "height".to_string(),
+                    label: "Height".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1080),
+                    min: Some(1.0),
+                    max: Some(8192.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let w = ctx.get_param_int("width")? as u32;
+            let h = ctx.get_param_int("height")? as u32;
+
+            let inv_w = if w > 1 { 1.0 / (w - 1) as f32 } else { 0.0 };
+            let inv_h = if h > 1 { 1.0 / (h - 1) as f32 } else { 0.0 };
+
+            let mut data = vec![0.0f32; (w * h) as usize * 4];
+
+            data.par_chunks_exact_mut(4).enumerate().for_each(|(i, out)| {
+                let x = (i % w as usize) as f32;
+                let y = (i / w as usize) as f32;
+                out[0] = x * inv_w;
+                out[1] = y * inv_h;
+                out[2] = 0.0;
+                out[3] = 1.0;
+            });
 
             let output = Image::from_f32_data(w, h, data);
             let mut outputs = HashMap::new();

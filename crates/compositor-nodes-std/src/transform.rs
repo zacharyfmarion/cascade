@@ -1103,3 +1103,420 @@ impl Node for Transform2D {
         self
     }
 }
+
+pub struct CornerPin;
+
+impl CornerPin {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for CornerPin {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "corner_pin".to_string(),
+            display_name: "CornerPin".to_string(),
+            category: "Transform".to_string(),
+            description: "Perspective warp via four corner points".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "tl_x".to_string(),
+                    label: "Top Left X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "tl_y".to_string(),
+                    label: "Top Left Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "tr_x".to_string(),
+                    label: "Top Right X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "tr_y".to_string(),
+                    label: "Top Right Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "br_x".to_string(),
+                    label: "Bottom Right X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "br_y".to_string(),
+                    label: "Bottom Right Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "bl_x".to_string(),
+                    label: "Bottom Left X".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "bl_y".to_string(),
+                    label: "Bottom Left Y".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(-1.0),
+                    max: Some(2.0),
+                    step: Some(0.001),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "filter".to_string(),
+                    label: "Filter".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(1),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec!["Nearest".to_string(), "Bilinear".to_string()]),
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+
+            let tl_x = ctx.get_param_float("tl_x")? as f32;
+            let tl_y = ctx.get_param_float("tl_y")? as f32;
+            let tr_x = ctx.get_param_float("tr_x")? as f32;
+            let tr_y = ctx.get_param_float("tr_y")? as f32;
+            let br_x = ctx.get_param_float("br_x")? as f32;
+            let br_y = ctx.get_param_float("br_y")? as f32;
+            let bl_x = ctx.get_param_float("bl_x")? as f32;
+            let bl_y = ctx.get_param_float("bl_y")? as f32;
+            let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
+
+            let is_identity = (tl_x).abs() < 0.0001
+                && (tl_y).abs() < 0.0001
+                && (tr_x - 1.0).abs() < 0.0001
+                && (tr_y).abs() < 0.0001
+                && (br_x - 1.0).abs() < 0.0001
+                && (br_y - 1.0).abs() < 0.0001
+                && (bl_x).abs() < 0.0001
+                && (bl_y - 1.0).abs() < 0.0001;
+
+            if is_identity {
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                return Ok(outputs);
+            }
+
+            let in_w = image.width as f32;
+            let in_h = image.height as f32;
+            let out_w = image.width;
+            let out_h = image.height;
+
+            let dst = [
+                [tl_x * (in_w - 1.0), tl_y * (in_h - 1.0)],
+                [tr_x * (in_w - 1.0), tr_y * (in_h - 1.0)],
+                [br_x * (in_w - 1.0), br_y * (in_h - 1.0)],
+                [bl_x * (in_w - 1.0), bl_y * (in_h - 1.0)],
+            ];
+
+            let src = [
+                [0.0f32, 0.0],
+                [(in_w - 1.0), 0.0],
+                [(in_w - 1.0), (in_h - 1.0)],
+                [0.0, (in_h - 1.0)],
+            ];
+
+            let h = compute_perspective_inverse(&dst, &src);
+
+            let mut data = vec![0.0f32; (out_w * out_h) as usize * 4];
+
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let dx = (i % out_w as usize) as f32;
+                    let dy = (i / out_w as usize) as f32;
+
+                    let denom = h[6] * dx + h[7] * dy + 1.0;
+                    if denom.abs() < 1e-10 {
+                        return;
+                    }
+                    let sx = (h[0] * dx + h[1] * dy + h[2]) / denom;
+                    let sy = (h[3] * dx + h[4] * dy + h[5]) / denom;
+
+                    let rgba = if filter == 0 {
+                        get_pixel_or_zero(image, sx.round() as i32, sy.round() as i32)
+                    } else {
+                        sample_bilinear_zero(image, sx, sy)
+                    };
+                    out[0] = rgba[0];
+                    out[1] = rgba[1];
+                    out[2] = rgba[2];
+                    out[3] = rgba[3];
+                });
+
+            let out_dw = image.data_window;
+            let output = Image::new_with_domain(
+                Format::from_dimensions(out_w, out_h),
+                out_dw,
+                data,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// Compute the 8 coefficients of a projective (homography) transform that maps
+/// destination quad to source quad. Given output pixel (dx, dy), the source
+/// coordinate is:
+///   sx = (h0*dx + h1*dy + h2) / (h6*dx + h7*dy + 1)
+///   sy = (h3*dx + h4*dy + h5) / (h6*dx + h7*dy + 1)
+///
+/// Uses 8x8 Gaussian elimination with partial pivoting.
+fn compute_perspective_inverse(dst: &[[f32; 2]; 4], src: &[[f32; 2]; 4]) -> [f32; 8] {
+    // Build 8x9 augmented matrix from 4 point correspondences.
+    // Each point gives two equations:
+    //   sx = h0*dx + h1*dy + h2 - h6*dx*sx - h7*dy*sx
+    //   sy = h3*dx + h4*dy + h5 - h6*dx*sy - h7*dy*sy
+    let mut a = [[0.0f64; 9]; 8];
+    for i in 0..4 {
+        let (dx, dy) = (dst[i][0] as f64, dst[i][1] as f64);
+        let (sx, sy) = (src[i][0] as f64, src[i][1] as f64);
+
+        let r0 = i * 2;
+        a[r0][0] = dx;
+        a[r0][1] = dy;
+        a[r0][2] = 1.0;
+        a[r0][3] = 0.0;
+        a[r0][4] = 0.0;
+        a[r0][5] = 0.0;
+        a[r0][6] = -dx * sx;
+        a[r0][7] = -dy * sx;
+        a[r0][8] = sx;
+
+        let r1 = r0 + 1;
+        a[r1][0] = 0.0;
+        a[r1][1] = 0.0;
+        a[r1][2] = 0.0;
+        a[r1][3] = dx;
+        a[r1][4] = dy;
+        a[r1][5] = 1.0;
+        a[r1][6] = -dx * sy;
+        a[r1][7] = -dy * sy;
+        a[r1][8] = sy;
+    }
+
+    // Gaussian elimination with partial pivoting
+    for col in 0..8 {
+        // Find pivot
+        let mut max_row = col;
+        let mut max_val = a[col][col].abs();
+        for row in (col + 1)..8 {
+            let v = a[row][col].abs();
+            if v > max_val {
+                max_val = v;
+                max_row = row;
+            }
+        }
+        a.swap(col, max_row);
+
+        let pivot = a[col][col];
+        if pivot.abs() < 1e-14 {
+            return [0.0; 8]; // degenerate
+        }
+
+        for j in col..9 {
+            a[col][j] /= pivot;
+        }
+        for row in 0..8 {
+            if row == col {
+                continue;
+            }
+            let factor = a[row][col];
+            for j in col..9 {
+                a[row][j] -= factor * a[col][j];
+            }
+        }
+    }
+
+    let mut h = [0.0f32; 8];
+    for i in 0..8 {
+        h[i] = a[i][8] as f32;
+    }
+    h
+}
+
+pub struct STMap;
+
+impl STMap {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for STMap {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "st_map".to_string(),
+            display_name: "STMap".to_string(),
+            category: "Transform".to_string(),
+            description: "UV-based image distortion (R=U, G=V)".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "uv".to_string(),
+                    label: "UV Map".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "filter".to_string(),
+                label: "Filter".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(1),
+                min: Some(0.0),
+                max: Some(1.0),
+                step: Some(1.0),
+                ui_hint: UiHint::Dropdown(vec!["Nearest".to_string(), "Bilinear".to_string()]),
+                promotable: true,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let uv_map = ctx.get_input_image("uv")?;
+            let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
+
+            let out_w = uv_map.width;
+            let out_h = uv_map.height;
+            let in_w = image.width as f32;
+            let in_h = image.height as f32;
+
+            let mut data = vec![0.0f32; (out_w * out_h) as usize * 4];
+
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let ux = i % out_w as usize;
+                    let uy = i / out_w as usize;
+                    let uv_idx = (uy * out_w as usize + ux) * 4;
+
+                    let u = uv_map.data[uv_idx];
+                    let v = uv_map.data[uv_idx + 1];
+
+                    let sx = u * (in_w - 1.0);
+                    let sy = v * (in_h - 1.0);
+
+                    let rgba = if filter == 0 {
+                        get_pixel_or_zero(image, sx.round() as i32, sy.round() as i32)
+                    } else {
+                        sample_bilinear_zero(image, sx, sy)
+                    };
+                    out[0] = rgba[0];
+                    out[1] = rgba[1];
+                    out[2] = rgba[2];
+                    out[3] = rgba[3];
+                });
+
+            let out_dw = uv_map.data_window;
+            let output = Image::new_with_domain(
+                Format::from_dimensions(out_w, out_h),
+                out_dw,
+                data,
+                image.color_space.clone(),
+            );
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
