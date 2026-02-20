@@ -19,7 +19,7 @@ pub mod script;
 pub mod transform;
 pub mod utility;
 
-pub use ai::{AiDepthEstimate, AiInpaint};
+pub use ai::{AiDepthEstimate, AiGenerateImage, AiInpaint, AiRemoveBackground, AiUpscale, decode_response_image, encode_image_png};
 pub use blend::{AlphaOver, Blend, Merge};
 pub use color::{
     BrightnessContrast, ColorRampNode, CombineHsva, HueSaturation, Invert, SeparateHsva,
@@ -30,7 +30,7 @@ pub use filter::GaussianBlur;
 pub use filter_ops::{Dilate, DirectionalBlur, EdgeDetect, Erode, Median, RadialBlur, Sharpen};
 pub use generate::{
     BooleanConstant, Checkerboard, ColorConstant, FloatConstant, Gradient, IntegerConstant, Noise,
-    RasterizeField, SolidColor, Text,
+    RasterizeField, SolidColor, Text, TextArea, UVMap,
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
@@ -38,8 +38,8 @@ pub use matte::{ChromaKey, CombineRgba, CopyChannels, DifferenceMatte, EdgeBlur,
 pub use output::{ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
-pub use transform::{Crop, Flip, Resize, Rotate, Transform2D, Translate};
-pub use utility::{Dot, ImageMath, MapRange, MathNode};
+pub use transform::{CornerPin, Crop, Flip, Resize, Rotate, STMap, Transform2D, Translate};
+pub use utility::{Dot, ImageInfo, ImageMath, MapRange, MathNode, ProjectInfo};
 
 pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     // Input/Output
@@ -49,6 +49,9 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
 
     registry.register("ai_inpaint", || Arc::new(AiInpaint::new()));
     registry.register("ai_depth_estimate", || Arc::new(AiDepthEstimate::new()));
+    registry.register("ai_remove_background", || Arc::new(AiRemoveBackground::new()));
+    registry.register("ai_upscale", || Arc::new(AiUpscale::new()));
+    registry.register("ai_generate_image", || Arc::new(AiGenerateImage::new()));
 
     // Color
     registry.register("color_convert", || Arc::new(ColorConvert::new()));
@@ -76,6 +79,8 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("math", || Arc::new(MathNode::new()));
     registry.register("image_math", || Arc::new(ImageMath::new()));
     registry.register("dot", || Arc::new(Dot::new()));
+    registry.register("project_info", || Arc::new(ProjectInfo::new()));
+    registry.register("image_info", || Arc::new(ImageInfo::new()));
 
     // Filter
     registry.register("gaussian_blur", || Arc::new(GaussianBlur::new()));
@@ -99,6 +104,8 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("rotate", || Arc::new(Rotate::new()));
     registry.register("translate", || Arc::new(Translate::new()));
     registry.register("transform_2d", || Arc::new(Transform2D::new()));
+    registry.register("corner_pin", || Arc::new(CornerPin::new()));
+    registry.register("st_map", || Arc::new(STMap::new()));
 
     // Generator
     registry.register("solid_color", || Arc::new(SolidColor::new()));
@@ -110,7 +117,9 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("integer_constant", || Arc::new(IntegerConstant::new()));
     registry.register("color_constant", || Arc::new(ColorConstant::new()));
     registry.register("boolean_constant", || Arc::new(BooleanConstant::new()));
+    registry.register("text_area", || Arc::new(TextArea::new()));
     registry.register("text", || Arc::new(Text::new()));
+    registry.register("uv_map", || Arc::new(UVMap::new()));
 
     // Matte
     registry.register("premultiply", || Arc::new(Premultiply::new()));
@@ -3009,5 +3018,316 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_corner_pin_identity() {
+        let input = make_test_image(4, 4, [0.5, 0.3, 0.7, 1.0]);
+        let node = CornerPin::new();
+        let mut params = HashMap::new();
+        params.insert("tl_x".to_string(), ParamValue::Float(0.0));
+        params.insert("tl_y".to_string(), ParamValue::Float(0.0));
+        params.insert("tr_x".to_string(), ParamValue::Float(1.0));
+        params.insert("tr_y".to_string(), ParamValue::Float(0.0));
+        params.insert("br_x".to_string(), ParamValue::Float(1.0));
+        params.insert("br_y".to_string(), ParamValue::Float(1.0));
+        params.insert("bl_x".to_string(), ParamValue::Float(0.0));
+        params.insert("bl_y".to_string(), ParamValue::Float(1.0));
+        params.insert("filter".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input.clone(), params);
+
+        assert_eq!(output.width, input.width);
+        assert_eq!(output.height, input.height);
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.5, 0.3, 0.7, 1.0], "corner_pin identity");
+    }
+
+    #[test]
+    fn test_corner_pin_output_size_matches_input() {
+        let input = make_test_image(8, 6, [1.0, 0.0, 0.0, 1.0]);
+        let node = CornerPin::new();
+        let mut params = HashMap::new();
+        params.insert("tl_x".to_string(), ParamValue::Float(0.1));
+        params.insert("tl_y".to_string(), ParamValue::Float(0.1));
+        params.insert("tr_x".to_string(), ParamValue::Float(0.9));
+        params.insert("tr_y".to_string(), ParamValue::Float(0.05));
+        params.insert("br_x".to_string(), ParamValue::Float(0.95));
+        params.insert("br_y".to_string(), ParamValue::Float(0.95));
+        params.insert("bl_x".to_string(), ParamValue::Float(0.05));
+        params.insert("bl_y".to_string(), ParamValue::Float(0.9));
+        params.insert("filter".to_string(), ParamValue::Int(1));
+
+        let output = eval_image_node(&node, input.clone(), params);
+
+        assert_eq!(output.width, input.width, "output width must match input");
+        assert_eq!(output.height, input.height, "output height must match input");
+        assert_eq!(output.data_window, input.data_window, "data_window must match input");
+    }
+
+    #[test]
+    fn test_corner_pin_warps_pixels() {
+        let mut data = vec![0.0f32; 4 * 4 * 4];
+        for pixel in data.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+        }
+        let input = Image::from_f32_data(4, 4, data);
+        let node = CornerPin::new();
+        let mut params = HashMap::new();
+        params.insert("tl_x".to_string(), ParamValue::Float(0.25));
+        params.insert("tl_y".to_string(), ParamValue::Float(0.25));
+        params.insert("tr_x".to_string(), ParamValue::Float(0.75));
+        params.insert("tr_y".to_string(), ParamValue::Float(0.25));
+        params.insert("br_x".to_string(), ParamValue::Float(0.75));
+        params.insert("br_y".to_string(), ParamValue::Float(0.75));
+        params.insert("bl_x".to_string(), ParamValue::Float(0.25));
+        params.insert("bl_y".to_string(), ParamValue::Float(0.75));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        let center = output.get_pixel_f32(2, 2);
+        assert!(center[3] > 0.0, "center should have content after warp");
+
+        let corner = output.get_pixel_f32(0, 0);
+        assert!(
+            corner[3] < 0.01,
+            "corner should be transparent after inward warp: alpha={}",
+            corner[3]
+        );
+    }
+
+    #[test]
+    fn test_stmap_identity_uv() {
+        let input = make_test_image(4, 4, [0.8, 0.2, 0.4, 1.0]);
+        let mut uv_data = vec![0.0f32; 4 * 4 * 4];
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                let idx = (y * 4 + x) as usize * 4;
+                uv_data[idx] = x as f32 / 3.0;
+                uv_data[idx + 1] = y as f32 / 3.0;
+                uv_data[idx + 2] = 0.0;
+                uv_data[idx + 3] = 1.0;
+            }
+        }
+        let uv_map = Image::from_f32_data(4, 4, uv_data);
+
+        let node = STMap::new();
+        let mut params = HashMap::new();
+        params.insert("filter".to_string(), ParamValue::Int(1));
+        let output = eval_two_input_node(&node, "image", input, "uv", uv_map, params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.8, 0.2, 0.4, 1.0], "stmap identity uv (0,0)");
+        let px2 = output.get_pixel_f32(3, 3);
+        assert_color_approx(px2, [0.8, 0.2, 0.4, 1.0], "stmap identity uv (3,3)");
+    }
+
+    #[test]
+    fn test_stmap_output_size_matches_uv() {
+        let input = make_test_image(8, 8, [1.0, 0.0, 0.0, 1.0]);
+        let uv_map = make_test_image(4, 6, [0.5, 0.5, 0.0, 1.0]);
+
+        let node = STMap::new();
+        let mut params = HashMap::new();
+        params.insert("filter".to_string(), ParamValue::Int(1));
+        let output = eval_two_input_node(&node, "image", input, "uv", uv_map, params);
+
+        assert_eq!(output.width, 4, "output width should match uv map");
+        assert_eq!(output.height, 6, "output height should match uv map");
+    }
+
+    #[test]
+    fn test_stmap_out_of_bounds_uv() {
+        let input = make_test_image(4, 4, [1.0, 0.5, 0.0, 1.0]);
+        let uv_map = Image::from_f32_data(1, 1, vec![2.0, 2.0, 0.0, 1.0]);
+
+        let node = STMap::new();
+        let mut params = HashMap::new();
+        params.insert("filter".to_string(), ParamValue::Int(0));
+        let output = eval_two_input_node(&node, "image", input, "uv", uv_map, params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.0, 0.0, 0.0, 0.0], "out of bounds uv should be black");
+    }
+
+    #[test]
+    fn test_uv_map_corners() {
+        let node = UVMap::new();
+        let mut params = HashMap::new();
+        params.insert("width".to_string(), ParamValue::Int(4));
+        params.insert("height".to_string(), ParamValue::Int(4));
+
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+        };
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+        let img = match result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+
+        assert_eq!(img.width, 4);
+        assert_eq!(img.height, 4);
+
+        let tl = img.get_pixel_f32(0, 0);
+        assert_color_approx(tl, [0.0, 0.0, 0.0, 1.0], "uv top-left");
+
+        let tr = img.get_pixel_f32(3, 0);
+        assert_color_approx(tr, [1.0, 0.0, 0.0, 1.0], "uv top-right");
+
+        let bl = img.get_pixel_f32(0, 3);
+        assert_color_approx(bl, [0.0, 1.0, 0.0, 1.0], "uv bottom-left");
+
+        let br = img.get_pixel_f32(3, 3);
+        assert_color_approx(br, [1.0, 1.0, 0.0, 1.0], "uv bottom-right");
+    }
+
+    #[test]
+    fn test_uv_map_feeds_stmap_identity() {
+        let input = make_test_image(4, 4, [0.8, 0.2, 0.4, 1.0]);
+
+        let uv_node = UVMap::new();
+        let mut uv_params = HashMap::new();
+        uv_params.insert("width".to_string(), ParamValue::Int(4));
+        uv_params.insert("height".to_string(), ParamValue::Int(4));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs: HashMap::new(),
+            params: &uv_params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+        };
+        let uv_result = block_on(uv_node.evaluate(&ctx)).unwrap();
+        let uv_img = match uv_result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            _ => panic!("expected image"),
+        };
+
+        let st_node = STMap::new();
+        let mut st_params = HashMap::new();
+        st_params.insert("filter".to_string(), ParamValue::Int(1));
+        let output = eval_two_input_node(&st_node, "image", input.clone(), "uv", uv_img, st_params);
+
+        for y in 0..4u32 {
+            for x in 0..4u32 {
+                let orig = input.get_pixel_f32(x, y);
+                let out = output.get_pixel_f32(x, y);
+                for c in 0..4 {
+                    assert!(
+                        (orig[c] - out[c]).abs() < 0.01,
+                        "pixel ({},{}) ch {}: orig={}, got={}",
+                        x, y, c, orig[c], out[c]
+                    );
+                }
+            }
+        }
+    }
+
+    fn eval_no_input_node(node: &dyn Node, params: HashMap<String, ParamValue>) -> HashMap<String, Value> {
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 42 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+        };
+        block_on(node.evaluate(&ctx)).unwrap()
+    }
+
+    #[test]
+    fn test_project_info_outputs() {
+        let node = ProjectInfo::new();
+        let result = eval_no_input_node(&node, HashMap::new());
+
+        let w = match result.get("width").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+        let h = match result.get("height").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+        let pa = match result.get("pixel_aspect").unwrap() {
+            Value::Float(v) => *v,
+            other => panic!("expected Float, got {:?}", other.value_type()),
+        };
+        let frame = match result.get("frame").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+
+        assert_eq!(w, 1920, "project width");
+        assert_eq!(h, 1080, "project height");
+        assert!(approx_eq(pa, 1.0), "pixel aspect: {}", pa);
+        assert_eq!(frame, 42, "frame number");
+    }
+
+    #[test]
+    fn test_image_info_outputs() {
+        let input = make_offset_image([0.5, 0.5, 0.5, 1.0]);
+        let node = ImageInfo::new();
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(input.clone()));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            params: &HashMap::new(),
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+        };
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+
+        let w = match result.get("width").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+        let h = match result.get("height").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+        let aspect = match result.get("aspect_ratio").unwrap() {
+            Value::Float(v) => *v,
+            other => panic!("expected Float, got {:?}", other.value_type()),
+        };
+        let px_count = match result.get("pixel_count").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+        let dw_x = match result.get("dw_x").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+        let dw_y = match result.get("dw_y").unwrap() {
+            Value::Int(v) => *v,
+            other => panic!("expected Int, got {:?}", other.value_type()),
+        };
+
+        assert_eq!(w, 4, "image width");
+        assert_eq!(h, 4, "image height");
+        assert!(approx_eq(aspect, 1.0), "aspect ratio: {}", aspect);
+        assert_eq!(px_count, 16, "pixel count");
+        assert_eq!(dw_x, 100, "data window x offset");
+        assert_eq!(dw_y, 100, "data window y offset");
     }
 }
