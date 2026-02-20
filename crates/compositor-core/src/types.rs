@@ -525,6 +525,7 @@ pub enum ValueType {
     Bool,
     Color,
     Field,
+    String,
 }
 
 #[derive(Debug, Clone)]
@@ -536,6 +537,7 @@ pub enum Value {
     Bool(bool),
     Color([f32; 4]),
     Field(Field),
+    String(String),
     None,
 }
 
@@ -561,6 +563,7 @@ impl Value {
             Value::Bool(_) => ValueType::Bool,
             Value::Color(_) => ValueType::Color,
             Value::Field(_) => ValueType::Field,
+            Value::String(_) => ValueType::String,
             Value::None => ValueType::Float,
         }
     }
@@ -603,6 +606,29 @@ impl Value {
     pub fn as_field(&self) -> Option<&Field> {
         match self {
             Value::Field(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn to_param_value(&self) -> Option<ParamValue> {
+        match self {
+            Value::Float(v) => Some(ParamValue::Float(*v as f64)),
+            Value::Int(v) => Some(ParamValue::Int(*v as i64)),
+            Value::Bool(v) => Some(ParamValue::Bool(*v)),
+            Value::Color(c) => Some(ParamValue::Color([
+                c[0] as f64,
+                c[1] as f64,
+                c[2] as f64,
+                c[3] as f64,
+            ])),
+            Value::String(s) => Some(ParamValue::String(s.clone())),
             _ => None,
         }
     }
@@ -725,11 +751,19 @@ impl NodeSpec {
         param.promotable
             && matches!(
                 param.ty,
-                ValueType::Float | ValueType::Int | ValueType::Bool | ValueType::Color
+                ValueType::Float
+                    | ValueType::Int
+                    | ValueType::Bool
+                    | ValueType::Color
+                    | ValueType::String
             )
             && matches!(
                 param.ui_hint,
-                UiHint::Slider | UiHint::NumberInput | UiHint::Checkbox | UiHint::ColorPicker
+                UiHint::Slider
+                    | UiHint::NumberInput
+                    | UiHint::Checkbox
+                    | UiHint::ColorPicker
+                    | UiHint::TextArea
             )
     }
 }

@@ -166,32 +166,9 @@ impl Evaluator {
             }
 
             let mut merged_params = Self::merge_params(instance, spec);
-            for param in &spec.params {
-                if !crate::types::NodeSpec::is_connectable_param(param) {
-                    continue;
-                }
-                if let Some((up_node, up_port)) = graph.get_upstream(node_id, &param.key) {
-                    if let Some((_, cached_value)) = self.cache.get(&(up_node, up_port.clone())) {
-                        let param_value = match cached_value {
-                            Value::Float(v) => Some(ParamValue::Float(*v as f64)),
-                            Value::Int(v) => Some(ParamValue::Int(*v as i64)),
-                            Value::Bool(v) => Some(ParamValue::Bool(*v)),
-                            Value::Color(c) => Some(ParamValue::Color([
-                                c[0] as f64,
-                                c[1] as f64,
-                                c[2] as f64,
-                                c[3] as f64,
-                            ])),
-                            _ => None,
-                        };
-                        if let Some(pv) = param_value {
-                            merged_params.insert(param.key.clone(), pv);
-                        }
-                    }
-                } else if let Some(input_default) = instance.input_defaults.get(&param.key) {
-                    merged_params.insert(param.key.clone(), input_default.clone());
-                }
-            }
+            Self::apply_promoted_params(
+                &mut merged_params, spec, instance, graph, node_id, &self.cache,
+            );
             let ctx = EvalContext {
                 inputs,
                 params: &merged_params,
@@ -299,6 +276,10 @@ impl Evaluator {
             .map(|(_, v)| v)
     }
 
+    pub fn cache(&self) -> &HashMap<(NodeId, String), (CacheKey, Value)> {
+        &self.cache
+    }
+
     pub fn compute_node_cache_key(
         &self,
         graph: &Graph,
@@ -344,6 +325,30 @@ impl Evaluator {
             params.entry(key.clone()).or_insert_with(|| value.clone());
         }
         params
+    }
+
+    pub fn apply_promoted_params(
+        params: &mut HashMap<String, ParamValue>,
+        spec: &crate::types::NodeSpec,
+        instance: &crate::graph::NodeInstance,
+        graph: &Graph,
+        node_id: NodeId,
+        cache: &HashMap<(NodeId, String), (CacheKey, Value)>,
+    ) {
+        for param in &spec.params {
+            if !crate::types::NodeSpec::is_connectable_param(param) {
+                continue;
+            }
+            if let Some((up_node, up_port)) = graph.get_upstream(node_id, &param.key) {
+                if let Some((_, cached_value)) = cache.get(&(up_node, up_port)) {
+                    if let Some(pv) = cached_value.to_param_value() {
+                        params.insert(param.key.clone(), pv);
+                    }
+                }
+            } else if let Some(input_default) = instance.input_defaults.get(&param.key) {
+                params.insert(param.key.clone(), input_default.clone());
+            }
+        }
     }
 
     fn default_to_value(default: &ParamDefault) -> ParamValue {

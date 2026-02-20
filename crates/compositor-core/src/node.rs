@@ -74,6 +74,13 @@ impl<'a> EvalContext<'a> {
             .ok_or_else(|| CompositorError::MissingInput(name.to_string()))
     }
 
+    pub fn get_input_string(&self, name: &str) -> Result<&str, CompositorError> {
+        self.inputs
+            .get(name)
+            .and_then(|v| v.as_string())
+            .ok_or_else(|| CompositorError::MissingInput(name.to_string()))
+    }
+
     pub fn get_param_float(&self, key: &str) -> Result<f64, CompositorError> {
         match self.params.get(key) {
             Some(ParamValue::Float(v)) => Ok(*v),
