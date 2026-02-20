@@ -5,14 +5,8 @@ import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
 import { NodeNumberInput, NodeSection } from './NodePrimitives';
 import { useGraphStore } from '../../store/graphStore';
-import type { NodeSpec, ParamValue, ParamSpec, ValueType } from '../../store/types';
-import { extractParamValue, createParamValue } from '../../store/types';
-
-const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox'];
-const SCALAR_TYPES: ValueType[] = ['Float', 'Int', 'Bool'];
-
-const isConnectableParam = (p: ParamSpec): boolean =>
-  p.promotable && SCALAR_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
+import type { NodeSpec, ParamValue } from '../../store/types';
+import { extractParamValue, createParamValue, isConnectableParam } from '../../store/types';
 
 type NodeData = {
   label: string;

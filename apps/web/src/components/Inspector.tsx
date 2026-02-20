@@ -6,14 +6,8 @@ import { NodeNumberInput } from './nodes/NodePrimitives';
 import { ScriptNodeEditor } from './ScriptNodeEditor';
 import { ColorRampEditor } from './ColorRampEditor';
 import { CurveEditor } from './nodes/CurveEditor';
-import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec, ValueType } from '../store/types';
-import { createParamValue, extractParamValue } from '../store/types';
-
-const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox', 'ColorPicker'];
-const SCALAR_TYPES: ValueType[] = ['Float', 'Int', 'Bool', 'Color'];
-
-const isConnectableParam = (p: ParamSpec): boolean =>
-  p.promotable && SCALAR_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
+import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec } from '../store/types';
+import { createParamValue, extractParamValue, isConnectableParam } from '../store/types';
 
 const ParamControl: React.FC<{
   nodeId: string;

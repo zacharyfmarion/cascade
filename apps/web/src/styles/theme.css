@@ -314,6 +314,32 @@ body {
   border-color: var(--accent-primary);
 }
 
+/* ── Node Text Area ──────────────────────────────────────────── */
+.node-text-area {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.node-text-area__field {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  padding: 6px 8px;
+  min-width: 100%;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  resize: both;
+  line-height: 1.4;
+}
+
+.node-text-area__field:focus {
+  border-color: var(--accent-primary);
+}
+
 /* ── Node Button ──────────────────────────────────────────────── */
 .node-btn {
   width: 100%;

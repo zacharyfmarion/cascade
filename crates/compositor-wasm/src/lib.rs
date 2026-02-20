@@ -14,8 +14,8 @@ use compositor_core::types::{ColorStop, Format, FrameTime, NodeSpec, ParamValue,
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{GpuContext, KernelManifest};
 use compositor_nodes_std::{
-    register_standard_nodes, ColorPaletteNode, GpuScriptDraftNode, GroupNode, LoadImage,
-    LoadImageSequence, SequenceInfo, Viewer,
+    decode_response_image, encode_image_png, register_standard_nodes, ColorPaletteNode,
+    GpuScriptDraftNode, GroupNode, LoadImage, LoadImageSequence, SequenceInfo, Viewer,
 };
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
@@ -360,6 +360,34 @@ impl Engine {
         load_node
             .get_image_bytes()
             .ok_or_else(|| JsValue::from_str("No image data available"))
+    }
+
+    pub fn get_ai_node_image_data(&self, node_id: &str) -> Result<Vec<u8>, JsValue> {
+        let nid = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let cached = self
+            .ai_node_cache
+            .get(&nid)
+            .ok_or_else(|| JsValue::from_str("No cached AI result"))?;
+        let image = match cached.get("image") {
+            Some(Value::Image(img)) => img,
+            _ => return Err(JsValue::from_str("No image in AI cache")),
+        };
+        encode_image_png(image).map_err(to_js_error)
+    }
+
+    pub fn set_ai_node_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<(), JsValue> {
+        let nid = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let image = decode_response_image(data).map_err(to_js_error)?;
+        let mut outputs = HashMap::new();
+        outputs.insert("image".to_string(), Value::Image(image));
+        self.ai_node_cache.insert(nid, outputs);
+        let state = self
+            .node_exec_state
+            .entry(nid)
+            .or_insert_with(NodeExecutionState::new);
+        state.status = RunStatus::Complete;
+        self.graph.mark_dirty(nid);
+        Ok(())
     }
 
     pub fn load_palette_data(&mut self, node_id: &str, data: &[u8]) -> Result<JsValue, JsValue> {
@@ -741,7 +769,11 @@ impl Engine {
             }
         }
 
-        let merged_params = Evaluator::merge_params(instance, spec);
+        let mut merged_params = Evaluator::merge_params(instance, spec);
+        Evaluator::apply_promoted_params(
+            &mut merged_params, spec, instance, &self.graph, nid,
+            self.evaluator.cache(),
+        );
         let node_arc = self
             .nodes
             .get(&nid)

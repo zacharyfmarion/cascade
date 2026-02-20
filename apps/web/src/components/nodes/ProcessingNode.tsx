@@ -3,17 +3,11 @@ import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
 import { NodeColorPicker } from './NodeColorPicker';
-import { NodeDropdown, NodeCheckbox, NodeNumberInput, NodeSection } from './NodePrimitives';
+import { NodeDropdown, NodeCheckbox, NodeNumberInput, NodeTextArea, NodeSection } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
-import type { NodeSpec, ParamValue, ParamSpec, ValueType } from '../../store/types';
-import { extractParamValue, createParamValue } from '../../store/types';
-
-const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox', 'ColorPicker'];
-const SCALAR_TYPES: ValueType[] = ['Float', 'Int', 'Bool', 'Color'];
-
-const isConnectableParam = (p: ParamSpec): boolean =>
-  p.promotable && SCALAR_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
+import type { NodeSpec, ParamValue } from '../../store/types';
+import { extractParamValue, createParamValue, isConnectableParam } from '../../store/types';
 
 type NodeData = {
   label: string;
@@ -48,8 +42,10 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
     [props.id, setParamCommit]
   );
 
+  const hasTextArea = spec.params.some(p => p.ui_hint.type === 'TextArea');
+
   return (
-    <BaseNode {...props} data={data} headerIcon={getNodeIcon(spec.id, spec.category)}>
+    <BaseNode {...props} data={data} headerIcon={getNodeIcon(spec.id, spec.category)} maxWidth={hasTextArea ? 'none' : undefined}>
       <NodeSection>
         {spec.params.filter(p => !isConnectableParam(p)).map(p => {
           if (p.ui_hint.type === 'Hidden') return null;
@@ -126,17 +122,13 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
 
           if (p.ui_hint.type === 'TextArea') {
             return (
-              <div key={p.key} className="node-text-input nopan nodrag nowheel" onPointerDown={(e) => e.stopPropagation()}>
-                <div className="node-text-input__label">{p.label}</div>
-                <textarea
-                  className="node-text-input__field"
-                  value={String(rawValue)}
-                  onChange={(e) => setParam(props.id, p.key, { String: e.target.value })}
-                  placeholder={p.label}
-                  rows={2}
-                  style={{ resize: 'vertical', fontFamily: 'inherit' }}
-                />
-              </div>
+              <NodeTextArea
+                key={p.key}
+                label={p.label}
+                value={String(rawValue)}
+                onChange={(v) => setParam(props.id, p.key, { String: v })}
+                placeholder={p.label}
+              />
             );
           }
 

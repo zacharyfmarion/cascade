@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 /* ───────────────────────────────────────────────────────────────
  *  Shared UI primitives for all node components.
@@ -126,6 +126,49 @@ export const NodeTextInput: React.FC<NodeTextInputProps> = ({
     />
   </div>
 );
+
+// ── Text Area ───────────────────────────────────────────────────
+
+interface NodeTextAreaProps {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}
+
+export const NodeTextArea: React.FC<NodeTextAreaProps> = ({
+  label, value, onChange, placeholder,
+}) => {
+  const [localValue, setLocalValue] = useState(value);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (document.activeElement !== textareaRef.current) {
+      setLocalValue(value);
+    }
+  }, [value]);
+
+  const handleBlur = useCallback(() => {
+    if (localValue !== value) {
+      onChange(localValue);
+    }
+  }, [localValue, value, onChange]);
+
+  return (
+    <div className="node-text-area nopan nodrag" onPointerDown={(e) => e.stopPropagation()}>
+      {label && <div className="node-text-input__label">{label}</div>}
+      <textarea
+        ref={textareaRef}
+        className="node-text-area__field"
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onBlur={handleBlur}
+        placeholder={placeholder}
+        rows={4}
+      />
+    </div>
+  );
+};
 
 // ── Checkbox ────────────────────────────────────────────────────
 

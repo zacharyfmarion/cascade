@@ -212,7 +212,7 @@ export class WasmEngine implements EngineBridge {
     const graph = eng.export_graph();
     const doc = createDocumentEnvelope(graph);
 
-    // Embed image data for LoadImage nodes as base64
+    // Embed image data for LoadImage nodes and AI node results as base64
     const graphData = graph as { nodes?: Array<{ id: string; type_id: string }> };
     if (graphData.nodes) {
       const assets: Record<string, { type: string; source: string; data: string; original_filename: string; hash: string }> = {};
@@ -232,6 +232,25 @@ export class WasmEngine implements EngineBridge {
               hash: '',
             };
           }
+        } else if (node.type_id.startsWith('ai_')) {
+          try {
+            const aiData = (eng as any).get_ai_node_image_data(node.id) as Uint8Array;
+            if (aiData && aiData.length > 0) {
+              let binary = '';
+              for (let i = 0; i < aiData.length; i++) {
+                binary += String.fromCharCode(aiData[i]);
+              }
+              assets[node.id] = {
+                type: 'ai_result',
+                source: 'embedded',
+                data: btoa(binary),
+                original_filename: '',
+                hash: '',
+              };
+            }
+          } catch {
+            // No cached AI result for this node — skip
+          }
         }
       }
       (doc as Record<string, unknown>).assets = assets;
@@ -244,21 +263,23 @@ export class WasmEngine implements EngineBridge {
     const graph = extractGraphData(data);
     this.getEngine().import_graph(graph);
 
-    // Load embedded image assets
     if (isRecord(data) && isRecord(data.assets)) {
       const assets = data.assets as Record<string, Record<string, unknown>>;
       for (const [nodeId, assetRef] of Object.entries(assets)) {
-        if (assetRef.type === 'image' && typeof assetRef.data === 'string') {
-          const binary = atob(assetRef.data);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-          }
-          try {
+        if (typeof assetRef.data !== 'string') continue;
+        const binary = atob(assetRef.data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        try {
+          if (assetRef.type === 'image') {
             this.getEngine().load_image_data(nodeId, bytes);
-          } catch (e) {
-            console.warn(`Failed to load embedded image for node ${nodeId}:`, e);
+          } else if (assetRef.type === 'ai_result') {
+            (this.getEngine() as any).set_ai_node_image_data(nodeId, bytes);
           }
+        } catch (e) {
+          console.warn(`Failed to load embedded asset for node ${nodeId}:`, e);
         }
       }
     }

@@ -1,4 +1,4 @@
-export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field';
+export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field' | 'String';
 
 export interface ColorStop {
   position: number;
@@ -88,6 +88,12 @@ export const extractParamValue = (pv: ParamValue): number | boolean | [number, n
   if ('String' in pv) return pv.String;
   return 0;
 };
+
+const CONNECTABLE_HINTS = ['Slider', 'NumberInput', 'Checkbox', 'ColorPicker', 'TextArea'];
+const CONNECTABLE_TYPES: ValueType[] = ['Float', 'Int', 'Bool', 'Color', 'String'];
+
+export const isConnectableParam = (p: ParamSpec): boolean =>
+  p.promotable && CONNECTABLE_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
 
 export const createParamValue = (type: ValueType | string, value: any): ParamValue => {
   if (type === 'Float') return { Float: Number(value) };
