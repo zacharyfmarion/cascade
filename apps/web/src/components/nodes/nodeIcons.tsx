@@ -53,6 +53,7 @@ import {
   Filter,
   Box,
   BrainCircuit,
+  Film,
 } from 'lucide-react';
 
 const ICON_SIZE = 12;
@@ -61,6 +62,7 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
   // ── Input ──
   load_image: <Image size={ICON_SIZE} />,
   load_image_sequence: <FileVideo size={ICON_SIZE} />,
+  load_video: <Film size={ICON_SIZE} />,
 
   // ── Output ──
   viewer: <Eye size={ICON_SIZE} />,

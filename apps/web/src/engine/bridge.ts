@@ -27,6 +27,14 @@ export interface SequenceInfo {
   last_frame: number;
 }
 
+export interface VideoInfo {
+  width: number;
+  height: number;
+  fps: number;
+  frame_count: number;
+  duration_secs: number;
+}
+
 export interface AddNodeResult {
   id: string;
   typeId: string;
@@ -62,6 +70,7 @@ export interface EngineBridge {
   getJobProgress?(): Promise<JobProgress | null>;
   setSequenceDirectory?(nodeId: string, directory: string): Promise<SequenceInfo>;
   getSequenceInfo?(nodeId: string, pattern: string): Promise<SequenceInfo>;
+  loadVideoFile?(nodeId: string, path: string): Promise<VideoInfo>;
   loadSequenceFrameData?(nodeId: string, frame: number, data: Uint8Array): Promise<void> | void;
   setSequenceInfo?(nodeId: string, info: SequenceInfo): Promise<void> | void;
   createGroupFromNodes?(nodeIds: string[], name: string): Promise<CreateGroupResult>;

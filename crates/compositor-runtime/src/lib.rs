@@ -12,13 +12,14 @@ use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-pub use compositor_core::types::{Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value};
+pub use compositor_core::types::{Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use compositor_nodes_std::input::LoadImage as InputLoadImage;
 pub use compositor_nodes_std::SequenceInfo;
 use compositor_nodes_std::{
-    register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
+    register_standard_nodes, srgb_to_linear_lut, GpuScriptDraftNode, GroupNode,
+    LoadImageSequence, LoadVideo, Viewer,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -1420,6 +1421,48 @@ impl Engine {
             .downcast_ref::<LoadImageSequence>()
             .ok_or_else(|| CompositorError::Other("Node is not LoadImageSequence".to_string()))?;
         seq_node.get_sequence_info(pattern)
+    }
+
+    #[cfg(all(feature = "video", target_os = "macos"))]
+    pub fn load_video_file(
+        &mut self,
+        node_id: &str,
+        path: &str,
+    ) -> Result<compositor_video::VideoInfo, CompositorError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CompositorError::Other("Node not found".to_string()))?;
+        let video_node = node
+            .as_any()
+            .downcast_ref::<LoadVideo>()
+            .ok_or_else(|| CompositorError::Other("Node is not LoadVideo".to_string()))?;
+
+        let decoder = Arc::new(
+            compositor_video::VideoDecoder::new(path)
+                .map_err(|e| CompositorError::Other(e))?,
+        );
+        let info = decoder.info().clone();
+
+        let lut = srgb_to_linear_lut();
+        let decoder_ref = Arc::clone(&decoder);
+        let frame_loader: Box<dyn Fn(u64) -> Result<Image, CompositorError> + Send> =
+            Box::new(move |frame_index: u64| {
+                let frame = decoder_ref
+                    .decode_frame_linear(frame_index, lut)
+                    .map_err(|e| CompositorError::Other(e))?
+                    .ok_or_else(|| {
+                        CompositorError::Other(format!("No frame at index {frame_index}"))
+                    })?;
+
+                Ok(Image::from_f32_data(frame.width, frame.height, frame.data))
+            });
+
+        video_node.set_frame_loader(frame_loader)?;
+
+        self.graph.mark_dirty(id);
+        Ok(info)
     }
 
     pub fn render_viewer(

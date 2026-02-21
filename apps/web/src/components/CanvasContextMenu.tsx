@@ -103,7 +103,7 @@ const SelectionMenu: React.FC<{
   const allMuted = nodeIds.every(id => nodes.get(id)?.muted);
 
   const UNMUTABLE_TYPES = new Set([
-    'load_image', 'load_image_sequence',
+    'load_image', 'load_image_sequence', 'load_video',
     'viewer', 'export_image', 'export_image_sequence', 'export_video',
     'group_input', 'group_output',
   ]);

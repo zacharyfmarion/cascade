@@ -6,6 +6,7 @@ use compositor_core::color::{ColorManagement, ColorProcessor, ColorSpaceInfo};
 use compositor_core::error::CompositorError;
 use compositor_core::types::ColorSpaceId;
 use compositor_ocio_sys as ffi;
+use rayon::prelude::*;
 
 pub struct OcioColorManagement {
     config: *mut ffi::OcioConfig,
@@ -259,9 +260,43 @@ impl ColorProcessor for OcioCpuProcessor {
         if self.ptr.is_null() || pixels.is_empty() {
             return;
         }
-        let num_pixels = (pixels.len() / 4) as i32;
-        unsafe {
-            ffi::ocio_processor_apply_rgba_f32(self.ptr, pixels.as_mut_ptr(), num_pixels);
+        let num_pixels = pixels.len() / 4;
+        const CHUNK_PIXELS: usize = 64 * 1024;
+        if num_pixels <= CHUNK_PIXELS {
+            unsafe {
+                ffi::ocio_processor_apply_rgba_f32(
+                    self.ptr,
+                    pixels.as_mut_ptr(),
+                    num_pixels as i32,
+                );
+            }
+        } else {
+            // SAFETY: OCIO's ConstCPUProcessorRcPtr::apply is thread-safe (const method).
+            // We transmit the pointer as usize to satisfy Send+Sync bounds on the closure.
+            let ptr_val = self.ptr as usize;
+            pixels
+                .par_chunks_exact_mut(CHUNK_PIXELS * 4)
+                .for_each(move |chunk| unsafe {
+                    ffi::ocio_processor_apply_rgba_f32(
+                        ptr_val as *mut ffi::OcioProcessor,
+                        chunk.as_mut_ptr(),
+                        (chunk.len() / 4) as i32,
+                    );
+                });
+            let remainder_start = (num_pixels / CHUNK_PIXELS) * CHUNK_PIXELS * 4;
+            if remainder_start < pixels.len() {
+                let remainder = &mut pixels[remainder_start..];
+                let rem_pixels = remainder.len() / 4;
+                if rem_pixels > 0 {
+                    unsafe {
+                        ffi::ocio_processor_apply_rgba_f32(
+                            self.ptr,
+                            remainder.as_mut_ptr(),
+                            rem_pixels as i32,
+                        );
+                    }
+                }
+            }
         }
     }
 }

@@ -29,3 +29,6 @@ opt-level = 2
 
 [profile.dev.package.compositor-wasm]
 opt-level = 2
+
+[profile.dev.package.compositor-video]
+opt-level = 2

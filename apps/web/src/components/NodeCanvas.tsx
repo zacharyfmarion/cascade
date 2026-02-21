@@ -24,6 +24,7 @@ import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { ImageInputNode } from './nodes/ImageInputNode';
 import { LoadImageSequenceNode } from './nodes/LoadImageSequenceNode';
+import { LoadVideoNode } from './nodes/LoadVideoNode';
 import { ViewerNode } from './nodes/ViewerNode';
 import { ProcessingNode } from './nodes/ProcessingNode';
 import { ExportImageNode } from './nodes/ExportImageNode';
@@ -40,6 +41,7 @@ import { FrameNode } from './nodes/FrameNode';
 const SPECIAL_NODE_TYPES: NodeTypes = {
   load_image: ImageInputNode,
   load_image_sequence: LoadImageSequenceNode,
+  load_video: LoadVideoNode,
   viewer: ViewerNode,
   export_image: ExportImageNode,
   export_image_sequence: ExportImageSequenceNode,
@@ -323,6 +325,7 @@ export const NodeCanvas: React.FC = () => {
         connectable: false,
       });
     }
+    flowNodesRef.current = nextNodes;
     setFlowNodes(nextNodes);
   }, [nodesStore, nodeSpecs, framesStore]);
 

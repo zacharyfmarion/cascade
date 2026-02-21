@@ -492,7 +492,122 @@ fn build_frame_regex(pattern: &str) -> String {
     format!("^{}$", with_capture)
 }
 
-fn srgb_to_linear_lut() -> &'static [f32; 256] {
+pub struct LoadVideo {
+    frame_cache: Mutex<FrameCache>,
+    frame_loader: Mutex<Option<Box<dyn Fn(u64) -> Result<Image, CompositorError> + Send>>>,
+}
+
+impl LoadVideo {
+    pub fn new() -> Self {
+        Self {
+            frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
+            frame_loader: Mutex::new(None),
+        }
+    }
+
+    /// Set a closure that decodes a single frame on demand.
+    /// The closure receives a frame index and returns the decoded Image
+    /// (already converted to f32 linear).
+    pub fn set_frame_loader(
+        &self,
+        loader: Box<dyn Fn(u64) -> Result<Image, CompositorError> + Send>,
+    ) -> Result<(), CompositorError> {
+        let mut guard = self
+            .frame_loader
+            .lock()
+            .map_err(|_| CompositorError::Other("Frame loader mutex poisoned".to_string()))?;
+        *guard = Some(loader);
+
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+        cache.clear();
+
+        Ok(())
+    }
+}
+
+impl Node for LoadVideo {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "load_video".to_string(),
+            display_name: "Load Video".to_string(),
+            category: "Input".to_string(),
+            description: "Load a video file".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "file_path".to_string(),
+                label: "File Path".to_string(),
+                ty: ValueType::String,
+                default: ParamDefault::String(String::new()),
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: UiHint::Hidden,
+                promotable: false,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let frame = ctx.frame_time.frame;
+
+            {
+                let cache = self
+                    .frame_cache
+                    .lock()
+                    .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+
+                if let Some(image) = cache.get(frame) {
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(image.clone()));
+                    return Ok(outputs);
+                }
+            }
+
+            let loader_guard = self
+                .frame_loader
+                .lock()
+                .map_err(|_| CompositorError::Other("Frame loader mutex poisoned".to_string()))?;
+
+            let loader = loader_guard.as_ref().ok_or_else(|| {
+                CompositorError::MissingInput(
+                    "No frame data available. Load a video file.".to_string(),
+                )
+            })?;
+
+            let image = loader(frame)?;
+
+            let mut cache = self
+                .frame_cache
+                .lock()
+                .map_err(|_| CompositorError::Other("Cache mutex poisoned".to_string()))?;
+            cache.insert(frame, image.clone());
+
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(image));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub fn srgb_to_linear_lut() -> &'static [f32; 256] {
     static LUT: OnceLock<[f32; 256]> = OnceLock::new();
     LUT.get_or_init(|| {
         let mut table = [0.0f32; 256];

@@ -33,7 +33,7 @@ pub use generate::{
     RasterizeField, SolidColor, Text, TextArea, UVMap,
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
-pub use input::{LoadImage, LoadImageSequence, SequenceInfo};
+pub use input::{LoadImage, LoadImageSequence, LoadVideo, SequenceInfo, srgb_to_linear_lut};
 pub use matte::{ChromaKey, CombineRgba, CopyChannels, DifferenceMatte, EdgeBlur, ExtractChannel, LuminanceKey, MatteExpand, MatteShrink, Premultiply, SeparateRgba, SetAlpha, Unpremultiply};
 pub use output::{ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
@@ -45,6 +45,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     // Input/Output
     registry.register("load_image", || Arc::new(LoadImage::new()));
     registry.register("load_image_sequence", || Arc::new(LoadImageSequence::new()));
+    registry.register("load_video", || Arc::new(LoadVideo::new()));
     registry.register("viewer", || Arc::new(Viewer::new()));
 
     registry.register("ai_inpaint", || Arc::new(AiInpaint::new()));

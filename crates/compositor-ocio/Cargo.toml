@@ -6,3 +6,4 @@ edition = "2021"
 [dependencies]
 compositor-core = { path = "../compositor-core" }
 compositor-ocio-sys = { path = "../compositor-ocio-sys" }
+rayon = "1"

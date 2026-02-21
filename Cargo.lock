@@ -601,6 +601,7 @@ version = "0.1.0"
 dependencies = [
  "compositor-core",
  "compositor-ocio-sys",
+ "rayon",
 ]
 
 [[package]]
@@ -656,6 +657,8 @@ dependencies = [
  "objc2-core-media",
  "objc2-core-video",
  "objc2-foundation",
+ "rayon",
+ "serde",
 ]
 
 [[package]]

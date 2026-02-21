@@ -11,7 +11,7 @@ import type {
   GroupInternalGraph,
   Frame,
 } from './types';
-import type { EngineBridge, JobProgress, SequenceInfo, ColorManagementInfo } from '../engine/bridge';
+import type { EngineBridge, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo } from '../engine/bridge';
 import { sequenceFrameManager } from '../engine/sequenceFrameManager';
 
 const DEFAULT_FRAME_COLOR = 'purple'; // eslint-disable-line compositor-theme/no-hardcoded-colors
@@ -226,6 +226,7 @@ interface GraphState {
   isPlaying: boolean;
   fps: number;
   loopPlayback: boolean;
+  playbackFps: number | null;
 
   nodeTimings: Map<string, number>;
   aiNodeStatuses: Record<string, string>;
@@ -253,6 +254,7 @@ interface GraphState {
   frameSelectedNodes: (nodeSizes?: Map<string, { width: number; height: number }>) => string | null;
   selectFrame: (id: string | null) => void;
   loadImageFile: (nodeId: string, file: File) => void;
+  loadVideoFile: (nodeId: string, path: string) => Promise<VideoInfo | null>;
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
   triggerRender: (viewerNodeId: string) => void;
@@ -300,6 +302,10 @@ interface GraphState {
   loadColorManagementInfo: () => Promise<void>;
   setProjectFormat: (width: number, height: number) => Promise<void>;
   linkToViewer: (nodeId: string, outputIndex?: number) => Promise<void>;
+
+  aiActionInProgress: boolean;
+  beginAiAction: () => Promise<void>;
+  endAiAction: () => void;
 }
 
 const undoStack: UndoSnapshot[] = [];
@@ -481,7 +487,7 @@ export const useGraphStore = create<GraphState>()(
       const { nodes, sequenceInfoMap } = get();
       let hasSeq = false;
       for (const [, node] of nodes) {
-        if (node.typeId === 'load_image_sequence') {
+        if (node.typeId === 'load_image_sequence' || node.typeId === 'load_video') {
           hasSeq = true;
           break;
         }
@@ -532,7 +538,10 @@ export const useGraphStore = create<GraphState>()(
       sequenceInfoMap: new Map(get().sequenceInfoMap),
     });
 
+    let aiActionSnapshot: UndoSnapshot | null = null;
+
     const pushUndo = async () => {
+      if (get().aiActionInProgress) return;
       const snapshot = await captureSnapshot();
       undoStack.push(snapshot);
       if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
@@ -614,6 +623,7 @@ export const useGraphStore = create<GraphState>()(
       isPlaying: false,
       fps: useSettingsStore.getState().defaultFps,
       loopPlayback: useSettingsStore.getState().loopPlayback,
+      playbackFps: null,
       editingStack: [{ id: 'root', label: 'Root' }],
 
       nodeTimings: new Map(),
@@ -1078,7 +1088,7 @@ export const useGraphStore = create<GraphState>()(
 
       toggleMuteSelected: async () => {
         const UNMUTABLE_TYPES = new Set([
-          'load_image', 'load_image_sequence',
+          'load_image', 'load_image_sequence', 'load_video',
           'viewer', 'export_image', 'export_image_sequence', 'export_video',
           'group_input', 'group_output',
         ]);
@@ -1200,6 +1210,35 @@ export const useGraphStore = create<GraphState>()(
         }).catch(e => {
           console.error('loadImageFile failed:', e);
         });
+      },
+
+      loadVideoFile: async (nodeId, path) => {
+        const eng = getEngine();
+        if (!eng.loadVideoFile) return null;
+        try {
+          const info = await eng.loadVideoFile(nodeId, path);
+
+          const seqInfo: SequenceInfo = {
+            frame_count: info.frame_count,
+            first_frame: 0,
+            last_frame: info.frame_count > 0 ? info.frame_count - 1 : 0,
+          };
+          const newInfoMap = new Map(get().sequenceInfoMap);
+          newInfoMap.set(nodeId, seqInfo);
+          set({ sequenceInfoMap: newInfoMap, dirty: true });
+          recomputeSequenceState();
+
+          const { currentFrame, sequenceStart, sequenceLength } = get();
+          if (info.frame_count > 0 && (currentFrame < sequenceStart || currentFrame > sequenceLength)) {
+            set({ currentFrame: sequenceStart });
+          }
+
+          triggerAllViewers();
+          return info;
+        } catch (e) {
+          console.error('loadVideoFile failed:', e);
+          return null;
+        }
       },
 
       getImageData: async (nodeId) => {
@@ -1633,19 +1672,36 @@ export const useGraphStore = create<GraphState>()(
         const { currentFrame, sequenceLength, sequenceStart } = get();
         const end = sequenceLength || 999;
         const startFrame = currentFrame >= end ? sequenceStart : currentFrame;
-        set({ isPlaying: true, currentFrame: startFrame });
+        set({ isPlaying: true, currentFrame: startFrame, playbackFps: null });
         playbackAborted = false;
 
         const loop = async () => {
+          let prevFrameStart: number | null = null;
+          const fpsWindow: number[] = [];
+          const FPS_WINDOW_SIZE = 20;
+
           while (!playbackAborted) {
             const frameStart = performance.now();
             const { fps, sequenceLength: seqLen, loopPlayback, sequenceStart: seqStart } = get();
             const endFrame = seqLen || 999;
             const interval = 1000 / fps;
 
-            await renderAllViewersAsync();
+            if (prevFrameStart !== null) {
+              const frameDelta = frameStart - prevFrameStart;
+              fpsWindow.push(1000 / frameDelta);
+              if (fpsWindow.length > FPS_WINDOW_SIZE) fpsWindow.shift();
+            }
+            prevFrameStart = frameStart;
+
+            renderAllViewersAsync();
+            await renderLock;
 
             if (playbackAborted) break;
+
+            if (fpsWindow.length > 0) {
+              const avgFps = fpsWindow.reduce((a, b) => a + b, 0) / fpsWindow.length;
+              set({ playbackFps: avgFps });
+            }
 
             const { currentFrame: cur } = get();
             const next = cur + 1;
@@ -1680,7 +1736,7 @@ export const useGraphStore = create<GraphState>()(
           clearTimeout(playbackTimeoutId);
           playbackTimeoutId = null;
         }
-        set({ isPlaying: false });
+        set({ isPlaying: false, playbackFps: null });
       },
 
       togglePlayback: () => {
@@ -2284,6 +2340,25 @@ export const useGraphStore = create<GraphState>()(
           useSettingsStore.getState().setProjectFormat(width, height);
           renderAllViewersAsync();
         }
+      },
+
+      aiActionInProgress: false,
+
+      beginAiAction: async () => {
+        console.log('[AI lifecycle] beginAiAction');
+        aiActionSnapshot = await captureSnapshot();
+        set({ aiActionInProgress: true });
+      },
+
+      endAiAction: () => {
+        console.log('[AI lifecycle] endAiAction');
+        if (aiActionSnapshot) {
+          undoStack.push(aiActionSnapshot);
+          if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
+          redoStack.length = 0;
+          aiActionSnapshot = null;
+        }
+        set({ aiActionInProgress: false, canUndo: undoStack.length > 0, canRedo: false, dirty: true });
       },
 
       linkToViewer: async (nodeId, outputIndex) => {

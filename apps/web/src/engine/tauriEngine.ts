@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, ColorManagementInfo } from './bridge';
+import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 
 type DocumentEnvelope = {
@@ -216,6 +216,11 @@ export class TauriEngine implements EngineBridge {
   async getSequenceInfo(nodeId: string, pattern: string): Promise<SequenceInfo> {
     const json = await invoke<string>('get_sequence_info', { nodeId, pattern });
     return JSON.parse(json) as SequenceInfo;
+  }
+
+  async loadVideoFile(nodeId: string, path: string): Promise<VideoInfo> {
+    const json = await invoke<string>('load_video_file', { nodeId, path });
+    return JSON.parse(json) as VideoInfo;
   }
 
   async createGroupFromNodes(nodeIds: string[], name: string): Promise<CreateGroupResult> {

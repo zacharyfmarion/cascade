@@ -113,11 +113,7 @@ fn set_position(
 }
 
 #[tauri::command]
-fn set_muted(
-    state: State<'_, EngineState>,
-    node_id: String,
-    muted: bool,
-) -> Result<(), String> {
+fn set_muted(state: State<'_, EngineState>, node_id: String, muted: bool) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.engine
         .set_muted(&node_id, muted)
@@ -396,6 +392,20 @@ fn get_sequence_info(
 }
 
 #[tauri::command]
+fn load_video_file(
+    state: State<'_, EngineState>,
+    node_id: String,
+    path: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let info = s
+        .engine
+        .load_video_file(&node_id, &path)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn render_sequence(state: State<'_, EngineState>, node_id: String) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.engine
@@ -663,6 +673,7 @@ pub fn run() {
             export_image,
             set_sequence_directory,
             get_sequence_info,
+            load_video_file,
             render_sequence,
             render_video,
             cancel_render_job,

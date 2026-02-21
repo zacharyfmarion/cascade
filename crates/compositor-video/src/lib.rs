@@ -1,5 +1,6 @@
 #![cfg(target_os = "macos")]
 
+use rayon::prelude::*;
 use std::path::Path;
 use std::ptr::NonNull;
 use std::sync::mpsc;
@@ -10,22 +11,25 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{class, msg_send};
 use objc2_av_foundation::{
+    AVAsset, AVAssetReader, AVAssetReaderOutput, AVAssetReaderStatus, AVAssetReaderTrackOutput,
     AVAssetWriter, AVAssetWriterInput, AVAssetWriterInputPixelBufferAdaptor, AVAssetWriterStatus,
-    AVVideoAllowFrameReorderingKey, AVVideoCodecKey, AVVideoCompressionPropertiesKey,
-    AVVideoExpectedSourceFrameRateKey, AVVideoHeightKey, AVVideoMaxKeyFrameIntervalDurationKey,
-    AVVideoQualityKey, AVVideoWidthKey,
+    AVMediaTypeVideo, AVVideoAllowFrameReorderingKey, AVVideoCodecKey,
+    AVVideoCompressionPropertiesKey, AVVideoExpectedSourceFrameRateKey, AVVideoHeightKey,
+    AVVideoMaxKeyFrameIntervalDurationKey, AVVideoQualityKey, AVVideoWidthKey,
 };
 use objc2_core_foundation::CFRetained;
 use objc2_core_media::{
-    kCMTimeZero, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC, CMTime, CMVideoCodecType,
+    kCMTimeZero, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC, CMSampleBuffer, CMTime,
+    CMTimeRange, CMVideoCodecType,
 };
+use objc2_core_video::CVImageBuffer;
 use objc2_core_video::{
     kCVPixelBufferHeightKey, kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey,
     kCVPixelFormatType_32BGRA, kCVReturnSuccess, CVPixelBuffer, CVPixelBufferCreate,
     CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferLockBaseAddress,
     CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
 };
-use objc2_foundation::{NSError, NSNumber, NSString};
+use objc2_foundation::{NSDictionary, NSError, NSNumber, NSString, NSURL};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoCodec {
@@ -489,6 +493,475 @@ unsafe fn dict_set_cfstring(
     value: &AnyObject,
 ) {
     let () = msg_send![dict, setObject: value, forKey: key];
+}
+
+// ── Video Decoder (AVAssetReader) ─────────────────────────────────────
+
+/// Metadata about a decoded video.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VideoInfo {
+    pub width: u32,
+    pub height: u32,
+    pub fps: f64,
+    pub frame_count: u64,
+    pub duration_secs: f64,
+}
+
+/// A single decoded video frame in RGBA8 format.
+pub struct DecodedFrame {
+    pub rgba_data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub frame_index: u64,
+}
+
+pub struct LinearFrame {
+    pub data: Vec<f32>,
+    pub width: u32,
+    pub height: u32,
+    pub frame_index: u64,
+}
+
+struct SequentialReader {
+    #[allow(dead_code)] // Kept alive to own the reading session
+    reader: Retained<AVAssetReader>,
+    track_output: Retained<AVAssetReaderTrackOutput>,
+    next_frame: u64,
+}
+
+// AVFoundation objects are safe to send between threads but must not be used concurrently.
+// The Mutex<Option<SequentialReader>> in VideoDecoder ensures exclusive access.
+unsafe impl Send for SequentialReader {}
+
+pub struct VideoDecoder {
+    info: VideoInfo,
+    path: String,
+    sequential_reader: std::sync::Mutex<Option<SequentialReader>>,
+}
+
+impl VideoDecoder {
+    /// Opens a video file and reads its metadata. Does not decode frames.
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let abs_path = absolutize_path(path.as_ref())?;
+        let path_string = abs_path
+            .to_str()
+            .ok_or_else(|| "Path is not valid UTF-8".to_string())?
+            .to_string();
+
+        let info = Self::read_video_info(&path_string)?;
+
+        Ok(Self {
+            info,
+            path: path_string,
+            sequential_reader: std::sync::Mutex::new(None),
+        })
+    }
+
+    /// Returns metadata about the video.
+    pub fn info(&self) -> &VideoInfo {
+        &self.info
+    }
+
+    /// Decodes all frames from the video sequentially.
+    pub fn decode_all_frames(&self) -> Result<Vec<DecodedFrame>, String> {
+        let (reader, track_output) = self.create_reader()?;
+
+        let started = unsafe { reader.startReading() };
+        if !started {
+            return Err(reader_error(
+                &reader,
+                "AVAssetReader failed to start reading",
+            ));
+        }
+
+        let mut frames = Vec::new();
+        let mut frame_index: u64 = 0;
+
+        let output_base: &AVAssetReaderOutput = &track_output;
+
+        loop {
+            let sample = unsafe { output_base.copyNextSampleBuffer() };
+            let sample = match sample {
+                Some(s) => s,
+                None => break,
+            };
+
+            if unsafe { sample.num_samples() } == 0 {
+                continue;
+            }
+
+            let frame = self.extract_frame_from_sample(&sample, frame_index)?;
+            frames.push(frame);
+            frame_index += 1;
+        }
+
+        let status = unsafe { reader.status() };
+        if status == AVAssetReaderStatus::Failed {
+            return Err(reader_error(&reader, "AVAssetReader failed during reading"));
+        }
+
+        Ok(frames)
+    }
+
+    /// Decodes a single frame at the given index by reading up to that frame.
+    /// For random access, prefer `decode_all_frames` and caching.
+    pub fn decode_frame(&self, target_frame: u64) -> Result<Option<DecodedFrame>, String> {
+        let (reader, track_output) = self.create_reader()?;
+
+        let started = unsafe { reader.startReading() };
+        if !started {
+            return Err(reader_error(
+                &reader,
+                "AVAssetReader failed to start reading",
+            ));
+        }
+
+        let output_base: &AVAssetReaderOutput = &track_output;
+        let mut frame_index: u64 = 0;
+
+        loop {
+            let sample = unsafe { output_base.copyNextSampleBuffer() };
+            let sample = match sample {
+                Some(s) => s,
+                None => break,
+            };
+
+            if unsafe { sample.num_samples() } == 0 {
+                continue;
+            }
+
+            if frame_index == target_frame {
+                let frame = self.extract_frame_from_sample(&sample, frame_index)?;
+                return Ok(Some(frame));
+            }
+            frame_index += 1;
+        }
+
+        Ok(None)
+    }
+
+    pub fn decode_frame_at_time(&self, frame_index: u64) -> Result<Option<DecodedFrame>, String> {
+        self.with_next_sample(frame_index, |sample, idx| {
+            self.extract_frame_from_sample(sample, idx)
+        })
+    }
+
+    pub fn decode_frame_linear(
+        &self,
+        frame_index: u64,
+        srgb_lut: &'static [f32; 256],
+    ) -> Result<Option<LinearFrame>, String> {
+        self.with_next_sample(frame_index, |sample, idx| {
+            self.extract_frame_linear(sample, idx, srgb_lut)
+        })
+    }
+
+    fn with_next_sample<T>(
+        &self,
+        frame_index: u64,
+        extract: impl FnOnce(&CMSampleBuffer, u64) -> Result<T, String>,
+    ) -> Result<Option<T>, String> {
+        if self.info.fps <= 0.0 {
+            return Err("Cannot seek: video has no FPS info".to_string());
+        }
+
+        let mut state_guard = self
+            .sequential_reader
+            .lock()
+            .map_err(|_| "Sequential reader mutex poisoned".to_string())?;
+
+        let is_sequential = state_guard
+            .as_ref()
+            .map_or(false, |s| s.next_frame == frame_index);
+
+        if !is_sequential {
+            let (reader, track_output) = self.create_reader()?;
+
+            let timescale = 600i32;
+            let frame_time_secs = frame_index as f64 / self.info.fps;
+            let start_value = (frame_time_secs * timescale as f64) as i64;
+            let remaining_secs = self.info.duration_secs - frame_time_secs;
+            let duration_value =
+                (remaining_secs.max(1.0 / self.info.fps) * timescale as f64) as i64;
+
+            let start_time = unsafe { CMTime::new(start_value, timescale) };
+            let duration = unsafe { CMTime::new(duration_value.max(1), timescale) };
+            let time_range = unsafe { CMTimeRange::new(start_time, duration) };
+            unsafe { reader.setTimeRange(time_range) };
+
+            let started = unsafe { reader.startReading() };
+            if !started {
+                return Err(reader_error(
+                    &reader,
+                    "AVAssetReader failed to start reading",
+                ));
+            }
+
+            *state_guard = Some(SequentialReader {
+                reader,
+                track_output,
+                next_frame: frame_index,
+            });
+        }
+
+        let state = state_guard.as_mut().unwrap();
+        let output_base: &AVAssetReaderOutput = &state.track_output;
+        let sample = unsafe { output_base.copyNextSampleBuffer() };
+
+        match sample {
+            Some(s) => {
+                if unsafe { s.num_samples() } == 0 {
+                    *state_guard = None;
+                    return Ok(None);
+                }
+                state.next_frame = frame_index + 1;
+                let result = extract(&s, frame_index)?;
+                Ok(Some(result))
+            }
+            None => {
+                *state_guard = None;
+                Ok(None)
+            }
+        }
+    }
+
+    fn read_video_info(path: &str) -> Result<VideoInfo, String> {
+        let path_str = NSString::from_str(path);
+        let url: Retained<NSURL> = unsafe { msg_send![class!(NSURL), fileURLWithPath: &*path_str] };
+        let asset = unsafe { AVAsset::assetWithURL(&url) };
+
+        let media_type = unsafe {
+            AVMediaTypeVideo.ok_or_else(|| "AVMediaTypeVideo not available".to_string())?
+        };
+        #[allow(deprecated)]
+        let tracks = unsafe { asset.tracksWithMediaType(media_type) };
+        let track = tracks
+            .firstObject()
+            .ok_or_else(|| "No video tracks found in file".to_string())?;
+
+        let size = unsafe { track.naturalSize() };
+        let fps = unsafe { track.nominalFrameRate() } as f64;
+        let duration = unsafe { asset.duration() };
+        let duration_secs = if duration.timescale > 0 {
+            duration.value as f64 / duration.timescale as f64
+        } else {
+            0.0
+        };
+        let frame_count = if fps > 0.0 {
+            (duration_secs * fps).round() as u64
+        } else {
+            0
+        };
+
+        Ok(VideoInfo {
+            width: size.width as u32,
+            height: size.height as u32,
+            fps,
+            frame_count,
+            duration_secs,
+        })
+    }
+
+    fn create_reader(
+        &self,
+    ) -> Result<(Retained<AVAssetReader>, Retained<AVAssetReaderTrackOutput>), String> {
+        let path_str = NSString::from_str(&self.path);
+        let url: Retained<NSURL> = unsafe { msg_send![class!(NSURL), fileURLWithPath: &*path_str] };
+        let asset = unsafe { AVAsset::assetWithURL(&url) };
+
+        let media_type = unsafe {
+            AVMediaTypeVideo.ok_or_else(|| "AVMediaTypeVideo not available".to_string())?
+        };
+        #[allow(deprecated)]
+        let tracks = unsafe { asset.tracksWithMediaType(media_type) };
+        let track = tracks
+            .firstObject()
+            .ok_or_else(|| "No video tracks found in file".to_string())?;
+
+        let output_settings = create_decoder_output_settings()?;
+        let settings_dict: &NSDictionary<NSString, AnyObject> = unsafe {
+            &*(&*output_settings as *const AnyObject as *const NSDictionary<NSString, AnyObject>)
+        };
+
+        let track_output = unsafe {
+            AVAssetReaderTrackOutput::assetReaderTrackOutputWithTrack_outputSettings(
+                &track,
+                Some(settings_dict),
+            )
+        };
+
+        unsafe {
+            track_output.setAlwaysCopiesSampleData(false);
+        }
+
+        let reader = catch_objc("AVAssetReader creation", || unsafe {
+            AVAssetReader::assetReaderWithAsset_error(&asset)
+                .map_err(|e| format!("Failed to create AVAssetReader: {e}"))
+        })??;
+
+        let output_ref: &AVAssetReaderOutput = &track_output;
+        unsafe {
+            reader.addOutput(output_ref);
+        }
+
+        Ok((reader, track_output))
+    }
+
+    fn extract_frame_from_sample(
+        &self,
+        sample: &CMSampleBuffer,
+        frame_index: u64,
+    ) -> Result<DecodedFrame, String> {
+        let image_buffer: CFRetained<CVImageBuffer> = unsafe { sample.image_buffer() }
+            .ok_or_else(|| "CMSampleBuffer has no image buffer".to_string())?;
+
+        let pixel_buffer: &CVPixelBuffer = &image_buffer;
+
+        // kCVPixelBufferLock_ReadOnly
+        let lock_flags = CVPixelBufferLockFlags(1);
+        let status = unsafe { CVPixelBufferLockBaseAddress(pixel_buffer, lock_flags) };
+        if status != kCVReturnSuccess {
+            return Err(format!(
+                "CVPixelBufferLockBaseAddress failed with status {status}"
+            ));
+        }
+
+        struct UnlockGuard<'a> {
+            buffer: &'a CVPixelBuffer,
+            flags: CVPixelBufferLockFlags,
+        }
+
+        impl Drop for UnlockGuard<'_> {
+            fn drop(&mut self) {
+                let _ = unsafe { CVPixelBufferUnlockBaseAddress(self.buffer, self.flags) };
+            }
+        }
+
+        let _unlock = UnlockGuard {
+            buffer: pixel_buffer,
+            flags: lock_flags,
+        };
+
+        let base = CVPixelBufferGetBaseAddress(pixel_buffer) as *const u8;
+        if base.is_null() {
+            return Err("CVPixelBuffer base address is null".to_string());
+        }
+
+        let bytes_per_row = CVPixelBufferGetBytesPerRow(pixel_buffer);
+        let width = self.info.width as usize;
+        let height = self.info.height as usize;
+        let mut rgba_data = vec![0u8; width * height * 4];
+
+        for y in 0..height {
+            let src_row =
+                unsafe { std::slice::from_raw_parts(base.add(y * bytes_per_row), width * 4) };
+            let dst_offset = y * width * 4;
+            for x in 0..width {
+                let si = x * 4;
+                let di = dst_offset + x * 4;
+                rgba_data[di] = src_row[si + 2]; // BGRA → RGBA: R
+                rgba_data[di + 1] = src_row[si + 1]; // G
+                rgba_data[di + 2] = src_row[si]; // B
+                rgba_data[di + 3] = src_row[si + 3]; // A
+            }
+        }
+
+        Ok(DecodedFrame {
+            rgba_data,
+            width: self.info.width,
+            height: self.info.height,
+            frame_index,
+        })
+    }
+
+    fn extract_frame_linear(
+        &self,
+        sample: &CMSampleBuffer,
+        frame_index: u64,
+        lut: &[f32; 256],
+    ) -> Result<LinearFrame, String> {
+        let image_buffer: CFRetained<CVImageBuffer> = unsafe { sample.image_buffer() }
+            .ok_or_else(|| "CMSampleBuffer has no image buffer".to_string())?;
+
+        let pixel_buffer: &CVPixelBuffer = &image_buffer;
+
+        let lock_flags = CVPixelBufferLockFlags(1);
+        let status = unsafe { CVPixelBufferLockBaseAddress(pixel_buffer, lock_flags) };
+        if status != kCVReturnSuccess {
+            return Err(format!(
+                "CVPixelBufferLockBaseAddress failed with status {status}"
+            ));
+        }
+
+        struct UnlockGuard<'a> {
+            buffer: &'a CVPixelBuffer,
+            flags: CVPixelBufferLockFlags,
+        }
+
+        impl Drop for UnlockGuard<'_> {
+            fn drop(&mut self) {
+                let _ = unsafe { CVPixelBufferUnlockBaseAddress(self.buffer, self.flags) };
+            }
+        }
+
+        let _unlock = UnlockGuard {
+            buffer: pixel_buffer,
+            flags: lock_flags,
+        };
+
+        let base = CVPixelBufferGetBaseAddress(pixel_buffer) as *const u8;
+        if base.is_null() {
+            return Err("CVPixelBuffer base address is null".to_string());
+        }
+
+        let bytes_per_row = CVPixelBufferGetBytesPerRow(pixel_buffer);
+        let width = self.info.width as usize;
+        let height = self.info.height as usize;
+        let mut data = vec![0.0f32; width * height * 4];
+
+        // SAFETY: base is valid for the lifetime of _unlock guard and each row slice is
+        // non-overlapping, so parallel reads from different rows are safe.
+        let base_addr = base as usize;
+        data.par_chunks_exact_mut(width * 4)
+            .enumerate()
+            .for_each(|(y, row_out)| {
+                let row_ptr = (base_addr + y * bytes_per_row) as *const u8;
+                let src_row = unsafe { std::slice::from_raw_parts(row_ptr, width * 4) };
+                for x in 0..width {
+                    let si = x * 4;
+                    let di = x * 4;
+                    row_out[di] = lut[src_row[si + 2] as usize];
+                    row_out[di + 1] = lut[src_row[si + 1] as usize];
+                    row_out[di + 2] = lut[src_row[si] as usize];
+                    row_out[di + 3] = src_row[si + 3] as f32 / 255.0;
+                }
+            });
+
+        Ok(LinearFrame {
+            data,
+            width: self.info.width,
+            height: self.info.height,
+            frame_index,
+        })
+    }
+}
+
+fn create_decoder_output_settings() -> Result<Retained<AnyObject>, String> {
+    let dict: Retained<AnyObject> = unsafe { msg_send![class!(NSMutableDictionary), new] };
+    let format_val = NSNumber::new_u32(kCVPixelFormatType_32BGRA);
+    unsafe {
+        dict_set_cfstring(&dict, kCVPixelBufferPixelFormatTypeKey, &format_val);
+    }
+    Ok(dict)
+}
+
+fn reader_error(reader: &AVAssetReader, context: &str) -> String {
+    let status = unsafe { reader.status() };
+    let error = unsafe { reader.error() };
+    let error_desc = error
+        .map(|err| format!("{err}"))
+        .unwrap_or_else(|| "unknown error".to_string());
+    format!("{context} (status: {status:?}, error: {error_desc})")
 }
 
 #[cfg(test)]
