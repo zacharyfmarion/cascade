@@ -8,6 +8,7 @@ import { Viewer } from '../Viewer';
 import { Timeline } from '../Timeline';
 import { Breadcrumbs } from '../Breadcrumbs';
 import { AiAssistant } from '../AiAssistant';
+import { DslEditor } from '../DslEditor';
 
 const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
   const [aiOpen, setAiOpen] = useState(true);
@@ -38,6 +39,7 @@ const NodeLibraryPanel: React.FC<IDockviewPanelProps> = () => <NodeLibrary />;
 const InspectorPanel: React.FC<IDockviewPanelProps> = () => <Inspector />;
 const ViewerPanel: React.FC<IDockviewPanelProps> = () => <Viewer />;
 const TimelinePanel: React.FC<IDockviewPanelProps> = () => <Timeline />;
+const DslEditorPanel: React.FC<IDockviewPanelProps> = () => <DslEditor />;
 
 export const panelComponents: Record<string, React.FC<IDockviewPanelProps>> = {
   'node-canvas': NodeCanvasPanel,
@@ -45,6 +47,7 @@ export const panelComponents: Record<string, React.FC<IDockviewPanelProps>> = {
   'inspector': InspectorPanel,
   'viewer': ViewerPanel,
   'timeline': TimelinePanel,
+  'dsl-editor': DslEditorPanel,
 };
 
 export interface PanelTypeInfo {
@@ -55,6 +58,7 @@ export interface PanelTypeInfo {
 
 export const PANEL_TYPES: PanelTypeInfo[] = [
   { id: 'node-canvas', label: 'Node Editor', icon: '⬡' },
+  { id: 'dsl-editor', label: 'DSL', icon: '{ }' },
   { id: 'node-library', label: 'Node Library', icon: '☰' },
   { id: 'inspector', label: 'Inspector', icon: '⚙' },
   { id: 'viewer', label: 'Viewer', icon: '◉' },

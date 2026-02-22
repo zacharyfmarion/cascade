@@ -3,6 +3,9 @@ import { devtools } from 'zustand/middleware';
 import type { DockviewApi, SerializedDockview } from 'dockview';
 
 const LAYOUT_STORAGE_KEY = 'compositor-layout';
+const LAYOUT_VERSION_KEY = 'compositor-layout-version';
+/** Bump this when default layout changes to invalidate stale cached layouts. */
+const LAYOUT_VERSION = 2;
 
 export type WorkspacePreset = 'compositing' | 'viewing' | 'minimal';
 
@@ -11,6 +14,7 @@ function addPresetPanels(api: DockviewApi, preset: WorkspacePreset) {
     case 'compositing': {
       api.addPanel({ id: 'node-library', component: 'node-library', title: 'Node Library', initialWidth: 180 });
       api.addPanel({ id: 'node-canvas', component: 'node-canvas', title: 'Node Editor', position: { referencePanel: 'node-library', direction: 'right' } });
+      api.addPanel({ id: 'dsl-editor', component: 'dsl-editor', title: 'DSL', position: { referencePanel: 'node-canvas' } });
       api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'right' }, initialWidth: 260 });
       api.addPanel({ id: 'viewer', component: 'viewer', title: 'Viewer', position: { referencePanel: 'inspector', direction: 'below' } });
       api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: 'node-canvas', direction: 'below' }, initialHeight: 40 });
@@ -58,12 +62,19 @@ export const useLayoutStore = create<LayoutState>()(
         try {
           const json = dockviewApi.toJSON();
           localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(json));
+          localStorage.setItem(LAYOUT_VERSION_KEY, String(LAYOUT_VERSION));
         } catch (e) {
           console.error('Failed to save layout:', e);
         }
       },
 
       loadLayout: () => {
+        const version = localStorage.getItem(LAYOUT_VERSION_KEY);
+        if (version !== String(LAYOUT_VERSION)) {
+          localStorage.removeItem(LAYOUT_STORAGE_KEY);
+          localStorage.removeItem(LAYOUT_VERSION_KEY);
+          return null;
+        }
         const saved = localStorage.getItem(LAYOUT_STORAGE_KEY);
         if (!saved) return null;
         try {
