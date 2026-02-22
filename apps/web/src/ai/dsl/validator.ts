@@ -115,6 +115,30 @@ const addWarning = (warnings: ValidationWarning[], warning: ValidationWarning) =
   warnings.push(warning);
 };
 
+/**
+ * Check whether a DSL param value matches its paramSpec.
+ * Complex param types (ColorPalette, ColorRamp, CurveEditor) have misleading
+ * `ty` values (e.g. ColorPalette has ty:'Color'), so we must route by ui_hint
+ * first — exactly as the parser does.
+ */
+const isParamTypeMatch = (paramSpec: ParamSpec, paramValue: DslParamValue): boolean => {
+  // Complex types: route by ui_hint, not ty
+  if (paramSpec.ui_hint.type === 'ColorPalette') return paramValue.type === 'palette';
+  if (paramSpec.ui_hint.type === 'ColorRamp') return paramValue.type === 'ramp';
+  if (paramSpec.ui_hint.type === 'CurveEditor') return paramValue.type === 'curve';
+  if (paramSpec.ui_hint.type === 'Dropdown') return paramValue.type === 'string';
+  // Simple types: compare against ty
+  return dslValueType(paramValue) === paramSpec.ty;
+};
+
+const expectedLabelForParam = (paramSpec: ParamSpec): string => {
+  if (paramSpec.ui_hint.type === 'ColorPalette') return 'palette [rgba(...), ...]';
+  if (paramSpec.ui_hint.type === 'ColorRamp') return 'ramp [pos: rgba(...), ...]';
+  if (paramSpec.ui_hint.type === 'CurveEditor') return 'curve [(x, y), ...]';
+  if (paramSpec.ui_hint.type === 'Dropdown') return 'string';
+  return expectedLabel(paramSpec.ty);
+};
+
 const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationError[]) => {
   const validKeys = spec.params.map(param => param.key);
   for (const [paramKey, paramValue] of node.params.entries()) {
@@ -127,12 +151,10 @@ const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationErr
       continue;
     }
 
-    const actualType = dslValueType(paramValue);
-    const expectedType = paramSpec.ty;
-    if (actualType !== expectedType) {
+    if (!isParamTypeMatch(paramSpec, paramValue)) {
       addError(errors, {
         line: node.line,
-        message: `Line ${node.line}: Param "${paramKey}" expects ${expectedLabel(expectedType)}, got "${dslValueLabel(paramValue)}"`,
+        message: `Line ${node.line}: Param "${paramKey}" expects ${expectedLabelForParam(paramSpec)}, got "${dslValueLabel(paramValue)}"`,
       });
       continue;
     }
