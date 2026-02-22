@@ -1,37 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Markdown from 'react-markdown';
 import { useChat } from '@ai-sdk/react';
-import type { UIMessage } from 'ai';
 import { isToolUIPart, getToolName } from 'ai';
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { createCompositorTransport } from '../ai/transport';
 import { captureViewerThumbnail } from '../ai/viewerSnapshot';
-import { AiActionFeed } from './AiActionFeed';
+import { AiActionItem } from './AiActionFeed';
 import type { ToolAction } from './AiActionFeed';
+import { MarkdownMessage } from './MarkdownMessage';
 
 interface AiAssistantProps {
   isOpen: boolean;
   onToggle: () => void;
 }
 
-const extractToolActions = (message: UIMessage): ToolAction[] => {
-  if (!message.parts) return [];
-  const actions: ToolAction[] = [];
-  for (const part of message.parts) {
-    if (isToolUIPart(part)) {
-      actions.push({
-        toolCallId: part.toolCallId,
-        toolName: getToolName(part),
-        state: part.state,
-        input: part.input as Record<string, unknown> | undefined,
-        output: 'output' in part ? part.output : undefined,
-        errorText: 'errorText' in part ? (part.errorText as string) : undefined,
-      });
-    }
-  }
-  return actions;
-};
+const toToolAction = (part: { toolCallId: string; state: string; input?: unknown; output?: unknown; errorText?: string }): ToolAction => ({
+  toolCallId: part.toolCallId,
+  toolName: getToolName(part as any),
+  state: part.state,
+  input: part.input as Record<string, unknown> | undefined,
+  output: 'output' in part ? part.output : undefined,
+  errorText: 'errorText' in part ? (part.errorText as string) : undefined,
+});
 
 export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) => {
   const apiKey = useSettingsStore(s => s.anthropicApiKey);
@@ -190,6 +180,8 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
           gap: '8px',
           minHeight: '100px',
           maxHeight: '280px',
+          userSelect: 'text',
+          cursor: 'auto',
         }}
       >
         {!isConfigured && (
@@ -221,13 +213,11 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
         )}
 
         {messages.map((msg) => {
-          const toolActions = msg.role === 'assistant' ? extractToolActions(msg) : [];
-          const textContent = (msg.parts ?? [])
-            .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-            .map(p => p.text)
-            .join('');
-
           if (msg.role === 'user') {
+            const textContent = (msg.parts ?? [])
+              .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+              .map(p => p.text)
+              .join('');
             return (
               <div key={msg.id} style={{
                 fontSize: '0.75rem',
@@ -252,16 +242,22 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
                 color: 'var(--text-secondary)',
                 maxWidth: '95%',
               }}>
-                {toolActions.length > 0 && <AiActionFeed actions={toolActions} />}
-                {textContent && (
-                  <div className="ai-markdown" style={{
-                    wordBreak: 'break-word',
-                    lineHeight: 1.5,
-                    marginTop: toolActions.length > 0 ? '4px' : 0,
-                  }}>
-                    <Markdown>{textContent}</Markdown>
-                  </div>
-                )}
+                {(msg.parts ?? []).map((part, i) => {
+                  if (part.type === 'text' && part.text) {
+                    return (
+                      <div key={`text-${i}`} className="ai-markdown" style={{
+                        wordBreak: 'break-word',
+                        lineHeight: 1.5,
+                      }}>
+                        <MarkdownMessage content={part.text} />
+                      </div>
+                    );
+                  }
+                  if (isToolUIPart(part)) {
+                    return <AiActionItem key={part.toolCallId} action={toToolAction(part)} />;
+                  }
+                  return null;
+                })}
               </div>
             );
           }
