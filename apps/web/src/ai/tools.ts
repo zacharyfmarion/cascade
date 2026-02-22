@@ -1,10 +1,11 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { useGraphStore } from '../store/graphStore';
-import { createParamValue } from '../store/types';
+import { createParamValue, isConnectableParam } from '../store/types';
 import type { NodeSpec, ParamValue } from '../store/types';
 import { buildGraphSnapshot } from './graphSnapshot';
 import { autoLayoutGraph } from './autoLayout';
+import { captureViewerThumbnail } from './viewerSnapshot';
 
 /**
  * Resolve a raw LLM value into a tagged ParamValue based on the param's declared type.
@@ -57,6 +58,7 @@ const insertNodeSchema = z.object({
 const duplicateNodeSchema = z.object({
   nodeId: z.string(),
 });
+const viewCurrentImageSchema = z.object({});
 
 type InspectGraphArgs = z.infer<typeof inspectGraphSchema>;
 type GetNodeSpecArgs = z.infer<typeof getNodeSpecSchema>;
@@ -68,6 +70,7 @@ type DisconnectArgs = z.infer<typeof disconnectSchema>;
 type SetParamArgs = z.infer<typeof setParamSchema>;
 type InsertNodeArgs = z.infer<typeof insertNodeSchema>;
 type DuplicateNodeArgs = z.infer<typeof duplicateNodeSchema>;
+type ViewCurrentImageArgs = z.infer<typeof viewCurrentImageSchema>;
 
 const toolExecutors = {
   inspect_graph: async (_args: InspectGraphArgs) => {
@@ -127,7 +130,17 @@ const toolExecutors = {
 
   set_param: async ({ nodeId, paramKey, value }: SetParamArgs) => {
     const paramValue = resolveParamValue(nodeId, paramKey, value);
-    await useGraphStore.getState().setParam(nodeId, paramKey, paramValue);
+    const store = useGraphStore.getState();
+    const node = store.nodes.get(nodeId);
+    if (!node) throw new Error(`Node not found: ${nodeId}`);
+    const spec = store.nodeSpecs.find((s: NodeSpec) => s.id === node.typeId);
+    const paramSpec = spec?.params.find(p => p.key === paramKey);
+
+    if (paramSpec && isConnectableParam(paramSpec)) {
+      await store.setInputDefault(nodeId, paramKey, paramValue);
+    } else {
+      await store.setParam(nodeId, paramKey, paramValue);
+    }
     return { success: true };
   },
 
@@ -155,6 +168,14 @@ const toolExecutors = {
 
     autoLayoutGraph();
     return { nodeId: newNodeId };
+  },
+
+  view_current_image: async (_args: ViewCurrentImageArgs) => {
+    void _args;
+    const dataUrl = captureViewerThumbnail();
+    if (!dataUrl) return { error: 'No viewer image available' };
+    const base64 = dataUrl.replace(/^data:image\/jpeg;base64,/, '');
+    return { type: 'image' as const, data: base64 };
   },
 
   duplicate_node: async ({ nodeId }: DuplicateNodeArgs) => {
@@ -230,6 +251,21 @@ export const compositorTools = {
     description: 'Duplicate a node with all its current parameter values. Returns the new node ID. The duplicate is not connected to anything.',
     inputSchema: duplicateNodeSchema,
     execute: toolExecutors.duplicate_node,
+  }),
+
+  view_current_image: tool({
+    description: 'Capture a screenshot of the current viewer output. Use this to see the result of your changes. Returns the image directly.',
+    inputSchema: viewCurrentImageSchema,
+    execute: toolExecutors.view_current_image,
+    toModelOutput({ output }) {
+      if (typeof output === 'object' && output && 'type' in output && output.type === 'image') {
+        return {
+          type: 'content',
+          value: [{ type: 'media', data: (output as { data: string }).data, mediaType: 'image/jpeg' }],
+        };
+      }
+      return { type: 'json', value: output };
+    },
   }),
 };
 

@@ -319,10 +319,16 @@ let playbackAborted = false;
 let webRenderCancelled = false;
 
 let renderLock: Promise<void> = Promise.resolve();
+let renderSuspendCount = 0;
+let renderNeededWhileSuspended = false;
 
 export const useGraphStore = create<GraphState>()(
   devtools((set, get) => {
     const triggerAllViewers = () => {
+      if (renderSuspendCount > 0) {
+        renderNeededWhileSuspended = true;
+        return;
+      }
       const { nodes } = get();
       for (const [viewerId, node] of nodes) {
         if (node.typeId === 'viewer' || node.typeId === 'export_image' || node.typeId === 'export_image_sequence' || node.typeId === 'export_video') {
@@ -821,8 +827,6 @@ export const useGraphStore = create<GraphState>()(
 
       setParam: async (nodeId, key, value) => {
         await pushUndo();
-        // Call setParam synchronously (no await) to avoid microtask boundaries
-        // that could let stale renders interleave and clear dirty flags.
         getEngine().setParam(nodeId, key, value);
         const newNodes = new Map(get().nodes);
         const node = newNodes.get(nodeId);
@@ -2348,10 +2352,13 @@ export const useGraphStore = create<GraphState>()(
 
       beginAiAction: async () => {
         aiActionSnapshot = await captureSnapshot();
+        renderSuspendCount++;
+        console.log('[RenderBarrier] beginAiAction — suspendCount=%d', renderSuspendCount);
         set({ aiActionInProgress: true });
       },
 
       endAiAction: () => {
+        console.log('[RenderBarrier] endAiAction — suspendCount=%d, pendingRender=%s', renderSuspendCount, renderNeededWhileSuspended);
         if (aiActionSnapshot) {
           undoStack.push(aiActionSnapshot);
           if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
@@ -2359,6 +2366,15 @@ export const useGraphStore = create<GraphState>()(
           aiActionSnapshot = null;
         }
         set({ aiActionInProgress: false, canUndo: undoStack.length > 0, canRedo: false, dirty: true });
+        renderSuspendCount--;
+        if (renderSuspendCount <= 0) {
+          renderSuspendCount = 0;
+          if (renderNeededWhileSuspended) {
+            renderNeededWhileSuspended = false;
+            console.log('[RenderBarrier] FLUSHING coalesced render');
+            triggerAllViewers();
+          }
+        }
       },
 
       linkToViewer: async (nodeId, outputIndex) => {

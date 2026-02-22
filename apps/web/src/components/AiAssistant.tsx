@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Markdown from 'react-markdown';
 import { useChat } from '@ai-sdk/react';
 import type { UIMessage } from 'ai';
 import { isToolUIPart, getToolName } from 'ai';
@@ -51,6 +52,21 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
 
   const isConfigured = Boolean(apiKey);
   const isLoading = status === 'submitted' || status === 'streaming';
+
+  // Safety net: if AI finishes with error/abort and onFinish didn't fire,
+  // ensure the render barrier is released
+  const prevStatusRef = useRef(status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    const wasLoading = prev === 'submitted' || prev === 'streaming';
+    if (wasLoading && !isLoading) {
+      const store = useGraphStore.getState();
+      if (store.aiActionInProgress) {
+        store.endAiAction();
+      }
+    }
+  }, [status, isLoading]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -238,13 +254,12 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
               }}>
                 {toolActions.length > 0 && <AiActionFeed actions={toolActions} />}
                 {textContent && (
-                  <div style={{
-                    whiteSpace: 'pre-wrap',
+                  <div className="ai-markdown" style={{
                     wordBreak: 'break-word',
                     lineHeight: 1.5,
                     marginTop: toolActions.length > 0 ? '4px' : 0,
                   }}>
-                    {textContent}
+                    <Markdown>{textContent}</Markdown>
                   </div>
                 )}
               </div>

@@ -123,14 +123,7 @@ export class WasmEngine implements EngineBridge {
   }
 
   loadImageData(nodeId: string, data: Uint8Array): void {
-    console.log(`[WASM] loadImageData nodeId=${nodeId} bytes=${data.length}`);
-    try {
-      this.getEngine().load_image_data(nodeId, data);
-      console.log(`[WASM] loadImageData SUCCESS`);
-    } catch (e) {
-      console.error(`[WASM] loadImageData FAILED:`, e);
-      throw e;
-    }
+    this.getEngine().load_image_data(nodeId, data);
   }
 
   loadPaletteData(nodeId: string, data: Uint8Array): [number, number, number, number][] {
@@ -152,7 +145,6 @@ export class WasmEngine implements EngineBridge {
   }
 
   async renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
-    console.log(`[WASM] renderViewer nodeId=${viewerNodeId} frame=${frame}`);
     try {
       const pixels = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
       
@@ -171,11 +163,9 @@ export class WasmEngine implements EngineBridge {
         console.warn('[WASM] Failed to get timings:', e);
       }
 
-      console.log(`[WASM] renderViewer pixels=${pixels ? pixels.length : 'null'}`);
       if (!pixels || pixels.length === 0) return null;
 
       const dims = await this.getEngine().get_render_dimensions(viewerNodeId, BigInt(frame));
-      console.log(`[WASM] renderViewer dims=`, dims);
       if (!dims) return null;
 
       return {
@@ -184,8 +174,7 @@ export class WasmEngine implements EngineBridge {
         height: dims.height,
         pixels: new Uint8ClampedArray(pixels.buffer),
       };
-    } catch (e) {
-      console.error(`[WASM] renderViewer FAILED:`, e);
+    } catch {
       return null;
     }
   }
