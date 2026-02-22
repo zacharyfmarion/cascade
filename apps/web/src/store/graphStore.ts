@@ -821,7 +821,9 @@ export const useGraphStore = create<GraphState>()(
 
       setParam: async (nodeId, key, value) => {
         await pushUndo();
-        await getEngine().setParam(nodeId, key, value);
+        // Call setParam synchronously (no await) to avoid microtask boundaries
+        // that could let stale renders interleave and clear dirty flags.
+        getEngine().setParam(nodeId, key, value);
         const newNodes = new Map(get().nodes);
         const node = newNodes.get(nodeId);
         if (node) {
@@ -2345,13 +2347,11 @@ export const useGraphStore = create<GraphState>()(
       aiActionInProgress: false,
 
       beginAiAction: async () => {
-        console.log('[AI lifecycle] beginAiAction');
         aiActionSnapshot = await captureSnapshot();
         set({ aiActionInProgress: true });
       },
 
       endAiAction: () => {
-        console.log('[AI lifecycle] endAiAction');
         if (aiActionSnapshot) {
           undoStack.push(aiActionSnapshot);
           if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();

@@ -1,18 +1,26 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
-import type { RenderResult } from '../store/types';
 import { ViewerToolbar } from './ViewerToolbar';
 
 export const Viewer: React.FC = () => {
   const selectedNodeIds = useGraphStore(s => s.selectedNodeIds);
   const nodes = useGraphStore(s => s.nodes);
+  const renderResults = useGraphStore(s => s.renderResults);
   const lastError = useGraphStore(s => s.lastError);
+  const playbackFps = useGraphStore(s => s.playbackFps);
+  const targetFps = useGraphStore(s => s.fps);
+
+  const fpsIndicatorColor = useMemo(() => {
+    if (playbackFps === null) return 'var(--timing-fast)';
+    const ratio = playbackFps / targetFps;
+    if (ratio >= 0.95) return 'var(--timing-fast)';
+    if (ratio >= 0.7) return 'var(--timing-medium)';
+    return 'var(--timing-slow)';
+  }, [playbackFps, targetFps]);
 
   const [activeViewerId, setActiveViewerId] = useState<string | null>(null);
-  const [dimensions, setDimensions] = useState<{ w: number; h: number } | null>(null);
-  const [hasResult, setHasResult] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(100);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -63,67 +71,61 @@ export const Viewer: React.FC = () => {
     }
   }, [selectedNodeId, nodes, activeViewerId]);
 
-  useEffect(() => {
-    if (!activeViewerId) return;
+  const activeResult = useMemo(() => {
+    return activeViewerId ? renderResults.get(activeViewerId) : undefined;
+  }, [renderResults, activeViewerId]);
 
-    const paintFrame = (result: RenderResult | undefined) => {
-      const canvas = canvasRef.current;
-      if (!result || !canvas) {
-        setHasResult(false);
-        return;
-      }
+  const hasResult = !!activeResult;
 
-      setHasResult(true);
-
-      const previewScale = result.previewScale ?? 1;
-      previewScaleRef.current = previewScale;
-      const logicalWidth = Math.max(1, Math.round(result.width / previewScale));
-      const logicalHeight = Math.max(1, Math.round(result.height / previewScale));
-      const prevDimensions = dimensionsRef.current;
-
-      if (canvas.width !== result.width || canvas.height !== result.height) {
-        canvas.width = result.width;
-        canvas.height = result.height;
-        imageDataRef.current = null;
-      }
-      
-      const dimsChanged = !prevDimensions || prevDimensions.w !== logicalWidth || prevDimensions.h !== logicalHeight;
-      if (dimsChanged) {
-        setDimensions({ w: logicalWidth, h: logicalHeight });
-      }
-
-      dimensionsRef.current = { w: logicalWidth, h: logicalHeight };
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      let imgData = imageDataRef.current;
-      if (!imgData || imgData.width !== result.width || imgData.height !== result.height) {
-        imgData = new ImageData(result.width, result.height);
-        imageDataRef.current = imgData;
-      }
-      imgData.data.set(result.pixels);
-      ctx.putImageData(imgData, 0, 0);
-
-      canvas.style.width = `${logicalWidth}px`;
-      canvas.style.height = `${logicalHeight}px`;
-      canvas.style.imageRendering = previewScale < 1 ? 'pixelated' : 'auto';
-
-      if (dimsChanged) {
-        setTimeout(() => fitToView(), 0);
-      }
+  const dimensions = useMemo(() => {
+    if (!activeResult) return null;
+    const scale = activeResult.previewScale ?? 1;
+    return {
+      w: Math.max(1, Math.round(activeResult.width / scale)),
+      h: Math.max(1, Math.round(activeResult.height / scale)),
     };
+  }, [activeResult]);
 
-    paintFrame(useGraphStore.getState().renderResults.get(activeViewerId));
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!activeResult || !canvas) {
+      return;
+    }
 
-    const unsub = useGraphStore.subscribe((state, prevState) => {
-      if (state.renderResults !== prevState.renderResults) {
-        paintFrame(state.renderResults.get(activeViewerId));
-      }
-    });
+    const previewScale = activeResult.previewScale ?? 1;
+    previewScaleRef.current = previewScale;
+    const logicalWidth = Math.max(1, Math.round(activeResult.width / previewScale));
+    const logicalHeight = Math.max(1, Math.round(activeResult.height / previewScale));
+    const prevDimensions = dimensionsRef.current;
 
-    return unsub;
-  }, [activeViewerId, fitToView]);
+    if (canvas.width !== activeResult.width || canvas.height !== activeResult.height) {
+      canvas.width = activeResult.width;
+      canvas.height = activeResult.height;
+      imageDataRef.current = null;
+    }
+
+    const dimsChanged = !prevDimensions || prevDimensions.w !== logicalWidth || prevDimensions.h !== logicalHeight;
+    dimensionsRef.current = { w: logicalWidth, h: logicalHeight };
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let imgData = imageDataRef.current;
+    if (!imgData || imgData.width !== activeResult.width || imgData.height !== activeResult.height) {
+      imgData = new ImageData(activeResult.width, activeResult.height);
+      imageDataRef.current = imgData;
+    }
+    imgData.data.set(activeResult.pixels);
+    ctx.putImageData(imgData, 0, 0);
+
+    canvas.style.width = `${logicalWidth}px`;
+    canvas.style.height = `${logicalHeight}px`;
+    canvas.style.imageRendering = previewScale < 1 ? 'pixelated' : 'auto';
+
+    if (dimsChanged) {
+      setTimeout(() => fitToView(), 0);
+    }
+  }, [activeResult, fitToView]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -206,6 +208,7 @@ export const Viewer: React.FC = () => {
               >
                 <canvas
                   ref={canvasRef}
+                  data-viewer-canvas
                   style={{
                     display: 'block',
                     imageRendering: 'auto',
@@ -231,15 +234,33 @@ export const Viewer: React.FC = () => {
           position: 'absolute',
           top: 4,
           left: 6,
-          fontSize: '0.65rem',
-          color: 'var(--text-muted)',
-          background: 'rgba(0,0,0,0.45)',
-          padding: '1px 5px',
-          borderRadius: 3,
+          display: 'flex',
+          gap: 4,
           pointerEvents: 'none',
           zIndex: 10,
         }}>
-          {dimensions.w}×{dimensions.h}
+          <div style={{
+            fontSize: '0.65rem',
+            color: 'var(--text-muted)',
+            background: 'rgba(0,0,0,0.45)',
+            padding: '1px 5px',
+            borderRadius: 3,
+          }}>
+            {dimensions.w}×{dimensions.h}
+          </div>
+          {playbackFps !== null && (
+            <div style={{
+              fontSize: '0.65rem',
+              fontFamily: 'monospace',
+              fontVariantNumeric: 'tabular-nums',
+              color: '#fff',
+              background: fpsIndicatorColor,
+              padding: '1px 5px',
+              borderRadius: 3,
+            }}>
+              {Math.round(playbackFps)} fps
+            </div>
+          )}
         </div>
       )}
       

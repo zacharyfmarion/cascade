@@ -20,7 +20,8 @@ const isAiCategory = (category: string) => category === 'AI';
 
 export const ProcessingNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
-  const { spec, params } = data;
+  const { spec } = data;
+  const params = useGraphStore(s => s.nodes.get(props.id)?.params ?? {});
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);
   const setParam = useGraphStore(s => s.setParam);
