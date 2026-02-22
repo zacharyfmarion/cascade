@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState, useEffect } from 'react';
 import type { IDockviewPanelProps, IDockviewPanelHeaderProps } from 'dockview';
 import { ReactFlowProvider } from '@xyflow/react';
 import { NodeCanvas } from '../NodeCanvas';
@@ -7,15 +7,32 @@ import { Inspector } from '../Inspector';
 import { Viewer } from '../Viewer';
 import { Timeline } from '../Timeline';
 import { Breadcrumbs } from '../Breadcrumbs';
+import { AiAssistant } from '../AiAssistant';
 
-const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => (
-  <ReactFlowProvider>
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <Breadcrumbs />
-      <NodeCanvas />
-    </div>
-  </ReactFlowProvider>
-);
+const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
+  const [aiOpen, setAiOpen] = useState(true);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
+        e.preventDefault();
+        setAiOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  return (
+    <ReactFlowProvider>
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <Breadcrumbs />
+        <NodeCanvas />
+        <AiAssistant isOpen={aiOpen} onToggle={() => setAiOpen(prev => !prev)} />
+      </div>
+    </ReactFlowProvider>
+  );
+};
 
 const NodeLibraryPanel: React.FC<IDockviewPanelProps> = () => <NodeLibrary />;
 const InspectorPanel: React.FC<IDockviewPanelProps> = () => <Inspector />;
