@@ -1,0 +1,313 @@
+import type { DslAst, DslConnection, DslNode, DslParamValue } from './types';
+import { pascalToSnake } from './types';
+import type { NodeSpec, ParamSpec } from '../../store/types';
+
+interface ParseError {
+  line: number;
+  message: string;
+  suggestion?: string;
+}
+
+export interface ParseResult {
+  ast: DslAst | null;
+  errors: ParseError[];
+}
+
+const NODE_REGEX = /^(@muted\s+)?([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\((.*)\)$/;
+const CONNECTION_REGEX = /^([a-z][a-z0-9_]*)\.([\w]+)\s*<-\s*([a-z][a-z0-9_]*)\.([\w]+)$/;
+
+const stripInlineComment = (line: string): string => {
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '\\' && !escaped) {
+      escaped = true;
+      continue;
+    }
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = false;
+    if (!inString && char === '#' && i > 0 && line[i - 1] === ' ') {
+      return line.slice(0, i - 1).trimEnd();
+    }
+  }
+  return line;
+};
+
+export const splitTopLevelParams = (paramStr: string): string[] => {
+  const parts: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let current = '';
+
+  for (let i = 0; i < paramStr.length; i += 1) {
+    const char = paramStr[i];
+    if (char === '\\' && !escaped) {
+      escaped = true;
+      current += char;
+      continue;
+    }
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = false;
+
+    if (!inString) {
+      if (char === '(' || char === '[') depth += 1;
+      if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
+    }
+
+    if (!inString && depth === 0 && char === ',') {
+      const trimmed = current.trim();
+      if (trimmed.length > 0) parts.push(trimmed);
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  const trimmed = current.trim();
+  if (trimmed.length > 0) parts.push(trimmed);
+  return parts;
+};
+
+const splitKeyValue = (entry: string): { key: string; value: string } | null => {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < entry.length; i += 1) {
+    const char = entry[i];
+    if (char === '\\' && !escaped) {
+      escaped = true;
+      continue;
+    }
+    if (char === '"' && !escaped) {
+      inString = !inString;
+    }
+    escaped = false;
+    if (!inString) {
+      if (char === '(' || char === '[') depth += 1;
+      if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
+    }
+    if (!inString && depth === 0 && char === ':') {
+      return { key: entry.slice(0, i).trim(), value: entry.slice(i + 1).trim() };
+    }
+  }
+  return null;
+};
+
+const parseNumber = (raw: string): number | null => {
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+};
+
+const parseRgba = (raw: string): [number, number, number, number] | null => {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('rgba(') || !trimmed.endsWith(')')) return null;
+  const inner = trimmed.slice(5, -1);
+  const parts = splitTopLevelParams(inner);
+  if (parts.length !== 4) return null;
+  const numbers = parts.map((part) => parseNumber(part));
+  if (numbers.some((num) => num === null)) return null;
+  return [numbers[0] as number, numbers[1] as number, numbers[2] as number, numbers[3] as number];
+};
+
+/**
+ * Strip outer bracket wrapper from array values.
+ * Accepts `[...]` syntax. Returns the inner content, or null if not array syntax.
+ */
+const unwrapArray = (raw: string): string | null => {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return null;
+};
+
+const parseRamp = (raw: string): { position: number; color: [number, number, number, number] }[] | null => {
+  const inner = unwrapArray(raw);
+  if (inner === null) return null;
+  if (!inner) return [];
+  const entries = splitTopLevelParams(inner);
+  const result: { position: number; color: [number, number, number, number] }[] = [];
+  for (const entry of entries) {
+    const parts = splitKeyValue(entry);
+    if (!parts) return null;
+    const position = parseNumber(parts.key);
+    if (position === null) return null;
+    const color = parseRgba(parts.value);
+    if (!color) return null;
+    result.push({ position, color });
+  }
+  return result;
+};
+
+const parseCurve = (raw: string): { x: number; y: number }[] | null => {
+  const inner = unwrapArray(raw);
+  if (inner === null) return null;
+  if (!inner) return [];
+  const entries = splitTopLevelParams(inner);
+  const result: { x: number; y: number }[] = [];
+  for (const entry of entries) {
+    const point = entry.trim();
+    if (!point.startsWith('(') || !point.endsWith(')')) return null;
+    const innerPoint = point.slice(1, -1);
+    const coords = splitTopLevelParams(innerPoint);
+    if (coords.length !== 2) return null;
+    const x = parseNumber(coords[0]);
+    const y = parseNumber(coords[1]);
+    if (x === null || y === null) return null;
+    result.push({ x, y });
+  }
+  return result;
+};
+
+const parsePalette = (raw: string): [number, number, number, number][] | null => {
+  const inner = unwrapArray(raw);
+  if (inner === null) return null;
+  if (!inner) return [];
+  const entries = splitTopLevelParams(inner);
+  const result: [number, number, number, number][] = [];
+  for (const entry of entries) {
+    const color = parseRgba(entry);
+    if (!color) return null;
+    result.push(color);
+  }
+  return result;
+};
+
+const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | null => {
+  const trimmed = raw.trim();
+  if (paramSpec.ui_hint.type === 'Dropdown') {
+    const value = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+    return { type: 'string', value };
+  }
+
+  // Complex structured types — route by ui_hint before ty, because ty is
+  // misleading on these params (e.g. ColorPalette has ty:Color, ColorRamp
+  // has ty:Float, CurveEditor has ty:Float).
+  if (paramSpec.ui_hint.type === 'ColorPalette') {
+    const palette = parsePalette(trimmed);
+    return palette ? { type: 'palette', value: palette } : null;
+  }
+  if (paramSpec.ui_hint.type === 'ColorRamp') {
+    const ramp = parseRamp(trimmed);
+    return ramp ? { type: 'ramp', value: ramp } : null;
+  }
+  if (paramSpec.ui_hint.type === 'CurveEditor') {
+    const curve = parseCurve(trimmed);
+    return curve ? { type: 'curve', value: curve } : null;
+  }
+
+  switch (paramSpec.ty) {
+    case 'Float': {
+      const value = parseNumber(trimmed);
+      return value === null ? null : { type: 'float', value };
+    }
+    case 'Int': {
+      const value = parseNumber(trimmed);
+      return value === null ? null : { type: 'int', value: Math.round(value) };
+    }
+    case 'Bool': {
+      if (trimmed === 'true') return { type: 'bool', value: true };
+      if (trimmed === 'false') return { type: 'bool', value: false };
+      return null;
+    }
+    case 'String': {
+      const value = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+      return { type: 'string', value };
+    }
+    case 'Color': {
+      const color = parseRgba(trimmed);
+      return color ? { type: 'color', value: color } : null;
+    }
+    case 'Field':
+    case 'Image':
+    case 'Mask':
+      return { type: 'string', value: trimmed };
+    default:
+      return null;
+  }
+};
+
+export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
+  const errors: ParseError[] = [];
+  const nodes = new Map<string, DslNode>();
+  const connections: DslConnection[] = [];
+  const specById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
+
+  const lines = input.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1;
+    const trimmedLine = line.trim();
+    if (!trimmedLine) return;
+    if (trimmedLine.startsWith('#')) return;
+
+    const withoutComment = stripInlineComment(line).trim();
+    if (!withoutComment) return;
+
+    const nodeMatch = withoutComment.match(NODE_REGEX);
+    if (nodeMatch) {
+      const muted = Boolean(nodeMatch[1]);
+      const handle = nodeMatch[2];
+      const nodeType = nodeMatch[3];
+      const paramsSection = nodeMatch[4];
+
+      if (nodes.has(handle)) {
+        errors.push({ line: lineNumber, message: `Duplicate handle '${handle}'` });
+        return;
+      }
+
+      const nodeTypeId = pascalToSnake(nodeType);
+      const spec = specById.get(nodeTypeId);
+      if (!spec) {
+        errors.push({ line: lineNumber, message: `Unknown node type '${nodeType}'` });
+      }
+
+      const params = new Map<string, DslParamValue>();
+      const paramSpecByKey = new Map((spec?.params ?? []).map((param) => [param.key, param]));
+      const entries = splitTopLevelParams(paramsSection.trim());
+      for (const entry of entries) {
+        if (!entry.trim()) continue;
+        const pair = splitKeyValue(entry);
+        if (!pair) {
+          errors.push({ line: lineNumber, message: `Invalid param syntax '${entry}'` });
+          continue;
+        }
+        const paramSpec = paramSpecByKey.get(pair.key);
+        if (!paramSpec) {
+          errors.push({ line: lineNumber, message: `Unknown param '${pair.key}' on ${nodeType}` });
+          continue;
+        }
+        const parsed = parseParamValue(paramSpec, pair.value);
+        if (!parsed) {
+          errors.push({ line: lineNumber, message: `Invalid value for '${pair.key}'` });
+          continue;
+        }
+        params.set(pair.key, parsed);
+      }
+
+      nodes.set(handle, { handle, nodeType, nodeTypeId, params, muted, line: lineNumber });
+      return;
+    }
+
+    const connectionMatch = withoutComment.match(CONNECTION_REGEX);
+    if (connectionMatch) {
+      const toHandle = connectionMatch[1];
+      const toPort = connectionMatch[2];
+      const fromHandle = connectionMatch[3];
+      const fromPort = connectionMatch[4];
+      connections.push({ fromHandle, fromPort, toHandle, toPort, line: lineNumber });
+      return;
+    }
+
+    errors.push({ line: lineNumber, message: 'Unrecognized DSL line' });
+  });
+
+  const ast: DslAst = { nodes, connections };
+  return { ast, errors };
+}
