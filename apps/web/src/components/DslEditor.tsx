@@ -133,7 +133,6 @@ export const DslEditor: React.FC = () => {
         tokenPostfix: '.dsl',
 
         keywords: ['true', 'false'],
-        annotations: ['@muted'],
         builtinFunctions: ['rgba'],
 
         tokenizer: {
@@ -143,7 +142,7 @@ export const DslEditor: React.FC = () => {
             [/(\s+)(#.*)$/, ['white', 'comment']],
 
             // Annotation (@muted) — must precede handle rules
-            [/@muted/, 'keyword.annotation'],
+            [/@@muted/, 'keyword.annotation'],
 
             // Connection: handle.port <- handle.port
             [/([a-z][a-z0-9_]*)(\.)(\w+)(\s*)(<-)(\s*)([a-z][a-z0-9_]*)(\.)(\w+)/,
