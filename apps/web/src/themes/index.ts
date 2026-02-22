@@ -56,5 +56,5 @@ export const DEFAULT_THEME = compositorDark as CompositorTheme;
 
 export { applyTheme } from './applyTheme';
 export { importVSCodeTheme } from './importVSCodeTheme';
-export type { CompositorTheme, ThemeTokens } from './types';
+export type { CompositorTheme, ThemeTokens, SyntaxColors } from './types';
 export { tokenToCssVar, THEME_TOKEN_KEYS } from './types';

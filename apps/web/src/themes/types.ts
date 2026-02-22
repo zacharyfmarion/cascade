@@ -76,6 +76,38 @@ export interface ThemeTokens {
   'minimap.mask': string;
 }
 
+/**
+ * Syntax highlighting colors for the DSL editor.
+ * Maps semantic token roles to hex colors, derived from each theme's
+ * VS Code origins. Used by Monaco's defineTheme to color DSL tokens.
+ */
+export interface SyntaxColors {
+  /** Comments (#...) */
+  comment: string;
+  /** Keywords: @muted, true, false */
+  keyword: string;
+  /** Node type names: GaussianBlur, Blend */
+  type: string;
+  /** Handle / variable names */
+  variable: string;
+  /** Parameter keys (before colon) */
+  parameter: string;
+  /** Port names (after dot) */
+  port: string;
+  /** Built-in functions: rgba, palette, ramp, curve */
+  function: string;
+  /** Numeric literals */
+  number: string;
+  /** String literals */
+  string: string;
+  /** Operators: <-, = */
+  operator: string;
+  /** Escape sequences in strings */
+  stringEscape: string;
+  /** Default foreground for delimiters etc. */
+  foreground: string;
+}
+
 /** Full theme definition. */
 export interface CompositorTheme {
   /** Human-readable name shown in the theme picker. */
@@ -84,6 +116,8 @@ export interface CompositorTheme {
   type: 'dark' | 'light';
   /** Complete color map. Every key from ThemeTokens must be present. */
   colors: ThemeTokens;
+  /** Syntax highlighting colors for the code/DSL editor. */
+  syntaxColors: SyntaxColors;
 }
 
 /**

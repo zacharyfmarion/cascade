@@ -1,9 +1,19 @@
-import type { CompositorTheme, ThemeTokens } from './types';
+import type { CompositorTheme, ThemeTokens, SyntaxColors } from './types';
+
+interface VSCodeTokenColor {
+  name?: string;
+  scope?: string | string[];
+  settings?: {
+    foreground?: string;
+    fontStyle?: string;
+  };
+}
 
 interface VSCodeThemeJson {
   name?: string;
   type?: string;
   colors?: Record<string, string>;
+  tokenColors?: VSCodeTokenColor[];
   [key: string]: unknown;
 }
 
@@ -143,9 +153,139 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CompositorTheme {
     'minimap.mask': isDark ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.5)',
   };
 
+  const syntaxColors = extractSyntaxColors(json.tokenColors, fg, isDark);
+
   return {
     name,
     type: isDark ? 'dark' : 'light',
     colors: defaults,
+    syntaxColors,
+  };
+}
+
+/**
+ * Extract syntax highlighting colors from VS Code tokenColors.
+ * Maps TextMate scopes to our SyntaxColors interface.
+ * Falls back to sensible defaults when scopes aren't found.
+ */
+function extractSyntaxColors(
+  tokenColors: VSCodeTokenColor[] | undefined,
+  fg: string,
+  isDark: boolean,
+): SyntaxColors {
+  const defaults: SyntaxColors = isDark
+    ? {
+        comment: '#6A9955',
+        keyword: '#C586C0',
+        type: '#4EC9B0',
+        variable: '#9CDCFE',
+        parameter: '#DCDCAA',
+        port: '#CE9178',
+        function: '#DCDCAA',
+        number: '#B5CEA8',
+        string: '#CE9178',
+        operator: '#C586C0',
+        stringEscape: '#D7BA7D',
+        foreground: '#D4D4D4',
+      }
+    : {
+        comment: '#6E7781',
+        keyword: '#CF222E',
+        type: '#953800',
+        variable: '#24292F',
+        parameter: '#0550AE',
+        port: '#116329',
+        function: '#8250DF',
+        number: '#0550AE',
+        string: '#0A3069',
+        operator: '#CF222E',
+        stringEscape: '#953800',
+        foreground: '#24292F',
+      };
+
+  if (!tokenColors || tokenColors.length === 0) {
+    return { ...defaults, foreground: fg };
+  }
+
+  // Build a scope→foreground lookup from tokenColors
+  const scopeMap = new Map<string, string>();
+  for (const tc of tokenColors) {
+    const color = tc.settings?.foreground;
+    if (!color || !isValidHex(color)) continue;
+    const scopes = Array.isArray(tc.scope)
+      ? tc.scope
+      : tc.scope
+        ? tc.scope.split(',').map((s) => s.trim())
+        : [];
+    for (const scope of scopes) {
+      if (!scopeMap.has(scope)) {
+        scopeMap.set(scope, color);
+      }
+    }
+  }
+
+  /** Find the first matching color for a list of scope candidates. */
+  function find(...candidates: string[]): string | undefined {
+    for (const c of candidates) {
+      const color = scopeMap.get(c);
+      if (color) return color;
+    }
+    return undefined;
+  }
+
+  return {
+    comment:
+      find('comment', 'comment.line', 'comment.block') ?? defaults.comment,
+    keyword:
+      find(
+        'keyword',
+        'keyword.control',
+        'keyword.operator',
+        'storage.type',
+      ) ?? defaults.keyword,
+    type:
+      find(
+        'entity.name.type',
+        'support.type',
+        'support.class',
+        'entity.name.class',
+      ) ?? defaults.type,
+    variable:
+      find('variable', 'variable.other', 'variable.other.readwrite') ??
+      defaults.variable,
+    parameter:
+      find(
+        'variable.parameter',
+        'entity.other.attribute-name',
+        'support.function',
+      ) ?? defaults.parameter,
+    port:
+      find(
+        'entity.name.tag',
+        'meta.object-literal.key',
+        'support.type.property-name',
+      ) ?? defaults.port,
+    function:
+      find(
+        'entity.name.function',
+        'support.function',
+        'meta.function-call',
+      ) ?? defaults.function,
+    number:
+      find('constant.numeric', 'constant.other', 'constant.language') ??
+      defaults.number,
+    string:
+      find('string', 'string.quoted', 'string.quoted.double') ??
+      defaults.string,
+    operator:
+      find('keyword.operator', 'punctuation', 'keyword') ??
+      defaults.operator,
+    stringEscape:
+      find(
+        'constant.character.escape',
+        'constant.character',
+        'string.regexp',
+      ) ?? defaults.stringEscape,
+    foreground: fg,
   };
 }
