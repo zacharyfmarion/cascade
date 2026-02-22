@@ -156,7 +156,7 @@ function Toolbar() {
         <button type="button" className="toolbar__btn" onClick={openShortcuts} title="Keyboard Shortcuts">
           <HelpCircle size={14} />
         </button>
-        <button type="button" className="toolbar__btn" onClick={openSettings} title="Settings">
+        <button type="button" className="toolbar__btn" onClick={() => openSettings()} title="Settings">
           <Settings size={14} />
         </button>
       </div>

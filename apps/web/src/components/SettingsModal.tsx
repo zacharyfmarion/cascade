@@ -30,7 +30,7 @@ const sectionDescriptions: Record<Tab, string> = {
   performance: 'Tune preview rendering performance for your hardware.',
   playback: 'Set default playback behavior for image sequences.',
   color: 'Configure display color space and view transform for the viewer.',
-  ai: 'Configure AI provider API keys for AI-powered nodes.',
+  ai: 'Configure API keys for AI-powered nodes and the AI assistant.',
 };
 
 const selectStyle: React.CSSProperties = {
@@ -439,12 +439,35 @@ function ColorTab() {
   );
 }
 
+const AI_MODELS = [
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+];
+
+const sectionHeaderStyle: React.CSSProperties = {
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  color: 'var(--text-primary)',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  marginBottom: '8px',
+  paddingBottom: '4px',
+  borderBottom: '1px solid var(--border-default)',
+};
+
 function AiTab() {
   const aiApiKey = useSettingsStore(s => s.aiApiKey);
   const setAiApiKey = useSettingsStore(s => s.setAiApiKey);
   const setEngineAiKey = useGraphStore(s => s.setAiApiKey);
   const [localKey, setLocalKey] = useState(aiApiKey);
   const [saved, setSaved] = useState(false);
+
+  const anthropicApiKey = useSettingsStore(s => s.anthropicApiKey);
+  const setAnthropicApiKey = useSettingsStore(s => s.setAnthropicApiKey);
+  const aiAssistantModel = useSettingsStore(s => s.aiAssistantModel);
+  const setAiAssistantModel = useSettingsStore(s => s.setAiAssistantModel);
+  const [localAnthropicKey, setLocalAnthropicKey] = useState(anthropicApiKey);
+  const [assistantSaved, setAssistantSaved] = useState(false);
 
   const handleSave = useCallback(() => {
     setAiApiKey(localKey);
@@ -454,8 +477,53 @@ function AiTab() {
     });
   }, [localKey, setAiApiKey, setEngineAiKey]);
 
+  const handleAssistantSave = useCallback(() => {
+    setAnthropicApiKey(localAnthropicKey);
+    setAssistantSaved(true);
+    setTimeout(() => setAssistantSaved(false), 2000);
+  }, [localAnthropicKey, setAnthropicApiKey]);
+
+  const pasteKeyHandler = useCallback((
+    e: React.KeyboardEvent<HTMLInputElement>,
+    currentValue: string,
+    setter: (v: string) => void,
+    savedSetter: (v: boolean) => void,
+  ) => {
+    e.stopPropagation();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
+      navigator.clipboard.readText().then(text => {
+        if (text) {
+          const input = e.currentTarget;
+          const start = input.selectionStart ?? 0;
+          const end = input.selectionEnd ?? currentValue.length;
+          setter(currentValue.slice(0, start) + text + currentValue.slice(end));
+          savedSetter(false);
+        }
+      });
+    }
+  }, []);
+
+  const keyInputStyle: React.CSSProperties = {
+    ...numberInputStyle,
+    width: '100%',
+    textAlign: 'left',
+    fontFamily: 'monospace',
+  };
+
+  const saveButtonStyle = (isSaved: boolean): React.CSSProperties => ({
+    background: isSaved ? 'var(--accent-primary)' : 'var(--bg-surface)',
+    color: isSaved ? 'var(--bg-primary)' : 'var(--text-secondary)',
+    border: '1px solid var(--border-default)',
+    borderRadius: '3px',
+    fontSize: '0.8rem',
+    padding: '6px 12px',
+    cursor: 'pointer',
+    width: '100%',
+  });
+
   return (
     <div>
+      <div style={sectionHeaderStyle}>AI Nodes</div>
       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
         Enter your Replicate API token to enable AI-powered nodes like Depth Estimate and Inpaint.
       </div>
@@ -465,45 +533,47 @@ function AiTab() {
           type="password"
           value={localKey}
           onChange={e => { setLocalKey(e.target.value); setSaved(false); }}
-          onKeyDown={e => {
-            e.stopPropagation();
-            if ((e.metaKey || e.ctrlKey) && e.key === 'v') {
-              navigator.clipboard.readText().then(text => {
-                if (text) {
-                  const input = e.currentTarget;
-                  const start = input.selectionStart ?? 0;
-                  const end = input.selectionEnd ?? localKey.length;
-                  setLocalKey(localKey.slice(0, start) + text + localKey.slice(end));
-                  setSaved(false);
-                }
-              });
-            }
-          }}
+          onKeyDown={e => pasteKeyHandler(e, localKey, setLocalKey, setSaved)}
           placeholder="r8_..."
-          style={{
-            ...numberInputStyle,
-            width: '100%',
-            textAlign: 'left',
-            fontFamily: 'monospace',
-          }}
+          style={keyInputStyle}
         />
       </label>
       <div style={{ marginTop: '12px' }}>
-        <button
-          type="button"
-          onClick={handleSave}
-          style={{
-            background: saved ? 'var(--accent-primary)' : 'var(--bg-surface)',
-            color: saved ? 'var(--bg-primary)' : 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: '3px',
-            fontSize: '0.8rem',
-            padding: '6px 12px',
-            cursor: 'pointer',
-            width: '100%',
-          }}
-        >
+        <button type="button" onClick={handleSave} style={saveButtonStyle(saved)}>
           {saved ? 'Saved' : 'Save API Key'}
+        </button>
+      </div>
+
+      <div style={{ ...sectionHeaderStyle, marginTop: '24px' }}>AI Assistant</div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Enter your Anthropic API key to enable the AI assistant (⌘L) that can build and modify node graphs from natural language.
+      </div>
+      <label style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: '4px' }}>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Anthropic API Key</span>
+        <input
+          type="password"
+          value={localAnthropicKey}
+          onChange={e => { setLocalAnthropicKey(e.target.value); setAssistantSaved(false); }}
+          onKeyDown={e => pasteKeyHandler(e, localAnthropicKey, setLocalAnthropicKey, setAssistantSaved)}
+          placeholder="sk-ant-..."
+          style={keyInputStyle}
+        />
+      </label>
+      <div style={{ ...rowStyle, marginTop: '8px' }}>
+        <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>Model</span>
+        <select
+          value={aiAssistantModel}
+          onChange={e => setAiAssistantModel(e.target.value)}
+          style={selectStyle}
+        >
+          {AI_MODELS.map(m => (
+            <option key={m.id} value={m.id}>{m.label}</option>
+          ))}
+        </select>
+      </div>
+      <div style={{ marginTop: '12px' }}>
+        <button type="button" onClick={handleAssistantSave} style={saveButtonStyle(assistantSaved)}>
+          {assistantSaved ? 'Saved' : 'Save API Key'}
         </button>
       </div>
     </div>
@@ -624,8 +694,15 @@ const TAB_COMPONENTS: Record<Tab, React.FC> = {
 
 export const SettingsModal: React.FC = () => {
   const isOpen = useSettingsStore(s => s.isSettingsOpen);
+  const initialTab = useSettingsStore(s => s.settingsInitialTab);
   const closeSettings = useSettingsStore(s => s.closeSettings);
   const [activeTab, setActiveTab] = useState<Tab>('project');
+
+  useEffect(() => {
+    if (isOpen && initialTab && TAB_LABELS.some(t => t.key === initialTab)) {
+      setActiveTab(initialTab as Tab);
+    }
+  }, [isOpen, initialTab]);
 
   useEffect(() => {
     if (!isOpen) return;

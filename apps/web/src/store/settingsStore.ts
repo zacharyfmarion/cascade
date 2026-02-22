@@ -4,7 +4,8 @@ import { devtools } from 'zustand/middleware';
 interface SettingsState {
   // --- Modal visibility ---
   isSettingsOpen: boolean;
-  openSettings: () => void;
+  settingsInitialTab: string | null;
+  openSettings: (tab?: string) => void;
   closeSettings: () => void;
 
   isAboutOpen: boolean;
@@ -46,6 +47,12 @@ interface SettingsState {
   aiApiKey: string;
   setAiApiKey: (key: string) => void;
 
+  // --- AI Assistant ---
+  anthropicApiKey: string;
+  setAnthropicApiKey: (key: string) => void;
+  aiAssistantModel: string;
+  setAiAssistantModel: (model: string) => void;
+
   // --- Project ---
   projectWidth: number;
   projectHeight: number;
@@ -65,6 +72,8 @@ const DEFAULT_SETTINGS = {
   defaultFps: 24,
   loopPlayback: true,
   aiApiKey: '',
+  anthropicApiKey: '',
+  aiAssistantModel: 'claude-sonnet-4-6',
   projectWidth: 1920,
   projectHeight: 1080,
 };
@@ -98,6 +107,8 @@ export const useSettingsStore = create<SettingsState>()(
           defaultFps,
           loopPlayback,
           aiApiKey,
+          anthropicApiKey,
+          aiAssistantModel,
           projectWidth,
           projectHeight,
         } = get();
@@ -114,6 +125,8 @@ export const useSettingsStore = create<SettingsState>()(
             defaultFps,
             loopPlayback,
             aiApiKey,
+            anthropicApiKey,
+            aiAssistantModel,
             projectWidth,
             projectHeight,
           }));
@@ -124,8 +137,9 @@ export const useSettingsStore = create<SettingsState>()(
 
       return {
         isSettingsOpen: false,
-        openSettings: () => set({ isSettingsOpen: true }),
-        closeSettings: () => set({ isSettingsOpen: false }),
+        settingsInitialTab: null,
+        openSettings: (tab?: string) => set({ isSettingsOpen: true, settingsInitialTab: tab ?? null }),
+        closeSettings: () => set({ isSettingsOpen: false, settingsInitialTab: null }),
 
         isAboutOpen: false,
         openAbout: () => set({ isAboutOpen: true }),
@@ -164,6 +178,11 @@ export const useSettingsStore = create<SettingsState>()(
 
         aiApiKey: initial.aiApiKey,
         setAiApiKey: (key) => { set({ aiApiKey: key }); save(); },
+
+        anthropicApiKey: initial.anthropicApiKey,
+        setAnthropicApiKey: (key) => { set({ anthropicApiKey: key }); save(); },
+        aiAssistantModel: initial.aiAssistantModel,
+        setAiAssistantModel: (model) => { set({ aiAssistantModel: model }); save(); },
 
         projectWidth: initial.projectWidth,
         projectHeight: initial.projectHeight,
