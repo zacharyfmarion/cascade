@@ -43,7 +43,8 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
     [props.id, setParamCommit]
   );
 
-  const hasTextArea = spec.params.some(p => p.ui_hint.type === 'TextArea');
+  const hasTextArea = spec.params.some(p => p.ui_hint.type === 'TextArea') ||
+    spec.inputs.some(i => i.ui_hint?.type === 'TextArea');
 
   return (
     <BaseNode {...props} data={data} headerIcon={getNodeIcon(spec.id, spec.category)} maxWidth={hasTextArea ? 'none' : undefined}>

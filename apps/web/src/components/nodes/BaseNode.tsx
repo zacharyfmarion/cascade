@@ -5,7 +5,7 @@ import { useSettingsStore } from '../../store/settingsStore';
 import type { NodeSpec, PortSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
 import { NodeSlider } from './NodeSlider';
-import { NodeCheckbox, NodeNumberInput } from './NodePrimitives';
+import { NodeCheckbox, NodeNumberInput, NodeTextArea } from './NodePrimitives';
 import { linearToSrgbChannel, floatToByte, linearToHex, hexToLinear } from './colorUtils';
 
 interface BaseNodeProps {
@@ -38,7 +38,7 @@ const InlineInputControl: React.FC<{
   if (!currentValue) return <span className="node-port__label">{portSpec.label}</span>;
 
   const rawValue = extractParamValue(currentValue as ParamValue);
-  const uiHint = portSpec.ui_hint?.type ?? (portSpec.ty === 'Float' ? 'Slider' : portSpec.ty === 'Int' ? 'NumberInput' : 'Checkbox');
+  const uiHint = portSpec.ui_hint?.type ?? (portSpec.ty === 'Float' ? 'Slider' : portSpec.ty === 'Int' ? 'NumberInput' : portSpec.ty === 'String' ? 'TextArea' : 'Checkbox');
 
   if (portSpec.ty === 'Color') {
     const [r, g, b, a] = (rawValue as [number, number, number, number]) || [0, 0, 0, 1];
@@ -109,6 +109,17 @@ const InlineInputControl: React.FC<{
         step={portSpec.step ?? 0.01}
         onChange={(v) => setInputDefaultLive(nodeId, portSpec.name, createParamValue(portSpec.ty, v))}
         onChangeCommit={(v) => setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, v))}
+      />
+    );
+  }
+
+  if (uiHint === 'TextArea' && portSpec.ty === 'String') {
+    return (
+      <NodeTextArea
+        label={portSpec.label}
+        value={String(rawValue)}
+        onChange={(v) => setInputDefaultCommit(nodeId, portSpec.name, { String: v })}
+        placeholder={portSpec.label}
       />
     );
   }
@@ -225,8 +236,8 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
       <div className="base-node__body">
         {spec.inputs.map((input: PortSpec) => {
           const isConnected = connectedInputs.has(input.name);
-          const isScalar = input.ty === 'Float' || input.ty === 'Int' || input.ty === 'Bool' || input.ty === 'Color';
-          const hasDefault = isScalar && !isConnected && (input.default != null || data.inputDefaults?.[input.name] != null || data.params?.[input.name] != null);
+          const isInlineable = input.ty === 'Float' || input.ty === 'Int' || input.ty === 'Bool' || input.ty === 'Color' || input.ty === 'String';
+          const hasDefault = isInlineable && !isConnected && (input.default != null || data.inputDefaults?.[input.name] != null || data.params?.[input.name] != null);
 
           return (
             <div key={input.name} className="node-port">
