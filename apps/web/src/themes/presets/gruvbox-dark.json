@@ -47,5 +47,19 @@
     "shadow.contextMenu": "0 4px 12px rgba(0,0,0,0.5)",
     "minimap.mask": "rgba(0,0,0,0.6)",
     "frame.default": "rgba(108, 92, 231, 0.08)"
+  },
+  "syntaxColors": {
+    "comment": "#928374",
+    "keyword": "#FB4934",
+    "type": "#FABD2F",
+    "variable": "#EBDBB2",
+    "parameter": "#83A598",
+    "port": "#B8BB26",
+    "function": "#83A598",
+    "number": "#D3869B",
+    "string": "#B8BB26",
+    "operator": "#FB4934",
+    "stringEscape": "#FE8019",
+    "foreground": "#EBDBB2"
   }
 }
