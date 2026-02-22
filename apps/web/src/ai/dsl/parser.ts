@@ -180,6 +180,29 @@ const parsePalette = (raw: string): [number, number, number, number][] | null =>
   return result;
 };
 
+const expectedFormatHint = (paramSpec: ParamSpec): string => {
+  if (paramSpec.ui_hint.type === 'ColorPalette') {
+    return 'Expected ColorPalette: [rgba(r, g, b, a), rgba(r, g, b, a), ...] with values 0..1';
+  }
+  if (paramSpec.ui_hint.type === 'ColorRamp') {
+    return 'Expected ColorRamp: [0.0: rgba(r, g, b, a), 1.0: rgba(r, g, b, a), ...] with positions 0..1';
+  }
+  if (paramSpec.ui_hint.type === 'CurveEditor') {
+    return 'Expected CurvePoints: [(0.0, 0.0), (0.5, 0.7), (1.0, 1.0)] with x,y 0..1';
+  }
+  if (paramSpec.ui_hint.type === 'Dropdown' && 'data' in paramSpec.ui_hint) {
+    return `Expected one of: ${paramSpec.ui_hint.data.map(o => `"${o}"`).join(', ')}`;
+  }
+  switch (paramSpec.ty) {
+    case 'Float': return 'Expected a number, e.g. 5.0';
+    case 'Int': return 'Expected an integer, e.g. 10';
+    case 'Bool': return 'Expected true or false';
+    case 'String': return 'Expected a quoted string, e.g. "hello"';
+    case 'Color': return 'Expected rgba(r, g, b, a) with values 0..1';
+    default: return `Expected a ${paramSpec.ty} value`;
+  }
+};
+
 const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | null => {
   const trimmed = raw.trim();
   if (paramSpec.ui_hint.type === 'Dropdown') {
@@ -285,7 +308,8 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
         }
         const parsed = parseParamValue(paramSpec, pair.value);
         if (!parsed) {
-          errors.push({ line: lineNumber, message: `Invalid value for '${pair.key}'` });
+          const hint = expectedFormatHint(paramSpec);
+          errors.push({ line: lineNumber, message: `Invalid value for '${pair.key}'. ${hint}` });
           continue;
         }
         params.set(pair.key, parsed);

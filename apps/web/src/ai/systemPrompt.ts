@@ -64,8 +64,12 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 | Float | bare number | \`sigma: 5.0\` |
 | Int | bare integer | \`width: 1920\` |
 | Bool | true/false | \`flip_x: true\` |
-| String | "quoted" | \`mode: "multiply"\` |
+| String | "quoted" | \`path: "/img.png"\` |
 | Color | rgba(r,g,b,a) | \`color: rgba(1.0, 0.0, 0.0, 1.0)\` |
+| Dropdown | "option_string" | \`mode: "multiply"\` — use exact string from options |
+| ColorPalette | [rgba(...), ...] | \`colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0)]\` |
+| ColorRamp | [pos: rgba(...), ...] | \`ramp: [0.0: rgba(0.0, 0.0, 0.0, 1.0), 1.0: rgba(1.0, 1.0, 1.0, 1.0)]\` |
+| CurvePoints | [(x, y), ...] | \`curve: [(0.0, 0.0), (0.5, 0.7), (1.0, 1.0)]\` |
 
 ### Example Graph
 \`\`\`

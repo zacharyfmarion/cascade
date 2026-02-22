@@ -42,13 +42,13 @@ function formatParamSpec(p: ParamSpec): Record<string, unknown> {
   let dslSyntax: string | undefined;
   if (p.ui_hint.type === 'ColorPalette') {
     type = 'ColorPalette';
-    dslSyntax = '[rgba(...), rgba(...)]';
+    dslSyntax = 'Array of rgba() colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 0.5, 1.0, 1.0)]. Colors are in LINEAR space [0..1].';
   } else if (p.ui_hint.type === 'ColorRamp') {
     type = 'ColorRamp';
-    dslSyntax = '[0.0: rgba(...), 1.0: rgba(...)]';
+    dslSyntax = 'Array of position:color stops: [0.0: rgba(0.0, 0.0, 0.0, 1.0), 0.5: rgba(1.0, 0.0, 0.0, 1.0), 1.0: rgba(1.0, 1.0, 1.0, 1.0)]. Positions are 0..1.';
   } else if (p.ui_hint.type === 'CurveEditor') {
     type = 'CurvePoints';
-    dslSyntax = '[(0.0, 0.0), (0.5, 0.7), (1.0, 1.0)]';
+    dslSyntax = 'Array of (x, y) control points: [(0.0, 0.0), (0.25, 0.4), (0.75, 0.9), (1.0, 1.0)]. Both x and y are 0..1.';
   }
 
   const desc: Record<string, unknown> = {
@@ -61,6 +61,7 @@ function formatParamSpec(p: ParamSpec): Record<string, unknown> {
   if (p.step !== undefined) desc.step = p.step;
   if (p.ui_hint.type === 'Dropdown' && 'data' in p.ui_hint) {
     desc.options = p.ui_hint.data;
+    desc.dsl_syntax = `Use one of the exact option strings in quotes, e.g. "${p.ui_hint.data[0]}"`;
   }
   return desc;
 }
