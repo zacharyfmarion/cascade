@@ -84,6 +84,7 @@ impl<'a> EvalContext<'a> {
     pub fn get_param_float(&self, key: &str) -> Result<f64, CompositorError> {
         match self.params.get(key) {
             Some(ParamValue::Float(v)) => Ok(*v),
+            Some(ParamValue::Int(v)) => Ok(*v as f64),
             _ => Err(CompositorError::MissingParam(key.to_string())),
         }
     }
@@ -91,6 +92,7 @@ impl<'a> EvalContext<'a> {
     pub fn get_param_int(&self, key: &str) -> Result<i64, CompositorError> {
         match self.params.get(key) {
             Some(ParamValue::Int(v)) => Ok(*v),
+            Some(ParamValue::Float(v)) => Ok(*v as i64),
             _ => Err(CompositorError::MissingParam(key.to_string())),
         }
     }

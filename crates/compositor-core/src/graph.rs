@@ -37,7 +37,10 @@ pub struct Graph {
 }
 
 pub fn types_compatible(from: &ValueType, to: &ValueType) -> bool {
-    from == to || (*from == ValueType::Field && (*to == ValueType::Image || *to == ValueType::Mask))
+    from == to
+        || (*from == ValueType::Field && (*to == ValueType::Image || *to == ValueType::Mask))
+        || (*from == ValueType::Int && *to == ValueType::Float)
+        || (*from == ValueType::Float && *to == ValueType::Int)
 }
 
 impl Graph {

@@ -269,9 +269,6 @@ impl Node for AiRemoveBackground {
     }
 }
 
-const REAL_ESRGAN_VERSION: &str =
-    "f121d640bd286e1fdc67f9799164c1d5be36ff74576ee11c803ae5b665dd46aa";
-
 pub struct AiUpscale;
 
 impl AiUpscale {
@@ -286,7 +283,7 @@ impl Node for AiUpscale {
             id: "ai_upscale".to_string(),
             display_name: "AI Upscale".to_string(),
             category: "AI".to_string(),
-            description: "Upscale an image using AI (Real-ESRGAN)".to_string(),
+            description: "Upscale an image using AI super-resolution models".to_string(),
             inputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
@@ -300,6 +297,22 @@ impl Node for AiUpscale {
                 ..Default::default()
             }],
             params: vec![
+                ParamSpec {
+                    key: "model".to_string(),
+                    label: "Model".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::String("Real-ESRGAN".to_string()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Dropdown(vec![
+                        "Real-ESRGAN".to_string(),
+                        "Google Upscaler".to_string(),
+                        "Recraft Crisp Upscale".to_string(),
+                        "Clarity Upscaler".to_string(),
+                    ]),
+                    promotable: false,
+                },
                 ParamSpec {
                     key: "scale".to_string(),
                     label: "Scale".to_string(),
@@ -354,17 +367,49 @@ impl Node for AiUpscale {
             let png_bytes = encode_image_png(input_image)?;
             let image_data_uri = png_bytes_to_data_uri(&png_bytes);
 
+            let model_name = ctx.get_param_string("model").unwrap_or("Real-ESRGAN");
             let scale = ctx.get_param_int("scale").unwrap_or(4);
             let face_enhance = ctx.get_param_bool("face_enhance").unwrap_or(false);
 
-            let mut input = HashMap::new();
-            input.insert("image".to_string(), image_data_uri.into());
-            input.insert("scale".to_string(), (scale as f64).into());
-            input.insert("face_enhance".to_string(), face_enhance.into());
+            let (model_id, input) = match model_name {
+                "Google Upscaler" => {
+                    let mut input = HashMap::new();
+                    input.insert("image".to_string(), image_data_uri.into());
+                    let scale_str = if scale >= 4 {
+                        "4".to_string()
+                    } else {
+                        "2".to_string()
+                    };
+                    input.insert("scale".to_string(), scale_str.into());
+                    ("google/upscaler", input)
+                }
+                "Recraft Crisp Upscale" => {
+                    let mut input = HashMap::new();
+                    input.insert("image".to_string(), image_data_uri.into());
+                    ("recraft-ai/recraft-crisp-upscale", input)
+                }
+                "Clarity Upscaler" => {
+                    let mut input = HashMap::new();
+                    input.insert("image".to_string(), image_data_uri.into());
+                    input.insert(
+                        "scale_factor".to_string(),
+                        (scale as f64).into(),
+                    );
+                    ("philz1337x/clarity-upscaler", input)
+                }
+                // Default: Real-ESRGAN
+                _ => {
+                    let mut input = HashMap::new();
+                    input.insert("image".to_string(), image_data_uri.into());
+                    input.insert("scale".to_string(), (scale as f64).into());
+                    input.insert("face_enhance".to_string(), face_enhance.into());
+                    ("nightmareai/real-esrgan", input)
+                }
+            };
 
             let request = AiPredictionRequest {
-                version: REAL_ESRGAN_VERSION.to_string(),
-                model: None,
+                version: String::new(),
+                model: Some(model_id.to_string()),
                 input,
             };
 

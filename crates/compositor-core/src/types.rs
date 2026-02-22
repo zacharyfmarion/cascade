@@ -578,6 +578,7 @@ impl Value {
     pub fn as_float(&self) -> Option<f32> {
         match self {
             Value::Float(v) => Some(*v),
+            Value::Int(v) => Some(*v as f32),
             _ => None,
         }
     }
@@ -585,6 +586,7 @@ impl Value {
     pub fn as_int(&self) -> Option<i32> {
         match self {
             Value::Int(v) => Some(*v),
+            Value::Float(v) => Some(*v as i32),
             _ => None,
         }
     }
