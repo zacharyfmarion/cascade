@@ -15,7 +15,7 @@ Based on the [architecture review of Feb 22 2026](./reviews/architecture-review-
 
 ---
 
-## Phase 1: Safety & Correctness (1–2 weeks)
+## Phase 1: Safety & Correctness (1–2 weeks) ✅
 
 Items that prevent crashes, data loss, or silent corruption. These should be done before any new feature work.
 
@@ -58,7 +58,7 @@ See the [error handling plan](./reviews/error-handling-plan.md) for the comprehe
 - [x] Add ESLint rule `no-empty` with `allowEmptyCatch: false`
 - [x] Add CI grep checks for `unwrap_or(JsValue::NULL)` and empty catch blocks
 
-### 1.4 Fix muted node pass-through bug
+### 1.4 Fix muted node pass-through bug (deferred — low impact)
 - [ ] `eval.rs:155-156`: When a node has multiple inputs of the same type, muting currently picks the first match silently. Add `NodeSpec` metadata for "pass-through input" or error when ambiguous
 
 ---
