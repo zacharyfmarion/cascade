@@ -147,6 +147,9 @@ pub fn decode_response_image(bytes: &[u8]) -> Result<Image, CompositorError> {
         .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
     let rgba = decoded.to_rgba8();
     let (width, height) = rgba.dimensions();
+    if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+        return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+    }
     let raw = rgba.as_raw();
     let pixel_count = (width as usize) * (height as usize);
     let mut data = vec![0.0f32; pixel_count * 4];

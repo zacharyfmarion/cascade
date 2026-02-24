@@ -242,8 +242,42 @@ pub struct Image {
     pub data_window: RectI,
 }
 
+/// Maximum allowed dimension (width or height) for any image.
+/// 16384 × 16384 × 4 channels × 4 bytes = 4 GB, which is a reasonable upper
+/// bound for a single image buffer.  Anything larger is almost certainly a bug
+/// or a malicious input.
+pub const MAX_IMAGE_DIM: u32 = 16_384;
+
+/// Validate that width and height are within the allowed limits.
+/// Returns `Err(CompositorError::ImageTooLarge)` if either dimension exceeds
+/// `MAX_IMAGE_DIM`, or if the total pixel count would overflow `usize`.
+fn validate_dimensions(width: u32, height: u32) -> Result<(), CompositorError> {
+    if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+        return Err(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        });
+    }
+    // Overflow check: width * height * 4 must fit in usize
+    (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|px| px.checked_mul(4))
+        .ok_or(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        })?;
+    Ok(())
+}
+
 impl Image {
     pub fn new(width: u32, height: u32) -> Self {
+        debug_assert!(
+            width <= MAX_IMAGE_DIM && height <= MAX_IMAGE_DIM,
+            "Image::new called with oversized dimensions: {}x{} (max {})",
+            width, height, MAX_IMAGE_DIM
+        );
         let len = (width as usize) * (height as usize) * 4;
         let dw = RectI::from_dimensions(width, height);
         Self {
@@ -257,6 +291,7 @@ impl Image {
     }
 
     pub fn from_f32_data(width: u32, height: u32, data: Vec<f32>) -> Result<Self, CompositorError> {
+        validate_dimensions(width, height)?;
         let expected = (width as usize) * (height as usize) * 4;
         if data.len() != expected {
             return Err(CompositorError::InvalidImageData {
@@ -281,6 +316,7 @@ impl Image {
         data: Vec<f32>,
         color_space: ColorSpaceId,
     ) -> Result<Self, CompositorError> {
+        validate_dimensions(width, height)?;
         let expected = (width as usize) * (height as usize) * 4;
         if data.len() != expected {
             return Err(CompositorError::InvalidImageData {
@@ -308,6 +344,7 @@ impl Image {
     ) -> Result<Self, CompositorError> {
         let w = data_window.width_u32();
         let h = data_window.height_u32();
+        validate_dimensions(w, h)?;
         let expected = (w as usize) * (h as usize) * 4;
         if data.len() != expected {
             return Err(CompositorError::InvalidImageData {
@@ -825,4 +862,92 @@ fn linear_to_srgb_lut() -> &'static [u8; 4096] {
         }
         table
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::CompositorError;
+
+    #[test]
+    fn test_valid_dimensions_accepted() {
+        // Small image
+        let img = Image::from_f32_data(4, 4, vec![0.0f32; 64]);
+        assert!(img.is_ok());
+
+        // Max dimension on one axis
+        let img = Image::from_f32_data(MAX_IMAGE_DIM, 1, vec![0.0f32; MAX_IMAGE_DIM as usize * 4]);
+        assert!(img.is_ok());
+    }
+
+    #[test]
+    fn test_oversized_width_rejected() {
+        let result = Image::from_f32_data(MAX_IMAGE_DIM + 1, 1, vec![]);
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_oversized_height_rejected() {
+        let result = Image::from_f32_data(1, MAX_IMAGE_DIM + 1, vec![]);
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_both_dimensions_oversized_rejected() {
+        let result = Image::from_f32_data(MAX_IMAGE_DIM + 1, MAX_IMAGE_DIM + 1, vec![]);
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_from_f32_data_with_space_validates_dimensions() {
+        let result = Image::from_f32_data_with_space(
+            MAX_IMAGE_DIM + 1,
+            1,
+            vec![],
+            ColorSpaceId::default_working(),
+        );
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_new_with_domain_validates_dimensions() {
+        let dw = RectI {
+            min: IVec2::ZERO,
+            max: IVec2::new((MAX_IMAGE_DIM + 1) as i32, 1),
+        };
+        let result = Image::new_with_domain(
+            Format::from_dimensions(MAX_IMAGE_DIM + 1, 1),
+            dw,
+            vec![],
+            ColorSpaceId::default_working(),
+        );
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_from_f16_data_validates_dimensions() {
+        let result = Image::from_f16_data(MAX_IMAGE_DIM + 1, 1, vec![]);
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_validate_dimensions_overflow() {
+        // u32::MAX * u32::MAX would overflow usize on any platform
+        let result = validate_dimensions(u32::MAX, u32::MAX);
+        assert!(matches!(result, Err(CompositorError::ImageTooLarge { .. })));
+    }
+
+    #[test]
+    fn test_image_too_large_error_contains_dimensions() {
+        let result = Image::from_f32_data(20000, 100, vec![]);
+        match result {
+            Err(CompositorError::ImageTooLarge { width, height, max }) => {
+                assert_eq!(width, 20000);
+                assert_eq!(height, 100);
+                assert_eq!(max, MAX_IMAGE_DIM);
+            }
+            other => panic!("Expected ImageTooLarge, got {:?}", other),
+        }
+    }
 }

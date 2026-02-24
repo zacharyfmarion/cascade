@@ -8,7 +8,7 @@ use ahash::AHasher;
 use compositor_core::error::CompositorError;
 use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::{
-    Image, NodeSpec, ParamDefault, ParamSpec, ParamValue, Value, ValueType,
+    Image, NodeSpec, ParamDefault, ParamSpec, ParamValue, Value, ValueType, MAX_IMAGE_DIM,
 };
 use half::f16;
 
@@ -434,6 +434,14 @@ pub(crate) async fn read_texture_to_image(
     width: u32,
     height: u32,
 ) -> Result<Image, CompositorError> {
+    // Validate dimensions before allocating buffers
+    if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+        return Err(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        });
+    }
     let bytes_per_pixel = 8u32;
     let unpadded_bytes_per_row = width * bytes_per_pixel;
     let padded_bytes_per_row = align_to(unpadded_bytes_per_row, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
@@ -485,7 +493,8 @@ pub(crate) async fn read_texture_to_image(
         .map_err(|e| CompositorError::Other(format!("Map error: {e:?}")))?;
 
     let data = buffer_slice.get_mapped_range();
-    let mut output_bytes = vec![0u8; (unpadded_bytes_per_row * height) as usize];
+    let byte_len = (unpadded_bytes_per_row as usize).checked_mul(height as usize).ok_or_else(|| CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM })?;
+    let mut output_bytes = vec![0u8; byte_len];
     for row in 0..height as usize {
         let src_start = row * padded_bytes_per_row as usize;
         let dst_start = row * unpadded_bytes_per_row as usize;
@@ -496,7 +505,8 @@ pub(crate) async fn read_texture_to_image(
     drop(data);
     buffer.unmap();
 
-    let mut out = Vec::with_capacity((width * height * 4) as usize);
+    let pixel_cap = (width as usize).checked_mul(height as usize).and_then(|p| p.checked_mul(4)).ok_or_else(|| CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM })?;
+    let mut out = Vec::with_capacity(pixel_cap);
     for chunk in output_bytes.chunks_exact(2) {
         out.push(f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
     }

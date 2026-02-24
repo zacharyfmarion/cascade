@@ -33,6 +33,9 @@ impl LoadImage {
             .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
+        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+            return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+        }
         let raw = rgba.as_raw();
         let lut = srgb_to_linear_lut();
         let pixel_count = (width as usize) * (height as usize);
@@ -184,6 +187,9 @@ impl LoadImageSequence {
             .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
+        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+            return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+        }
         let raw = rgba.as_raw();
         let lut = srgb_to_linear_lut();
         let pixel_count = (width as usize) * (height as usize);
