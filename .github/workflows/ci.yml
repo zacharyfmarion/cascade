@@ -45,6 +45,14 @@ jobs:
       - name: Rustfmt
         run: cargo fmt --all -- --check
 
+      - name: Check for error swallowing patterns
+        run: |
+          # WASM bridge: no unwrap_or(JsValue::NULL)
+          if grep -n 'unwrap_or(JsValue::NULL)' crates/compositor-wasm/src/lib.rs; then
+            echo '::error::Found unwrap_or(JsValue::NULL) in WASM bridge — use .map_err(to_js_error)? instead'
+            exit 1
+          fi
+
   bench-compile:
     name: Benchmarks (compile check)
     runs-on: ubuntu-latest

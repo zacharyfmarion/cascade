@@ -31,7 +31,8 @@ apps/
 - **Evaluator**: Pull-based from viewer nodes. Cached per-output with keys `(frame_time, param_revision, upstream_hash)`. Only recomputes dirty subgraphs.
 - **Parallelism**: All per-pixel operations use Rayon `par_chunks_exact_mut(4)` for SIMD-friendly parallel processing.
 - **Arc vs Box**: Node instances are `Arc<dyn Node>` (not `Box`) to enable cheap cloning for background renders.
-- **Error handling**: Use `CompositorError` from `compositor-core`. Don't use `unwrap()` or `panic!()` in library code.
+- **Error handling**: Use `CompositorError` from `compositor-core`. Don't use `unwrap()` or `panic!()` in library code. Image constructors (`from_f32_data`, `from_f32_data_with_space`, `new_with_domain`, `from_f16_data`) return `Result<Image, CompositorError>` — always propagate with `?` in production code.
+- **Error propagation (WASM bridge)**: All functions in `compositor-wasm` must return `Result<_, JsValue>` and use `map_err(to_engine_error)?` for error propagation. Never use `unwrap_or(JsValue::NULL)`, bare `.unwrap()`, or `.expect()` in production WASM bridge code. The crate enforces `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
 
 ### Frontend (TypeScript/React)
 
@@ -39,6 +40,7 @@ apps/
 - **Engine bridge**: `EngineBridge` interface abstracts over WASM and Tauri backends. `WasmEngine` is synchronous, `TauriEngine` is async IPC.
 - **Theming**: All colors use CSS custom properties defined in `src/styles/theme.css`. An ESLint rule (`no-hardcoded-colors`) enforces this — never use raw hex/rgb values in components.
 - **Node components**: Custom React Flow nodes live in `src/components/nodes/`. `BaseNode` is the shared wrapper. UI controls are driven by `NodeSpec` metadata from Rust.
+- **Error handling**: Engine/render/eval errors must propagate as structured `EngineError` objects through the full stack (WASM bridge → EngineBridge → store → UI). Never swallow errors with empty catch blocks or by returning null. Only the Zustand store should catch engine exceptions — components and hooks must not swallow errors from engine calls. See the [error handling plan](./reviews/error-handling-plan.md) for the full strategy.
 
 ## Build commands
 

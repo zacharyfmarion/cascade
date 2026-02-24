@@ -31,6 +31,7 @@ export default defineConfig([
     },
     rules: {
       'compositor-theme/no-hardcoded-colors': 'error',
+      'no-empty': ['error', { allowEmptyCatch: false }],
     },
   },
 ])
