@@ -21,6 +21,17 @@ pub enum CompositorError {
         node_type: String,
         port_name: String,
     },
+    #[error("Invalid image data: expected {expected} elements, got {got}")]
+    InvalidImageData { expected: usize, got: usize },
+    #[error("Image too large: {width}x{height} exceeds maximum dimension {max}")]
+    ImageTooLarge { width: u32, height: u32, max: u32 },
+    #[error("Node '{node_type}' ({node_id}) failed: {source}")]
+    EvalFailed {
+        node_id: String,
+        node_type: String,
+        #[source]
+        source: Box<CompositorError>,
+    },
     #[error("{0}")]
     Other(String),
 }

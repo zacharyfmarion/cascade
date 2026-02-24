@@ -1,3 +1,4 @@
+use crate::error::CompositorError;
 use half::f16;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -255,17 +256,23 @@ impl Image {
         }
     }
 
-    pub fn from_f32_data(width: u32, height: u32, data: Vec<f32>) -> Self {
-        assert_eq!(data.len(), (width as usize) * (height as usize) * 4);
+    pub fn from_f32_data(width: u32, height: u32, data: Vec<f32>) -> Result<Self, CompositorError> {
+        let expected = (width as usize) * (height as usize) * 4;
+        if data.len() != expected {
+            return Err(CompositorError::InvalidImageData {
+                expected,
+                got: data.len(),
+            });
+        }
         let dw = RectI::from_dimensions(width, height);
-        Self {
+        Ok(Self {
             width,
             height,
             data: Arc::new(data),
             color_space: ColorSpaceId::default_working(),
             format: Format::from_dimensions(width, height),
             data_window: dw,
-        }
+        })
     }
 
     pub fn from_f32_data_with_space(
@@ -273,17 +280,23 @@ impl Image {
         height: u32,
         data: Vec<f32>,
         color_space: ColorSpaceId,
-    ) -> Self {
-        assert_eq!(data.len(), (width as usize) * (height as usize) * 4);
+    ) -> Result<Self, CompositorError> {
+        let expected = (width as usize) * (height as usize) * 4;
+        if data.len() != expected {
+            return Err(CompositorError::InvalidImageData {
+                expected,
+                got: data.len(),
+            });
+        }
         let dw = RectI::from_dimensions(width, height);
-        Self {
+        Ok(Self {
             width,
             height,
             data: Arc::new(data),
             color_space,
             format: Format::from_dimensions(width, height),
             data_window: dw,
-        }
+        })
     }
 
     /// Full constructor with explicit format and data window.
@@ -292,21 +305,27 @@ impl Image {
         data_window: RectI,
         data: Vec<f32>,
         color_space: ColorSpaceId,
-    ) -> Self {
+    ) -> Result<Self, CompositorError> {
         let w = data_window.width_u32();
         let h = data_window.height_u32();
-        assert_eq!(data.len(), (w as usize) * (h as usize) * 4);
-        Self {
+        let expected = (w as usize) * (h as usize) * 4;
+        if data.len() != expected {
+            return Err(CompositorError::InvalidImageData {
+                expected,
+                got: data.len(),
+            });
+        }
+        Ok(Self {
             width: w,
             height: h,
             data: Arc::new(data),
             color_space,
             format,
             data_window,
-        }
+        })
     }
 
-    pub fn from_f16_data(width: u32, height: u32, data: Vec<f16>) -> Self {
+    pub fn from_f16_data(width: u32, height: u32, data: Vec<f16>) -> Result<Self, CompositorError> {
         let f32_data: Vec<f32> = data.iter().map(|v| v.to_f32()).collect();
         Self::from_f32_data(width, height, f32_data)
     }
@@ -473,13 +492,17 @@ impl Field {
         (self.sample_fn)(tu, tv)
     }
 
-    pub fn rasterize(&self, width: u32, height: u32) -> Image {
+    pub fn rasterize(&self, width: u32, height: u32) -> Result<Image, CompositorError> {
         let format = Format::from_dimensions(width, height);
         let data_window = RectI::from_dimensions(width, height);
         self.rasterize_to_domain(format, data_window)
     }
 
-    pub fn rasterize_to_domain(&self, format: Format, data_window: RectI) -> Image {
+    pub fn rasterize_to_domain(
+        &self,
+        format: Format,
+        data_window: RectI,
+    ) -> Result<Image, CompositorError> {
         let dw_w = data_window.width_u32();
         let dw_h = data_window.height_u32();
         let pixel_count = (dw_w as usize) * (dw_h as usize);

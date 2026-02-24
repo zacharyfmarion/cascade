@@ -138,7 +138,7 @@ impl Evaluator {
                 if matches!(port.ty, ValueType::Image | ValueType::Mask) {
                     if let Some(Value::Field(field)) = inputs.get(&port.name) {
                         let rasterized =
-                            field.rasterize_to_domain(raster_format.clone(), raster_dw);
+                            field.rasterize_to_domain(raster_format.clone(), raster_dw)?;
                         let converted = if port.ty == ValueType::Mask {
                             Value::Mask(rasterized)
                         } else {
@@ -183,7 +183,13 @@ impl Evaluator {
                 },
             };
             let start = Instant::now();
-            let outputs = node.evaluate(&ctx).await?;
+            let outputs = node.evaluate(&ctx).await.map_err(|e| {
+                CompositorError::EvalFailed {
+                    node_id: instance.uuid.clone(),
+                    node_type: instance.type_id.clone(),
+                    source: Box::new(e),
+                }
+            })?;
             let elapsed = start.elapsed();
             node_timings.insert(node_id, elapsed);
             for output in spec.outputs.iter() {
@@ -442,7 +448,7 @@ mod tests {
         let width = 2u32;
         let height = 2u32;
         let data = vec![1.0f32; 16];
-        Image::from_f32_data(width, height, data)
+        Image::from_f32_data(width, height, data).unwrap()
     }
 
     fn create_simple_registry() -> NodeRegistry {
@@ -811,7 +817,7 @@ mod tests {
             };
             Arc::new(MockNode::new(
                 spec,
-                Value::Image(Image::from_f32_data(4, 4, vec![0.5f32; 64])),
+                Value::Image(Image::from_f32_data(4, 4, vec![0.5f32; 64]).unwrap()),
             ))
         });
 
@@ -1041,7 +1047,7 @@ mod tests {
                     },
                     vec![0.5f32; 64],
                     crate::types::ColorSpaceId::default_working(),
-                )),
+                ).unwrap()),
             ))
         });
 
