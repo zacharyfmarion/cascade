@@ -110,3 +110,35 @@ Multiple AI agents may be working on this repository simultaneously. If you enco
 - TypeScript: ESLint config at `apps/web/eslint.config.js`. No hardcoded colors.
 - Commits: Conventional-style preferred (e.g., `feat:`, `fix:`, `refactor:`).
 - Tests: Add tests for new node implementations. GPU tests should handle missing GPU gracefully.
+
+## Cursor Cloud specific instructions
+
+### System dependencies
+
+The VM environment requires these system packages for the Tauri crate to compile:
+`libgtk-3-dev libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev libappindicator3-dev librsvg2-dev libssl-dev`
+
+### Rust toolchain
+
+The codebase requires Rust stable ≥1.85.0 (for edition 2024 support in dependencies). If the pre-installed Rust is older, run `rustup update stable && rustup default stable`. The `wasm32-unknown-unknown` target and `wasm-pack` must also be installed.
+
+### Build and run commands
+
+See `## Build commands` above for all standard commands. Key notes:
+
+- `cargo check/test/clippy --workspace --exclude compositor-tauri` — the Tauri crate requires the frontend `dist/` folder which only exists after `yarn build` from `apps/web/`. Exclude it for routine Rust checks unless you've built the frontend first.
+- The `predev` script in `apps/web/package.json` automatically runs `wasm-pack build` before starting Vite, so `yarn dev` from `apps/web/` handles the full WASM+frontend workflow.
+- Frontend TypeScript check (`npx tsc -b --noEmit`) will fail if the WASM package hasn't been built yet (missing `wasm-pkg/` module). Build WASM first or run `yarn dev` once.
+
+### Known pre-existing lint issues
+
+- `cargo clippy` with Rust ≥1.90 reports new `needless_range_loop` and `too_many_arguments` warnings not present in CI's Rust version. These are pre-existing and not caused by your changes.
+- `yarn lint` has ~83 pre-existing errors (hardcoded colors, unused vars, `no-explicit-any`). Do not fix these unless specifically asked.
+
+### Services
+
+| Service | Command | Port | Notes |
+|---------|---------|------|-------|
+| Web app (dev) | `cd apps/web && yarn dev` | 5173 | Builds WASM automatically via `predev` script |
+
+No databases, Docker, or external services are required. The WASM engine runs entirely in-browser.
