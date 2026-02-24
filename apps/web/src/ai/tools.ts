@@ -8,7 +8,7 @@ import { validateAst } from './dsl/validator';
 import { diffAst } from './dsl/differ';
 import { applyMutations } from './dsl/executor';
 import { captureViewerThumbnail } from './viewerSnapshot';
-import { snakeToPascal } from './dsl/types';
+import { snakeToPascal, labelToSnake } from './dsl/types';
 import type { DslAst } from './dsl/types';
 import { getSharedHandleMap } from './dsl/instance';
 
@@ -60,8 +60,10 @@ function formatParamSpec(p: ParamSpec): Record<string, unknown> {
   if (p.max !== undefined) desc.max = p.max;
   if (p.step !== undefined) desc.step = p.step;
   if (p.ui_hint.type === 'Dropdown' && 'data' in p.ui_hint) {
-    desc.options = p.ui_hint.data;
-    desc.dsl_syntax = `Use one of the exact option strings in quotes, e.g. "${p.ui_hint.data[0]}"`;
+    const snakeOptions = p.ui_hint.data.map(labelToSnake);
+    desc.options = snakeOptions;
+    desc.dsl_syntax = `Use one of the exact option strings in quotes, e.g. "${snakeOptions[0]}"`;
+    desc.type = 'Dropdown';
   }
   return desc;
 }
