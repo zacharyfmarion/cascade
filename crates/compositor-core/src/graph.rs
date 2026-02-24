@@ -748,4 +748,57 @@ mod tests {
         graph.clear_dirty(node_id);
         assert!(!graph.is_dirty(node_id));
     }
+
+    #[test]
+    fn test_connect_int_to_float_succeeds() {
+        let mut graph = Graph::new();
+        let mut registry = create_test_registry();
+
+        registry.register("int_output", || {
+            let spec = NodeSpec {
+                id: "int_output".to_string(),
+                display_name: "Int Output".to_string(),
+                category: "Input".to_string(),
+                description: "Test int output".to_string(),
+                inputs: vec![],
+                outputs: vec![PortSpec {
+                    name: "output".to_string(),
+                    label: "Output".to_string(),
+                    ty: ValueType::Int,
+                    ..Default::default()
+                }],
+                params: vec![],
+            };
+            Arc::new(TestNode { spec })
+        });
+
+        let int_out_id = graph.add_node("int_output");
+        let process_id = graph.add_node("process"); // expects Float input
+
+        // Int -> Float should succeed (implicit conversion)
+        let result = graph.connect(&registry, int_out_id, "output", process_id, "input");
+        assert!(result.is_ok(), "Int -> Float connection should be allowed");
+    }
+
+    #[test]
+    fn test_types_compatible() {
+        // Same types always compatible
+        assert!(types_compatible(&ValueType::Float, &ValueType::Float));
+        assert!(types_compatible(&ValueType::Int, &ValueType::Int));
+        assert!(types_compatible(&ValueType::Image, &ValueType::Image));
+
+        // Int <-> Float are compatible
+        assert!(types_compatible(&ValueType::Int, &ValueType::Float));
+        assert!(types_compatible(&ValueType::Float, &ValueType::Int));
+
+        // Field -> Image/Mask are compatible
+        assert!(types_compatible(&ValueType::Field, &ValueType::Image));
+        assert!(types_compatible(&ValueType::Field, &ValueType::Mask));
+
+        // Incompatible types
+        assert!(!types_compatible(&ValueType::Image, &ValueType::Float));
+        assert!(!types_compatible(&ValueType::Float, &ValueType::Image));
+        assert!(!types_compatible(&ValueType::Bool, &ValueType::Float));
+        assert!(!types_compatible(&ValueType::String, &ValueType::Int));
+    }
 }

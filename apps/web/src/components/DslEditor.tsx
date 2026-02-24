@@ -5,13 +5,17 @@ import { useGraphStore } from '../store/graphStore';
 import { useThemeStore } from '../store/themeStore';
 import type { SyntaxColors } from '../themes/types';
 import { serializeGraph } from '../ai/dsl/serializer';
-import { getSharedHandleMap } from '../ai/dsl/instance';
+import { deriveHandleMap } from '../ai/dsl/instance';
 import { applyDsl } from '../ai/dsl/executor';
 import { parseDsl } from '../ai/dsl/parser';
 import { validateAst } from '../ai/dsl/validator';
+import type { DslSourceMap } from '../ai/dsl/types';
+import type { DiagnosticItem, NodeInstance } from '../store/types';
+import type { EngineError } from '../engine/engineError';
 
 const APPLY_DEBOUNCE_MS = 600;
 const MARKER_OWNER = 'dsl-editor';
+const EVAL_MARKER_OWNER = 'dsl-eval';
 const LANGUAGE_ID = 'compositor-dsl';
 const MONACO_THEME_ID = 'compositor-dsl';
 
@@ -41,7 +45,7 @@ function serializeCurrent(): string {
     nodes,
     connections,
     nodeSpecs,
-    handleMap: getSharedHandleMap(),
+    handleMap: deriveHandleMap(nodes),
   });
 }
 
@@ -54,17 +58,16 @@ export const DslEditor: React.FC = () => {
    * because it was triggered by an external graph→editor sync, not user typing.
    */
   const suppressApplyRef = useRef(false);
-  /** Track whether the user is actively editing (has focus + has typed). */
-  const userEditingRef = useRef(false);
   /** Track the last DSL text we pushed to the editor to avoid no-op updates. */
   const lastPushedDslRef = useRef('');
+  const sourceMapRef = useRef<DslSourceMap | null>(null);
 
   // ─── Theme helpers ──────────────────────────────────────────────────
   /**
    * Strip leading '#' from a hex color for Monaco's foreground format.
    * Monaco expects 6-char hex without '#'.
    */
-  const stripHash = (hex: string) => hex.replace(/^#/, '');
+  const stripHash = useCallback((hex: string) => hex.replace(/^#/, ''), []);
 
   /**
    * Build Monaco token rules from SyntaxColors.
@@ -86,7 +89,7 @@ export const DslEditor: React.FC = () => {
       { token: 'operator.arrow.dsl', foreground: stripHash(sc.operator), fontStyle: 'bold' },
       { token: 'delimiter.dsl', foreground: stripHash(sc.foreground) },
     ],
-    [],
+    [stripHash],
   );
 
   /**
@@ -126,7 +129,7 @@ export const DslEditor: React.FC = () => {
   // ─── Language registration (once, before mount) ────────────────────
   const handleBeforeMount: BeforeMount = useCallback((monaco) => {
     // Register custom DSL language if not already registered
-    if (!monaco.languages.getLanguages().some((l) => l.id === LANGUAGE_ID)) {
+    if (!monaco.languages.getLanguages().some((l: Monaco.languages.ILanguageExtensionPoint) => l.id === LANGUAGE_ID)) {
       monaco.languages.register({ id: LANGUAGE_ID });
       monaco.languages.setMonarchTokensProvider(LANGUAGE_ID, {
         defaultToken: '',
@@ -232,6 +235,58 @@ export const DslEditor: React.FC = () => {
     if (!model) return;
     monaco.editor.setModelMarkers(model, MARKER_OWNER, []);
   }, []);
+  // ─── Eval markers (separate owner for eval errors) ──────────────────
+  const setEvalMarkers = useCallback(
+    (errors: { line?: number; message: string }[]) => {
+      const monaco = monacoRef.current;
+      const editor = editorRef.current;
+      if (!monaco || !editor) return;
+      const model = editor.getModel();
+    if (!model) return;
+      const markers: Monaco.editor.IMarkerData[] = errors.map((err) => {
+        const lineNumber = Math.max(1, Math.min(err.line ?? 1, model.getLineCount()));
+        return {
+          severity: monaco.MarkerSeverity.Warning,
+          message: `[Eval] ${err.message}`,
+          startLineNumber: lineNumber,
+          startColumn: 1,
+          endLineNumber: lineNumber,
+          endColumn: model.getLineMaxColumn(lineNumber),
+        };
+      });
+
+      monaco.editor.setModelMarkers(model, EVAL_MARKER_OWNER, markers);
+    },
+    [],
+  );
+
+  const clearEvalMarkers = useCallback(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    if (!monaco || !editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+    monaco.editor.setModelMarkers(model, EVAL_MARKER_OWNER, []);
+  }, []);
+
+  const mapEvalErrorsToMarkers = useCallback(
+    (errors: Array<Pick<DiagnosticItem, 'message' | 'nodeId' | 'line'>>, nodes: Map<string, NodeInstance>) => {
+      const sourceMap = sourceMapRef.current;
+      const handleMap = deriveHandleMap(nodes);
+      return errors.map((err) => {
+        let line = err.line;
+        if (err.nodeId && sourceMap) {
+          const handle = handleMap.getHandle(err.nodeId);
+          const span = handle ? sourceMap.nodeSpans.get(handle) : undefined;
+          if (span) {
+            line = span.startLine;
+          }
+        }
+        return { line: line ?? 1, message: err.message };
+      });
+    },
+    [],
+  );
 
   // ─── Validate only (show markers without applying) ──────────────────
   const validateAndMark = useCallback(
@@ -240,6 +295,7 @@ export const DslEditor: React.FC = () => {
       if (nodeSpecs.length === 0) return;
 
       const parseResult = parseDsl(text, nodeSpecs);
+      sourceMapRef.current = parseResult.sourceMap ?? null;
       if (parseResult.errors.length > 0) {
         setMarkers(parseResult.errors);
         return;
@@ -263,25 +319,31 @@ export const DslEditor: React.FC = () => {
     async (text: string) => {
       const { nodes, connections, nodeSpecs } = useGraphStore.getState();
       if (nodeSpecs.length === 0) return;
-
+      const handleMap = deriveHandleMap(nodes);
       const result = await applyDsl(
         text,
-        getSharedHandleMap(),
+        handleMap,
         nodeSpecs,
         nodes,
         connections,
       );
-
       if (!result.success) {
         setMarkers(result.errors);
+        clearEvalMarkers();
       } else {
         clearMarkers();
+        // Show eval errors as warning markers if the render produced errors
+        if (result.evalErrors && result.evalErrors.length > 0) {
+          setEvalMarkers(mapEvalErrorsToMarkers(result.evalErrors, nodes));
+        } else {
+          clearEvalMarkers();
+        }
         // After successful apply, update our tracking ref so graph→editor
         // sync recognizes this text as "already shown".
         lastPushedDslRef.current = result.updatedDsl;
       }
     },
-    [setMarkers, clearMarkers],
+    [setMarkers, clearMarkers, setEvalMarkers, clearEvalMarkers, mapEvalErrorsToMarkers],
   );
 
   // ─── Editor onChange: debounced apply ───────────────────────────────
@@ -291,9 +353,6 @@ export const DslEditor: React.FC = () => {
         suppressApplyRef.current = false;
         return;
       }
-
-      userEditingRef.current = true;
-
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
@@ -324,10 +383,6 @@ export const DslEditor: React.FC = () => {
       suppressApplyRef.current = true;
       editor.setValue(initialDsl);
 
-      // Track focus for edit detection
-      editor.onDidBlurEditorText(() => {
-        userEditingRef.current = false;
-      });
     },
     [],
   );
@@ -348,7 +403,7 @@ export const DslEditor: React.FC = () => {
 
   // ─── Graph → Editor sync ────────────────────────────────────────────
   // Subscribe to graph store changes and push serialized DSL to the editor.
-  // Only updates when the user is NOT actively editing (to avoid clobbering).
+  // Skip when the DSL editor itself caused the change (origin gating).
   useEffect(() => {
     let prevNodes = useGraphStore.getState().nodes;
     let prevConnections = useGraphStore.getState().connections;
@@ -370,8 +425,8 @@ export const DslEditor: React.FC = () => {
       const editor = editorRef.current;
       if (!editor) return;
 
-      // Don't overwrite while user is actively typing
-      if (userEditingRef.current) return;
+      // Don't re-serialize when the change originated from the DSL editor itself
+      if (state.lastTransactionOrigin === 'dsl') return;
 
       const { nodes, connections, nodeSpecs } = state;
       if (nodeSpecs.length === 0 || nodes.size === 0) return;
@@ -380,7 +435,7 @@ export const DslEditor: React.FC = () => {
         nodes,
         connections,
         nodeSpecs,
-        handleMap: getSharedHandleMap(),
+        handleMap: deriveHandleMap(nodes),
       });
 
       // Skip if the serialized text hasn't changed
@@ -400,6 +455,28 @@ export const DslEditor: React.FC = () => {
 
     return unsubscribe;
   }, [clearMarkers]);
+
+  useEffect(() => {
+    let prevNodeErrors = useGraphStore.getState().nodeErrors;
+    const unsubscribe = useGraphStore.subscribe((state) => {
+      if (state.nodeErrors === prevNodeErrors) return;
+      prevNodeErrors = state.nodeErrors;
+      if (state.lastTransactionOrigin === 'dsl') return;
+      const editor = editorRef.current;
+      if (!editor) return;
+      if (state.nodeErrors.size === 0) {
+        clearEvalMarkers();
+        return;
+      }
+      const errors: Array<Pick<DiagnosticItem, 'message' | 'nodeId' | 'line'>> = [];
+      state.nodeErrors.forEach((err: EngineError, nodeId) => {
+        errors.push({ message: err.message, nodeId: err.nodeId ?? nodeId });
+      });
+      setEvalMarkers(mapEvalErrorsToMarkers(errors, state.nodes));
+    });
+
+    return unsubscribe;
+  }, [clearEvalMarkers, mapEvalErrorsToMarkers, setEvalMarkers]);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {

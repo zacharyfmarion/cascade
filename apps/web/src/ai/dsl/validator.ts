@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamSpec, PortSpec, ValueType } from '../../store/types';
+import type { NodeSpec, ParamSpec, ValueType } from '../../store/types';
 import type {
   DslAst,
   DslNode,
@@ -101,11 +101,6 @@ const expectedLabel = (valueType: ValueType): string => {
 const getParamSpec = (spec: NodeSpec, key: string): ParamSpec | undefined =>
   spec.params.find(param => param.key === key);
 
-const getInputSpec = (spec: NodeSpec, name: string): PortSpec | undefined =>
-  spec.inputs.find(input => input.name === name);
-
-const getOutputSpec = (spec: NodeSpec, name: string): PortSpec | undefined =>
-  spec.outputs.find(output => output.name === name);
 
 const addError = (errors: ValidationError[], error: ValidationError) => {
   errors.push(error);
@@ -174,25 +169,21 @@ const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationErr
   }
 };
 
-const validateConnections = (ast: DslAst, specById: Map<string, NodeSpec>, errors: ValidationError[]) => {
+/**
+ * Structural validation of connections. Checks only DSL-level concerns:
+ * - Unknown handles (with fuzzy suggestions)
+ * - Duplicate input connections
+ *
+ * Semantic checks (type compatibility, port existence, cycles) are handled
+ * by Rust via validate_edits() — see semanticValidator.ts.
+ */
+const validateConnections = (ast: DslAst, errors: ValidationError[]) => {
   const handles = Array.from(ast.nodes.keys());
   const handleSuggestions = handles;
-
   const inputConnectionLines = new Map<string, number>();
-  const edgeLine = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  handles.forEach(handle => adjacency.set(handle, []));
-
-  const addEdge = (from: string, to: string) => {
-    const list = adjacency.get(from);
-    if (list) list.push(to);
-  };
-
   for (const conn of ast.connections) {
     const fromNode = ast.nodes.get(conn.fromHandle);
     const toNode = ast.nodes.get(conn.toHandle);
-
     if (!fromNode) {
       const suggestion = findClosestMatch(conn.fromHandle, handleSuggestions);
       const message = suggestion
@@ -209,11 +200,6 @@ const validateConnections = (ast: DslAst, specById: Map<string, NodeSpec>, error
       addError(errors, { line: conn.line, message, suggestion: suggestion ?? undefined });
       continue;
     }
-
-    const fromSpec = specById.get(fromNode.nodeTypeId);
-    const toSpec = specById.get(toNode.nodeTypeId);
-    if (!fromSpec || !toSpec) continue;
-
     const inputKey = `${conn.toHandle}.${conn.toPort}`;
     if (inputConnectionLines.has(inputKey)) {
       const prevLine = inputConnectionLines.get(inputKey) ?? conn.line;
@@ -224,74 +210,7 @@ const validateConnections = (ast: DslAst, specById: Map<string, NodeSpec>, error
     } else {
       inputConnectionLines.set(inputKey, conn.line);
     }
-
-    const outputSpec = getOutputSpec(fromSpec, conn.fromPort);
-    if (!outputSpec) {
-      const validOutputs = fromSpec.outputs.map(output => output.name).join(', ');
-      addError(errors, {
-        line: conn.line,
-        message: `Line ${conn.line}: Node "${fromNode.handle}" (${fromNode.nodeType}) has no output port "${conn.fromPort}". Valid outputs: ${validOutputs}`,
-      });
-      continue;
-    }
-
-    const inputSpec = getInputSpec(toSpec, conn.toPort);
-    if (!inputSpec) {
-      const validInputs = toSpec.inputs.map(input => input.name).join(', ');
-      addError(errors, {
-        line: conn.line,
-        message: `Line ${conn.line}: Node "${toNode.handle}" (${toNode.nodeType}) has no input port "${conn.toPort}". Valid inputs: ${validInputs}`,
-      });
-      continue;
-    }
-
-    if (outputSpec.ty !== inputSpec.ty) {
-      addError(errors, {
-        line: conn.line,
-        message: `Line ${conn.line}: Cannot connect ${outputSpec.ty} output to ${inputSpec.ty} input`,
-      });
-    }
-
-    addEdge(conn.fromHandle, conn.toHandle);
-    edgeLine.set(`${conn.fromHandle}->${conn.toHandle}`, conn.line);
   }
-
-  const visited = new Set<string>();
-  const stack = new Set<string>();
-  const path: string[] = [];
-  let cycleError: ValidationError | null = null;
-
-  const dfs = (node: string) => {
-    if (cycleError) return;
-    visited.add(node);
-    stack.add(node);
-    path.push(node);
-
-    for (const next of adjacency.get(node) ?? []) {
-      if (cycleError) break;
-      if (!visited.has(next)) {
-        dfs(next);
-      } else if (stack.has(next)) {
-        const startIndex = path.indexOf(next);
-        const cyclePath = startIndex >= 0 ? path.slice(startIndex).concat(next) : [next, node, next];
-        const line = edgeLine.get(`${node}->${next}`) ?? 1;
-        cycleError = {
-          line,
-          message: `Line ${line}: Connection creates a cycle: ${cyclePath.join(' → ')}`,
-        };
-      }
-    }
-
-    stack.delete(node);
-    path.pop();
-  };
-
-  for (const handle of handles) {
-    if (!visited.has(handle)) dfs(handle);
-    if (cycleError) break;
-  }
-
-  if (cycleError) addError(errors, cycleError);
 };
 
 const validateNodeTypes = (ast: DslAst, specById: Map<string, NodeSpec>, errors: ValidationError[]) => {
@@ -351,7 +270,7 @@ export const validateAst = (ast: DslAst, nodeSpecs: NodeSpec[]): ValidationResul
   const specById = new Map(nodeSpecs.map(spec => [spec.id, spec]));
 
   validateNodeTypes(ast, specById, errors);
-  validateConnections(ast, specById, errors);
+  validateConnections(ast, errors);
   validateWarnings(ast, warnings);
 
   return { valid: errors.length === 0, errors, warnings };
