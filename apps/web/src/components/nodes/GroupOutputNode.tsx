@@ -1,10 +1,11 @@
 import React from 'react';
-import { Handle, Position } from '@xyflow/react';
+import { Position } from '@xyflow/react';
+import { ReconnectableHandle } from './ReconnectableHandle';
 import type { NodeProps } from '@xyflow/react';
 import type { NodeSpec, PortSpec } from '../../store/types';
 import { getPortColor } from './BaseNode';
 
-export const GroupOutputNode: React.FC<NodeProps> = ({ data, selected }) => {
+export const GroupOutputNode: React.FC<NodeProps> = ({ id, data, selected }) => {
   const spec = data.spec as NodeSpec;
 
   return (
@@ -23,7 +24,8 @@ export const GroupOutputNode: React.FC<NodeProps> = ({ data, selected }) => {
       <div className="base-node__body">
         {spec.inputs.map((input: PortSpec) => (
           <div key={input.name} className="node-port" style={{ gap: 4 }}>
-            <Handle
+            <ReconnectableHandle
+              nodeId={id}
               type="target"
               position={Position.Left}
               id={input.name}

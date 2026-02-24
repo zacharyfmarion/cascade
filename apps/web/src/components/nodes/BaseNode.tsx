@@ -1,5 +1,6 @@
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
+import { ReconnectableHandle } from './ReconnectableHandle';
 import { useGraphStore } from '../../store/graphStore';
 import { useSettingsStore } from '../../store/settingsStore';
 import type { NodeSpec, PortSpec, ParamValue } from '../../store/types';
@@ -247,7 +248,8 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
 
           return (
             <div key={input.name} className="node-port">
-              <Handle
+              <ReconnectableHandle
+                nodeId={id}
                 type="target"
                 position={Position.Left}
                 id={input.name}
