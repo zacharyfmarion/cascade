@@ -243,4 +243,47 @@ describe('serializeGraph', () => {
     const output = serializeGraph(buildInput(nodes, [], handleMap));
     expect(output).toBe('palette1 = ColorPalette()');
   });
+
+  it('serializes dropdown param as snake_case string', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-1',
+      makeNodeInstance({
+        id: 'node-1',
+        typeId: 'blend',
+        params: { mode: { Int: 2 } },
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe('blend1 = Blend(mode: "screen")');
+  });
+
+  it('serializes default dropdown value (omitted from output)', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-1',
+      makeNodeInstance({
+        id: 'node-1',
+        typeId: 'blend',
+        params: { mode: { Int: 0 } },
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe('blend1 = Blend()');
+  });
+
+  it('serializes gradient dropdown as snake_case', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-1',
+      makeNodeInstance({
+        id: 'node-1',
+        typeId: 'gradient',
+        params: { direction: { Int: 2 } },
+        inputDefaults: { direction: { Int: 2 } },
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe('gradient1 = Gradient(direction: "radial")');
+  });
 });

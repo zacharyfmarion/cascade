@@ -203,10 +203,33 @@ describe('parseDsl', () => {
     expect(node?.params.get('width')).toEqual({ type: 'int', value: 1024 });
   });
 
-  it('parses dropdown params as strings', () => {
-    const result = parseDsl('blend1 = Blend(mode: "Multiply")', mockSpecs);
+  it('parses dropdown params as snake_case strings with resolved index', () => {
+    const result = parseDsl('blend1 = Blend(mode: "multiply")', mockSpecs);
     const node = result.ast?.nodes.get('blend1');
-    expect(node?.params.get('mode')).toEqual({ type: 'string', value: 'Multiply' });
+    expect(node?.params.get('mode')).toEqual({ type: 'dropdown', value: 'multiply', index: 1 });
+  });
+
+  it('parses dropdown with exact label match (case-insensitive)', () => {
+    const result = parseDsl('blend1 = Blend(mode: "Overlay")', mockSpecs);
+    const node = result.ast?.nodes.get('blend1');
+    expect(node?.params.get('mode')).toEqual({ type: 'dropdown', value: 'overlay', index: 3 });
+  });
+
+  it('parses dropdown with legacy integer index', () => {
+    const result = parseDsl('blend1 = Blend(mode: 2)', mockSpecs);
+    const node = result.ast?.nodes.get('blend1');
+    expect(node?.params.get('mode')).toEqual({ type: 'dropdown', value: 'screen', index: 2 });
+  });
+
+  it('parses multi-word dropdown option as snake_case', () => {
+    const result = parseDsl('grad1 = Gradient(direction: "radial")', mockSpecs);
+    const node = result.ast?.nodes.get('grad1');
+    expect(node?.params.get('direction')).toEqual({ type: 'dropdown', value: 'radial', index: 2 });
+  });
+
+  it('errors on invalid dropdown value', () => {
+    const result = parseDsl('blend1 = Blend(mode: "invalid_mode")', mockSpecs);
+    expect(result.errors.some((e) => e.message.includes("Invalid value for 'mode'"))).toBe(true);
   });
 });
 

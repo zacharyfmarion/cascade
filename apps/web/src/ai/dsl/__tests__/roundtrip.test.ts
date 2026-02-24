@@ -266,4 +266,47 @@ describe('DSL roundtrip', () => {
       'blend1.base<- load1.image'
     );
   });
+
+  it('roundtrips dropdown param', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-blend',
+      makeNodeInstance({
+        id: 'node-blend',
+        typeId: 'blend',
+        params: { mode: { Int: 2 } },
+      })
+    );
+    const handleMap = new HandleMap();
+    handleMap.set('blend1', 'node-blend');
+    const text = buildGraph(nodes, [], handleMap);
+    expect(text).toContain('mode: "screen"');
+    const parsed = parseDsl(text, mockSpecs);
+    expect(parsed.errors).toHaveLength(0);
+    expect(parsed.ast?.nodes.get('blend1')?.params.get('mode')).toEqual({
+      type: 'dropdown', value: 'screen', index: 2,
+    });
+  });
+
+  it('roundtrips gradient dropdown param', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-grad',
+      makeNodeInstance({
+        id: 'node-grad',
+        typeId: 'gradient',
+        params: { direction: { Int: 3 } },
+        inputDefaults: { direction: { Int: 3 } },
+      })
+    );
+    const handleMap = new HandleMap();
+    handleMap.set('grad1', 'node-grad');
+    const text = buildGraph(nodes, [], handleMap);
+    expect(text).toContain('direction: "angular"');
+    const parsed = parseDsl(text, mockSpecs);
+    expect(parsed.errors).toHaveLength(0);
+    expect(parsed.ast?.nodes.get('grad1')?.params.get('direction')).toEqual({
+      type: 'dropdown', value: 'angular', index: 3,
+    });
+  });
 });

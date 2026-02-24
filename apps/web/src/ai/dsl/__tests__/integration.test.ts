@@ -91,7 +91,7 @@ describe('integration: full graph DSL end-to-end', () => {
       const dsl = [
         'load1 = LoadImage(path: "/bg.jpg")',
         'load2 = LoadImage(path: "/fg.png")',
-        'blend1 = Blend(mode: "Multiply", opacity: 0.75)',
+        'blend1 = Blend(mode: "multiply", opacity: 0.75)',
         'viewer1 = Viewer()',
         '',
         'blend1.base <- load1.image',
@@ -100,7 +100,7 @@ describe('integration: full graph DSL end-to-end', () => {
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
-      expect(ast.nodes.get('blend1')?.params.get('mode')).toEqual({ type: 'string', value: 'Multiply' });
+      expect(ast.nodes.get('blend1')?.params.get('mode')).toEqual({ type: 'dropdown', value: 'multiply', index: 1 });
       expect(ast.nodes.get('blend1')?.params.get('opacity')).toEqual({ type: 'float', value: 0.75 });
     });
 
@@ -177,7 +177,7 @@ describe('integration: full graph DSL end-to-end', () => {
         'load1 = LoadImage(path: "/bg.jpg")',
         'solid1 = SolidColor(color: rgba(1.0, 0.0, 0.0, 0.5), width: 1024, height: 768)',
         'blur1 = GaussianBlur(sigma: 10.0)',
-        'blend1 = Blend(mode: "Screen", opacity: 0.5)',
+        'blend1 = Blend(mode: "screen", opacity: 0.5)',
         'grade1 = BrightnessContrast(brightness: 0.1)',
         'viewer1 = Viewer()',
         '',
@@ -242,9 +242,8 @@ describe('integration: full graph DSL end-to-end', () => {
     });
 
     it('changing dropdown param produces setParam mutation', () => {
-      const before = 'blend1 = Blend(mode: "Normal")';
-      const after = 'blend1 = Blend(mode: "Overlay")';
-
+      const before = 'blend1 = Blend(mode: "normal")';
+      const after = 'blend1 = Blend(mode: "overlay")';
       const beforeAst = parseAndValidate(before);
       const afterAst = parseAndValidate(after);
 
@@ -252,7 +251,7 @@ describe('integration: full graph DSL end-to-end', () => {
       const setParam = mutations.find(m => m.type === 'setParam' && m.paramKey === 'mode');
       expect(setParam).toBeDefined();
       if (setParam?.type === 'setParam') {
-        expect(setParam.value).toEqual({ type: 'string', value: 'Overlay' });
+        expect(setParam.value).toEqual({ type: 'dropdown', value: 'overlay', index: 3 });
       }
     });
   });
@@ -270,20 +269,7 @@ describe('integration: full graph DSL end-to-end', () => {
       expect(result.errors[0].message).toContain('colors');
     });
 
-    it('rejects cycle in connections', () => {
-      const dsl = [
-        'blur1 = GaussianBlur()',
-        'invert1 = Invert()',
-        '',
-        'blur1.image <- invert1.image',
-        'invert1.image <- blur1.image',
-      ].join('\n');
-
-      const parseResult = parseDsl(dsl, mockSpecs);
-      expect(parseResult.errors).toHaveLength(0);
-      const validation = validateAst(parseResult.ast!, mockSpecs);
-      expect(validation.errors.some(e => e.message.includes('cycle'))).toBe(true);
-    });
+    // Cycle detection is handled by Rust via validate_edits() (see semanticValidator.ts).
 
     it('rejects unknown node type with helpful suggestion', () => {
       // Parser catches unknown types, so validation suggestion comes from there
@@ -336,13 +322,13 @@ describe('integration: full graph DSL end-to-end', () => {
       parseAndValidate(dsl);
     });
 
-    it('validates Dropdown with quoted string passes', () => {
-      const dsl = 'blend1 = Blend(mode: "Multiply")';
+    it('validates Dropdown with quoted snake_case string passes', () => {
+      const dsl = 'blend1 = Blend(mode: "multiply")';
       parseAndValidate(dsl);
     });
 
-    it('validates Dropdown with unquoted string passes', () => {
-      const dsl = 'blend1 = Blend(mode: Multiply)';
+    it('validates Dropdown with unquoted snake_case string passes', () => {
+      const dsl = 'blend1 = Blend(mode: multiply)';
       parseAndValidate(dsl);
     });
   });
