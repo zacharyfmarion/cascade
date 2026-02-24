@@ -122,10 +122,10 @@ impl Node for BrightnessContrast {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -264,10 +264,10 @@ impl Node for HueSaturation {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -374,25 +374,25 @@ impl Node for SeparateHsva {
                 image.data_window,
                 hue_data,
                 image.color_space.clone(),
-            );
+            )?;
             let saturation_image = Image::new_with_domain(
                 image.format.clone(),
                 image.data_window,
                 saturation_data,
                 image.color_space.clone(),
-            );
+            )?;
             let value_image = Image::new_with_domain(
                 image.format.clone(),
                 image.data_window,
                 value_data,
                 image.color_space.clone(),
-            );
+            )?;
             let alpha_image = Image::new_with_domain(
                 image.format.clone(),
                 image.data_window,
                 alpha_data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("hue".to_string(), Value::Image(hue_image));
             outputs.insert("saturation".to_string(), Value::Image(saturation_image));
@@ -490,7 +490,7 @@ impl Node for CombineHsva {
                 hue_image.data_window,
                 data,
                 hue_image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -583,10 +583,10 @@ impl Node for Invert {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -832,7 +832,7 @@ impl Node for ColorRampNode {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let mut outputs = HashMap::new();
                     outputs.insert("image".to_string(), Value::Image(output));
                     Ok(outputs)

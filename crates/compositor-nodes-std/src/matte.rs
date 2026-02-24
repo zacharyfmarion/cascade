@@ -1,3 +1,4 @@
+use compositor_core::error::CompositorError;
 use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
@@ -67,7 +68,7 @@ impl Node for Premultiply {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -143,7 +144,7 @@ impl Node for Unpremultiply {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -236,7 +237,7 @@ impl Node for SetAlpha {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -320,7 +321,7 @@ impl Node for ExtractChannel {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -455,13 +456,13 @@ impl Node for ChromaKey {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let matte_output = Image::new_with_domain(
                 image.format.clone(),
                 image.data_window,
                 matte_data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             outputs.insert("matte".to_string(), Value::Image(matte_output));
@@ -611,7 +612,7 @@ impl Node for Despill {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -718,7 +719,7 @@ impl Node for SeparateRgba {
                         out[3] = 1.0;
                     }
                 });
-            let make_image = |data: Vec<f32>| {
+            let make_image = |data: Vec<f32>| -> Result<Image, CompositorError> {
                 Image::new_with_domain(
                     image.format.clone(),
                     image.data_window,
@@ -727,10 +728,10 @@ impl Node for SeparateRgba {
                 )
             };
             let mut outputs = HashMap::new();
-            outputs.insert("red".to_string(), Value::Image(make_image(r_data)));
-            outputs.insert("green".to_string(), Value::Image(make_image(g_data)));
-            outputs.insert("blue".to_string(), Value::Image(make_image(b_data)));
-            outputs.insert("alpha".to_string(), Value::Image(make_image(a_data)));
+            outputs.insert("red".to_string(), Value::Image(make_image(r_data)?));
+            outputs.insert("green".to_string(), Value::Image(make_image(g_data)?));
+            outputs.insert("blue".to_string(), Value::Image(make_image(b_data)?));
+            outputs.insert("alpha".to_string(), Value::Image(make_image(a_data)?));
             Ok(outputs)
         })
     }
@@ -842,7 +843,7 @@ impl Node for CombineRgba {
                 out_dw,
                 data,
                 red_image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1027,7 +1028,7 @@ impl Node for CopyChannels {
                 out_dw,
                 data,
                 a.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1194,13 +1195,13 @@ impl Node for LuminanceKey {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let matte_output = Image::new_with_domain(
                 image.format.clone(),
                 image.data_window,
                 matte_data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             outputs.insert("matte".to_string(), Value::Image(matte_output));
@@ -1346,13 +1347,13 @@ impl Node for DifferenceMatte {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let matte_output = Image::new_with_domain(
                 image.format.clone(),
                 image.data_window,
                 matte_data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             outputs.insert("matte".to_string(), Value::Image(matte_output));
@@ -1508,7 +1509,7 @@ impl Node for EdgeBlur {
                 image.data_window,
                 out,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1616,7 +1617,7 @@ impl Node for MatteExpand {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1724,7 +1725,7 @@ impl Node for MatteShrink {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

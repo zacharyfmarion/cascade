@@ -159,7 +159,7 @@ pub fn decode_response_image(bytes: &[u8]) -> Result<Image, CompositorError> {
             out[2] = srgb_to_linear(raw[idx + 2]);
             out[3] = raw[idx + 3] as f32 / 255.0;
         });
-    Ok(Image::from_f32_data(width, height, data))
+    Ok(Image::from_f32_data(width, height, data)?)
 }
 
 fn srgb_to_linear(v: u8) -> f32 {

@@ -148,7 +148,7 @@ impl Node for Blend {
                 });
 
             let output =
-                Image::new_with_domain(base.format.clone(), out_dw, data, base.color_space.clone());
+                Image::new_with_domain(base.format.clone(), out_dw, data, base.color_space.clone())?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -265,7 +265,7 @@ impl Node for AlphaOver {
                 out_dw,
                 data,
                 background.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -511,7 +511,7 @@ impl Node for Merge {
                     },
                 };
                 let output =
-                    Image::new_with_domain(a.format.clone(), empty_dw, data, a.color_space.clone());
+                    Image::new_with_domain(a.format.clone(), empty_dw, data, a.color_space.clone())?;
                 let mut outputs = HashMap::new();
                 outputs.insert("image".to_string(), Value::Image(output));
                 return Ok(outputs);
@@ -661,7 +661,7 @@ impl Node for Merge {
                 });
 
             let output =
-                Image::new_with_domain(a.format.clone(), out_dw, data, a.color_space.clone());
+                Image::new_with_domain(a.format.clone(), out_dw, data, a.color_space.clone())?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

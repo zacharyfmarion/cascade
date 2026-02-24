@@ -112,7 +112,7 @@ impl Node for GpuKuwaharaNode {
             if width == 0 || height == 0 || size <= 0 {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                    apply_mask_cpu(image, &output, mask)
+                    apply_mask_cpu(image, &output, mask)?
                 } else {
                     output
                 };
@@ -126,7 +126,7 @@ impl Node for GpuKuwaharaNode {
                 .as_ref()
                 .map_err(|err| CompositorError::Other(err.clone()))?;
 
-            let mask_fallback = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+            let mask_fallback = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0])?;
             let mask_image = ctx
                 .get_optional_input_image("mask")
                 .unwrap_or(&mask_fallback);
@@ -890,7 +890,7 @@ async fn read_texture_to_image(
     for chunk in output_bytes.chunks_exact(2) {
         out.push(half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
     }
-    Ok(Image::from_f32_data(width, height, out))
+    Ok(Image::from_f32_data(width, height, out)?)
 }
 
 fn pack_image_data(image: &Image) -> (Vec<u8>, u32, u32) {
@@ -946,7 +946,7 @@ fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
         .collect()
 }
 
-fn apply_mask_cpu(original: &Image, processed: &Image, mask: &Image) -> Image {
+fn apply_mask_cpu(original: &Image, processed: &Image, mask: &Image) -> Result<Image, CompositorError> {
     let pixel_count = processed.pixel_count();
     let proc_width = processed.width as usize;
     let mask_width = mask.width as usize;

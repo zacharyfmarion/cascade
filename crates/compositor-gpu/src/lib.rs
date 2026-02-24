@@ -187,7 +187,7 @@ mod tests {
                 data.extend_from_slice(&[r, g, b, a]);
             }
         }
-        let image = compositor_core::types::Image::from_f32_data(4, 4, data);
+        let image = compositor_core::types::Image::from_f32_data(4, 4, data).unwrap();
 
         use compositor_core::node::EvalContext;
         use compositor_core::types::{FrameTime, Value};
@@ -271,7 +271,7 @@ mod tests {
                 img_data.extend_from_slice(&[r, g, b, a]);
             }
         }
-        let image = compositor_core::types::Image::from_f32_data(8, 8, img_data);
+        let image = compositor_core::types::Image::from_f32_data(8, 8, img_data).unwrap();
 
         let mut inputs = HashMap::new();
         inputs.insert("image".to_string(), Value::Image(image));
@@ -331,7 +331,7 @@ mod tests {
                 img_data.extend_from_slice(&[r, g, b, a]);
             }
         }
-        let image = compositor_core::types::Image::from_f32_data(8, 8, img_data);
+        let image = compositor_core::types::Image::from_f32_data(8, 8, img_data).unwrap();
 
         let mut inputs = HashMap::new();
         inputs.insert("image".to_string(), Value::Image(image));

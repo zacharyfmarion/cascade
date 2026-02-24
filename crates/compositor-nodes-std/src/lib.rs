@@ -580,7 +580,7 @@ mod tests {
         for pixel in data.chunks_exact_mut(4) {
             pixel.copy_from_slice(&color);
         }
-        Image::from_f32_data(w, h, data)
+        Image::from_f32_data(w, h, data).unwrap()
     }
 
     fn make_offset_image(color: [f32; 4]) -> Image {
@@ -596,6 +596,7 @@ mod tests {
             max: IVec2::new(104, 104),
         };
         Image::new_with_domain(format, data_window, data, ColorSpaceId::default_working())
+            .unwrap()
     }
 
     /// Helper: evaluate a node with a single image input and return the output image.
@@ -771,7 +772,7 @@ mod tests {
             data_window,
             data,
             ColorSpaceId::new(ColorSpaceId::ACESCG),
-        );
+        ).unwrap();
 
         let output = eval_image_node(&Invert::new(), input.clone(), HashMap::new());
 
@@ -870,7 +871,7 @@ mod tests {
         let color = [0.3, 0.6, 0.9, 1.0];
 
         // Zero-origin image
-        let zero_origin = Image::from_f32_data(4, 4, vec![color; 16].concat());
+        let zero_origin = Image::from_f32_data(4, 4, vec![color; 16].concat()).unwrap();
 
         // Offset image
         let offset = make_offset_image(color);
@@ -1085,8 +1086,8 @@ mod tests {
         operation: i64,
         opacity: f64,
     ) -> [f32; 4] {
-        let a = Image::from_f32_data(1, 1, a_color.to_vec());
-        let b = Image::from_f32_data(1, 1, b_color.to_vec());
+        let a = Image::from_f32_data(1, 1, a_color.to_vec()).unwrap();
+        let b = Image::from_f32_data(1, 1, b_color.to_vec()).unwrap();
         let node = Merge::new();
         let mut params = HashMap::new();
         params.insert("operation".to_string(), ParamValue::Int(operation));
@@ -1105,14 +1106,16 @@ mod tests {
             vec![
                 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 1.0,
             ],
-        );
+        )
+        .unwrap();
         let fg = Image::from_f32_data(
             2,
             2,
             vec![
                 1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.5,
             ],
-        );
+        )
+        .unwrap();
         let node = AlphaOver::new();
         let mut params = HashMap::new();
         params.insert("opacity".to_string(), ParamValue::Float(1.0));
@@ -1132,7 +1135,7 @@ mod tests {
     fn test_alpha_over_different_size_images() {
         // BG: 4x4 blue at (0,0)→(4,4)
         let bg_data = vec![[0.0f32, 0.0, 1.0, 1.0]; 16].concat();
-        let bg = Image::from_f32_data(4, 4, bg_data);
+        let bg = Image::from_f32_data(4, 4, bg_data).unwrap();
 
         // FG: 2x2 red at (1,1)→(3,3), offset within the BG
         let fg_data = vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat();
@@ -1145,7 +1148,8 @@ mod tests {
             fg_dw,
             fg_data,
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
 
         let node = AlphaOver::new();
         let mut params = HashMap::new();
@@ -1187,7 +1191,8 @@ mod tests {
     #[test]
     fn test_alpha_over_non_overlapping_images() {
         // A: red at (0,0)→(2,2)
-        let a = Image::from_f32_data(2, 2, vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat());
+        let a =
+            Image::from_f32_data(2, 2, vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat()).unwrap();
 
         // B: green at (10,10)→(12,12) — completely separate
         let b_dw = RectI {
@@ -1199,7 +1204,8 @@ mod tests {
             b_dw,
             vec![[0.0f32, 1.0, 0.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
 
         let node = AlphaOver::new();
         let mut params = HashMap::new();
@@ -1328,13 +1334,15 @@ mod tests {
             a_dw,
             vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
         let b = Image::new_with_domain(
             format,
             b_dw,
             vec![[0.0f32, 0.0, 1.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
         let node = Merge::new();
 
         let output = eval_two_input_node(&node, "A", a, "B", b, merge_params(0, 1, 1.0, 1.0));
@@ -1363,13 +1371,15 @@ mod tests {
             a_dw,
             vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
         let b = Image::new_with_domain(
             format,
             b_dw,
             vec![[0.0f32, 0.0, 1.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
         let node = Merge::new();
 
         let output =
@@ -1396,13 +1406,15 @@ mod tests {
             a_dw,
             vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
         let b = Image::new_with_domain(
             format,
             b_dw,
             vec![[0.0f32, 0.0, 1.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
         let node = Merge::new();
 
         let output =
@@ -1416,7 +1428,7 @@ mod tests {
     #[test]
     fn test_merge_different_size_images() {
         let bg_data = vec![[0.0f32, 0.0, 1.0, 1.0]; 16].concat();
-        let b = Image::from_f32_data(4, 4, bg_data);
+        let b = Image::from_f32_data(4, 4, bg_data).unwrap();
 
         let a_data = vec![[1.0f32, 0.0, 0.0, 1.0]; 4].concat();
         let a_dw = RectI {
@@ -1428,7 +1440,8 @@ mod tests {
             a_dw,
             a_data,
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
 
         let node = Merge::new();
         let output = eval_two_input_node(&node, "A", a, "B", b, merge_params(0, 0, 1.0, 1.0));
@@ -1480,8 +1493,8 @@ mod tests {
 
     #[test]
     fn test_merge_with_mix() {
-        let a = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]);
-        let b = Image::from_f32_data(1, 1, vec![0.0, 0.0, 1.0, 1.0]);
+        let a = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]).unwrap();
+        let b = Image::from_f32_data(1, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
         let node = Merge::new();
 
         let output = eval_two_input_node(&node, "A", a, "B", b, merge_params(0, 0, 1.0, 0.25));
@@ -1493,7 +1506,9 @@ mod tests {
     #[test]
     fn test_blend_different_size_images() {
         // Base: 4x4 mid-gray
-        let base = Image::from_f32_data(4, 4, vec![[0.5f32, 0.5, 0.5, 1.0]; 16].concat());
+        let base =
+            Image::from_f32_data(4, 4, vec![[0.5f32, 0.5, 0.5, 1.0]; 16].concat())
+                .unwrap();
 
         // Blend: 2x2 white at (1,1)→(3,3)
         let bl_dw = RectI {
@@ -1505,7 +1520,8 @@ mod tests {
             bl_dw,
             vec![[1.0f32, 1.0, 1.0, 1.0]; 4].concat(),
             ColorSpaceId::default_working(),
-        );
+        )
+        .unwrap();
 
         let node = Blend::new();
         let mut params = HashMap::new();
@@ -1538,9 +1554,10 @@ mod tests {
             bg_dw,
             vec![0.0f32; 64],
             ColorSpaceId::new(ColorSpaceId::ACESCG),
-        );
+        )
+        .unwrap();
 
-        let fg = Image::from_f32_data(2, 2, vec![0.0f32; 16]);
+        let fg = Image::from_f32_data(2, 2, vec![0.0f32; 16]).unwrap();
 
         let node = AlphaOver::new();
         let mut params = HashMap::new();
@@ -1655,7 +1672,8 @@ mod tests {
 
     #[test]
     fn test_rotate_data_window_expands() {
-        let input = Image::from_f32_data(4, 4, vec![[1.0f32, 0.0, 0.0, 1.0]; 16].concat());
+        let input =
+            Image::from_f32_data(4, 4, vec![[1.0f32, 0.0, 0.0, 1.0]; 16].concat()).unwrap();
 
         let node = Rotate::new();
         let mut params = HashMap::new();
@@ -1730,7 +1748,9 @@ mod tests {
 
     #[test]
     fn test_transform2d_scale_expands_bbox() {
-        let input = Image::from_f32_data(4, 4, vec![[0.5f32, 0.5, 0.5, 1.0]; 16].concat());
+        let input =
+            Image::from_f32_data(4, 4, vec![[0.5f32, 0.5, 0.5, 1.0]; 16].concat())
+                .unwrap();
 
         let node = Transform2D::new();
         let mut params = HashMap::new();
@@ -1780,7 +1800,8 @@ mod tests {
             0.5, 0.6, 0.7, 0.8,
             0.9, 0.0, 0.1, 1.0,
             0.0, 1.0, 0.0, 0.5,
-        ]);
+        ])
+        .unwrap();
         let sep = SeparateRgba::new();
         let mut inputs = HashMap::new();
         inputs.insert("image".to_string(), Value::Image(input.clone()));
@@ -1833,7 +1854,8 @@ mod tests {
             0.5, 0.6, 0.7, 0.8,
             0.9, 0.0, 0.1, 1.0,
             0.0, 1.0, 0.0, 0.5,
-        ]);
+        ])
+        .unwrap();
         // Step 1: Separate
         let sep = SeparateRgba::new();
         let mut inputs = HashMap::new();
@@ -1899,8 +1921,9 @@ mod tests {
             0.5, 0.6, 0.7, 0.8,
             0.9, 0.0, 0.1, 1.0,
             0.0, 1.0, 0.0, 0.5,
-        ]);
-        let b = Image::from_f32_data(2, 2, vec![1.0f32; 16]);
+        ])
+        .unwrap();
+        let b = Image::from_f32_data(2, 2, vec![1.0f32; 16]).unwrap();
         let node = CopyChannels::new();
         let mut params = HashMap::new();
         params.insert("red".to_string(), ParamValue::Int(0));   // A.R
@@ -1926,8 +1949,8 @@ mod tests {
     #[test]
     fn test_copy_channels_swap_from_b() {
         // Take RGB from B, Alpha from A
-        let a = Image::from_f32_data(1, 1, vec![0.1, 0.2, 0.3, 0.9]);
-        let b = Image::from_f32_data(1, 1, vec![0.7, 0.8, 0.9, 0.0]);
+        let a = Image::from_f32_data(1, 1, vec![0.1, 0.2, 0.3, 0.9]).unwrap();
+        let b = Image::from_f32_data(1, 1, vec![0.7, 0.8, 0.9, 0.0]).unwrap();
         let node = CopyChannels::new();
         let mut params = HashMap::new();
         params.insert("red".to_string(), ParamValue::Int(4));   // B.R
@@ -1945,8 +1968,8 @@ mod tests {
     #[test]
     fn test_copy_channels_shuffle() {
         // Shuffle: output R=A.Blue, G=B.Alpha, B=A.Red, A=B.Green
-        let a = Image::from_f32_data(1, 1, vec![0.1, 0.2, 0.3, 0.4]);
-        let b = Image::from_f32_data(1, 1, vec![0.5, 0.6, 0.7, 0.8]);
+        let a = Image::from_f32_data(1, 1, vec![0.1, 0.2, 0.3, 0.4]).unwrap();
+        let b = Image::from_f32_data(1, 1, vec![0.5, 0.6, 0.7, 0.8]).unwrap();
         let node = CopyChannels::new();
         let mut params = HashMap::new();
         params.insert("red".to_string(), ParamValue::Int(2));   // A.B
@@ -1976,7 +1999,7 @@ mod tests {
         params.insert("gain_r".to_string(), ParamValue::Float(1.0));
         params.insert("gain_g".to_string(), ParamValue::Float(1.0));
         params.insert("gain_b".to_string(), ParamValue::Float(1.0));
-        let input = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 0.9]);
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 0.9]).unwrap();
         let output = eval_image_node(&node, input.clone(), params);
         let px = output.get_pixel_f32(0, 0);
         assert!(approx_eq(px[0], 0.5), "R identity: {}", px[0]);
@@ -1998,7 +2021,7 @@ mod tests {
         params.insert("gain_r".to_string(), ParamValue::Float(1.0));
         params.insert("gain_g".to_string(), ParamValue::Float(1.0));
         params.insert("gain_b".to_string(), ParamValue::Float(1.0));
-        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]).unwrap();
         let output = eval_image_node(&node, input, params);
         let px = output.get_pixel_f32(0, 0);
         assert!(approx_eq(px[0], 0.6), "R lifted +0.1: {}", px[0]);
@@ -2019,7 +2042,7 @@ mod tests {
         params.insert("gain_r".to_string(), ParamValue::Float(2.0));
         params.insert("gain_g".to_string(), ParamValue::Float(0.5));
         params.insert("gain_b".to_string(), ParamValue::Float(1.0));
-        let input = Image::from_f32_data(1, 1, vec![0.4, 0.6, 0.8, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.4, 0.6, 0.8, 1.0]).unwrap();
         let output = eval_image_node(&node, input, params);
         let px = output.get_pixel_f32(0, 0);
         assert!(approx_eq(px[0], 0.8), "R gain 2x: {}", px[0]);
@@ -2040,7 +2063,7 @@ mod tests {
         params.insert("gain_r".to_string(), ParamValue::Float(1.0));
         params.insert("gain_g".to_string(), ParamValue::Float(1.0));
         params.insert("gain_b".to_string(), ParamValue::Float(1.0));
-        let input = Image::from_f32_data(1, 1, vec![0.25, 0.5, 0.5, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.25, 0.5, 0.5, 1.0]).unwrap();
         let output = eval_image_node(&node, input, params);
         let px = output.get_pixel_f32(0, 0);
         // gamma=2 means inv_gamma=0.5, so 0.25^0.5 = 0.5
@@ -2080,7 +2103,7 @@ mod tests {
         params.insert("max_b".to_string(), ParamValue::Float(1.0));
         params.insert("clamp_alpha".to_string(), ParamValue::Bool(false));
         // HDR values outside [0,1]
-        let input = Image::from_f32_data(1, 1, vec![-0.1, 1.5, 0.5, 2.0]);
+        let input = Image::from_f32_data(1, 1, vec![-0.1, 1.5, 0.5, 2.0]).unwrap();
         let output = eval_image_node(&node, input, params);
         let px = output.get_pixel_f32(0, 0);
         assert!(approx_eq(px[0], 0.0), "R clamped min: {}", px[0]);
@@ -2100,7 +2123,7 @@ mod tests {
         params.insert("max_g".to_string(), ParamValue::Float(1.0));
         params.insert("max_b".to_string(), ParamValue::Float(1.0));
         params.insert("clamp_alpha".to_string(), ParamValue::Bool(true));
-        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.5]);
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.5]).unwrap();
         let output = eval_image_node(&node, input, params);
         let px = output.get_pixel_f32(0, 0);
         assert!(approx_eq(px[3], 1.0), "A clamped: {}", px[3]);
@@ -2117,7 +2140,7 @@ mod tests {
         params.insert("max_g".to_string(), ParamValue::Float(0.8));
         params.insert("max_b".to_string(), ParamValue::Float(0.8));
         params.insert("clamp_alpha".to_string(), ParamValue::Bool(false));
-        let input = Image::from_f32_data(1, 1, vec![0.0, 0.5, 1.0, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.0, 0.5, 1.0, 1.0]).unwrap();
         let output = eval_image_node(&node, input, params);
         let px = output.get_pixel_f32(0, 0);
         assert!(approx_eq(px[0], 0.2), "R clamped to min: {}", px[0]);
@@ -2199,7 +2222,7 @@ mod tests {
             }
         }
 
-        Image::from_f32_data(img.width, img.height, out)
+        Image::from_f32_data(img.width, img.height, out).unwrap()
     }
 
     #[test]
@@ -2221,7 +2244,7 @@ mod tests {
             }
         }
 
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
 
         for sigma in [0.5f64, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0, 10.0] {
             let node = GaussianBlur::new();
@@ -2307,7 +2330,7 @@ mod tests {
             }
         }
 
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
         let node = GaussianBlur::new();
         let mut params = HashMap::new();
         params.insert("sigma".to_string(), ParamValue::Float(3.0));
@@ -2376,7 +2399,8 @@ mod tests {
                 1.0, 0.5, 0.25, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 0.1, 0.2, 0.3,
                 0.4,
             ],
-        );
+        )
+        .unwrap();
         let node = Dot::new();
         let output = eval_image_node(&node, input.clone(), HashMap::new());
         assert_eq!(output.data, input.data);
@@ -2453,7 +2477,7 @@ mod tests {
     #[test]
     fn test_luminance_key_bright_keyed() {
         // Bright pixel (lum=1.0) with low=0.2, high=0.8 → key=1.0
-        let input = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]).unwrap();
         let node = LuminanceKey::new();
         let mut params = HashMap::new();
         params.insert("low".to_string(), ParamValue::Float(0.2));
@@ -2474,7 +2498,7 @@ mod tests {
     #[test]
     fn test_luminance_key_dark_suppressed() {
         // Dark pixel (lum=0.0) with low=0.2, high=0.8 → key=0.0
-        let input = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 1.0]).unwrap();
         let node = LuminanceKey::new();
         let mut params = HashMap::new();
         params.insert("low".to_string(), ParamValue::Float(0.2));
@@ -2493,7 +2517,7 @@ mod tests {
     #[test]
     fn test_luminance_key_midtone_soft() {
         // Pixel with lum=0.5, low=0.2, high=0.8 → key=(0.5-0.2)/0.6 = 0.5
-        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]).unwrap();
         let node = LuminanceKey::new();
         let mut params = HashMap::new();
         params.insert("low".to_string(), ParamValue::Float(0.2));
@@ -2512,7 +2536,7 @@ mod tests {
     #[test]
     fn test_luminance_key_invert() {
         // Bright pixel with invert → key should flip
-        let input = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![1.0, 1.0, 1.0, 1.0]).unwrap();
         let node = LuminanceKey::new();
         let mut params = HashMap::new();
         params.insert("low".to_string(), ParamValue::Float(0.2));
@@ -2532,7 +2556,7 @@ mod tests {
     #[test]
     fn test_luminance_key_red_channel() {
         // Red=0.8, Green=0.0, Blue=0.0 → channel=1 (Red), low=0.2, high=0.8 → key=1.0
-        let input = Image::from_f32_data(1, 1, vec![0.8, 0.0, 0.0, 1.0]);
+        let input = Image::from_f32_data(1, 1, vec![0.8, 0.0, 0.0, 1.0]).unwrap();
         let node = LuminanceKey::new();
         let mut params = HashMap::new();
         params.insert("low".to_string(), ParamValue::Float(0.2));
@@ -2550,8 +2574,8 @@ mod tests {
     #[test]
     fn test_difference_matte_identical() {
         // Identical image and plate → difference=0 → key=0 (background keyed out)
-        let image = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 1.0]);
-        let plate = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 1.0]);
+        let image = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 1.0]).unwrap();
+        let plate = Image::from_f32_data(1, 1, vec![0.5, 0.3, 0.7, 1.0]).unwrap();
         let mut params = HashMap::new();
         params.insert("tolerance".to_string(), ParamValue::Float(0.1));
         params.insert("softness".to_string(), ParamValue::Float(0.1));
@@ -2567,8 +2591,8 @@ mod tests {
     #[test]
     fn test_difference_matte_very_different() {
         // Very different → large distance → key=1.0
-        let image = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]);
-        let plate = Image::from_f32_data(1, 1, vec![0.0, 1.0, 0.0, 1.0]);
+        let image = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]).unwrap();
+        let plate = Image::from_f32_data(1, 1, vec![0.0, 1.0, 0.0, 1.0]).unwrap();
         let mut params = HashMap::new();
         params.insert("tolerance".to_string(), ParamValue::Float(0.1));
         params.insert("softness".to_string(), ParamValue::Float(0.1));
@@ -2585,9 +2609,9 @@ mod tests {
     #[test]
     fn test_difference_matte_soft_edge() {
         // Small difference within softness range → partial key
-        let image = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]);
+        let image = Image::from_f32_data(1, 1, vec![0.5, 0.5, 0.5, 1.0]).unwrap();
         // dist = sqrt(0.15^2 * 3) ≈ 0.2598
-        let plate = Image::from_f32_data(1, 1, vec![0.35, 0.35, 0.35, 1.0]);
+        let plate = Image::from_f32_data(1, 1, vec![0.35, 0.35, 0.35, 1.0]).unwrap();
         let mut params = HashMap::new();
         params.insert("tolerance".to_string(), ParamValue::Float(0.1));
         params.insert("softness".to_string(), ParamValue::Float(0.3));
@@ -2644,7 +2668,7 @@ mod tests {
                 // right half stays 0,0,0,0
             }
         }
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
         let node = EdgeBlur::new();
         let mut params = HashMap::new();
         params.insert("radius".to_string(), ParamValue::Float(2.0));
@@ -2681,7 +2705,7 @@ mod tests {
         data[center + 2] = 1.0;
         data[center + 3] = 1.0;
 
-        let input = Image::from_f32_data(3, 3, data);
+        let input = Image::from_f32_data(3, 3, data).unwrap();
         let node = MatteExpand::new();
         let mut params = HashMap::new();
         params.insert("radius".to_string(), ParamValue::Int(1));
@@ -2709,7 +2733,7 @@ mod tests {
             1.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 1.0, 1.0,
         ];
-        let input = Image::from_f32_data(2, 1, data);
+        let input = Image::from_f32_data(2, 1, data).unwrap();
         let node = MatteExpand::new();
         let mut params = HashMap::new();
         params.insert("radius".to_string(), ParamValue::Int(1));
@@ -2729,7 +2753,7 @@ mod tests {
     fn test_matte_shrink_erodes_alpha() {
         // 3x3 fully opaque, shrink by 1 → only center should remain
         let data = vec![1.0f32; 9 * 4]; // all pixels [1,1,1,1]
-        let input = Image::from_f32_data(3, 3, data);
+        let input = Image::from_f32_data(3, 3, data).unwrap();
         let node = MatteShrink::new();
         let mut params = HashMap::new();
         params.insert("radius".to_string(), ParamValue::Int(1));
@@ -2747,7 +2771,7 @@ mod tests {
         // Make top-left corner transparent
         data[0] = 1.0; data[1] = 1.0; data[2] = 1.0; data[3] = 0.0;
 
-        let input = Image::from_f32_data(3, 3, data);
+        let input = Image::from_f32_data(3, 3, data).unwrap();
         let node = MatteShrink::new();
         let mut params = HashMap::new();
         params.insert("radius".to_string(), ParamValue::Int(1));
@@ -2771,7 +2795,7 @@ mod tests {
             0.8, 0.3, 0.5, 1.0,
             0.2, 0.7, 0.1, 0.0,
         ];
-        let input = Image::from_f32_data(2, 1, data);
+        let input = Image::from_f32_data(2, 1, data).unwrap();
         let node = MatteShrink::new();
         let mut params = HashMap::new();
         params.insert("radius".to_string(), ParamValue::Int(1));
@@ -2788,7 +2812,9 @@ mod tests {
 
     #[test]
     fn test_directional_blur_zero_length_identity() {
-        let input = Image::from_f32_data(4, 4, vec![[0.5f32, 0.3, 0.7, 1.0]; 16].concat());
+        let input =
+            Image::from_f32_data(4, 4, vec![[0.5f32, 0.3, 0.7, 1.0]; 16].concat())
+                .unwrap();
         let node = DirectionalBlur::new();
         let mut params = HashMap::new();
         params.insert("length".to_string(), ParamValue::Float(0.0));
@@ -2821,7 +2847,7 @@ mod tests {
         data[mid * 4 + 2] = 1.0;
         data[mid * 4 + 3] = 1.0;
 
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
         let node = DirectionalBlur::new();
         let mut params = HashMap::new();
         params.insert("length".to_string(), ParamValue::Float(6.0));
@@ -2880,7 +2906,7 @@ mod tests {
                 }
             }
         }
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
         let node = DirectionalBlur::new();
         let mut params = HashMap::new();
         params.insert("length".to_string(), ParamValue::Float(8.0));
@@ -2903,7 +2929,9 @@ mod tests {
 
     #[test]
     fn test_radial_blur_zero_strength_identity() {
-        let input = Image::from_f32_data(4, 4, vec![[0.5f32, 0.3, 0.7, 1.0]; 16].concat());
+        let input =
+            Image::from_f32_data(4, 4, vec![[0.5f32, 0.3, 0.7, 1.0]; 16].concat())
+                .unwrap();
         let node = RadialBlur::new();
         let mut params = HashMap::new();
         params.insert("strength".to_string(), ParamValue::Float(0.0));
@@ -2948,7 +2976,7 @@ mod tests {
                 }
             }
         }
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
         let node = RadialBlur::new();
         let mut params = HashMap::new();
         params.insert("strength".to_string(), ParamValue::Float(0.5));
@@ -2999,7 +3027,7 @@ mod tests {
                 }
             }
         }
-        let input = Image::from_f32_data(w, h, data);
+        let input = Image::from_f32_data(w, h, data).unwrap();
         let node = RadialBlur::new();
         let mut params = HashMap::new();
         params.insert("strength".to_string(), ParamValue::Float(0.5));
@@ -3072,7 +3100,7 @@ mod tests {
         for pixel in data.chunks_exact_mut(4) {
             pixel.copy_from_slice(&[1.0, 1.0, 1.0, 1.0]);
         }
-        let input = Image::from_f32_data(4, 4, data);
+        let input = Image::from_f32_data(4, 4, data).unwrap();
         let node = CornerPin::new();
         let mut params = HashMap::new();
         params.insert("tl_x".to_string(), ParamValue::Float(0.25));
@@ -3111,7 +3139,7 @@ mod tests {
                 uv_data[idx + 3] = 1.0;
             }
         }
-        let uv_map = Image::from_f32_data(4, 4, uv_data);
+        let uv_map = Image::from_f32_data(4, 4, uv_data).unwrap();
 
         let node = STMap::new();
         let mut params = HashMap::new();
@@ -3141,7 +3169,7 @@ mod tests {
     #[test]
     fn test_stmap_out_of_bounds_uv() {
         let input = make_test_image(4, 4, [1.0, 0.5, 0.0, 1.0]);
-        let uv_map = Image::from_f32_data(1, 1, vec![2.0, 2.0, 0.0, 1.0]);
+        let uv_map = Image::from_f32_data(1, 1, vec![2.0, 2.0, 0.0, 1.0]).unwrap();
 
         let node = STMap::new();
         let mut params = HashMap::new();

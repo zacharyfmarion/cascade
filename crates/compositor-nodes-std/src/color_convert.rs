@@ -79,7 +79,7 @@ impl Node for ColorConvert {
             processor.apply(&mut data);
 
             let output =
-                Image::new_with_domain(image.format.clone(), image.data_window, data, to_id);
+                Image::new_with_domain(image.format.clone(), image.data_window, data, to_id)?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

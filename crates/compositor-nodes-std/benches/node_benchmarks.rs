@@ -22,7 +22,7 @@ fn create_test_image(width: u32, height: u32) -> Image {
             data[idx + 3] = 1.0;
         }
     }
-    Image::from_f32_data(width, height, data)
+    Image::from_f32_data(width, height, data).unwrap()
 }
 
 fn create_test_mask(width: u32, height: u32) -> Image {
@@ -38,7 +38,7 @@ fn create_test_mask(width: u32, height: u32) -> Image {
             data[idx + 3] = gray;
         }
     }
-    Image::from_f32_data(width, height, data)
+    Image::from_f32_data(width, height, data).unwrap()
 }
 
 fn make_context<'a>(

@@ -264,7 +264,7 @@ impl Node for GpuKernelNode {
                         input_views.push(view);
                     }
                     None => {
-                        let dummy = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 0.0]);
+                        let dummy = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 0.0])?;
                         let texture = create_storage_texture(
                             &self.context.device,
                             1,
@@ -500,7 +500,7 @@ pub(crate) async fn read_texture_to_image(
     for chunk in output_bytes.chunks_exact(2) {
         out.push(f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
     }
-    Ok(Image::from_f32_data(width, height, out))
+    Ok(Image::from_f32_data(width, height, out)?)
 }
 
 fn collect_image_inputs<'a>(

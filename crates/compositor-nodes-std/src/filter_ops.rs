@@ -79,7 +79,7 @@ impl Node for Sharpen {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -94,7 +94,7 @@ impl Node for Sharpen {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -129,10 +129,10 @@ impl Node for Sharpen {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -211,7 +211,7 @@ impl Node for EdgeDetect {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -266,10 +266,10 @@ impl Node for EdgeDetect {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -347,7 +347,7 @@ impl Node for Dilate {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -368,10 +368,10 @@ impl Node for Dilate {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -449,7 +449,7 @@ impl Node for Erode {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -470,10 +470,10 @@ impl Node for Erode {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -551,7 +551,7 @@ impl Node for Median {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -591,10 +591,10 @@ impl Node for Median {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -730,10 +730,10 @@ impl Node for Vignette {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -894,10 +894,10 @@ impl Node for Glow {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -1123,7 +1123,7 @@ impl Node for LensDistortion {
                 let output = image.clone();
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, &output, mask)
+                    crate::mask_utils::apply_mask(original, &output, mask)?
                 } else {
                     output
                 };
@@ -1187,10 +1187,10 @@ impl Node for LensDistortion {
                 image.data_window,
                 out_data,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -1343,7 +1343,7 @@ impl Node for DirectionalBlur {
             if length < 0.5 {
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, image, mask)
+                    crate::mask_utils::apply_mask(original, image, mask)?
                 } else {
                     image.clone()
                 };
@@ -1441,10 +1441,10 @@ impl Node for DirectionalBlur {
                 image.data_window,
                 out,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };
@@ -1548,7 +1548,7 @@ impl Node for RadialBlur {
             if strength < 0.001 {
                 let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                     let original = ctx.get_input_image("image")?;
-                    crate::mask_utils::apply_mask(original, image, mask)
+                    crate::mask_utils::apply_mask(original, image, mask)?
                 } else {
                     image.clone()
                 };
@@ -1637,10 +1637,10 @@ impl Node for RadialBlur {
                 image.data_window,
                 out,
                 image.color_space.clone(),
-            );
+            )?;
             let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let original = ctx.get_input_image("image")?;
-                crate::mask_utils::apply_mask(original, &output, mask)
+                crate::mask_utils::apply_mask(original, &output, mask)?
             } else {
                 output
             };

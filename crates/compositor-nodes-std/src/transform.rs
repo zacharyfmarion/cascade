@@ -1,3 +1,4 @@
+use compositor_core::error::CompositorError;
 use compositor_core::node::{EvalContext, Node, NodeFuture};
 use compositor_core::types::*;
 use rayon::prelude::*;
@@ -81,9 +82,9 @@ impl Node for Resize {
             let filter = ctx.get_param_int("filter")?.clamp(0, 2) as i32;
 
             let output = match filter {
-                0 => resize_nearest(image, width, height),
-                1 => resize_bilinear(image, width, height),
-                _ => resize_bicubic(image, width, height),
+                0 => resize_nearest(image, width, height)?,
+                1 => resize_bilinear(image, width, height)?,
+                _ => resize_bicubic(image, width, height)?,
             };
 
             let mut outputs = HashMap::new();
@@ -218,7 +219,7 @@ impl Node for Crop {
                     empty_dw,
                     data,
                     image.color_space.clone(),
-                );
+                )?;
                 let mut outputs = HashMap::new();
                 outputs.insert("image".to_string(), Value::Image(output));
                 return Ok(outputs);
@@ -245,7 +246,7 @@ impl Node for Crop {
                 out_dw,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -342,7 +343,7 @@ impl Node for Flip {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -512,7 +513,7 @@ impl Node for Rotate {
                 out_dw,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -613,7 +614,7 @@ impl Node for Translate {
     }
 }
 
-fn resize_nearest(image: &Image, out_w: u32, out_h: u32) -> Image {
+fn resize_nearest(image: &Image, out_w: u32, out_h: u32) -> Result<Image, CompositorError> {
     let in_w = image.width as usize;
     let in_h = image.height as usize;
     let out_w_usize = out_w as usize;
@@ -645,7 +646,7 @@ fn resize_nearest(image: &Image, out_w: u32, out_h: u32) -> Image {
     )
 }
 
-fn resize_bilinear(image: &Image, out_w: u32, out_h: u32) -> Image {
+fn resize_bilinear(image: &Image, out_w: u32, out_h: u32) -> Result<Image, CompositorError> {
     let in_w = image.width as usize;
     let in_h = image.height as usize;
     let out_w_usize = out_w as usize;
@@ -675,7 +676,7 @@ fn resize_bilinear(image: &Image, out_w: u32, out_h: u32) -> Image {
     )
 }
 
-fn resize_bicubic(image: &Image, out_w: u32, out_h: u32) -> Image {
+fn resize_bicubic(image: &Image, out_w: u32, out_h: u32) -> Result<Image, CompositorError> {
     let in_w = image.width as usize;
     let in_h = image.height as usize;
     let out_w_usize = out_w as usize;
@@ -1088,7 +1089,7 @@ impl Node for Transform2D {
                 out_dw,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1317,7 +1318,7 @@ impl Node for CornerPin {
                 out_dw,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1505,7 +1506,7 @@ impl Node for STMap {
                 out_dw,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

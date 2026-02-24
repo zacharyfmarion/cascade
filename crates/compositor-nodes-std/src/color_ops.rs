@@ -189,10 +189,10 @@ impl Node for Levels {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -565,10 +565,10 @@ impl Node for Curves {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -818,10 +818,10 @@ impl Node for ColorBalance {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1002,10 +1002,10 @@ impl Node for ChannelShuffle {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1119,10 +1119,10 @@ impl Node for Threshold {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1242,10 +1242,10 @@ impl Node for Posterize {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1385,10 +1385,10 @@ impl Node for Gamma {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1529,10 +1529,10 @@ impl Node for WhiteBalance {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1650,10 +1650,10 @@ impl Node for Vibrance {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -1920,10 +1920,10 @@ impl Node for GradientMap {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -2091,10 +2091,10 @@ impl Node for ToneMap {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -2419,10 +2419,10 @@ impl Node for Grade {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };
@@ -2626,10 +2626,10 @@ impl Node for Clamp {
                         image.data_window,
                         data,
                         image.color_space.clone(),
-                    );
+                    )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
                         let original = ctx.get_input_image("image")?;
-                        crate::mask_utils::apply_mask(original, &output, mask)
+                        crate::mask_utils::apply_mask(original, &output, mask)?
                     } else {
                         output
                     };

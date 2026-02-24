@@ -1456,7 +1456,7 @@ impl Engine {
                         CompositorError::Other(format!("No frame at index {frame_index}"))
                     })?;
 
-                Ok(Image::from_f32_data(frame.width, frame.height, frame.data))
+                Ok(Image::from_f32_data(frame.width, frame.height, frame.data)?)
             });
 
         video_node.set_frame_loader(frame_loader)?;

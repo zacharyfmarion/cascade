@@ -304,7 +304,7 @@ impl Node for ColorPaletteNode {
                 data.push(color[3] as f32);
             }
 
-            let image = Image::from_f32_data(width, height, data);
+            let image = Image::from_f32_data(width, height, data)?;
             let mut outputs = HashMap::new();
             outputs.insert("palette".to_string(), Value::Image(image));
             Ok(outputs)

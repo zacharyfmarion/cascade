@@ -1,10 +1,15 @@
+use compositor_core::error::CompositorError;
 use compositor_core::types::Image;
 use rayon::prelude::*;
 
 /// Apply a mask to blend between original and processed images.
 /// For each pixel: output = lerp(original, processed, mask_luminance)
 /// mask_luminance = 0.2126*R + 0.7152*G + 0.0722*B from the mask image
-pub fn apply_mask(original: &Image, processed: &Image, mask: &Image) -> Image {
+pub fn apply_mask(
+    original: &Image,
+    processed: &Image,
+    mask: &Image,
+) -> Result<Image, CompositorError> {
     let pixel_count = processed.pixel_count();
     let proc_width = processed.width as usize;
     let mask_width = mask.width as usize;

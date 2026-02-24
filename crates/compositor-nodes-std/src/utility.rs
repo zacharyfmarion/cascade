@@ -132,7 +132,7 @@ impl Node for MapRange {
                 image.data_window,
                 data,
                 image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -481,7 +481,7 @@ impl Node for ImageMath {
                 a_image.data_window,
                 data,
                 a_image.color_space.clone(),
-            );
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

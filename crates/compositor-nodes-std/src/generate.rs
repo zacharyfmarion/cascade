@@ -1057,7 +1057,7 @@ impl Node for RasterizeField {
             let field = ctx.get_input_field("field")?;
             let width = ctx.get_param_int("width")? as u32;
             let height = ctx.get_param_int("height")? as u32;
-            let image = field.rasterize(width, height);
+            let image = field.rasterize(width, height)?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(image));
             Ok(outputs)
@@ -1987,7 +1987,7 @@ impl Node for Text {
                 }
             }
 
-            let output = Image::from_f32_data(w, h, data);
+            let output = Image::from_f32_data(w, h, data)?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -2071,7 +2071,7 @@ impl Node for UVMap {
                 out[3] = 1.0;
             });
 
-            let output = Image::from_f32_data(w, h, data);
+            let output = Image::from_f32_data(w, h, data)?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)

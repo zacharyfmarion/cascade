@@ -46,7 +46,7 @@ impl LoadImage {
                 out[2] = lut[raw[idx + 2] as usize];
                 out[3] = raw[idx + 3] as f32 / 255.0;
             });
-        let image = Image::from_f32_data(width, height, data);
+        let image = Image::from_f32_data(width, height, data)?;
         let mut guard = self
             .image
             .lock()
@@ -197,7 +197,7 @@ impl LoadImageSequence {
                 out[2] = lut[raw[idx + 2] as usize];
                 out[3] = raw[idx + 3] as f32 / 255.0;
             });
-        let image = Image::from_f32_data(width, height, data);
+        let image = Image::from_f32_data(width, height, data)?;
         let mut cache = self
             .frame_cache
             .lock()
@@ -296,7 +296,7 @@ impl LoadImageSequence {
                 out[2] = lut[raw[idx + 2] as usize];
                 out[3] = raw[idx + 3] as f32 / 255.0;
             });
-        Ok(Image::from_f32_data(width, height, data))
+        Ok(Image::from_f32_data(width, height, data)?)
     }
 }
 
