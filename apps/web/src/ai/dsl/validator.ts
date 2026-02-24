@@ -121,7 +121,7 @@ const isParamTypeMatch = (paramSpec: ParamSpec, paramValue: DslParamValue): bool
   if (paramSpec.ui_hint.type === 'ColorPalette') return paramValue.type === 'palette';
   if (paramSpec.ui_hint.type === 'ColorRamp') return paramValue.type === 'ramp';
   if (paramSpec.ui_hint.type === 'CurveEditor') return paramValue.type === 'curve';
-  if (paramSpec.ui_hint.type === 'Dropdown') return paramValue.type === 'string';
+  if (paramSpec.ui_hint.type === 'Dropdown') return paramValue.type === 'dropdown';
   // Simple types: compare against ty
   return dslValueType(paramValue) === paramSpec.ty;
 };
@@ -130,7 +130,7 @@ const expectedLabelForParam = (paramSpec: ParamSpec): string => {
   if (paramSpec.ui_hint.type === 'ColorPalette') return 'palette [rgba(...), ...]';
   if (paramSpec.ui_hint.type === 'ColorRamp') return 'ramp [pos: rgba(...), ...]';
   if (paramSpec.ui_hint.type === 'CurveEditor') return 'curve [(x, y), ...]';
-  if (paramSpec.ui_hint.type === 'Dropdown') return 'string';
+  if (paramSpec.ui_hint.type === 'Dropdown') return 'dropdown option string';
   return expectedLabel(paramSpec.ty);
 };
 

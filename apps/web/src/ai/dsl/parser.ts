@@ -1,5 +1,5 @@
 import type { DslAst, DslConnection, DslNode, DslParamValue, DslSourceMap, DslSourceSpan } from './types';
-import { pascalToSnake } from './types';
+import { pascalToSnake, labelToSnake, snakeToLabel } from './types';
 import type { NodeSpec, ParamSpec } from '../../store/types';
 
 interface ParseError {
@@ -206,9 +206,30 @@ const expectedFormatHint = (paramSpec: ParamSpec): string => {
 
 const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | null => {
   const trimmed = raw.trim();
-  if (paramSpec.ui_hint.type === 'Dropdown') {
-    const value = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
-    return { type: 'string', value };
+  if (paramSpec.ui_hint.type === 'Dropdown' && 'data' in paramSpec.ui_hint) {
+    const options = paramSpec.ui_hint.data;
+    const unquoted = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+    // Accept snake_case string → resolve to index
+    const labelFromSnake = snakeToLabel(unquoted, options);
+    if (labelFromSnake !== undefined) {
+      const index = options.indexOf(labelFromSnake);
+      return { type: 'dropdown', value: labelToSnake(labelFromSnake), index };
+    }
+    // Accept exact label match (case-insensitive) for robustness
+    const exactMatch = options.find(o => o.toLowerCase() === unquoted.toLowerCase());
+    if (exactMatch !== undefined) {
+      const index = options.indexOf(exactMatch);
+      return { type: 'dropdown', value: labelToSnake(exactMatch), index };
+    }
+    // Accept legacy integer index
+    const num = parseNumber(unquoted);
+    if (num !== null) {
+      const idx = Math.round(num);
+      if (idx >= 0 && idx < options.length) {
+        return { type: 'dropdown', value: labelToSnake(options[idx]), index: idx };
+      }
+    }
+    return null;
   }
 
   // Complex structured types — route by ui_hint before ty, because ty is

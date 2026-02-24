@@ -1,6 +1,6 @@
 import { HandleMap } from './handleMap';
 import type { DslParamValue } from './types';
-import { snakeToPascal } from './types';
+import { snakeToPascal, labelToSnake } from './types';
 import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
@@ -26,7 +26,15 @@ const formatColor = (color: [number, number, number, number]): string => {
   return `rgba(${formatFloat(r)}, ${formatFloat(g)}, ${formatFloat(b)}, ${formatFloat(a)})`;
 };
 
-const unwrapParamValue = (paramValue: ParamValue): DslParamValue => {
+const unwrapParamValue = (paramSpec: ParamSpec, paramValue: ParamValue): DslParamValue => {
+  // Dropdown params are stored as Int in the engine but should be represented
+  // as snake_case strings in the DSL.
+  if (paramSpec.ui_hint.type === 'Dropdown' && 'data' in paramSpec.ui_hint && 'Int' in paramValue) {
+    const options = paramSpec.ui_hint.data;
+    const idx = paramValue.Int;
+    const label = idx >= 0 && idx < options.length ? options[idx] : undefined;
+    return { type: 'dropdown', value: label ? labelToSnake(label) : String(idx), index: idx };
+  }
   if ('Float' in paramValue) return { type: 'float', value: paramValue.Float };
   if ('Int' in paramValue) return { type: 'int', value: paramValue.Int };
   if ('Bool' in paramValue) return { type: 'bool', value: paramValue.Bool };
@@ -63,6 +71,8 @@ const formatDslValue = (paramValue: DslParamValue): string => {
         .join(', ')}]`;
     case 'palette':
       return `[${paramValue.value.map((color) => formatColor(color)).join(', ')}]`;
+    case 'dropdown':
+      return `"${paramValue.value}"`;
     default: {
       const exhaustive: never = paramValue;
       return String(exhaustive);
@@ -71,7 +81,7 @@ const formatDslValue = (paramValue: DslParamValue): string => {
 };
 
 const formatParamEntry = (paramSpec: ParamSpec, paramValue: ParamValue): string => {
-  const dslValue = unwrapParamValue(paramValue);
+  const dslValue = unwrapParamValue(paramSpec, paramValue);
   return `${paramSpec.key}: ${formatDslValue(dslValue)}`;
 };
 

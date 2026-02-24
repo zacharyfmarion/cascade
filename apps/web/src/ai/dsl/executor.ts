@@ -59,6 +59,8 @@ const dslParamToStoreParam = (dslValue: DslParamValue): ParamValue => {
       return { CurvePoints: dslValue.value };
     case 'palette':
       return { ColorPalette: dslValue.value };
+    case 'dropdown':
+      return createParamValue('Int', dslValue.index);
     default:
       return createParamValue('String', '');
   }

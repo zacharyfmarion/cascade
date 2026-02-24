@@ -20,7 +20,8 @@ export type DslParamValue =
   | { type: 'color'; value: [number, number, number, number] }
   | { type: 'ramp'; value: { position: number; color: [number, number, number, number] }[] }
   | { type: 'curve'; value: { x: number; y: number }[] }
-  | { type: 'palette'; value: [number, number, number, number][] };
+  | { type: 'palette'; value: [number, number, number, number][] }
+  | { type: 'dropdown'; value: string; index: number };
 
 export interface DslConnection {
   fromHandle: string;
@@ -89,6 +90,14 @@ export const pascalToSnake = (name: string): string =>
         .toLowerCase()
     )
     .join('::');
+
+/** Convert a dropdown label like "Soft Light" or "Rounded Rectangle" to snake_case. */
+export const labelToSnake = (label: string): string =>
+  label.replace(/\s+/g, '_').toLowerCase();
+
+/** Convert a snake_case value like "soft_light" back to a display label by matching against options. */
+export const snakeToLabel = (snake: string, options: string[]): string | undefined =>
+  options.find(opt => labelToSnake(opt) === snake);
 
 export const snakeToPascal = (name: string): string =>
   name
