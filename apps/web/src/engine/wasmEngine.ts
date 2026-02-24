@@ -1,5 +1,5 @@
 import init, { Engine } from '../wasm-pkg/compositor_wasm';
-import type { EngineBridge, AddNodeResult, ColorManagementInfo } from './bridge';
+import type { EngineBridge, AddNodeResult, ColorManagementInfo, EditValidationError } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
 
@@ -145,38 +145,34 @@ export class WasmEngine implements EngineBridge {
   }
 
   async renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
+    const pixels = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
+    
     try {
-      const pixels = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
-      
-      try {
-        const timingsRaw = this.getEngine().get_last_render_timings();
-        if (timingsRaw) {
-          if (timingsRaw instanceof Map) {
-            const obj: Record<string, number> = {};
-            (timingsRaw as Map<string, number>).forEach((v, k) => { obj[k] = v; });
-            this.lastTimings = obj;
-          } else {
-            this.lastTimings = timingsRaw as unknown as Record<string, number>;
-          }
+      const timingsRaw = this.getEngine().get_last_render_timings();
+      if (timingsRaw) {
+        if (timingsRaw instanceof Map) {
+          const obj: Record<string, number> = {};
+          (timingsRaw as Map<string, number>).forEach((v, k) => { obj[k] = v; });
+          this.lastTimings = obj;
+        } else {
+          this.lastTimings = timingsRaw as unknown as Record<string, number>;
         }
-      } catch (e) {
-        console.warn('[WASM] Failed to get timings:', e);
       }
-
-      if (!pixels || pixels.length === 0) return null;
-
-      const dims = await this.getEngine().get_render_dimensions(viewerNodeId, BigInt(frame));
-      if (!dims) return null;
-
-      return {
-        nodeId: viewerNodeId,
-        width: dims.width,
-        height: dims.height,
-        pixels: new Uint8ClampedArray(pixels.buffer),
-      };
-    } catch {
-      return null;
+    } catch (e) {
+      console.warn('[WASM] Failed to get timings:', e);
     }
+
+    if (!pixels || pixels.length === 0) return null;
+
+    const dims = await this.getEngine().get_render_dimensions(viewerNodeId, BigInt(frame));
+    if (!dims) return null;
+
+    return {
+      nodeId: viewerNodeId,
+      width: dims.width,
+      height: dims.height,
+      pixels: new Uint8ClampedArray(pixels.buffer),
+    };
   }
 
   exportGraph(): unknown {
@@ -404,6 +400,10 @@ export class WasmEngine implements EngineBridge {
 
   setProjectFormat(width: number, height: number): void {
     (this.getEngine() as any).set_project_format(width, height);
+  }
+
+  validateEdits(editsJson: string): EditValidationError[] {
+    return this.getEngine().validate_edits(editsJson) as EditValidationError[];
   }
 }
 

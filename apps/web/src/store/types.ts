@@ -111,6 +111,7 @@ export interface NodeInstance {
   inputDefaults: Record<string, ParamValue>;
   position: { x: number; y: number };
   muted: boolean;
+  dslHandle?: string;
 }
 
 export interface Connection {
@@ -176,4 +177,37 @@ export interface Frame {
   position: { x: number; y: number };
   size: { width: number; height: number };
   zIndex: number;
+}
+
+// ─── Edit Transaction types ──────────────────────────────────────
+
+export type TransactionOrigin = 'ui' | 'dsl' | 'ai';
+
+export interface TransactionOptions {
+  origin: TransactionOrigin;
+  awaitRender?: boolean;   // default: false
+  suppressUndo?: boolean;  // default: false
+}
+
+export interface DiagnosticItem {
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+  line?: number;
+  nodeId?: string;
+  nodeType?: string;
+  handle?: string;
+  paramKey?: string;
+}
+
+export interface TransactionDiagnostics {
+  parseErrors: DiagnosticItem[];
+  validationErrors: DiagnosticItem[];
+  mutationErrors: DiagnosticItem[];
+  evalErrors: DiagnosticItem[];
+}
+
+export interface TransactionResult {
+  success: boolean;
+  diagnostics: TransactionDiagnostics;
+  graphRevision: number;
 }

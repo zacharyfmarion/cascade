@@ -40,6 +40,34 @@ export interface AddNodeResult {
   typeId: string;
 }
 
+/** A proposed graph edit operation for dry-run validation via Rust. */
+export interface EditOp {
+  type: 'addNode' | 'removeNode' | 'connect' | 'disconnect';
+  op_id: number;
+  type_id?: string;
+  node_id?: string;
+  from_node?: string;
+  from_port?: string;
+  to_node?: string;
+  to_port?: string;
+}
+
+export interface EditErrorKind {
+  type: 'TypeMismatch' | 'PortNotFound' | 'NodeNotFound' | 'UnknownNodeType' | 'CycleDetected';
+  from_type?: string;
+  to_type?: string;
+  node_type?: string;
+  port_name?: string;
+  node_id?: string;
+  type_id?: string;
+}
+
+export interface EditValidationError {
+  op_id: number;
+  kind: EditErrorKind;
+  message: string;
+}
+
 export interface EngineBridge {
   listNodeTypes(): Promise<NodeSpec[]> | NodeSpec[];
   addNode(typeId: string, x: number, y: number): Promise<AddNodeResult> | AddNodeResult;
@@ -89,4 +117,5 @@ export interface EngineBridge {
   getViewsForDisplay?(display: string): Promise<string[]> | string[];
   setDisplayView?(display: string, view: string): Promise<void> | void;
   setProjectFormat?(width: number, height: number): Promise<void> | void;
+  validateEdits?(editsJson: string): EditValidationError[] | Promise<EditValidationError[]>;
 }

@@ -1,3 +1,7 @@
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
+
 mod ai_provider;
 
 use crate::ai_provider::WasmAiProvider;
@@ -45,6 +49,46 @@ impl NodeExecutionState {
             last_run_cache_key: None,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum EditOp {
+    #[serde(rename = "addNode")]
+    AddNode { op_id: usize, type_id: String },
+    #[serde(rename = "removeNode")]
+    RemoveNode { op_id: usize, node_id: String },
+    #[serde(rename = "connect")]
+    Connect {
+        op_id: usize,
+        from_node: String,
+        from_port: String,
+        to_node: String,
+        to_port: String,
+    },
+    #[serde(rename = "disconnect")]
+    Disconnect {
+        op_id: usize,
+        to_node: String,
+        to_port: String,
+    },
+}
+
+#[derive(Debug, Serialize)]
+struct EditValidationError {
+    op_id: usize,
+    kind: EditErrorKind,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type")]
+enum EditErrorKind {
+    TypeMismatch { from_type: String, to_type: String },
+    PortNotFound { node_type: String, port_name: String },
+    NodeNotFound { node_id: String },
+    UnknownNodeType { type_id: String },
+    CycleDetected,
 }
 
 #[wasm_bindgen]
@@ -159,9 +203,13 @@ impl Engine {
         let manifest_for_factory = manifest.clone();
         let gpu_ctx = gpu_context.clone();
         Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+            // SAFETY: The manifest was just validated by from_manifest() above (line 153).
+            // This factory only runs to create duplicate instances of an already-proven type.
+            // Changing register_or_replace to accept fallible factories is tracked for Phase C.
+            #[allow(clippy::expect_used)]
             Arc::new(
                 GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
-                    .expect("GPU node"),
+                    .expect("GPU node factory: manifest was pre-validated"),
             )
         });
 
@@ -172,7 +220,7 @@ impl Engine {
         serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    pub fn list_node_types(&self) -> JsValue {
+    pub fn list_node_types(&self) -> Result<JsValue, JsValue> {
         let specs: Vec<_> = self
             .registry
             .list_specs()
@@ -184,7 +232,7 @@ impl Engine {
                 spec
             })
             .collect();
-        serde_wasm_bindgen::to_value(&specs).unwrap_or(JsValue::NULL)
+        serde_wasm_bindgen::to_value(&specs).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     fn register_group(&mut self, def: GroupDefinition) -> Result<NodeSpec, String> {
@@ -196,14 +244,14 @@ impl Engine {
         Ok(spec)
     }
 
-    pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> JsValue {
+    pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> Result<JsValue, JsValue> {
         match self.add_node_internal(type_id, x, y) {
             Some((id, actual_type_id)) => serde_wasm_bindgen::to_value(&AddNodeResult {
                 id,
                 type_id: actual_type_id,
             })
-            .unwrap_or(JsValue::NULL),
-            None => JsValue::NULL,
+            .map_err(|e| JsValue::from_str(&e.to_string())),
+            None => Err(JsValue::from_str(&format!("Failed to add node of type '{}'", type_id))),
         }
     }
 
@@ -503,14 +551,14 @@ impl Engine {
         }
     }
 
-    pub fn get_last_render_timings(&self) -> JsValue {
-        serde_wasm_bindgen::to_value(&self.last_timings).unwrap_or(JsValue::NULL)
+    pub fn get_last_render_timings(&self) -> Result<JsValue, JsValue> {
+        serde_wasm_bindgen::to_value(&self.last_timings).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    pub fn get_color_management_info(&self) -> JsValue {
+    pub fn get_color_management_info(&self) -> Result<JsValue, JsValue> {
         let cm = &self.color_management;
         let displays = cm.available_displays();
-        let views: Vec<String> = if let Some(d) = displays.first() {
+        let _views: Vec<String> = if let Some(d) = displays.first() {
             cm.available_views(d)
         } else {
             vec![]
@@ -522,12 +570,12 @@ impl Engine {
             "displays": displays,
             "colorSpaces": cm.available_color_spaces(),
         });
-        serde_wasm_bindgen::to_value(&info).unwrap_or(JsValue::NULL)
+        serde_wasm_bindgen::to_value(&info).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    pub fn get_views_for_display(&self, display: &str) -> JsValue {
+    pub fn get_views_for_display(&self, display: &str) -> Result<JsValue, JsValue> {
         let views = self.color_management.available_views(display);
-        serde_wasm_bindgen::to_value(&views).unwrap_or(JsValue::NULL)
+        serde_wasm_bindgen::to_value(&views).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn set_display_view(&mut self, display: &str, view: &str) {
@@ -541,11 +589,8 @@ impl Engine {
         self.evaluator = Evaluator::new();
     }
 
-    pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> JsValue {
-        let id = match parse_node_id(&self.uuid_map, viewer_node_id) {
-            Ok(v) => v,
-            Err(_) => return JsValue::NULL,
-        };
+    pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> Result<JsValue, JsValue> {
+        let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
         let cm = &self.color_management;
         let eval_result = self
             .evaluator
@@ -561,23 +606,21 @@ impl Engine {
                 &self.project_format,
                 &self.ai_node_cache,
             )
-            .await;
-        if let Ok(eval_result) = eval_result {
-            if let Value::Image(image) = eval_result.value {
+            .await
+            .map_err(to_js_error)?;
+        match eval_result.value {
+            Value::Image(image) => {
                 let dims = RenderDimensions {
                     width: image.width,
                     height: image.height,
                 };
-                serde_wasm_bindgen::to_value(&dims).unwrap_or(JsValue::NULL)
-            } else {
-                JsValue::NULL
+                serde_wasm_bindgen::to_value(&dims).map_err(|e| JsValue::from_str(&e.to_string()))
             }
-        } else {
-            JsValue::NULL
+            _ => Err(JsValue::from_str("Viewer output is not an image")),
         }
     }
 
-    pub fn export_graph(&self) -> JsValue {
+    pub fn export_graph(&self) -> Result<JsValue, JsValue> {
         let nodes = self
             .graph
             .nodes
@@ -616,7 +659,7 @@ impl Engine {
         // a plain JS object instead of a JS Map. Required because
         // JSON.stringify (used in saveProject) silently drops Map entries.
         let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
-        graph.serialize(&serializer).unwrap_or(JsValue::NULL)
+        graph.serialize(&serializer).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub async fn export_image(&mut self, node_id: &str, frame: u64) -> Result<Vec<u8>, JsValue> {
@@ -1687,6 +1730,157 @@ impl Engine {
 
         Ok(spec)
     }
+
+    pub fn validate_edits(&self, edits_json: &str) -> Result<JsValue, JsValue> {
+        let edits: Vec<EditOp> = serde_json::from_str(edits_json)
+            .map_err(|e| to_js_error(CompositorError::Other(format!("Invalid edits JSON: {}", e))))?;
+        let errors = self.validate_edits_internal(&edits);
+        serde_wasm_bindgen::to_value(&errors)
+            .map_err(|e| to_js_error(CompositorError::Other(e.to_string())))
+    }
+}
+
+impl Engine {
+    fn validate_edits_internal(&self, edits: &[EditOp]) -> Vec<EditValidationError> {
+        let mut shadow = self.graph.clone();
+        let mut temp_ids: HashMap<String, NodeId> = HashMap::new();
+        let mut errors = Vec::new();
+
+        for edit in edits {
+            match edit {
+                EditOp::AddNode { op_id, type_id } => {
+                    if self.registry.get_spec(type_id).is_none() {
+                        errors.push(EditValidationError {
+                            op_id: *op_id,
+                            kind: EditErrorKind::UnknownNodeType {
+                                type_id: type_id.clone(),
+                            },
+                            message: format!("Unknown node type: {}", type_id),
+                        });
+                        continue;
+                    }
+                    let id = shadow.add_node(type_id);
+                    temp_ids.insert(format!("__temp_{}", op_id), id);
+                }
+                EditOp::RemoveNode { op_id, node_id } => {
+                    match self.resolve_edit_node_id(&shadow, &temp_ids, node_id) {
+                        Some(id) => shadow.remove_node(id),
+                        None => {
+                            errors.push(EditValidationError {
+                                op_id: *op_id,
+                                kind: EditErrorKind::NodeNotFound {
+                                    node_id: node_id.clone(),
+                                },
+                                message: format!("Node not found: {}", node_id),
+                            });
+                        }
+                    }
+                }
+                EditOp::Connect {
+                    op_id,
+                    from_node,
+                    from_port,
+                    to_node,
+                    to_port,
+                } => {
+                    let from_id = self.resolve_edit_node_id(&shadow, &temp_ids, from_node);
+                    let to_id = self.resolve_edit_node_id(&shadow, &temp_ids, to_node);
+                    match (from_id, to_id) {
+                        (Some(fid), Some(tid)) => {
+                            if let Err(e) = shadow.connect(
+                                &self.registry,
+                                fid,
+                                from_port,
+                                tid,
+                                to_port,
+                            ) {
+                                errors.push(EditValidationError {
+                                    op_id: *op_id,
+                                    kind: compositor_error_to_edit_kind(&e),
+                                    message: e.to_string(),
+                                });
+                            }
+                        }
+                        (None, _) => {
+                            errors.push(EditValidationError {
+                                op_id: *op_id,
+                                kind: EditErrorKind::NodeNotFound {
+                                    node_id: from_node.clone(),
+                                },
+                                message: format!("Source node not found: {}", from_node),
+                            });
+                        }
+                        (_, None) => {
+                            errors.push(EditValidationError {
+                                op_id: *op_id,
+                                kind: EditErrorKind::NodeNotFound {
+                                    node_id: to_node.clone(),
+                                },
+                                message: format!("Target node not found: {}", to_node),
+                            });
+                        }
+                    }
+                }
+                EditOp::Disconnect {
+                    op_id,
+                    to_node,
+                    to_port,
+                } => {
+                    let _ = op_id;
+                    if let Some(id) = self.resolve_edit_node_id(&shadow, &temp_ids, to_node) {
+                        shadow.disconnect(id, to_port);
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    fn resolve_edit_node_id(
+        &self,
+        shadow: &Graph,
+        temp_ids: &HashMap<String, NodeId>,
+        id_str: &str,
+    ) -> Option<NodeId> {
+        if let Some(id) = temp_ids.get(id_str) {
+            return Some(*id);
+        }
+        if let Some(id) = self.uuid_map.get(id_str) {
+            if shadow.nodes.contains_key(*id) {
+                return Some(*id);
+            }
+        }
+        if let Ok(value) = id_str.parse::<u64>() {
+            let id = NodeId::from(slotmap::KeyData::from_ffi(value));
+            if shadow.nodes.contains_key(id) {
+                return Some(id);
+            }
+        }
+        None
+    }
+}
+
+fn compositor_error_to_edit_kind(err: &CompositorError) -> EditErrorKind {
+    match err {
+        CompositorError::TypeMismatch { expected, got } => EditErrorKind::TypeMismatch {
+            from_type: got.clone(),
+            to_type: expected.clone(),
+        },
+        CompositorError::PortNotFound {
+            node_type,
+            port_name,
+        } => EditErrorKind::PortNotFound {
+            node_type: node_type.clone(),
+            port_name: port_name.clone(),
+        },
+        CompositorError::NodeNotFound(id) => EditErrorKind::NodeNotFound {
+            node_id: format!("{:?}", id),
+        },
+        CompositorError::CycleDetected => EditErrorKind::CycleDetected,
+        _ => EditErrorKind::NodeNotFound {
+            node_id: String::new(),
+        },
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1937,10 +2131,76 @@ fn convert_param_value(
     Err(JsValue::from_str("Unsupported parameter value"))
 }
 
-fn to_js_error(err: CompositorError) -> JsValue {
-    JsValue::from_str(&err.to_string())
+/// Structured error DTO serialized to JS as a plain object.
+/// The frontend `parseEngineError()` converts this into the TS `EngineError` type.
+#[derive(Serialize)]
+struct EngineErrorDto {
+    code: String,
+    message: String,
+    severity: String,
+    domain: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    node_type: Option<String>,
 }
 
+impl EngineErrorDto {
+    fn from_compositor_error(err: &CompositorError) -> Self {
+        if let CompositorError::EvalFailed { node_id, node_type, source } = err {
+            let inner = Self::from_compositor_error(source);
+            return Self {
+                code: "EVAL_FAILED".to_string(),
+                message: source.to_string(),
+                severity: "error".to_string(),
+                domain: inner.domain,
+                node_id: Some(node_id.clone()),
+                node_type: Some(node_type.clone()),
+            };
+        }
+        let (code, domain) = match err {
+            CompositorError::NodeNotFound(_) => ("NODE_NOT_FOUND", "graph"),
+            CompositorError::MissingInput(_) => ("MISSING_INPUT", "eval"),
+            CompositorError::MissingParam(_) => ("MISSING_PARAM", "eval"),
+            CompositorError::TypeMismatch { .. } => ("TYPE_MISMATCH", "graph"),
+            CompositorError::CycleDetected => ("CYCLE_DETECTED", "graph"),
+            CompositorError::InvalidConnection(_) => ("INVALID_CONNECTION", "graph"),
+            CompositorError::ImageDecode(_) => ("IMAGE_DECODE", "io"),
+            CompositorError::PortNotFound { .. } => ("PORT_NOT_FOUND", "graph"),
+            CompositorError::InvalidImageData { .. } => ("INVALID_IMAGE_DATA", "eval"),
+            CompositorError::ImageTooLarge { .. } => ("IMAGE_TOO_LARGE", "io"),
+            CompositorError::EvalFailed { .. } => unreachable!(),
+            CompositorError::Other(_) => ("OTHER", "eval"),
+        };
+        Self {
+            code: code.to_string(),
+            message: err.to_string(),
+            severity: "error".to_string(),
+            domain: domain.to_string(),
+            node_id: None,
+            node_type: None,
+        }
+    }
+
+    fn from_string(msg: &str, code: &str, domain: &str) -> Self {
+        Self {
+            code: code.to_string(),
+            message: msg.to_string(),
+            severity: "error".to_string(),
+            domain: domain.to_string(),
+            node_id: None,
+            node_type: None,
+        }
+    }
+}
+
+fn serialize_engine_error(dto: &EngineErrorDto) -> JsValue {
+    serde_wasm_bindgen::to_value(dto)
+        .unwrap_or_else(|_| JsValue::from_str(&dto.message))
+}
+fn to_js_error(err: CompositorError) -> JsValue {
+    serialize_engine_error(&EngineErrorDto::from_compositor_error(&err))
+}
 fn to_js_error_str(err: String) -> JsValue {
-    JsValue::from_str(&err)
+    serialize_engine_error(&EngineErrorDto::from_string(&err, "RUNTIME_ERROR", "runtime"))
 }
