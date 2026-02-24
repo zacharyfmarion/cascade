@@ -44,6 +44,9 @@ const createInitialState = () => ({
   loopPlayback: useSettingsStore.getState().loopPlayback,
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
+  nodeErrors: new Map(),
+  graphRevision: 0,
+  lastTransactionOrigin: null,
 });
 
 const flushPromises = async (ticks = 1) => {
@@ -499,7 +502,7 @@ describe('graphStore error states', () => {
   it('renderVideo sets error when engine does not support it', async () => {
     const id = await useGraphStore.getState().addNode('export_image', { x: 0, y: 0 });
     await useGraphStore.getState().renderVideo(id);
-    expect(useGraphStore.getState().lastError).toBe('Video rendering is only available in the desktop app');
+    expect(useGraphStore.getState().lastError?.message).toBe('Video rendering is only available in the desktop app');
   });
 
   it('cancelRender sets isRendering to false', async () => {

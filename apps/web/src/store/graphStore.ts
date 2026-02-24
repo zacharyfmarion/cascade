@@ -10,9 +10,15 @@ import type {
   EditingContext,
   GroupInternalGraph,
   Frame,
+  TransactionOptions,
+  TransactionResult,
+  TransactionOrigin,
+  TransactionDiagnostics,
 } from './types';
-import type { EngineBridge, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo } from '../engine/bridge';
+import type { EngineBridge, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../engine/bridge';
 import { sequenceFrameManager } from '../engine/sequenceFrameManager';
+import { parseEngineError, makeEngineError } from '../engine/engineError';
+import type { EngineError } from '../engine/engineError';
 
 const DEFAULT_FRAME_COLOR = 'purple'; // eslint-disable-line compositor-theme/no-hardcoded-colors
 let engine: EngineBridge | null = null;
@@ -210,7 +216,7 @@ interface GraphState {
   nodeSpecs: NodeSpec[];
   engineReady: boolean;
   renderResults: Map<string, RenderResult>;
-  lastError: string | null;
+  lastError: EngineError | null;
   canUndo: boolean;
   canRedo: boolean;
   currentFrame: number;
@@ -229,6 +235,7 @@ interface GraphState {
   playbackFps: number | null;
 
   nodeTimings: Map<string, number>;
+  nodeErrors: Map<string, EngineError>;
   aiNodeStatuses: Record<string, string>;
   aiNodeStale: Record<string, boolean>;
   refreshAiNodeStale: () => void;
@@ -239,6 +246,7 @@ interface GraphState {
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
   setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
+  setDslHandle: (nodeId: string, handle: string) => void;
   setParamLive: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamCommit: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
@@ -306,6 +314,14 @@ interface GraphState {
   aiActionInProgress: boolean;
   beginAiAction: () => Promise<void>;
   endAiAction: () => void;
+  graphRevision: number;
+  lastTransactionOrigin: TransactionOrigin | null;
+  editTransaction: (
+    options: TransactionOptions,
+    mutate: () => Promise<void> | void,
+  ) => Promise<TransactionResult>;
+  flushRender: () => Promise<Map<string, EngineError>>;
+  validateEdits: (editsJson: string) => EditValidationError[];
 }
 
 const undoStack: UndoSnapshot[] = [];
@@ -321,6 +337,7 @@ let webRenderCancelled = false;
 let renderLock: Promise<void> = Promise.resolve();
 let renderSuspendCount = 0;
 let renderNeededWhileSuspended = false;
+let graphRevision = 0;
 
 export const useGraphStore = create<GraphState>()(
   devtools((set, get) => {
@@ -478,11 +495,10 @@ export const useGraphStore = create<GraphState>()(
               newResults.set(viewerId, scaled);
               changed = true;
             }
-          } catch {
-          }
+          } catch (e) { const error = parseEngineError(e); if (error.nodeId) { const errs = new Map(get().nodeErrors); errs.set(error.nodeId, error); set({ nodeErrors: errs, lastError: error }); } else { set({ lastError: error }); } }
         }
         if (changed) {
-          set({ renderResults: newResults, lastError: null });
+          set({ renderResults: newResults, lastError: null, nodeErrors: new Map() });
           updateNodeTimings();
         }
         get().refreshAiNodeStale();
@@ -544,8 +560,6 @@ export const useGraphStore = create<GraphState>()(
       sequenceInfoMap: new Map(get().sequenceInfoMap),
     });
 
-    let aiActionSnapshot: UndoSnapshot | null = null;
-
     const pushUndo = async () => {
       if (get().aiActionInProgress) return;
       const snapshot = await captureSnapshot();
@@ -553,6 +567,16 @@ export const useGraphStore = create<GraphState>()(
       if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
       redoStack.length = 0;
       set({ canUndo: undoStack.length > 0, canRedo: false, dirty: true });
+    };
+
+    /**
+     * Tag a mutation as UI-originated so the DSL editor can gate on origin.
+     * Only tags when NOT inside an editTransaction (which sets origin itself).
+     */
+    const tagUiOrigin = () => {
+      if (renderSuspendCount > 0) return; // Inside editTransaction — origin already set
+      graphRevision++;
+      set({ lastTransactionOrigin: 'ui', graphRevision });
     };
 
     const restoreSnapshot = async (snapshot: UndoSnapshot) => {
@@ -633,6 +657,7 @@ export const useGraphStore = create<GraphState>()(
       editingStack: [{ id: 'root', label: 'Root' }],
 
       nodeTimings: new Map(),
+      nodeErrors: new Map(),
       aiNodeStatuses: {},
       aiNodeStale: {},
       colorManagement: null,
@@ -664,6 +689,7 @@ export const useGraphStore = create<GraphState>()(
 
       addNode: async (typeId, position) => {
         await pushUndo();
+        tagUiOrigin();
 
         const result = await getEngine().addNode(typeId, position.x, position.y);
         const actualTypeId = result.typeId;
@@ -718,6 +744,7 @@ export const useGraphStore = create<GraphState>()(
 
       removeNode: async (id) => {
         await pushUndo();
+        tagUiOrigin();
         const removedNode = get().nodes.get(id);
         await getEngine().removeNode(id);
         const newNodes = new Map(get().nodes);
@@ -753,6 +780,7 @@ export const useGraphStore = create<GraphState>()(
 
       connect: async (fromNode, fromPort, toNode, toPort) => {
         await pushUndo();
+        tagUiOrigin();
         const exists = get().connections.some(
           c => c.fromNode === fromNode && c.fromPort === fromPort && 
                c.toNode === toNode && c.toPort === toPort
@@ -764,7 +792,7 @@ export const useGraphStore = create<GraphState>()(
         if (editingStack.length > 1) {
           const ctx = editingStack[editingStack.length - 1];
           if (!eng.addInternalConnection || !eng.getGroupInternalGraph) {
-            set({ lastError: 'Group editing not supported by this engine' });
+            set({ lastError: makeEngineError('Group editing not supported by this engine') });
             return;
           }
           await eng.addInternalConnection(ctx.groupDefId!, fromNode, fromPort, toNode, toPort);
@@ -781,7 +809,7 @@ export const useGraphStore = create<GraphState>()(
         if (editingStack.length > 1) {
           const ctx = editingStack[editingStack.length - 1];
           if (!eng.getGroupInternalGraph) {
-            set({ lastError: 'Group editing not supported by this engine' });
+            set({ lastError: makeEngineError('Group editing not supported by this engine') });
             return;
           }
           const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
@@ -793,6 +821,7 @@ export const useGraphStore = create<GraphState>()(
 
       disconnect: async (connectionId) => {
         await pushUndo();
+        tagUiOrigin();
         const conn = get().connections.find(c => c.id === connectionId);
         if (conn) {
           const eng = getEngine();
@@ -800,7 +829,7 @@ export const useGraphStore = create<GraphState>()(
           if (editingStack.length > 1) {
             const ctx = editingStack[editingStack.length - 1];
             if (!eng.removeInternalConnection || !eng.getGroupInternalGraph) {
-              set({ lastError: 'Group editing not supported by this engine' });
+            set({ lastError: makeEngineError('Group editing not supported by this engine') });
               return;
             }
             await eng.removeInternalConnection(ctx.groupDefId!, conn.toNode, conn.toPort);
@@ -814,7 +843,7 @@ export const useGraphStore = create<GraphState>()(
           if (editingStack.length > 1) {
             const ctx = editingStack[editingStack.length - 1];
             if (!eng.getGroupInternalGraph) {
-              set({ lastError: 'Group editing not supported by this engine' });
+            set({ lastError: makeEngineError('Group editing not supported by this engine') });
               return;
             }
             const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
@@ -827,6 +856,7 @@ export const useGraphStore = create<GraphState>()(
 
       setParam: async (nodeId, key, value) => {
         await pushUndo();
+        tagUiOrigin();
         getEngine().setParam(nodeId, key, value);
         const newNodes = new Map(get().nodes);
         const node = newNodes.get(nodeId);
@@ -836,6 +866,16 @@ export const useGraphStore = create<GraphState>()(
           set({ nodes: newNodes });
         }
         triggerAllViewers();
+      },
+
+      setDslHandle: (nodeId, handle) => {
+        const newNodes = new Map(get().nodes);
+        const node = newNodes.get(nodeId);
+        if (!node) return;
+        if (node.dslHandle === handle) return;
+        node.dslHandle = handle;
+        newNodes.set(nodeId, { ...node });
+        set({ nodes: newNodes });
       },
 
       setParamLive: async (nodeId, key, value) => {
@@ -889,7 +929,7 @@ export const useGraphStore = create<GraphState>()(
                 set({ renderResults: newResults, lastError: null });
                 updateNodeTimings();
               }
-            }).catch(() => {});
+            }).catch((e: unknown) => { const error = parseEngineError(e); if (error.code !== 'MISSING_INPUT') { set({ lastError: error }); } });
           };
         } else {
           pendingLiveRender = () => {
@@ -961,7 +1001,7 @@ export const useGraphStore = create<GraphState>()(
               set({ renderResults: newResults, lastError: null });
               updateNodeTimings();
             }
-          }).catch(() => {});
+          }).catch((e: unknown) => { const error = parseEngineError(e); if (error.code !== 'MISSING_INPUT') { set({ lastError: error }); } });
         } else {
           await getEngine().setParam(nodeId, key, value);
           triggerAllViewers();
@@ -970,6 +1010,7 @@ export const useGraphStore = create<GraphState>()(
 
       setInputDefault: async (nodeId, portName, value) => {
         await pushUndo();
+        tagUiOrigin();
         await getEngine().setInputDefault(nodeId, portName, value);
         const newNodes = new Map(get().nodes);
         const node = newNodes.get(nodeId);
@@ -1093,6 +1134,7 @@ export const useGraphStore = create<GraphState>()(
       },
 
       toggleMuteSelected: async () => {
+        tagUiOrigin();
         const UNMUTABLE_TYPES = new Set([
           'load_image', 'load_image_sequence', 'load_video',
           'viewer', 'export_image', 'export_image_sequence', 'export_video',
@@ -1294,7 +1336,7 @@ export const useGraphStore = create<GraphState>()(
           URL.revokeObjectURL(url);
         }).catch(e => {
           console.error('exportImage failed:', e);
-          set({ lastError: e instanceof Error ? e.message : String(e) });
+          set({ lastError: parseEngineError(e) });
         });
       },
 
@@ -1310,13 +1352,19 @@ export const useGraphStore = create<GraphState>()(
             if (scaled && renderGenerations.get(viewerNodeId) === generation) {
               const newResults = new Map(get().renderResults);
               newResults.set(viewerNodeId, scaled);
-              set({ renderResults: newResults, lastError: null });
+              set({ renderResults: newResults, lastError: null, nodeErrors: new Map() });
               updateNodeTimings();
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            if (!msg.includes('Missing input')) {
-              set({ lastError: msg });
+            const error = parseEngineError(e);
+            if (error.code !== 'MISSING_INPUT') {
+              if (error.nodeId) {
+                const errs = new Map(get().nodeErrors);
+                errs.set(error.nodeId, error);
+                set({ nodeErrors: errs, lastError: error });
+              } else {
+                set({ lastError: error });
+              }
             }
           }
         });
@@ -1330,7 +1378,7 @@ export const useGraphStore = create<GraphState>()(
       setSequenceDirectory: async (nodeId, directory) => {
         const eng = getEngine();
         if (!eng.setSequenceDirectory) {
-          set({ lastError: 'Image sequences are only available in the desktop app' });
+          set({ lastError: makeEngineError('Image sequences are only available in the desktop app') });
           return;
         }
         const info = await eng.setSequenceDirectory(nodeId, directory);
@@ -1385,17 +1433,17 @@ export const useGraphStore = create<GraphState>()(
           try {
             await eng.renderSequence(nodeId);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.error('[renderSequence] start failed:', msg);
+            const error = parseEngineError(e);
+            console.error('[renderSequence] start failed:', error.message);
             set({
               isRendering: false,
-              lastError: msg,
+              lastError: error,
               renderProgress: {
                 job_id: '',
                 current_frame: 0,
                 total_frames: 0,
                 completed: true,
-                error: msg,
+                error: error.message,
               },
             });
             return;
@@ -1415,13 +1463,10 @@ export const useGraphStore = create<GraphState>()(
                 clearInterval(pollInterval);
                 set({
                   isRendering: false,
-                  lastError: progress.error ?? null,
+                  lastError: progress.error ? makeEngineError(progress.error) : null,
                 });
               }
-            } catch {
-              clearInterval(pollInterval);
-              set({ isRendering: false });
-            }
+            } catch (e) { clearInterval(pollInterval); set({ isRendering: false, lastError: parseEngineError(e) }); }
           }, 250);
           return;
         }
@@ -1449,7 +1494,7 @@ export const useGraphStore = create<GraphState>()(
           ? node.params['format'].Int : 0;
 
         if (step <= 0 || startFrame > endFrame) {
-          set({ lastError: 'Invalid frame range' });
+          set({ lastError: makeEngineError('Invalid frame range') });
           return;
         }
 
@@ -1517,16 +1562,16 @@ export const useGraphStore = create<GraphState>()(
             },
           });
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
+          const error = parseEngineError(e);
           set({
             isRendering: false,
-            lastError: msg,
+            lastError: error,
             renderProgress: {
               job_id: 'web',
               current_frame: 0,
               total_frames: totalFrames,
               completed: true,
-              error: msg,
+              error: error.message,
             },
           });
         }
@@ -1535,23 +1580,23 @@ export const useGraphStore = create<GraphState>()(
       renderVideo: async (nodeId) => {
         const eng = getEngine();
         if (!eng.renderVideo) {
-          set({ lastError: 'Video rendering is only available in the desktop app' });
+          set({ lastError: makeEngineError('Video rendering is only available in the desktop app') });
           return;
         }
         set({ isRendering: true, renderProgress: null, lastError: null });
         try {
           await eng.renderVideo(nodeId);
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
+          const error = parseEngineError(e);
           set({
             isRendering: false,
-            lastError: msg,
+            lastError: error,
             renderProgress: {
               job_id: '',
               current_frame: 0,
               total_frames: 0,
               completed: true,
-              error: msg,
+              error: error.message,
             },
           });
           return;
@@ -1571,13 +1616,10 @@ export const useGraphStore = create<GraphState>()(
               clearInterval(pollInterval);
               set({
                 isRendering: false,
-                lastError: progress.error ?? null,
+                lastError: progress.error ? makeEngineError(progress.error) : null,
               });
             }
-          } catch {
-            clearInterval(pollInterval);
-            set({ isRendering: false });
-          }
+          } catch (e) { clearInterval(pollInterval); set({ isRendering: false, lastError: parseEngineError(e) }); }
         }, 250);
       },
 
@@ -1822,7 +1864,7 @@ export const useGraphStore = create<GraphState>()(
       enterGroup: async (groupNodeId) => {
         const eng = getEngine();
         if (!eng.getGroupInternalGraph) {
-          set({ lastError: 'Group editing not supported by this engine' });
+          set({ lastError: makeEngineError('Group editing not supported by this engine') });
           return;
         }
 
@@ -2019,7 +2061,7 @@ export const useGraphStore = create<GraphState>()(
       createGroup: async (nodeIds, name) => {
         const eng = getEngine();
         if (!eng.createGroupFromNodes) {
-          set({ lastError: 'Group creation not supported by this engine' });
+          set({ lastError: makeEngineError('Group creation not supported by this engine') });
           return;
         }
 
@@ -2089,7 +2131,7 @@ export const useGraphStore = create<GraphState>()(
       ungroupNode: async (groupNodeId) => {
         const eng = getEngine();
         if (!eng.ungroupNode) {
-          set({ lastError: 'Ungrouping not supported by this engine' });
+          set({ lastError: makeEngineError('Ungrouping not supported by this engine') });
           return;
         }
 
@@ -2142,7 +2184,7 @@ export const useGraphStore = create<GraphState>()(
 
         const eng = getEngine();
         if (!eng.renameGroup) {
-          set({ lastError: 'Group rename not supported by this engine' });
+          set({ lastError: makeEngineError('Group rename not supported by this engine') });
           return;
         }
 
@@ -2161,7 +2203,7 @@ export const useGraphStore = create<GraphState>()(
 
         const eng = getEngine();
         if (!eng.updateGroupInterface || !eng.getGroupInternalGraph) {
-          set({ lastError: 'Group interface update not supported by this engine' });
+          set({ lastError: makeEngineError('Group interface update not supported by this engine') });
           return;
         }
 
@@ -2217,7 +2259,7 @@ export const useGraphStore = create<GraphState>()(
       loadProjectFromPath: () => {
         const eng = getEngine();
         if (!isTauri() || !eng.loadProject) {
-          set({ lastError: 'Project loading is only available in the desktop app' });
+          set({ lastError: makeEngineError('Project loading is only available in the desktop app') });
           return;
         }
 
@@ -2348,33 +2390,116 @@ export const useGraphStore = create<GraphState>()(
         }
       },
 
+      graphRevision: 0,
+      lastTransactionOrigin: null,
       aiActionInProgress: false,
 
       beginAiAction: async () => {
-        aiActionSnapshot = await captureSnapshot();
-        renderSuspendCount++;
-        console.log('[RenderBarrier] beginAiAction — suspendCount=%d', renderSuspendCount);
         set({ aiActionInProgress: true });
       },
-
       endAiAction: () => {
-        console.log('[RenderBarrier] endAiAction — suspendCount=%d, pendingRender=%s', renderSuspendCount, renderNeededWhileSuspended);
-        if (aiActionSnapshot) {
-          undoStack.push(aiActionSnapshot);
-          if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
-          redoStack.length = 0;
-          aiActionSnapshot = null;
+        set({ aiActionInProgress: false });
+      },
+
+      flushRender: async () => {
+        if (renderNeededWhileSuspended) {
+          renderNeededWhileSuspended = false;
+          triggerAllViewers();
         }
-        set({ aiActionInProgress: false, canUndo: undoStack.length > 0, canRedo: false, dirty: true });
+        await renderLock;
+        const { nodeErrors } = get();
+        return new Map(nodeErrors);
+      },
+
+      validateEdits: (editsJson: string): EditValidationError[] => {
+        const eng = getEngine();
+        if (!eng.validateEdits) return [];
+        const result = eng.validateEdits(editsJson);
+        // validateEdits is sync for WASM, but interface allows Promise
+        if (result instanceof Promise) {
+          throw new Error('validateEdits must be synchronous');
+        }
+        return result;
+      },
+
+      editTransaction: async (options, mutate) => {
+        const diagnostics: TransactionDiagnostics = {
+          parseErrors: [],
+          validationErrors: [],
+          mutationErrors: [],
+          evalErrors: [],
+        };
+
+        let snapshot: UndoSnapshot | null = null;
+        if (!options.suppressUndo) {
+          snapshot = await captureSnapshot();
+        }
+
+        renderSuspendCount++;
+        graphRevision++;
+        set({
+          lastTransactionOrigin: options.origin,
+          graphRevision,
+        });
+
+        let success = true;
+        try {
+          await mutate();
+        } catch (err) {
+          success = false;
+          diagnostics.mutationErrors.push({
+            message: err instanceof Error ? err.message : String(err),
+            severity: 'error',
+          });
+        }
+
         renderSuspendCount--;
-        if (renderSuspendCount <= 0) {
+
+        if (options.awaitRender && renderSuspendCount <= 0) {
           renderSuspendCount = 0;
           if (renderNeededWhileSuspended) {
             renderNeededWhileSuspended = false;
-            console.log('[RenderBarrier] FLUSHING coalesced render');
+            triggerAllViewers();
+          }
+          await renderLock;
+          const { nodeErrors, lastError } = get();
+          for (const [nodeId, error] of nodeErrors) {
+            diagnostics.evalErrors.push({
+              message: error.message,
+              severity: 'error',
+              nodeId,
+              nodeType: error.nodeType,
+            });
+          }
+          if (lastError && !lastError.nodeId) {
+            diagnostics.evalErrors.push({
+              message: lastError.message,
+              severity: 'error',
+            });
+          }
+          if (diagnostics.evalErrors.length > 0) {
+            success = false;
+          }
+        } else if (renderSuspendCount <= 0) {
+          renderSuspendCount = 0;
+          if (renderNeededWhileSuspended) {
+            renderNeededWhileSuspended = false;
             triggerAllViewers();
           }
         }
+
+        if (snapshot && !options.suppressUndo) {
+          undoStack.push(snapshot);
+          if (undoStack.length > useSettingsStore.getState().maxUndoSteps) undoStack.shift();
+          redoStack.length = 0;
+          set({ canUndo: undoStack.length > 0, canRedo: false, dirty: true });
+        }
+
+        return {
+          success,
+          diagnostics,
+          graphRevision,
+        };
       },
 
       linkToViewer: async (nodeId, outputIndex) => {
