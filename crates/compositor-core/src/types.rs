@@ -469,22 +469,20 @@ impl Default for FieldTransform {
 }
 
 impl FieldTransform {
-    /// Transforms UV coords: offset → rotate (around center) → scale.
+    /// Transforms UV coords: offset → rotate (around center) → scale (around center).
     pub fn apply(&self, u: f32, v: f32) -> (f32, f32) {
         let u = u - self.offset[0];
         let v = v - self.offset[1];
-
-        let (u, v) = if self.rotation.abs() > f32::EPSILON {
-            let cu = u - 0.5;
-            let cv = v - 0.5;
+        let cu = u - 0.5;
+        let cv = v - 0.5;
+        let (cu, cv) = if self.rotation.abs() > f32::EPSILON {
             let cos_r = self.rotation.cos();
             let sin_r = self.rotation.sin();
-            (cu * cos_r - cv * sin_r + 0.5, cu * sin_r + cv * cos_r + 0.5)
+            (cu * cos_r - cv * sin_r, cu * sin_r + cv * cos_r)
         } else {
-            (u, v)
+            (cu, cv)
         };
-
-        (u * self.scale[0], v * self.scale[1])
+        (cu * self.scale[0] + 0.5, cv * self.scale[1] + 0.5)
     }
 }
 
