@@ -172,6 +172,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
   const { spec } = data;
   const muted = useGraphStore(s => s.nodes.get(id)?.muted ?? false);
   const timing = useGraphStore(s => s.nodeTimings.get(id));
+  const nodeError = useGraphStore(s => s.nodeErrors.get(id));
   const showTimings = useSettingsStore(s => s.showTimings);
   const connections = useGraphStore(s => s.connections);
   const connectedInputs = new Set(
@@ -230,6 +231,11 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
         </span>
         {headerTag && <div className="node-badge node-badge--default" style={{ fontSize: '0.6rem', padding: '1px 4px' }}>{headerTag}</div>}
         {badge}
+        {nodeError && (
+          <div className="node-error-badge" title={nodeError.message}>
+            ⚠
+          </div>
+        )}
         {headerExtra}
       </div>
 

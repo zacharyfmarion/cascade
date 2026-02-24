@@ -87,8 +87,8 @@ const getNodeSchemaSchema = z.object({
   node_type: z.string().describe('PascalCase node type name (e.g. "GaussianBlur", "BrightnessContrast")'),
 });
 
-// ─── Tool type aliases ───────────────────────────────────────────
 
+// ─── Tool type aliases ───────────────────────────────────────────
 type ReadGraphArgs = z.infer<typeof readGraphSchema>;
 type EditGraphArgs = z.infer<typeof editGraphSchema>;
 type WriteGraphArgs = z.infer<typeof writeGraphSchema>;
@@ -233,17 +233,25 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
   if (!result.success) {
     return {
       success: false,
-      errors: result.errors.map(msg => ({ line: 0, message: msg })),
+      error: result.error,
     };
   }
 
 
   const updatedDsl = getCurrentDsl();
-  return {
+  const response: Record<string, unknown> = {
     success: true,
     graph: updatedDsl,
     mutations_applied: mutations.length,
   };
+  if (result.evalErrors && result.evalErrors.length > 0) {
+    response.eval_errors = result.evalErrors.map(e => ({
+      message: e.message,
+      node: e.nodeId,
+      nodeType: e.nodeType,
+    }));
+  }
+  return response;
 }
 
 // ─── Exported tool definitions ───────────────────────────────────

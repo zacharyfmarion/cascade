@@ -212,6 +212,90 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
           </div>
         )}
 
+
+        {isConfigured && messages.length === 0 && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px 16px 16px',
+            gap: '16px',
+            flex: 1,
+          }}>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '6px',
+            }}>
+              <span style={{
+                fontSize: '1.2rem',
+                opacity: 0.5,
+                lineHeight: 1,
+              }}>
+                ✦
+              </span>
+              <span style={{
+                fontSize: '0.75rem',
+                color: 'var(--text-muted)',
+              }}>
+                What would you like to build?
+              </span>
+            </div>
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px',
+              justifyContent: 'center',
+            }}>
+              {[
+                'Add a gaussian blur to the selected node',
+                'Create a color grading pipeline',
+                'Set up a composite with alpha over',
+                'Build a sharpen and contrast workflow',
+              ].map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => {
+                    const thumbnail = captureViewerThumbnail();
+                    if (thumbnail) {
+                      sendMessage({
+                        text: suggestion,
+                        files: [{ type: 'file', mediaType: 'image/jpeg', url: thumbnail }],
+                      });
+                    } else {
+                      sendMessage({ text: suggestion });
+                    }
+                  }}
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '12px',
+                    padding: '4px 10px',
+                    fontSize: '0.7rem',
+                    color: 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    transition: 'border-color 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--accent-primary)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border-default)';
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                  }}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {messages.map((msg) => {
           if (msg.role === 'user') {
             const textContent = (msg.parts ?? [])

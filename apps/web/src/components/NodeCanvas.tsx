@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   useReactFlow,
   applyNodeChanges,
   applyEdgeChanges,
@@ -79,6 +80,7 @@ interface ClipboardEntry {
 
 import { CanvasContextMenu } from './CanvasContextMenu';
 import type { ContextMenuState } from './CanvasContextMenu';
+import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
@@ -119,6 +121,15 @@ export const NodeCanvas: React.FC = () => {
     }
     return sizes;
   }, [getNodes]);
+
+  useEffect(() => {
+    registerNodeSizeProvider(getMeasuredNodeSizes);
+    return () => unregisterNodeSizeProvider();
+  }, [getMeasuredNodeSizes]);
+
+  const onCleanupNodes = useCallback(() => {
+    autoLayoutGraph(getMeasuredNodeSizes());
+  }, [getMeasuredNodeSizes]);
 
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
   const [flowEdges, setFlowEdges] = useState<FlowEdge[]>([]);
@@ -900,8 +911,24 @@ export const NodeCanvas: React.FC = () => {
     return () => window.removeEventListener('keydown', handler);
   }, [copySelected, pasteClipboard, frameSelectedNodes, getMeasuredNodeSizes, createGroup, ungroupNode, enterGroup, exitGroup, isInsideGroup, toggleMuteSelected]);
 
+
+  // Prevent browser back/forward navigation triggered by horizontal scroll/swipe gestures.
+  // Must use a non-passive listener since React's onWheel is passive by default.
+  const canvasRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) > 0) {
+        e.preventDefault();
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
+  }, []);
   return (
     <section
+      ref={canvasRef}
       style={{ width: '100%', height: '100%', background: 'var(--bg-canvas)' }}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -947,6 +974,24 @@ export const NodeCanvas: React.FC = () => {
         <Background color="var(--bg-canvasGrid)" gap={gridSize} size={1} />
         <Controls />
         {showMinimap && <MiniMap />}
+        <Panel position="top-right">
+          <button
+            type="button"
+            onClick={onCleanupNodes}
+            style={{
+              background: 'var(--bg-secondary)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '4px',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              padding: '4px 8px',
+            }}
+            title="Auto-arrange all nodes (left-to-right)"
+          >
+            Cleanup Nodes
+          </button>
+        </Panel>
       </ReactFlow>
       {contextMenu && (
         <CanvasContextMenu

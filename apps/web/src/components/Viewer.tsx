@@ -163,7 +163,13 @@ export const Viewer: React.FC = () => {
   return (
     <div 
       className="panel" 
-      style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden', outline: 'none' }}
+      style={{
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        overflow: 'hidden',
+        outline: 'none',
+      }}
       ref={containerRef}
       tabIndex={0}
     >
@@ -293,7 +299,7 @@ export const Viewer: React.FC = () => {
           lineHeight: '1.3',
           zIndex: 20,
         }}>
-          {lastError}
+          {lastError.message}
         </div>
       )}
     </div>
