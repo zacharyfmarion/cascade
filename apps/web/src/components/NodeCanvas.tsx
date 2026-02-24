@@ -81,6 +81,7 @@ interface ClipboardEntry {
 import { CanvasContextMenu } from './CanvasContextMenu';
 import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
+import { shortcutDispatcher } from '../shortcuts/dispatcher';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
@@ -423,186 +424,189 @@ export const NodeCanvas: React.FC = () => {
     }
   }, [getNodes]);
 
-  const onNodesChange = useCallback((changes: NodeChange[]) => {
-    const removals = changes.filter(c => c.type === 'remove');
-    const nonRemovals = changes.filter(c => c.type !== 'remove');
+  // ── Position sync via drag handlers ──────────────────────────────────
+  // Position changes are synced to the store ONLY from user-initiated drags
+  // (onNodeDrag / onNodeDragStop), NOT from onNodesChange. This prevents
+  // React Flow's internal node initialization from overwriting positions
+  // set by programmatic layout (e.g. autoLayoutGraph after AI edits).
 
-    let selectionChanged = false;
-    nonRemovals.forEach(change => {
-      if (change.type === 'position' && change.position) {
-        if (change.id.startsWith('frame__')) {
-          const frameId = change.id.slice(7);
-          const frame = useGraphStore.getState().frames.get(frameId);
-          if (frame && change.dragging) {
-            const oldPos = frame.position;
-            const newPos = change.position;
-            const dx = newPos.x - oldPos.x;
+  const onNodeDrag = useCallback((_event: React.MouseEvent, _node: FlowNode, draggedNodes: FlowNode[]) => {
+    for (const n of draggedNodes) {
+      if (n.id.startsWith('frame__')) {
+        // Frame dragging: move contained nodes along with the frame
+        const frameId = n.id.slice(7);
+        const frame = useGraphStore.getState().frames.get(frameId);
+        if (frame) {
+          const oldPos = frame.position;
+          const newPos = n.position;
+          const dx = newPos.x - oldPos.x;
             const dy = newPos.y - oldPos.y;
-
-            if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
-              const { nodes } = useGraphStore.getState();
-              const flowNodeList = getNodes();
-              for (const [nodeId, node] of nodes) {
-                const flowNode = flowNodeList.find(n => n.id === nodeId);
-                const nw = flowNode?.measured?.width ?? 200;
-                const nh = flowNode?.measured?.height ?? 100;
-                // Use node center for containment check
-                const cx = node.position.x + nw / 2;
-                const cy = node.position.y + nh / 2;
-                if (
-                  cx >= oldPos.x &&
-                  cy >= oldPos.y &&
-                  cx <= oldPos.x + frame.size.width &&
-                  cy <= oldPos.y + frame.size.height
-                ) {
-                  setPosition(nodeId, {
-                    x: node.position.x + dx,
-                    y: node.position.y + dy,
-                  });
-                }
-              }
-            }
-          }
-          useGraphStore.getState().updateFrame(frameId, { position: change.position });
-        } else {
-          setPosition(change.id, change.position);
-
-          // Detect drag over frames for auto-expand highlight
-          if (change.dragging) {
-            const flowNode = getNodes().find(n => n.id === change.id);
-            const nw = flowNode?.measured?.width ?? 200;
-            const nh = flowNode?.measured?.height ?? 100;
-            const cx = change.position.x + nw / 2;
-            const cy = change.position.y + nh / 2;
-            const SNAP_MARGIN = 50;
-            const { frames } = useGraphStore.getState();
-            let hitFrameId: string | null = null;
-            for (const frame of frames.values()) {
-              const fx = frame.position.x - SNAP_MARGIN;
-              const fy = frame.position.y - SNAP_MARGIN;
-              const fw = frame.size.width + SNAP_MARGIN * 2;
-              const fh = frame.size.height + SNAP_MARGIN * 2;
-              if (cx >= fx && cy >= fy && cx <= fx + fw && cy <= fy + fh) {
-                hitFrameId = frame.id;
-                break;
-              }
-            }
-            if (hitFrameId !== dropTargetFrameId.current) {
-              dropTargetFrameId.current = hitFrameId;
-              // Force re-render of frame nodes to update dropTarget flag
-              setFlowNodes(prev => prev.map(n => {
-                if (!n.id.startsWith('frame__')) return n;
-                const fid = n.id.slice(7);
-                return { ...n, data: { ...n.data, dropTarget: fid === hitFrameId } };
-              }));
-            }
-          }
-
-          // On drop: refit frames that contain this node (expand or shrink to fit)
-          if (change.dragging === false) {
-            const droppedPos = change.position;
+          if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+            const { nodes } = useGraphStore.getState();
             const flowNodeList = getNodes();
-            const droppedFlowNode = flowNodeList.find(n => n.id === change.id);
-            const droppedW = droppedFlowNode?.measured?.width ?? 200;
-            const droppedH = droppedFlowNode?.measured?.height ?? 100;
-            const droppedCx = droppedPos.x + droppedW / 2;
-            const droppedCy = droppedPos.y + droppedH / 2;
-
-            const SNAP_MARGIN = 50;
-            const PADDING = 30;
-            const HEADER = 28;
-            const MIN_W = 200;
-            const MIN_H = 150;
-            const { frames, nodes } = useGraphStore.getState();
-
-            // Find the frame this node was dropped into/near
-            let targetFrameId = dropTargetFrameId.current;
-            if (!targetFrameId) {
-              // Also check if node center is inside any existing frame
-              for (const frame of frames.values()) {
-                if (
-                  droppedCx >= frame.position.x &&
-                  droppedCy >= frame.position.y &&
-                  droppedCx <= frame.position.x + frame.size.width &&
-                  droppedCy <= frame.position.y + frame.size.height
-                ) {
-                  targetFrameId = frame.id;
-                  break;
-                }
+            for (const [nodeId, storeNode] of nodes) {
+              const flowNode = flowNodeList.find(fn => fn.id === nodeId);
+              const nw = flowNode?.measured?.width ?? 200;
+              const nh = flowNode?.measured?.height ?? 100;
+              const cx = storeNode.position.x + nw / 2;
+              const cy = storeNode.position.y + nh / 2;
+              if (
+                cx >= oldPos.x &&
+                cy >= oldPos.y &&
+                cx <= oldPos.x + frame.size.width &&
+                cy <= oldPos.y + frame.size.height
+              ) {
+                setPosition(nodeId, {
+                  x: storeNode.position.x + dx,
+                  y: storeNode.position.y + dy,
+                });
               }
             }
-            dropTargetFrameId.current = null;
+          }
+          useGraphStore.getState().updateFrame(frameId, { position: newPos });
+        }
+      } else {
+        // Regular node: sync position to store
+        setPosition(n.id, n.position);
+        const nw = n.measured?.width ?? 200;
+        const nh = n.measured?.height ?? 100;
+        const cx = n.position.x + nw / 2;
+        const cy = n.position.y + nh / 2;
+        const SNAP_MARGIN = 50;
+        const { frames } = useGraphStore.getState();
+        let hitFrameId: string | null = null;
+        for (const frame of frames.values()) {
+          const fx = frame.position.x - SNAP_MARGIN;
+          const fy = frame.position.y - SNAP_MARGIN;
+          const fw = frame.size.width + SNAP_MARGIN * 2;
+          const fh = frame.size.height + SNAP_MARGIN * 2;
+          if (cx >= fx && cy >= fy && cx <= fx + fw && cy <= fy + fh) {
+            hitFrameId = frame.id;
+            break;
+          }
+        }
+        if (hitFrameId !== dropTargetFrameId.current) {
+          dropTargetFrameId.current = hitFrameId;
+          setFlowNodes(prev => prev.map(fn => {
+            if (!fn.id.startsWith('frame__')) return fn;
+            const fid = fn.id.slice(7);
+            return { ...fn, data: { ...fn.data, dropTarget: fid === hitFrameId } };
+          }));
+        }
+      }
+    }
+  }, [setPosition, getNodes]);
 
-            if (targetFrameId) {
-              const frame = frames.get(targetFrameId);
-              if (frame) {
-                // Collect all nodes whose center is inside the frame (including the dropped node)
-                // Use the expanded snap zone for the dropped node, but strict bounds for existing nodes
-                const containedBounds: { l: number; t: number; r: number; b: number }[] = [];
+  const onNodeDragStop = useCallback((_event: React.MouseEvent, _node: FlowNode, draggedNodes: FlowNode[]) => {
+    for (const n of draggedNodes) {
+      if (n.id.startsWith('frame__')) {
+        useGraphStore.getState().updateFrame(n.id.slice(7), { position: n.position });
+      } else {
+        // Final position sync
+        setPosition(n.id, n.position);
 
-                for (const [nodeId, node] of nodes) {
-                  const fn = flowNodeList.find(n => n.id === nodeId);
-                  const w = fn?.measured?.width ?? 200;
-                  const h = fn?.measured?.height ?? 100;
-                  const pos = nodeId === change.id ? droppedPos : node.position;
-                  const cx = pos.x + w / 2;
-                  const cy = pos.y + h / 2;
+        // Refit frames that contain this node (expand or shrink to fit)
+        const flowNodeList = getNodes();
+        const nw = n.measured?.width ?? 200;
+        const nh = n.measured?.height ?? 100;
+        const droppedCx = n.position.x + nw / 2;
+        const droppedCy = n.position.y + nh / 2;
 
-                  // Check if node center is inside frame (with snap margin for the dropped node)
-                  const margin = nodeId === change.id ? SNAP_MARGIN : 0;
-                  if (
-                    cx >= frame.position.x - margin &&
-                    cy >= frame.position.y - margin &&
-                    cx <= frame.position.x + frame.size.width + margin &&
-                    cy <= frame.position.y + frame.size.height + margin
-                  ) {
-                    containedBounds.push({ l: pos.x, t: pos.y, r: pos.x + w, b: pos.y + h });
-                  }
-                }
+        const SNAP_MARGIN = 50;
+        const PADDING = 30;
+        const HEADER = 28;
+        const MIN_W = 200;
+        const MIN_H = 150;
+        const { frames, nodes } = useGraphStore.getState();
 
-                if (containedBounds.length > 0) {
-                  const minL = Math.min(...containedBounds.map(b => b.l));
-                  const minT = Math.min(...containedBounds.map(b => b.t));
-                  const maxR = Math.max(...containedBounds.map(b => b.r));
-                  const maxB = Math.max(...containedBounds.map(b => b.b));
+        let targetFrameId = dropTargetFrameId.current;
+        if (!targetFrameId) {
+          for (const frame of frames.values()) {
+            if (
+              droppedCx >= frame.position.x &&
+              droppedCy >= frame.position.y &&
+              droppedCx <= frame.position.x + frame.size.width &&
+              droppedCy <= frame.position.y + frame.size.height
+            ) {
+              targetFrameId = frame.id;
+              break;
+            }
+          }
+        }
+        dropTargetFrameId.current = null;
 
-                  const newX = minL - PADDING;
-                  const newY = minT - PADDING - HEADER;
-                  const newW = Math.max(MIN_W, (maxR - minL) + PADDING * 2);
-                  const newH = Math.max(MIN_H, (maxB - minT) + PADDING * 2 + HEADER);
+        if (targetFrameId) {
+          const frame = frames.get(targetFrameId);
+          if (frame) {
+            const containedBounds: { l: number; t: number; r: number; b: number }[] = [];
 
-                  useGraphStore.getState().updateFrame(targetFrameId, {
-                    position: { x: newX, y: newY },
-                    size: { width: newW, height: newH },
-                  });
-                }
+            for (const [nodeId, storeNode] of nodes) {
+              const fn = flowNodeList.find(fln => fln.id === nodeId);
+              const w = fn?.measured?.width ?? 200;
+              const h = fn?.measured?.height ?? 100;
+              const pos = nodeId === n.id ? n.position : storeNode.position;
+              const pcx = pos.x + w / 2;
+              const pcy = pos.y + h / 2;
+
+              const margin = nodeId === n.id ? SNAP_MARGIN : 0;
+              if (
+                pcx >= frame.position.x - margin &&
+                pcy >= frame.position.y - margin &&
+                pcx <= frame.position.x + frame.size.width + margin &&
+                pcy <= frame.position.y + frame.size.height + margin
+              ) {
+                containedBounds.push({ l: pos.x, t: pos.y, r: pos.x + w, b: pos.y + h });
               }
             }
 
-            // Clear highlight
-            setFlowNodes(prev => prev.map(n => {
-              if (!n.id.startsWith('frame__')) return n;
-              return { ...n, data: { ...n.data, dropTarget: false } };
-            }));
+            if (containedBounds.length > 0) {
+              const minL = Math.min(...containedBounds.map(b => b.l));
+              const minT = Math.min(...containedBounds.map(b => b.t));
+              const maxR = Math.max(...containedBounds.map(b => b.r));
+              const maxB = Math.max(...containedBounds.map(b => b.b));
+
+              useGraphStore.getState().updateFrame(targetFrameId, {
+                position: { x: minL - PADDING, y: minT - PADDING - HEADER },
+                size: {
+                  width: Math.max(MIN_W, (maxR - minL) + PADDING * 2),
+                  height: Math.max(MIN_H, (maxB - minT) + PADDING * 2 + HEADER),
+                },
+              });
+            }
           }
         }
       }
+    }
+
+    // Clear frame drop-target highlight
+    setFlowNodes(prev => prev.map(fn => {
+      if (!fn.id.startsWith('frame__')) return fn;
+      return { ...fn, data: { ...fn.data, dropTarget: false } };
+    }));
+  }, [setPosition, getNodes]);
+  const onNodesChange = useCallback((changes: NodeChange[]) => {
+    const removals = changes.filter(c => c.type === 'remove');
+    const nonRemovals = changes.filter(c => c.type !== 'remove');
+    // Apply all non-removal changes to React Flow's internal state.
+    // Position changes are NOT synced to the Zustand store here — that
+    // happens exclusively in onNodeDrag/onNodeDragStop to avoid React
+    // Flow's internal initialization from overwriting programmatic positions.
+    const next = applyNodeChanges(nonRemovals, flowNodesRef.current);
+    setFlowNodes(next);
+    // Selection sync
+    let selectionChanged = false;
+    for (const change of nonRemovals) {
       if (change.type === 'select') {
         selectionChanged = true;
         if (change.id.startsWith('frame__') && change.selected) {
           useGraphStore.getState().selectFrame(change.id.slice(7));
         }
       }
-    });
-
-    const next = applyNodeChanges(nonRemovals, flowNodesRef.current);
-    setFlowNodes(next);
-
+    }
     if (selectionChanged) {
       const selectedIds = next.filter(n => n.selected && !n.id.startsWith('frame__')).map(n => n.id);
       setSelectedNodes(selectedIds);
     }
-
     if (removals.length > 0) {
       const deletedNodeIds = new Set<string>();
       removals.forEach(change => {
@@ -619,7 +623,7 @@ export const NodeCanvas: React.FC = () => {
         refitFrames(deletedNodeIds);
       }
     }
-  }, [setPosition, setSelectedNodes, removeNode, refitFrames]);
+  }, [setSelectedNodes, removeNode, refitFrames]);
 
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     const removals = changes.filter(c => c.type === 'remove');
@@ -852,34 +856,23 @@ export const NodeCanvas: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key === 'c') {
-        e.preventDefault();
-        copySelected(false);
-      } else if (mod && e.key === 'x') {
-        e.preventDefault();
-        copySelected(true);
-      } else if (mod && e.key === 'v') {
-        e.preventDefault();
-      pasteClipboard();
-    } else if (e.key === 'f' && !mod && !e.shiftKey && !e.altKey) {
-      e.preventDefault();
-      const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
-      if (selectedIds.length >= 1) {
-        frameSelectedNodes(getMeasuredNodeSizes());
-      }
-    } else if (mod && e.key === 'g' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
+    const unregisters = [
+      shortcutDispatcher.register('node.copy', () => copySelected(false)),
+      shortcutDispatcher.register('node.cut', () => copySelected(true)),
+      shortcutDispatcher.register('node.paste', () => { pasteClipboard(); }),
+      shortcutDispatcher.register('node.frame', () => {
+        const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
+        if (selectedIds.length >= 1) {
+          frameSelectedNodes(getMeasuredNodeSizes());
+        }
+      }),
+      shortcutDispatcher.register('node.group', () => {
         const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
         if (selectedIds.length >= 1) {
           createGroup(selectedIds);
         }
-      } else if (mod && e.altKey && e.key === 'g') {
-        e.preventDefault();
+      }),
+      shortcutDispatcher.register('node.ungroup', () => {
         const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
         if (selectedIds.length === 1) {
           const node = useGraphStore.getState().nodes.get(selectedIds[0]);
@@ -887,13 +880,9 @@ export const NodeCanvas: React.FC = () => {
             ungroupNode(selectedIds[0]);
           }
         }
-      } else if (e.key === 'm' || e.key === 'M') {
-        if (!mod) {
-          e.preventDefault();
-          toggleMuteSelected();
-        }
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
+      }),
+      shortcutDispatcher.register('node.mute', () => toggleMuteSelected()),
+      shortcutDispatcher.register('node.tabGroup', () => {
         const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
         if (selectedIds.length === 1) {
           const node = useGraphStore.getState().nodes.get(selectedIds[0]);
@@ -905,30 +894,13 @@ export const NodeCanvas: React.FC = () => {
         if (isInsideGroup()) {
           exitGroup();
         }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+      }),
+    ];
+
+    return () => unregisters.forEach(fn => fn());
   }, [copySelected, pasteClipboard, frameSelectedNodes, getMeasuredNodeSizes, createGroup, ungroupNode, enterGroup, exitGroup, isInsideGroup, toggleMuteSelected]);
-
-
-  // Prevent browser back/forward navigation triggered by horizontal scroll/swipe gestures.
-  // Must use a non-passive listener since React's onWheel is passive by default.
-  const canvasRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => {
-      if (Math.abs(e.deltaX) > 0) {
-        e.preventDefault();
-      }
-    };
-    el.addEventListener('wheel', handler, { passive: false });
-    return () => el.removeEventListener('wheel', handler);
-  }, []);
   return (
     <section
-      ref={canvasRef}
       style={{ width: '100%', height: '100%', background: 'var(--bg-canvas)' }}
       onDragOver={onDragOver}
       onDrop={onDrop}
@@ -939,6 +911,8 @@ export const NodeCanvas: React.FC = () => {
         edges={flowEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onConnectStart={onConnectStart}
