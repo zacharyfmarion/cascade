@@ -276,7 +276,9 @@ impl Image {
         debug_assert!(
             width <= MAX_IMAGE_DIM && height <= MAX_IMAGE_DIM,
             "Image::new called with oversized dimensions: {}x{} (max {})",
-            width, height, MAX_IMAGE_DIM
+            width,
+            height,
+            MAX_IMAGE_DIM
         );
         let len = (width as usize) * (height as usize) * 4;
         let dw = RectI::from_dimensions(width, height);
@@ -628,6 +630,17 @@ impl Value {
         }
     }
 
+    /// Estimate heap memory used by this value in bytes.
+    pub fn estimate_bytes(&self) -> usize {
+        match self {
+            Value::Image(img) | Value::Mask(img) => {
+                img.data.capacity() * std::mem::size_of::<f32>()
+            }
+            Value::String(s) => s.capacity(),
+            _ => 0,
+        }
+    }
+
     pub fn as_image(&self) -> Option<&Image> {
         match self {
             Value::Image(img) => Some(img),
@@ -863,7 +876,6 @@ fn linear_to_srgb_lut() -> &'static [u8; 4096] {
         table
     })
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -16,8 +16,30 @@ pub struct EvalResult {
     pub node_timings: HashMap<NodeId, Duration>,
 }
 
+struct CacheEntry {
+    key: CacheKey,
+    value: Value,
+    byte_size: usize,
+    last_access: u64,
+}
+
+pub struct CacheMetrics {
+    pub total_bytes: usize,
+    pub entry_count: usize,
+    pub eviction_count: u64,
+    pub hit_count: u64,
+    pub miss_count: u64,
+}
+
 pub struct Evaluator {
-    cache: HashMap<(NodeId, String), (CacheKey, Value)>,
+    cache: HashMap<(NodeId, String), CacheEntry>,
+    access_counter: u64,
+    total_bytes: usize,
+    max_bytes: usize,
+    in_eval_scope: bool,
+    eviction_count: u64,
+    hit_count: u64,
+    miss_count: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -30,8 +52,95 @@ pub struct CacheKey {
 
 impl Evaluator {
     pub fn new() -> Self {
+        Self::with_budget(512 * 1024 * 1024)
+    }
+
+    pub fn with_budget(max_bytes: usize) -> Self {
         Self {
             cache: HashMap::new(),
+            access_counter: 0,
+            total_bytes: 0,
+            max_bytes,
+            in_eval_scope: false,
+            eviction_count: 0,
+            hit_count: 0,
+            miss_count: 0,
+        }
+    }
+
+    /// Set the cache memory budget in bytes.
+    pub fn set_budget(&mut self, max_bytes: usize) {
+        self.max_bytes = max_bytes;
+    }
+
+    /// Get current cache metrics.
+    pub fn metrics(&self) -> CacheMetrics {
+        CacheMetrics {
+            total_bytes: self.total_bytes,
+            entry_count: self.cache.len(),
+            eviction_count: self.eviction_count,
+            hit_count: self.hit_count,
+            miss_count: self.miss_count,
+        }
+    }
+
+    /// Begin an evaluation scope. Eviction is deferred until end_eval_scope().
+    /// Use this when evaluating multiple viewers so eviction between viewers
+    /// doesn't force recomputation of shared upstream nodes.
+    pub fn begin_eval_scope(&mut self) {
+        self.in_eval_scope = true;
+    }
+
+    /// End an evaluation scope and run eviction if needed.
+    pub fn end_eval_scope(&mut self) {
+        self.in_eval_scope = false;
+        self.evict_if_needed();
+    }
+
+    pub fn remove_node_cache(&mut self, node_id: NodeId) {
+        self.cache.retain(|&(nid, _), entry| {
+            if nid == node_id {
+                self.total_bytes = self.total_bytes.saturating_sub(entry.byte_size);
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    fn next_access(&mut self) -> u64 {
+        self.access_counter += 1;
+        self.access_counter
+    }
+
+    fn cache_insert(&mut self, key: (NodeId, String), entry: CacheEntry) {
+        let new_size = entry.byte_size;
+        if let Some(old) = self.cache.insert(key, entry) {
+            self.total_bytes = self.total_bytes.saturating_sub(old.byte_size);
+        }
+        self.total_bytes += new_size;
+    }
+
+    fn evict_if_needed(&mut self) {
+        if self.total_bytes <= self.max_bytes {
+            return;
+        }
+
+        let mut candidates: Vec<((NodeId, String), u64)> = self
+            .cache
+            .iter()
+            .map(|(k, e)| (k.clone(), e.last_access))
+            .collect();
+        candidates.sort_by_key(|&(_, access)| access);
+
+        for (cache_key, _) in candidates {
+            if self.total_bytes <= self.max_bytes {
+                break;
+            }
+            if let Some(evicted) = self.cache.remove(&cache_key) {
+                self.total_bytes = self.total_bytes.saturating_sub(evicted.byte_size);
+                self.eviction_count += 1;
+            }
         }
     }
 
@@ -79,14 +188,22 @@ impl Evaluator {
                 && spec.outputs.iter().all(|port| {
                     self.cache
                         .get(&(node_id, port.name.clone()))
-                        .map(|(cached_key, _)| cached_key == &key)
+                        .map(|entry| entry.key == key)
                         .unwrap_or(false)
                 });
 
             if cache_hit {
+                let access = self.next_access();
+                for port in spec.outputs.iter() {
+                    if let Some(entry) = self.cache.get_mut(&(node_id, port.name.clone())) {
+                        entry.last_access = access;
+                    }
+                }
+                self.hit_count += 1;
                 node_timings.insert(node_id, Duration::ZERO);
                 continue;
             }
+            self.miss_count += 1;
 
             let node = node_instances
                 .get(&node_id)
@@ -99,7 +216,7 @@ impl Evaluator {
                     let value = self
                         .cache
                         .get(&(up_node, up_port.clone()))
-                        .map(|(_, v)| v.clone())
+                        .map(|entry| entry.value.clone())
                         .ok_or_else(|| {
                             CompositorError::MissingInput(format!(
                                 "{}.{}",
@@ -157,8 +274,17 @@ impl Evaluator {
                         .and_then(|inp| inputs.get(&inp.name))
                         .cloned()
                         .unwrap_or(Value::None);
-                    self.cache
-                        .insert((node_id, output.name.clone()), (key.clone(), pass_value));
+                    let byte_size = pass_value.estimate_bytes();
+                    let access = self.next_access();
+                    self.cache_insert(
+                        (node_id, output.name.clone()),
+                        CacheEntry {
+                            key: key.clone(),
+                            value: pass_value,
+                            byte_size,
+                            last_access: access,
+                        },
+                    );
                 }
                 node_timings.insert(node_id, Duration::ZERO);
                 graph.clear_dirty(node_id);
@@ -167,7 +293,16 @@ impl Evaluator {
 
             let mut merged_params = Self::merge_params(instance, spec);
             Self::apply_promoted_params(
-                &mut merged_params, spec, instance, graph, node_id, &self.cache,
+                &mut merged_params,
+                spec,
+                instance,
+                graph,
+                node_id,
+                |nid, port| {
+                    self.cache
+                        .get(&(nid, port.to_string()))
+                        .map(|entry| entry.value.clone())
+                },
             );
             let ctx = EvalContext {
                 inputs,
@@ -194,8 +329,17 @@ impl Evaluator {
             node_timings.insert(node_id, elapsed);
             for output in spec.outputs.iter() {
                 let value = outputs.get(&output.name).cloned().unwrap_or(Value::None);
-                self.cache
-                    .insert((node_id, output.name.clone()), (key.clone(), value));
+                let byte_size = value.estimate_bytes();
+                let access = self.next_access();
+                self.cache_insert(
+                    (node_id, output.name.clone()),
+                    CacheEntry {
+                        key: key.clone(),
+                        value,
+                        byte_size,
+                        last_access: access,
+                    },
+                );
             }
 
             graph.clear_dirty(node_id);
@@ -204,7 +348,7 @@ impl Evaluator {
         let value = self
             .cache
             .get(&(viewer_node_id, output_port.to_string()))
-            .map(|(_, v)| v.clone())
+            .map(|entry| entry.value.clone())
             .ok_or_else(|| {
                 CompositorError::MissingInput(format!(
                     "{}.{}",
@@ -212,6 +356,9 @@ impl Evaluator {
                     output_port
                 ))
             })?;
+        if !self.in_eval_scope {
+            self.evict_if_needed();
+        }
         Ok(EvalResult {
             value,
             node_timings,
@@ -259,7 +406,7 @@ impl Evaluator {
                 let cache_key = self
                     .cache
                     .get(&(up_node, up_port.clone()))
-                    .map(|(key, _)| key)
+                    .map(|entry| &entry.key)
                     .ok_or_else(|| {
                         CompositorError::MissingInput(format!(
                             "{}.{}",
@@ -279,11 +426,23 @@ impl Evaluator {
     pub fn get_cached(&self, node_id: NodeId, output_port: &str) -> Option<&Value> {
         self.cache
             .get(&(node_id, output_port.to_string()))
-            .map(|(_, v)| v)
+            .map(|entry| &entry.value)
     }
 
-    pub fn cache(&self) -> &HashMap<(NodeId, String), (CacheKey, Value)> {
-        &self.cache
+    pub fn get_cached_key(&self, node_id: NodeId, output_port: &str) -> Option<&CacheKey> {
+        self.cache
+            .get(&(node_id, output_port.to_string()))
+            .map(|entry| &entry.key)
+    }
+
+    pub fn get_cached_key_value(
+        &self,
+        node_id: NodeId,
+        port: &str,
+    ) -> Option<(&CacheKey, &Value)> {
+        self.cache
+            .get(&(node_id, port.to_string()))
+            .map(|entry| (&entry.key, &entry.value))
     }
 
     pub fn compute_node_cache_key(
@@ -333,20 +492,22 @@ impl Evaluator {
         params
     }
 
-    pub fn apply_promoted_params(
+    pub fn apply_promoted_params<F>(
         params: &mut HashMap<String, ParamValue>,
         spec: &crate::types::NodeSpec,
         instance: &crate::graph::NodeInstance,
         graph: &Graph,
         node_id: NodeId,
-        cache: &HashMap<(NodeId, String), (CacheKey, Value)>,
-    ) {
+        cache_lookup: F,
+    ) where
+        F: Fn(NodeId, &str) -> Option<Value>,
+    {
         for param in &spec.params {
             if !crate::types::NodeSpec::is_connectable_param(param) {
                 continue;
             }
             if let Some((up_node, up_port)) = graph.get_upstream(node_id, &param.key) {
-                if let Some((_, cached_value)) = cache.get(&(up_node, up_port)) {
+                if let Some(cached_value) = cache_lookup(up_node, &up_port) {
                     if let Some(pv) = cached_value.to_param_value() {
                         params.insert(param.key.clone(), pv);
                     }
@@ -448,6 +609,13 @@ mod tests {
         let width = 2u32;
         let height = 2u32;
         let data = vec![1.0f32; 16];
+        Image::from_f32_data(width, height, data).unwrap()
+    }
+
+    fn create_large_image() -> Image {
+        let width = 256u32;
+        let height = 256u32;
+        let data = vec![1.0f32; (width * height * 4) as usize];
         Image::from_f32_data(width, height, data).unwrap()
     }
 
@@ -635,7 +803,7 @@ mod tests {
         ));
         assert!(result1.is_ok());
 
-        let cache_size_before = evaluator.cache.len();
+        let cache_size_before = evaluator.metrics().entry_count;
 
         let result2 = block_on(evaluator.evaluate(
             &mut graph,
@@ -651,7 +819,7 @@ mod tests {
         ));
         assert!(result2.is_ok());
 
-        let cache_size_after = evaluator.cache.len();
+        let cache_size_after = evaluator.metrics().entry_count;
         assert_eq!(cache_size_before, cache_size_after);
     }
 
@@ -972,7 +1140,7 @@ mod tests {
         ));
         assert!(result1.is_ok());
 
-        let cache_size_frame_1 = evaluator.cache.len();
+        let cache_size_frame_1 = evaluator.metrics().entry_count;
 
         let result2 = block_on(evaluator.evaluate(
             &mut graph,
@@ -988,7 +1156,7 @@ mod tests {
         ));
         assert!(result2.is_ok());
 
-        let cache_size_frame_2 = evaluator.cache.len();
+        let cache_size_frame_2 = evaluator.metrics().entry_count;
         assert!(cache_size_frame_2 >= cache_size_frame_1);
     }
 
@@ -1017,8 +1185,8 @@ mod tests {
             Arc::new(MockNode::new(spec, Value::Field(field)))
         });
 
-        let offset_format = Format::hd();
-        let offset_dw = RectI {
+        let _offset_format = Format::hd();
+        let _offset_dw = RectI {
             min: IVec2::new(50, 50),
             max: IVec2::new(54, 54),
         };
@@ -1748,5 +1916,293 @@ mod tests {
             key_hd.project_format_hash, key_custom.project_format_hash,
             "project_format_hash should differ"
         );
+    }
+
+    #[test]
+    fn test_cache_eviction_respects_budget() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let budget = 1024;
+        let mut evaluator = Evaluator::with_budget(budget);
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let processor_id = graph.add_node("processor");
+        let sink_id = graph.add_node("sink");
+
+        graph
+            .connect(&registry, source_id, "output", processor_id, "input")
+            .unwrap();
+        graph
+            .connect(&registry, processor_id, "output", sink_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_large_image()),
+            )),
+        );
+        node_instances.insert(
+            processor_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("processor").unwrap().clone(),
+                Value::Image(create_large_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_large_image()),
+            )),
+        );
+
+        let result = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+        assert!(result.is_ok());
+
+        let metrics = evaluator.metrics();
+        assert!(metrics.eviction_count > 0);
+        assert!(metrics.total_bytes <= budget);
+    }
+
+    #[test]
+    fn test_cache_no_eviction_within_budget() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::with_budget(100 * 1024 * 1024);
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let sink_id = graph.add_node("sink");
+        graph
+            .connect(&registry, source_id, "output", sink_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let metrics = evaluator.metrics();
+        assert_eq!(metrics.eviction_count, 0);
+        assert!(metrics.total_bytes > 0);
+        assert_eq!(metrics.entry_count, 2);
+    }
+
+    #[test]
+    fn test_remove_node_cache_cleans_up() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let sink_id = graph.add_node("sink");
+        graph
+            .connect(&registry, source_id, "output", sink_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let bytes_before = evaluator.metrics().total_bytes;
+        assert!(bytes_before > 0);
+
+        evaluator.remove_node_cache(source_id);
+
+        let metrics = evaluator.metrics();
+        assert!(metrics.total_bytes < bytes_before);
+        assert_eq!(metrics.entry_count, 1);
+    }
+
+    #[test]
+    fn test_eval_scope_defers_eviction() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::with_budget(1024);
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let sink_id = graph.add_node("sink");
+        graph
+            .connect(&registry, source_id, "output", sink_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_large_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_large_image()),
+            )),
+        );
+
+        evaluator.begin_eval_scope();
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+
+        let metrics = evaluator.metrics();
+        assert_eq!(metrics.eviction_count, 0);
+        assert!(metrics.total_bytes > 1024);
+
+        evaluator.end_eval_scope();
+
+        let metrics = evaluator.metrics();
+        assert!(metrics.eviction_count > 0);
+    }
+
+    #[test]
+    fn test_cache_metrics_track_hits_and_misses() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let mut evaluator = Evaluator::new();
+        let cm = BuiltinColorManagement::new();
+
+        let source_id = graph.add_node("source");
+        let sink_id = graph.add_node("sink");
+        graph
+            .connect(&registry, source_id, "output", sink_id, "input")
+            .unwrap();
+
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(
+            source_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("source").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+        node_instances.insert(
+            sink_id,
+            Arc::new(MockNode::new(
+                registry.get_spec("sink").unwrap().clone(),
+                Value::Image(create_simple_image()),
+            )),
+        );
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+        let m1 = evaluator.metrics();
+        assert_eq!(m1.miss_count, 2);
+        assert_eq!(m1.hit_count, 0);
+
+        let _ = block_on(evaluator.evaluate(
+            &mut graph,
+            &registry,
+            &node_instances,
+            sink_id,
+            "output",
+            FrameTime { frame: 0 },
+            &cm,
+            None,
+            &Format::hd(),
+            &HashMap::new(),
+        ));
+        let m2 = evaluator.metrics();
+        assert_eq!(m2.hit_count, 2);
+        assert_eq!(m2.miss_count, 2);
+    }
+
+    #[test]
+    fn test_value_estimate_bytes() {
+        let img = create_simple_image();
+        let img_value = Value::Image(img);
+        assert!(img_value.estimate_bytes() >= 64);
+
+        assert_eq!(Value::Float(1.0).estimate_bytes(), 0);
+        assert_eq!(Value::Int(42).estimate_bytes(), 0);
+        assert_eq!(Value::Bool(true).estimate_bytes(), 0);
+        assert_eq!(Value::None.estimate_bytes(), 0);
     }
 }

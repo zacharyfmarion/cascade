@@ -814,8 +814,12 @@ impl Engine {
 
         let mut merged_params = Evaluator::merge_params(instance, spec);
         Evaluator::apply_promoted_params(
-            &mut merged_params, spec, instance, &self.graph, nid,
-            self.evaluator.cache(),
+            &mut merged_params,
+            spec,
+            instance,
+            &self.graph,
+            nid,
+            |node_id, port| self.evaluator.get_cached(node_id, port).cloned(),
         );
         let node_arc = self
             .nodes
