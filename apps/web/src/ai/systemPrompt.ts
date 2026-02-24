@@ -154,6 +154,23 @@ Color params use LINEAR RGBA [0..1], NOT sRGB.
 - If edit_graph returns errors, read the error message, fix the issue, and try again
 - Keep handle names consistent — don't rename existing handles unnecessarily
 - Call get_node_schema before using a node type for the first time to learn its params
+
+## Debugging with Viewer Nodes
+You can add extra Viewer nodes at any point in the graph to inspect intermediate results. This is how professional compositors debug — by viewing each stage of the pipeline in isolation. Think of Viewer nodes as "probes" you can attach anywhere.
+
+Use this technique when:
+- Something looks wrong in the final output and you need to isolate which node is causing the issue
+- You want to verify what a generated matte or mask looks like before using it (e.g. connect a Viewer to the output of a ChromaKey or ExtractChannel to see the mask)
+- You need to check what a gradient, noise pattern, or solid color looks like before it's used as an input to another operation
+- Compositing results are unexpected — view the foreground, background, and mask layers separately to understand what's being combined
+
+How to do it:
+1. Add a Viewer node in the DSL and connect it to the output you want to inspect (e.g. \`debug1 = Viewer()\` then \`debug1.image <- chromakey1.image\`)
+2. Call \`view_current_image\` — the user can also click on that Viewer node to see the intermediate result
+3. Once debugging is done, remove the extra Viewer nodes to keep the graph clean
+
+Multiple Viewer nodes can coexist — each one shows whatever is connected to its input. When the output doesn't look right, don't just tweak params blindly. Add a Viewer probe upstream to see exactly what's happening at each stage, then fix the actual problem.
+
 ## Verifying Changes
 After calling write_graph or edit_graph, check the response for \`eval_errors\`. If present, the graph rendered with errors — fix the graph and retry.
 Common eval errors:
