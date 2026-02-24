@@ -1,4 +1,4 @@
-import type { DslAst, DslConnection, DslNode, DslParamValue } from './types';
+import type { DslAst, DslConnection, DslNode, DslParamValue, DslSourceMap, DslSourceSpan } from './types';
 import { pascalToSnake } from './types';
 import type { NodeSpec, ParamSpec } from '../../store/types';
 
@@ -11,6 +11,7 @@ interface ParseError {
 export interface ParseResult {
   ast: DslAst | null;
   errors: ParseError[];
+  sourceMap?: DslSourceMap;
 }
 
 const NODE_REGEX = /^(@muted\s+)?([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\((.*)\)$/;
@@ -257,21 +258,99 @@ const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | nul
   }
 };
 
+interface LogicalLine {
+  text: string;
+  /** 1-based line number where this logical line starts in the original input */
+  startLine: number;
+}
+
+/**
+ * Join continuation lines: when a line has unclosed `(`, `[`, or `"`,
+ * subsequent lines are merged into the same logical line until balanced.
+ * Comments and blank lines inside continuations are stripped.
+ */
+export const joinContinuationLines = (input: string): LogicalLine[] => {
+  const rawLines = input.split(/\r?\n/);
+  const result: LogicalLine[] = [];
+  let buffer = '';
+  let startLine = 1;
+  let depth = 0; // tracks ( and [ nesting
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < rawLines.length; i += 1) {
+    const raw = rawLines[i];
+    const trimmed = raw.trim();
+
+    // Outside a continuation: skip blank lines and full-line comments
+    if (depth === 0 && !inString && buffer === '') {
+      if (!trimmed || trimmed.startsWith('#')) {
+        result.push({ text: raw, startLine: i + 1 });
+        continue;
+      }
+    }
+
+    // Start a new logical line if buffer is empty
+    if (buffer === '') {
+      startLine = i + 1;
+      buffer = trimmed;
+    } else {
+      // Inside continuation: strip inline comments on continuation lines,
+      // collapse whitespace
+      const stripped = stripInlineComment(raw).trim();
+      if (stripped) {
+        buffer += ' ' + stripped;
+      }
+    }
+
+    // Scan the current raw line to update depth/string state
+    for (let j = 0; j < raw.length; j += 1) {
+      const char = raw[j];
+      if (char === '\\' && !escaped) {
+        escaped = true;
+        continue;
+      }
+      if (char === '"' && !escaped) {
+        inString = !inString;
+      }
+      escaped = false;
+      if (!inString) {
+        if (char === '(' || char === '[') depth += 1;
+        if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
+      }
+    }
+
+    // If balanced, emit the logical line
+    if (depth === 0 && !inString) {
+      result.push({ text: buffer, startLine });
+      buffer = '';
+    }
+  }
+
+  // Flush any remaining buffer (unclosed brackets — will produce parse errors downstream)
+  if (buffer) {
+    result.push({ text: buffer, startLine });
+  }
+
+  return result;
+};
+
 export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
   const errors: ParseError[] = [];
   const nodes = new Map<string, DslNode>();
   const connections: DslConnection[] = [];
+  const nodeSpans = new Map<string, DslSourceSpan>();
+  const connectionSpans = new Map<string, DslSourceSpan>();
   const specById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
 
-  const lines = input.split(/\r?\n/);
-  lines.forEach((line, index) => {
-    const lineNumber = index + 1;
+  const logicalLines = joinContinuationLines(input);
+  for (const { text: line, startLine: lineNumber } of logicalLines) {
     const trimmedLine = line.trim();
-    if (!trimmedLine) return;
-    if (trimmedLine.startsWith('#')) return;
+    if (!trimmedLine) continue;
+    if (trimmedLine.startsWith('#')) continue;
 
     const withoutComment = stripInlineComment(line).trim();
-    if (!withoutComment) return;
+    if (!withoutComment) continue;
 
     const nodeMatch = withoutComment.match(NODE_REGEX);
     if (nodeMatch) {
@@ -282,7 +361,7 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
 
       if (nodes.has(handle)) {
         errors.push({ line: lineNumber, message: `Duplicate handle '${handle}'` });
-        return;
+        continue;
       }
 
       const nodeTypeId = pascalToSnake(nodeType);
@@ -316,7 +395,14 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
       }
 
       nodes.set(handle, { handle, nodeType, nodeTypeId, params, muted, line: lineNumber });
-      return;
+      const trimmedLine = withoutComment.trim();
+      nodeSpans.set(handle, {
+        startLine: lineNumber,
+        startCol: 0,
+        endLine: lineNumber,
+        endCol: trimmedLine.length,
+      });
+      continue;
     }
 
     const connectionMatch = withoutComment.match(CONNECTION_REGEX);
@@ -326,12 +412,20 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
       const fromHandle = connectionMatch[3];
       const fromPort = connectionMatch[4];
       connections.push({ fromHandle, fromPort, toHandle, toPort, line: lineNumber });
-      return;
+      const trimmedLine = withoutComment.trim();
+      connectionSpans.set(`${fromHandle}.${fromPort}->${toHandle}.${toPort}`, {
+        startLine: lineNumber,
+        startCol: 0,
+        endLine: lineNumber,
+        endCol: trimmedLine.length,
+      });
+      continue;
     }
 
     errors.push({ line: lineNumber, message: 'Unrecognized DSL line' });
-  });
+  }
 
   const ast: DslAst = { nodes, connections };
-  return { ast, errors };
+  const sourceMap: DslSourceMap = { nodeSpans, connectionSpans };
+  return { ast, errors, sourceMap };
 }

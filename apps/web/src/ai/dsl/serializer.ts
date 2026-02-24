@@ -3,6 +3,7 @@ import type { DslParamValue } from './types';
 import { snakeToPascal } from './types';
 import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
+import { useGraphStore } from '../../store/graphStore';
 
 export interface SerializerInput {
   nodes: Map<string, NodeInstance>;
@@ -143,6 +144,9 @@ export function serializeGraph(input: SerializerInput): string {
   const nodeLines = orderedNodes.map((node) => {
     const spec = nodeSpecById.get(node.typeId);
     const handle = handleMap.getOrCreate(node.id, node.typeId);
+    if (!node.dslHandle || node.dslHandle !== handle) {
+      useGraphStore.getState().setDslHandle(node.id, handle);
+    }
     const typeName = spec ? snakeToPascal(spec.id) : snakeToPascal(node.typeId);
 
     const params: string[] = [];

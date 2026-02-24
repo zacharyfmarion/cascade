@@ -1,18 +1,20 @@
-import type { Connection, NodeInstance, NodeSpec, ParamDefault, ParamSpec, ParamValue } from '../../store/types';
+import type { Connection, NodeInstance, NodeSpec, ParamDefault, ParamSpec, ParamValue, TransactionOptions, DiagnosticItem } from '../../store/types';
 import { createParamValue, isConnectableParam } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
 import { autoLayoutGraph } from '../autoLayout';
-import type { DslAst, DslNode, DslParamValue, GraphMutation, ValidationError } from './types';
+import type { DslAst, DslNode, DslParamValue, GraphMutation, ValidationError, DslSourceMap } from './types';
 import type { HandleMap } from './handleMap';
 import { parseDsl } from './parser';
 import { validateAst } from './validator';
 import { diffAst } from './differ';
+import { validateSemantics } from './semanticValidator';
 import { serializeGraph } from './serializer';
 
-export type ApplyResult = { success: true } | { success: false; error: string };
-
+export type ApplyResult =
+  | { success: true; evalErrors?: DiagnosticItem[] }
+  | { success: false; error: string };
 export type ApplyDslResult =
-  | { success: true; updatedDsl: string }
+  | { success: true; updatedDsl: string; evalErrors?: DiagnosticItem[]; sourceMap?: DslSourceMap }
   | { success: false; errors: (ParseError | ValidationError)[] };
 
 export interface ParseError {
@@ -91,98 +93,113 @@ const applyMutedState = async (nodeId: string, muted: boolean) => {
   store.setSelectedNodes(previousSelection);
 };
 
+/**
+ * Execute a list of graph mutations against the store and HandleMap.
+ * This is the inner loop used inside editTransaction.
+ */
+const executeMutations = async (
+  mutations: GraphMutation[],
+  handleMap: HandleMap,
+  nodeSpecs: NodeSpec[],
+): Promise<string | null> => {
+  const store = useGraphStore.getState();
+  let error: string | null = null;
+  for (const mutation of mutations) {
+    if (error) break;
+    switch (mutation.type) {
+      case 'addNode': {
+        const nodeId = await store.addNode(mutation.typeId, { x: 0, y: 0 });
+        handleMap.set(mutation.handle, nodeId);
+        for (const [paramKey, paramValue] of mutation.params.entries()) {
+          await applyParamValue(nodeId, paramKey, paramValue, nodeSpecs);
+        }
+        if (mutation.muted) {
+          await applyMutedState(nodeId, true);
+        }
+        break;
+      }
+      case 'removeNode': {
+        const nodeId = handleMap.getNodeId(mutation.handle);
+        if (!nodeId) {
+          error = `Unknown handle for removeNode: ${mutation.handle}`;
+          break;
+        }
+        await store.removeNode(nodeId);
+        handleMap.removeByHandle(mutation.handle);
+        break;
+      }
+      case 'setParam': {
+        const nodeId = handleMap.getNodeId(mutation.handle);
+        if (!nodeId) {
+          error = `Unknown handle for setParam: ${mutation.handle}`;
+          break;
+        }
+        await applyParamValue(nodeId, mutation.paramKey, mutation.value, nodeSpecs);
+        break;
+      }
+      case 'connect': {
+        const fromId = handleMap.getNodeId(mutation.fromHandle);
+        const toId = handleMap.getNodeId(mutation.toHandle);
+        if (!fromId || !toId) {
+          error = `Unknown handle for connect: ${mutation.fromHandle} -> ${mutation.toHandle}`;
+          break;
+        }
+        await store.connect(fromId, mutation.fromPort, toId, mutation.toPort);
+        break;
+      }
+      case 'disconnect': {
+        const toId = handleMap.getNodeId(mutation.toHandle);
+        if (!toId) {
+          error = `Unknown handle for disconnect: ${mutation.toHandle}`;
+          break;
+        }
+        const connection = store.connections.find(
+          conn => conn.toNode === toId && conn.toPort === mutation.toPort,
+        );
+        if (!connection) {
+          error = `Connection not found for disconnect: ${mutation.toHandle}.${mutation.toPort}`;
+          break;
+        }
+        await store.disconnect(connection.id);
+        break;
+      }
+      case 'setMuted': {
+        const nodeId = handleMap.getNodeId(mutation.handle);
+        if (!nodeId) {
+          error = `Unknown handle for setMuted: ${mutation.handle}`;
+          break;
+        }
+        await applyMutedState(nodeId, mutation.muted);
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  return error;
+};
 export const applyMutations = async (
   mutations: GraphMutation[],
   handleMap: HandleMap,
   nodeSpecs: NodeSpec[],
+  txOptions: TransactionOptions = { origin: 'ai', awaitRender: true },
 ): Promise<ApplyResult> => {
   const store = useGraphStore.getState();
-  await store.beginAiAction();
-
-  let error: string | null = null;
-  try {
-    for (const mutation of mutations) {
-      if (error) break;
-      switch (mutation.type) {
-        case 'addNode': {
-          const nodeId = await store.addNode(mutation.typeId, { x: 0, y: 0 });
-          handleMap.set(mutation.handle, nodeId);
-          for (const [paramKey, paramValue] of mutation.params.entries()) {
-            await applyParamValue(nodeId, paramKey, paramValue, nodeSpecs);
-          }
-          if (mutation.muted) {
-            await applyMutedState(nodeId, true);
-          }
-          break;
-        }
-        case 'removeNode': {
-          const nodeId = handleMap.getNodeId(mutation.handle);
-          if (!nodeId) {
-            error = `Unknown handle for removeNode: ${mutation.handle}`;
-            break;
-          }
-          await store.removeNode(nodeId);
-          handleMap.removeByHandle(mutation.handle);
-          break;
-        }
-        case 'setParam': {
-          const nodeId = handleMap.getNodeId(mutation.handle);
-          if (!nodeId) {
-            error = `Unknown handle for setParam: ${mutation.handle}`;
-            break;
-          }
-          await applyParamValue(nodeId, mutation.paramKey, mutation.value, nodeSpecs);
-          break;
-        }
-        case 'connect': {
-          const fromId = handleMap.getNodeId(mutation.fromHandle);
-          const toId = handleMap.getNodeId(mutation.toHandle);
-          if (!fromId || !toId) {
-            error = `Unknown handle for connect: ${mutation.fromHandle} -> ${mutation.toHandle}`;
-            break;
-          }
-          await store.connect(fromId, mutation.fromPort, toId, mutation.toPort);
-          break;
-        }
-        case 'disconnect': {
-          const toId = handleMap.getNodeId(mutation.toHandle);
-          if (!toId) {
-            error = `Unknown handle for disconnect: ${mutation.toHandle}`;
-            break;
-          }
-          const connection = store.connections.find(
-            conn => conn.toNode === toId && conn.toPort === mutation.toPort,
-          );
-          if (!connection) {
-            error = `Connection not found for disconnect: ${mutation.toHandle}.${mutation.toPort}`;
-            break;
-          }
-          await store.disconnect(connection.id);
-          break;
-        }
-        case 'setMuted': {
-          const nodeId = handleMap.getNodeId(mutation.handle);
-          if (!nodeId) {
-            error = `Unknown handle for setMuted: ${mutation.handle}`;
-            break;
-          }
-          await applyMutedState(nodeId, mutation.muted);
-          break;
-        }
-        default:
-          break;
-      }
-    }
-  } catch (err) {
-    error = err instanceof Error ? err.message : String(err);
-  } finally {
-    store.endAiAction();
+  let mutationError: string | null = null;
+  const result = await store.editTransaction(txOptions, async () => {
+    mutationError = await executeMutations(mutations, handleMap, nodeSpecs);
+    if (mutationError) throw new Error(mutationError);
+  });
+  if (mutationError) {
+    return { success: false, error: mutationError };
   }
 
-  if (error) return { success: false, error };
-
   autoLayoutGraph();
-  return { success: true };
+  const evalErrors = result.diagnostics.evalErrors.length > 0
+    ? result.diagnostics.evalErrors
+    : undefined;
+  return { success: true, evalErrors };
 };
 
 const buildAstWithDefaults = (
@@ -247,8 +264,20 @@ export const applyDsl = async (
 
   const normalizedNewAst = buildAstWithDefaults(currentParsed.ast, parseResult.ast, nodeSpecs);
   const mutations = diffAst(currentParsed.ast, normalizedNewAst);
-
-  const applyResult = await applyMutations(mutations, handleMap, nodeSpecs);
+  // Semantic validation via Rust engine (type compat, port existence, cycles)
+  const validateEditsFn = useGraphStore.getState().validateEdits;
+  if (validateEditsFn) {
+    const semanticErrors = validateSemantics(
+      mutations,
+      parseResult.sourceMap ?? { nodeSpans: new Map(), connectionSpans: new Map() },
+      handleMap,
+      validateEditsFn,
+    );
+    if (semanticErrors.length > 0) {
+      return { success: false, errors: semanticErrors };
+    }
+  }
+  const applyResult = await applyMutations(mutations, handleMap, nodeSpecs, { origin: 'dsl', awaitRender: true });
   if (!applyResult.success) {
     return { success: false, errors: [{ line: 0, message: applyResult.error }] };
   }
@@ -261,5 +290,5 @@ export const applyDsl = async (
     nodeSpecs,
   });
 
-  return { success: true, updatedDsl };
+  return { success: true, updatedDsl, evalErrors: applyResult.evalErrors, sourceMap: parseResult.sourceMap };
 };

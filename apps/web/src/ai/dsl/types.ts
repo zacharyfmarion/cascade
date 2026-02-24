@@ -30,6 +30,18 @@ export interface DslConnection {
   line: number;
 }
 
+export interface DslSourceSpan {
+  startLine: number;
+  startCol: number;
+  endLine: number;
+  endCol: number;
+}
+
+export interface DslSourceMap {
+  nodeSpans: Map<string, DslSourceSpan>;
+  connectionSpans: Map<string, DslSourceSpan>;
+}
+
 export type GraphMutation =
   | { type: 'addNode'; handle: string; typeId: string; params: Map<string, DslParamValue>; muted: boolean }
   | { type: 'removeNode'; handle: string }
@@ -47,6 +59,7 @@ export interface ParseError {
 export interface ParseResult {
   ast: DslAst | null;
   errors: ParseError[];
+  sourceMap?: DslSourceMap;
 }
 
 export interface ValidationError {
