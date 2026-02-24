@@ -2561,6 +2561,6 @@ export const useGraphStore = create<GraphState>()(
   })
 );
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as any).__compositorStore = useGraphStore;
 }

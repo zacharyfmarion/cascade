@@ -20,7 +20,6 @@ export function useShortcuts(): void {
   const stepBackward = useGraphStore(s => s.stepBackward);
   const goToStart = useGraphStore(s => s.goToStart);
   const goToEnd = useGraphStore(s => s.goToEnd);
-  const loopPlayback = useGraphStore(s => s.loopPlayback);
   const setLoopPlayback = useGraphStore(s => s.setLoopPlayback);
   const openShortcuts = useSettingsStore(s => s.openShortcuts);
 
@@ -42,7 +41,7 @@ export function useShortcuts(): void {
       shortcutDispatcher.register('playback.fwd', () => stepForward()),
       shortcutDispatcher.register('playback.start', () => goToStart()),
       shortcutDispatcher.register('playback.end', () => goToEnd()),
-      shortcutDispatcher.register('playback.loop', () => setLoopPlayback(!loopPlayback)),
+      shortcutDispatcher.register('playback.loop', () => setLoopPlayback(!useGraphStore.getState().loopPlayback)),
     ];
 
     const detach = shortcutDispatcher.attach();
@@ -51,5 +50,5 @@ export function useShortcuts(): void {
       unregisters.forEach(fn => fn());
       detach();
     };
-  }, [undo, redo, togglePlayback, stepForward, stepBackward, goToStart, goToEnd, loopPlayback, setLoopPlayback, openShortcuts]);
+  }, [undo, redo, togglePlayback, stepForward, stepBackward, goToStart, goToEnd, setLoopPlayback, openShortcuts]);
 }

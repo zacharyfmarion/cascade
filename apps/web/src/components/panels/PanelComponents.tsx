@@ -9,19 +9,16 @@ import { Timeline } from '../Timeline';
 import { Breadcrumbs } from '../Breadcrumbs';
 import { AiAssistant } from '../AiAssistant';
 import { DslEditor } from '../DslEditor';
+import { shortcutDispatcher } from '../../shortcuts/dispatcher';
 
 const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
   const [aiOpen, setAiOpen] = useState(true);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
-        e.preventDefault();
-        setAiOpen(prev => !prev);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    const unregister = shortcutDispatcher.register('ui.toggleAi', () => {
+      setAiOpen(prev => !prev);
+    });
+    return unregister;
   }, []);
 
   return (

@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
+import { SHORTCUT_REGISTRY } from '../shortcuts/registry';
+import { groupByCategory } from '../shortcuts/formatDisplay';
 
 export function ShortcutsModal() {
   const isOpen = useSettingsStore(s => s.isShortcutsOpen);
@@ -20,57 +22,7 @@ export function ShortcutsModal() {
 
   if (!isOpen) return null;
 
-  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
-  const mod = isMac ? '⌘' : 'Ctrl';
-
-  const categories = [
-    {
-      title: 'General',
-      items: [
-        { action: 'Save Project', shortcut: [mod, 'S'] },
-        { action: 'Open Project', shortcut: [mod, 'O'] },
-        { action: 'Settings', shortcut: [mod, ','] },
-        { action: 'Undo', shortcut: [mod, 'Z'] },
-        { action: 'Redo', shortcut: [mod, 'Shift', 'Z'] },
-        { action: 'Select All', shortcut: [mod, 'A'] },
-        { action: 'Delete Selected', shortcut: ['Del'] },
-      ]
-    },
-    {
-      title: 'Node Graph',
-      items: [
-        { action: 'Copy', shortcut: [mod, 'C'] },
-        { action: 'Cut', shortcut: [mod, 'X'] },
-        { action: 'Paste', shortcut: [mod, 'V'] },
-        { action: 'Group Nodes', shortcut: [mod, 'G'] },
-        { action: 'Ungroup', shortcut: [mod, 'Alt', 'G'] },
-        { action: 'Enter / Exit Group', shortcut: ['Tab'] },
-        { action: 'Frame Selection', shortcut: ['F'] },
-        { action: 'Mute / Unmute', shortcut: ['M'] },
-        { action: 'Link to Viewer', shortcut: [mod, 'Shift', 'Click'] },
-      ]
-    },
-    {
-      title: 'Viewer',
-      items: [
-        { action: 'Zoom In', shortcut: [mod, '='] },
-        { action: 'Zoom Out', shortcut: [mod, '-'] },
-        { action: 'Fit to View', shortcut: [mod, '0'] },
-        { action: 'Actual Size (100%)', shortcut: [mod, '1'] },
-      ]
-    },
-    {
-      title: 'Playback',
-      items: [
-        { action: 'Play / Pause', shortcut: ['Space'] },
-        { action: 'Step Back', shortcut: ['←'] },
-        { action: 'Step Forward', shortcut: ['→'] },
-        { action: 'Go to Start', shortcut: ['Home'] },
-        { action: 'Go to End', shortcut: ['End'] },
-        { action: 'Toggle Loop', shortcut: ['L'] },
-      ]
-    },
-  ];
+  const categories = groupByCategory(SHORTCUT_REGISTRY);
 
   return (
     <div
@@ -124,8 +76,8 @@ export function ShortcutsModal() {
           overflowY: 'auto',
           paddingRight: '4px' 
         }}>
-          {categories.map((cat, idx) => (
-            <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {categories.map((cat) => (
+            <div key={cat.title} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div
                 style={{
                   fontSize: '0.7rem',
@@ -141,31 +93,27 @@ export function ShortcutsModal() {
                 {cat.title}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {cat.items.map((item, itemIdx) => (
-                  <div key={itemIdx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {cat.items.map((item) => (
+                  <div key={item.action} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                       {item.action}
                     </span>
-                    <div style={{ display: 'flex', gap: '4px' }}>
-                      {item.shortcut.map((key, keyIdx) => (
-                        <kbd
-                          key={keyIdx}
-                          style={{
-                            background: 'var(--bg-surface)',
-                            border: '1px solid var(--border-default)',
-                            borderRadius: '3px',
-                            padding: '2px 6px',
-                            fontSize: '0.7rem',
-                            fontFamily: 'inherit',
-                            color: 'var(--text-secondary)',
-                            minWidth: '1.2em',
-                            textAlign: 'center',
-                          }}
-                        >
-                          {key}
-                        </kbd>
-                      ))}
-                    </div>
+                    <kbd
+                      style={{
+                        background: 'var(--bg-surface)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: '3px',
+                        padding: '2px 6px',
+                        fontSize: '0.7rem',
+                        fontFamily: 'inherit',
+                        color: 'var(--text-secondary)',
+                        minWidth: '1.2em',
+                        textAlign: 'center',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {item.shortcut}
+                    </kbd>
                   </div>
                 ))}
               </div>

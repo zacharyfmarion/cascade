@@ -2,6 +2,7 @@ import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLayoutStore } from '../store/layoutStore';
 import type { WorkspacePreset } from '../store/layoutStore';
+import { isTextInputFocused } from '../shortcuts/focusDetection';
 
 // ── Menu item types ─────────────────────────────────────────────
 
@@ -117,10 +118,12 @@ export function handleMenuAction(id: string): void {
       break;
 
     case 'edit.undo':
-      graphStore.undo();
+      // In Tauri, menu accelerators fire even when Monaco is focused.
+      // Gate undo/redo so the editor handles its own undo natively.
+      if (!isTextInputFocused()) graphStore.undo();
       break;
     case 'edit.redo':
-      graphStore.redo();
+      if (!isTextInputFocused()) graphStore.redo();
       break;
     case 'edit.selectAll': {
       const allIds = Array.from(graphStore.nodes.keys());

@@ -3,7 +3,6 @@ import { Settings, HelpCircle } from 'lucide-react';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
-
 import { SettingsModal } from './components/SettingsModal';
 import { AboutModal } from './components/AboutModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
@@ -12,7 +11,7 @@ import { useGraphStore } from './store/graphStore';
 import { useSettingsStore } from './store/settingsStore';
 import { useLayoutStore, applyDefaultLayout } from './store/layoutStore';
 import { useTauriMenuListener } from './menus/menuListener';
-import { handleMenuAction } from './menus/menuDefinition';
+import { useShortcuts } from './shortcuts/useShortcuts';
 import { panelComponents, tabComponents, EditorTab } from './components/panels/PanelComponents';
 import './store/themeStore';
 import './styles/theme.css';
@@ -31,110 +30,6 @@ function useBeforeUnload() {
   }, [dirty]);
 }
 
-function useUndoRedoShortcuts() {
-  const undo = useGraphStore(s => s.undo);
-  const redo = useGraphStore(s => s.redo);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) {
-          redo();
-        } else {
-          undo();
-        }
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [undo, redo]);
-}
-
-function useMenuShortcuts() {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
-
-      if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        useSettingsStore.getState().openShortcuts();
-        return;
-      }
-
-      if (!(e.metaKey || e.ctrlKey)) return;
-
-      switch (e.key.toLowerCase()) {
-        case 's':
-          e.preventDefault();
-          handleMenuAction('file.save');
-          break;
-        case 'o':
-          e.preventDefault();
-          handleMenuAction('file.open');
-          break;
-        case ',':
-          e.preventDefault();
-          handleMenuAction('file.settings');
-          break;
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-}
-
-function usePlaybackShortcuts() {
-  const togglePlayback = useGraphStore(s => s.togglePlayback);
-  const stepForward = useGraphStore(s => s.stepForward);
-  const stepBackward = useGraphStore(s => s.stepBackward);
-  const goToStart = useGraphStore(s => s.goToStart);
-  const goToEnd = useGraphStore(s => s.goToEnd);
-  const hasSequenceNodes = useGraphStore(s => s.hasSequenceNodes);
-  const loopPlayback = useGraphStore(s => s.loopPlayback);
-  const setLoopPlayback = useGraphStore(s => s.setLoopPlayback);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!hasSequenceNodes) return;
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
-
-      switch (e.key) {
-        case ' ':
-          e.preventDefault();
-          togglePlayback();
-          break;
-        case 'ArrowLeft':
-          e.preventDefault();
-          stepBackward();
-          break;
-        case 'ArrowRight':
-          e.preventDefault();
-          stepForward();
-          break;
-        case 'Home':
-          e.preventDefault();
-          goToStart();
-          break;
-        case 'End':
-          e.preventDefault();
-          goToEnd();
-          break;
-        case 'l':
-        case 'L':
-          if (!e.metaKey && !e.ctrlKey) {
-            e.preventDefault();
-            setLoopPlayback(!loopPlayback);
-          }
-          break;
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [hasSequenceNodes, togglePlayback, stepForward, stepBackward, goToStart, goToEnd, loopPlayback, setLoopPlayback]);
-}
 
 function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
@@ -174,9 +69,7 @@ function App() {
   const saveLayout = useLayoutStore(s => s.saveLayout);
 
   useBeforeUnload();
-  useUndoRedoShortcuts();
-  useMenuShortcuts();
-  usePlaybackShortcuts();
+  useShortcuts();
   useTauriMenuListener();
 
   useEffect(() => {
@@ -185,6 +78,19 @@ function App() {
     return () => document.removeEventListener('contextmenu', suppress);
   }, []);
 
+
+  // Prevent Chrome's trackpad back/forward navigation gesture.
+  // Chrome on macOS interprets horizontal two-finger swipes as history navigation.
+  // We must use a non-passive wheel listener to call preventDefault on these events.
+  useEffect(() => {
+    const preventNavGesture = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) > 0) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('wheel', preventNavGesture, { passive: false });
+    return () => document.removeEventListener('wheel', preventNavGesture);
+  }, []);
   useEffect(() => {
     initEngine().catch(e => setError(String(e)));
   }, [initEngine]);
