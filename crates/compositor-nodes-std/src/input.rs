@@ -629,3 +629,172 @@ pub fn srgb_to_linear_lut() -> &'static [f32; 256] {
         table
     })
 }
+
+pub struct LoadImageBatch {
+    entries: Mutex<Vec<(String, Vec<u8>)>>,
+    frame_cache: Mutex<FrameCache>,
+}
+impl LoadImageBatch {
+    pub fn new() -> Self {
+        Self {
+            entries: Mutex::new(Vec::new()),
+            frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
+        }
+    }
+    pub fn clear(&self) -> Result<(), CompositorError> {
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
+        entries.clear();
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Batch cache mutex poisoned".to_string()))?;
+        cache.clear();
+        Ok(())
+    }
+    pub fn add_image(&self, filename: &str, bytes: &[u8]) -> Result<(), CompositorError> {
+        // Validate that the bytes are a decodable image without full decode
+        let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        let (width, height) = reader
+            .into_dimensions()
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+            return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+        }
+        let stem = std::path::Path::new(filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(filename)
+            .to_string();
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
+        entries.push((stem, bytes.to_vec()));
+        Ok(())
+    }
+    pub fn image_count(&self) -> Result<usize, CompositorError> {
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
+        Ok(entries.len())
+    }
+
+    pub fn filenames(&self) -> Result<Vec<String>, CompositorError> {
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
+        Ok(entries.iter().map(|(stem, _)| stem.clone()).collect())
+    }
+
+    fn decode_frame(&self, index: usize) -> Result<Image, CompositorError> {
+        // Check cache first
+        {
+            let cache = self
+                .frame_cache
+                .lock()
+                .map_err(|_| CompositorError::Other("Batch cache mutex poisoned".to_string()))?;
+            if let Some(img) = cache.get(index as u64) {
+                return Ok(img.clone());
+            }
+        }
+
+        // Cache miss - decode from raw bytes
+        let bytes = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
+            let (_, raw) = entries
+                .get(index)
+                .ok_or_else(|| CompositorError::MissingInput("Batch index out of range".to_string()))?;
+            raw.clone()
+        };
+
+        let decoded = image::load_from_memory(&bytes)
+            .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+        let rgba = decoded.to_rgba8();
+        let (width, height) = rgba.dimensions();
+        let raw = rgba.as_raw();
+        let lut = srgb_to_linear_lut();
+        let pixel_count = (width as usize) * (height as usize);
+        let mut data = vec![0.0f32; pixel_count * 4];
+        data.par_chunks_exact_mut(4)
+            .enumerate()
+            .for_each(|(i, out)| {
+                let idx = i * 4;
+                out[0] = lut[raw[idx] as usize];
+                out[1] = lut[raw[idx + 1] as usize];
+                out[2] = lut[raw[idx + 2] as usize];
+                out[3] = raw[idx + 3] as f32 / 255.0;
+            });
+        let image = Image::from_f32_data(width, height, data)?;
+        // Insert into cache
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CompositorError::Other("Batch cache mutex poisoned".to_string()))?;
+        cache.insert(index as u64, image.clone());
+
+        Ok(image)
+    }
+}
+impl Node for LoadImageBatch {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "load_image_batch".to_string(),
+            display_name: "Load Image Batch".to_string(),
+            category: "Input".to_string(),
+            description: "Load a batch of images for processing".to_string(),
+            inputs: vec![],
+            outputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "filename".to_string(),
+                    label: "Filename".to_string(),
+                    ty: ValueType::String,
+                    ..Default::default()
+                },
+            ],
+            params: vec![],
+        }
+    }
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let frame = ctx.frame_time.frame as usize;
+            let image = self.decode_frame(frame)?;
+
+            let stem = {
+                let entries = self
+                    .entries
+                    .lock()
+                    .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
+                let (stem, _) = entries
+                    .get(frame)
+                    .ok_or_else(|| CompositorError::MissingInput("Batch index out of range".to_string()))?;
+                stem.clone()
+            };
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(image));
+            outputs.insert("filename".to_string(), Value::String(stem));
+            Ok(outputs)
+        })
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}

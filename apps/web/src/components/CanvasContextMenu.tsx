@@ -95,16 +95,17 @@ const SelectionMenu: React.FC<{
   const enterGroup = useGraphStore(s => s.enterGroup);
   const removeNode = useGraphStore(s => s.removeNode);
   const toggleMuteSelected = useGraphStore(s => s.toggleMuteSelected);
+  const exportGroupAsPackage = useGraphStore(s => s.exportGroupAsPackage);
   const nodes = useGraphStore(s => s.nodes);
 
-  const hasMultiple = nodeIds.length >= 2;
+  const canGroup = nodeIds.length >= 1;
   const singleNode = nodeIds.length === 1 ? nodes.get(nodeIds[0]) : null;
   const isGroupNode = singleNode?.typeId.startsWith('group::') ?? false;
   const allMuted = nodeIds.every(id => nodes.get(id)?.muted);
 
   const UNMUTABLE_TYPES = new Set([
-    'load_image', 'load_image_sequence', 'load_video',
-    'viewer', 'export_image', 'export_image_sequence', 'export_video',
+    'load_image', 'load_image_sequence', 'load_image_batch', 'load_video',
+    'viewer', 'export_image', 'export_image_sequence', 'export_image_batch', 'export_video',
     'group_input', 'group_output',
   ]);
   const canMute = nodeIds.some(id => {
@@ -136,6 +137,14 @@ const SelectionMenu: React.FC<{
     onClose();
   }, [enterGroup, singleNode, onClose]);
 
+
+  const handleExportCustomNode = useCallback(() => {
+    if (singleNode && isGroupNode) {
+      exportGroupAsPackage(singleNode.typeId);
+    }
+    onClose();
+  }, [exportGroupAsPackage, singleNode, isGroupNode, onClose]);
+
   const handleMute = useCallback(() => {
     toggleMuteSelected();
     onClose();
@@ -153,7 +162,7 @@ const SelectionMenu: React.FC<{
       <MenuItem
         label="Group"
         shortcut="⌘G"
-        disabled={!hasMultiple}
+        disabled={!canGroup}
         onClick={handleGroup}
       />
       <MenuItem
@@ -173,6 +182,11 @@ const SelectionMenu: React.FC<{
         shortcut="Tab"
         disabled={!isGroupNode}
         onClick={handleEnterGroup}
+      />
+      <MenuItem
+        label="Export as Custom Node"
+        disabled={!isGroupNode}
+        onClick={handleExportCustomNode}
       />
       <Separator />
       <MenuItem

@@ -23,9 +23,16 @@ import type { EngineError } from '../engine/engineError';
 const DEFAULT_FRAME_COLOR = 'purple'; // eslint-disable-line compositor-theme/no-hardcoded-colors
 let engine: EngineBridge | null = null;
 
+/** Sentinel port name appended to GroupInput outputs — drag from this to create a new group input. */
+export const ADD_OUTPUT_PORT = '__add_output';
+/** Sentinel port name appended to GroupOutput inputs — drag to this to create a new group output. */
+export const ADD_INPUT_PORT = '__add_input';
+
 function buildGroupIOSpecs(
   internalGraph: GroupInternalGraph,
 ): { groupInputSpec: NodeSpec; groupOutputSpec: NodeSpec } {
+  const addOutputPort: PortSpec = { name: ADD_OUTPUT_PORT, label: '+', ty: 'Image' };
+  const addInputPort: PortSpec = { name: ADD_INPUT_PORT, label: '+', ty: 'Image' };
   return {
     groupInputSpec: {
       id: 'group_input',
@@ -33,7 +40,7 @@ function buildGroupIOSpecs(
       category: 'Group',
       description: 'Inputs to this group',
       inputs: [],
-      outputs: internalGraph.inputs,
+      outputs: [...internalGraph.inputs, addOutputPort],
       params: [],
     },
     groupOutputSpec: {
@@ -41,7 +48,7 @@ function buildGroupIOSpecs(
       display_name: 'Group Output',
       category: 'Group',
       description: 'Outputs from this group',
-      inputs: internalGraph.outputs,
+      inputs: [...internalGraph.outputs, addInputPort],
       outputs: [],
       params: [],
     },
@@ -224,11 +231,13 @@ interface GraphState {
   isRendering: boolean;
   previewScale: number;
   dirty: boolean;
+  fitViewRequestId: number;
 
   hasSequenceNodes: boolean;
   sequenceLength: number;
   sequenceStart: number;
   sequenceInfoMap: Map<string, SequenceInfo>;
+
   isPlaying: boolean;
   fps: number;
   loopPlayback: boolean;
@@ -274,7 +283,9 @@ interface GraphState {
   setCurrentFrame: (frame: number) => void;
   setSequenceDirectory: (nodeId: string, directory: string) => Promise<void>;
   setSequenceFiles: (nodeId: string, files: File[]) => Promise<void>;
+  loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
   renderSequence: (nodeId: string) => Promise<void>;
+  renderBatch: (nodeId: string) => Promise<void>;
   renderVideo: (nodeId: string) => Promise<void>;
   cancelRender: () => Promise<void>;
   compileScriptNode: (nodeId: string, manifestJson: string) => Promise<NodeSpec>;
@@ -300,6 +311,8 @@ interface GraphState {
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
   isInsideGroup: () => boolean;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
+  importCustomNodes: (json: string) => Promise<void>;
+  exportGroupAsPackage: (groupDefId: string) => Promise<void>;
   setAiApiKey: (provider: string, key: string) => Promise<void>;
   isAiConfigured: () => Promise<boolean>;
   runAiNode: (nodeId: string) => Promise<void>;
@@ -322,6 +335,7 @@ interface GraphState {
   ) => Promise<TransactionResult>;
   flushRender: () => Promise<Map<string, EngineError>>;
   validateEdits: (editsJson: string) => EditValidationError[];
+  typesCompatible: (fromType: string, toType: string) => boolean;
 }
 
 const undoStack: UndoSnapshot[] = [];
@@ -441,6 +455,7 @@ export const useGraphStore = create<GraphState>()(
         renderResults: new Map(),
         editingStack: [{ id: 'root', label: 'Root' }],
         dirty: false,
+        fitViewRequestId: get().fitViewRequestId + 1,
       });
 
       triggerAllViewers();
@@ -646,10 +661,12 @@ export const useGraphStore = create<GraphState>()(
       isRendering: false,
       previewScale: 1,
       dirty: false,
+      fitViewRequestId: 0,
       hasSequenceNodes: false,
       sequenceLength: 0,
       sequenceStart: 0,
       sequenceInfoMap: new Map(),
+
       isPlaying: false,
       fps: useSettingsStore.getState().defaultFps,
       loopPlayback: useSettingsStore.getState().loopPlayback,
@@ -789,10 +806,52 @@ export const useGraphStore = create<GraphState>()(
 
         const eng = getEngine();
         const editingStack = get().editingStack;
+        // Intercept connections to/from add-port sentinels inside groups
         if (editingStack.length > 1) {
           const ctx = editingStack[editingStack.length - 1];
           if (!eng.addInternalConnection || !eng.getGroupInternalGraph) {
             set({ lastError: makeEngineError('Group editing not supported by this engine') });
+            return;
+          }
+
+          const isAddFrom = fromPort === ADD_OUTPUT_PORT;
+          const isAddTo = toPort === ADD_INPUT_PORT;
+
+          if (isAddFrom || isAddTo) {
+            const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
+            let resolvedFromPort = fromPort;
+            let resolvedToPort = toPort;
+
+            if (isAddFrom) {
+              // Creating a new group input — generate unique name
+              const existing = internalGraph.inputs;
+              let idx = existing.length + 1;
+              let name = `input_${idx}`;
+              while (existing.some(p => p.name === name)) { idx++; name = `input_${idx}`; }
+              resolvedFromPort = name;
+            }
+
+            if (isAddTo) {
+              // Creating a new group output — generate unique name
+              const existing = internalGraph.outputs;
+              let idx = existing.length + 1;
+              let name = `output_${idx}`;
+              while (existing.some(p => p.name === name)) { idx++; name = `output_${idx}`; }
+              resolvedToPort = name;
+            }
+
+            await eng.addInternalConnection(ctx.groupDefId!, fromNode, resolvedFromPort, toNode, resolvedToPort);
+
+            // Refresh internal graph state after the new port was created
+            const updatedGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
+            const specs = await Promise.resolve(eng.listNodeTypes());
+            const id = crypto.randomUUID();
+            const newConnection: Connection = { id, fromNode, fromPort: resolvedFromPort, toNode, toPort: resolvedToPort };
+            set(state => ({
+              connections: [...state.connections, newConnection],
+              nodeSpecs: withGroupIOSpecs(specs, updatedGraph),
+            }));
+            triggerAllViewers();
             return;
           }
           await eng.addInternalConnection(ctx.groupDefId!, fromNode, fromPort, toNode, toPort);
@@ -801,7 +860,6 @@ export const useGraphStore = create<GraphState>()(
         }
         const id = crypto.randomUUID();
         const newConnection: Connection = { id, fromNode, fromPort, toNode, toPort };
-        
         set(state => ({
           connections: [...state.connections, newConnection]
         }));
@@ -1425,6 +1483,125 @@ export const useGraphStore = create<GraphState>()(
         triggerAllViewers();
       },
 
+
+      loadBatchFiles: async (nodeId, files) => {
+        const eng = getEngine();
+        if (!eng.batchClear || !eng.batchAddImage) return;
+        await eng.batchClear(nodeId);
+        const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
+        for (const file of sorted) {
+          const buffer = await file.arrayBuffer();
+          const data = new Uint8Array(buffer);
+          await eng.batchAddImage(nodeId, file.name, data);
+        }
+        set({ dirty: true });
+        triggerAllViewers();
+      },
+      renderBatch: async (nodeId) => {
+        const eng = getEngine();
+        const node = get().nodes.get(nodeId);
+        if (!node) return;
+        const formatIdx = node.params['format'] && 'Int' in node.params['format']
+          ? node.params['format'].Int : 0;
+        const ext = formatIdx === 1 ? 'jpg' : 'png';
+        if (!eng.getBatchInfo) {
+          set({ lastError: makeEngineError('Batch info not supported') });
+          return;
+        }
+        let totalFrames = 0;
+        let filenames: string[] = [];
+        try {
+          const info = await eng.getBatchInfo(nodeId);
+          totalFrames = info.count;
+          filenames = info.filenames;
+        } catch (e) {
+          set({ lastError: parseEngineError(e) });
+          return;
+        }
+        if (totalFrames <= 0) {
+          set({ lastError: makeEngineError('No images in batch') });
+          return;
+        }
+
+        const padding = Math.max(4, String(totalFrames).length);
+        webRenderCancelled = false;
+        set({
+          isRendering: true,
+          lastError: null,
+          renderProgress: {
+            job_id: 'web-batch',
+            current_frame: 0,
+            total_frames: totalFrames,
+            completed: false,
+            error: null,
+          },
+        });
+
+        try {
+          const JSZip = (await import('jszip')).default;
+          const zip = new JSZip();
+          let renderedCount = 0;
+          const usedNames = new Map<string, number>();
+
+          for (let frame = 0; frame < totalFrames; frame++) {
+            if (webRenderCancelled) break;
+            const bytes = await eng.exportImage(nodeId, frame);
+            let baseName = filenames[frame]
+              ?? String(frame).padStart(padding, '0');
+            const originalName = baseName;
+            const count = usedNames.get(originalName) ?? 0;
+            if (count > 0) {
+              baseName = `${originalName}_${count}`;
+            }
+            usedNames.set(originalName, count + 1);
+
+            zip.file(`${baseName}.${ext}`, bytes);
+            renderedCount++;
+            set({
+              renderProgress: {
+                job_id: 'web-batch',
+                current_frame: renderedCount,
+                total_frames: totalFrames,
+                completed: false,
+                error: null,
+              },
+            });
+          }
+          if (!webRenderCancelled) {
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'batch.zip';
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+
+          set({
+            isRendering: false,
+            renderProgress: {
+              job_id: 'web-batch',
+              current_frame: renderedCount,
+              total_frames: totalFrames,
+              completed: true,
+              error: webRenderCancelled ? 'Cancelled' : null,
+            },
+          });
+        } catch (e) {
+          const error = parseEngineError(e);
+          set({
+            isRendering: false,
+            lastError: error,
+            renderProgress: {
+              job_id: 'web-batch',
+              current_frame: 0,
+              total_frames: totalFrames,
+              completed: true,
+              error: error.message,
+            },
+          });
+        }
+      },
       renderSequence: async (nodeId) => {
         const eng = getEngine();
 
@@ -1652,6 +1829,7 @@ export const useGraphStore = create<GraphState>()(
           lastError: null,
           hasSequenceNodes: false,
           sequenceInfoMap: new Map(),
+
            nodeTimings: new Map(),
            aiNodeStatuses: {},
            aiNodeStale: {},
@@ -1922,6 +2100,7 @@ export const useGraphStore = create<GraphState>()(
           nodeSpecs: withGroupIOSpecs(get().nodeSpecs, internalGraph),
           selectedNodeIds: new Set(),
           renderResults: new Map(),
+          fitViewRequestId: get().fitViewRequestId + 1,
         });
       },
 
@@ -1942,7 +2121,7 @@ export const useGraphStore = create<GraphState>()(
         if (index === 0) {
           const childContext = stack[index + 1];
           if (childContext?.savedNodes) {
-            const specs = childContext.savedNodeSpecs ?? await Promise.resolve(eng.listNodeTypes());
+            const specs = await Promise.resolve(eng.listNodeTypes());
             set({
               editingStack: newStack,
               nodes: childContext.savedNodes,
@@ -1950,6 +2129,7 @@ export const useGraphStore = create<GraphState>()(
               nodeSpecs: specs,
               selectedNodeIds: new Set(),
               renderResults: new Map(),
+              fitViewRequestId: get().fitViewRequestId + 1,
             });
             triggerAllViewers();
             return;
@@ -2000,12 +2180,13 @@ export const useGraphStore = create<GraphState>()(
             nodeSpecs: specs,
             selectedNodeIds: new Set(),
             renderResults: new Map(),
+              fitViewRequestId: get().fitViewRequestId + 1,
           });
           triggerAllViewers();
         } else {
           const childContext = stack[index + 1];
           if (childContext?.savedNodes) {
-            const specs = childContext.savedNodeSpecs ?? await Promise.resolve(eng.listNodeTypes());
+            const specs = await Promise.resolve(eng.listNodeTypes());
             set({
               editingStack: newStack,
               nodes: childContext.savedNodes,
@@ -2052,6 +2233,7 @@ export const useGraphStore = create<GraphState>()(
               nodeSpecs: withGroupIOSpecs(get().nodeSpecs, internalGraph),
               selectedNodeIds: new Set(),
               renderResults: new Map(),
+              fitViewRequestId: get().fitViewRequestId + 1,
             });
             triggerAllViewers();
           }
@@ -2195,6 +2377,47 @@ export const useGraphStore = create<GraphState>()(
         set({ nodeSpecs: specs });
       },
 
+
+      importCustomNodes: async (json) => {
+        const eng = getEngine();
+        if (!eng.importCustomNodes) {
+          set({ lastError: makeEngineError('Custom node import not supported by this engine') });
+          return;
+        }
+        try {
+          const newSpecs = await Promise.resolve(eng.importCustomNodes(json));
+          const specs = await Promise.resolve(eng.listNodeTypes());
+          set({ nodeSpecs: specs });
+          console.log(`[CustomNodes] Imported ${newSpecs.length} custom node(s)`);
+        } catch (e) {
+          set({ lastError: parseEngineError(e) });
+        }
+      },
+
+      exportGroupAsPackage: async (groupDefId) => {
+        const eng = getEngine();
+        if (!eng.exportGroupAsPackage) {
+          set({ lastError: makeEngineError('Custom node export not supported by this engine') });
+          return;
+        }
+        try {
+          const pkg = await Promise.resolve(eng.exportGroupAsPackage(groupDefId));
+          const json = JSON.stringify(pkg, null, 2);
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          // Extract a readable name from the groupDefId (e.g. 'group::My Filter' -> 'My Filter')
+          const name = groupDefId.replace(/^group::/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+          a.href = url;
+          a.download = `${name}.compnode`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          set({ lastError: parseEngineError(e) });
+        }
+      },
       updateGroupInterface: async (inputs, outputs) => {
         const stack = get().editingStack;
         if (stack.length <= 1) return;
@@ -2420,6 +2643,23 @@ export const useGraphStore = create<GraphState>()(
           throw new Error('validateEdits must be synchronous');
         }
         return result;
+      },
+
+
+      typesCompatible: (fromType: string, toType: string): boolean => {
+        const eng = getEngine();
+        if (eng.typesCompatible) {
+          const result = eng.typesCompatible(fromType, toType);
+          if (result instanceof Promise) {
+            throw new Error('typesCompatible must be synchronous');
+          }
+          return result;
+        }
+        // Fallback if engine doesn't support typesCompatible
+        return fromType === toType
+          || (fromType === 'Field' && (toType === 'Image' || toType === 'Mask'))
+          || (fromType === 'Int' && toType === 'Float')
+          || (fromType === 'Float' && toType === 'Int');
       },
 
       editTransaction: async (options, mutate) => {

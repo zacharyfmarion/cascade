@@ -25,11 +25,13 @@ import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { ImageInputNode } from './nodes/ImageInputNode';
 import { LoadImageSequenceNode } from './nodes/LoadImageSequenceNode';
+import { LoadImageBatchNode } from './nodes/LoadImageBatchNode';
 import { LoadVideoNode } from './nodes/LoadVideoNode';
 import { ViewerNode } from './nodes/ViewerNode';
 import { ProcessingNode } from './nodes/ProcessingNode';
 import { ExportImageNode } from './nodes/ExportImageNode';
 import { ExportImageSequenceNode } from './nodes/ExportImageSequenceNode';
+import { ExportImageBatchNode } from './nodes/ExportImageBatchNode';
 import { ExportVideoNode } from './nodes/ExportVideoNode';
 import { ColorRampNode } from './nodes/ColorRampNode';
 import { GroupInputNode } from './nodes/GroupInputNode';
@@ -43,10 +45,12 @@ const SPECIAL_NODE_TYPES: NodeTypes = {
   load_image: ImageInputNode,
   load_image_sequence: LoadImageSequenceNode,
   load_video: LoadVideoNode,
+  load_image_batch: LoadImageBatchNode,
   viewer: ViewerNode,
   export_image: ExportImageNode,
   export_image_sequence: ExportImageSequenceNode,
   export_video: ExportVideoNode,
+  export_image_batch: ExportImageBatchNode,
   color_ramp: ColorRampNode,
   color_palette: ColorPaletteNode,
   curves: CurvesNode,
@@ -66,7 +70,7 @@ const PORT_COLORS: Record<string, string> = {
  };
 
  function typesCompatible(from: string, to: string): boolean {
-   return from === to || (from === 'Field' && to === 'Image');
+   return useGraphStore.getState().typesCompatible(from, to);
  }
 
  const DEFAULT_EDGE_COLOR = 'var(--text-muted)';
@@ -82,13 +86,14 @@ import { CanvasContextMenu } from './CanvasContextMenu';
 import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 import { shortcutDispatcher } from '../shortcuts/dispatcher';
+import { pendingImageFiles } from './nodes/pendingImageFiles';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
   const framesStore = useGraphStore(s => s.frames);
   const connectionsStore = useGraphStore(s => s.connections);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
-  const { screenToFlowPosition, getNodes, getEdges } = useReactFlow();
+  const { screenToFlowPosition, getNodes, getEdges, fitView } = useReactFlow();
 
   const nodeTypes = useMemo((): NodeTypes => {
     const types: NodeTypes = { ...SPECIAL_NODE_TYPES };
@@ -128,6 +133,18 @@ export const NodeCanvas: React.FC = () => {
     return () => unregisterNodeSizeProvider();
   }, [getMeasuredNodeSizes]);
 
+  // Fit viewport when navigating into/out of groups or loading a project
+  const fitViewRequestId = useGraphStore(s => s.fitViewRequestId);
+  const lastFitViewIdRef = useRef(fitViewRequestId);
+  useEffect(() => {
+    if (fitViewRequestId === lastFitViewIdRef.current) return;
+    lastFitViewIdRef.current = fitViewRequestId;
+    // Wait one frame for React Flow to measure the new nodes
+    requestAnimationFrame(() => {
+      fitView({ padding: 0.2, duration: 200 });
+    });
+  }, [fitViewRequestId, fitView]);
+
   const onCleanupNodes = useCallback(() => {
     autoLayoutGraph(getMeasuredNodeSizes());
   }, [getMeasuredNodeSizes]);
@@ -135,10 +152,12 @@ export const NodeCanvas: React.FC = () => {
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
   const [flowEdges, setFlowEdges] = useState<FlowEdge[]>([]);
   const flowNodesRef = useRef<FlowNode[]>([]);
-  const flowEdgesRef = useRef<FlowEdge[]>([]);
+  // flowNodesRef keeps a stable reference for event handlers (e.g. onNodesChange)
   const dropTargetFrameId = useRef<string | null>(null);
-  flowNodesRef.current = flowNodes;
-  flowEdgesRef.current = flowEdges;
+  // Selection state tracked as regular state (not ref) so it can be
+  // safely read during render in the useMemo derivation below.
+  const [selectionState, setSelectionState] = useState<Map<string, boolean>>(new Map());
+
   const clipboardRef = useRef<ClipboardEntry[]>([]);
   const isCutRef = useRef(false);
   const edgeReconnectSuccessful = useRef(true);
@@ -297,16 +316,18 @@ export const NodeCanvas: React.FC = () => {
     [nodesStore, nodeSpecs]
   );
 
-  useEffect(() => {
-    const prev = flowNodesRef.current;
+  // Derive flow nodes synchronously from store (no useEffect delay).
+  // This prevents the useSyncExternalStore infinite-loop that occurred when
+  // useEffect + setState created a perpetual one-render-behind lag during
+  // rapid Zustand updates (e.g. 60fps param drags with GPU nodes).
+  const derivedNodes = useMemo((): FlowNode[] => {
     const nextNodes: FlowNode[] = Array.from(nodesStore.values()).map(node => {
       const spec = nodeSpecs.find(s => s.id === node.typeId);
-      const existing = prev.find(n => n.id === node.id);
       return {
         id: node.id,
         type: node.typeId,
         position: node.position,
-        selected: existing?.selected ?? false,
+        selected: selectionState.get(node.id) ?? false,
         data: {
           label: spec?.display_name || node.typeId,
           spec,
@@ -316,11 +337,13 @@ export const NodeCanvas: React.FC = () => {
       };
     });
     for (const frame of framesStore.values()) {
+      const frameFlowId = `frame__${frame.id}`;
+      const frameSelected = selectionState.get(frameFlowId) ?? false;
       nextNodes.push({
-        id: `frame__${frame.id}`,
+        id: frameFlowId,
         type: 'frame',
         position: frame.position,
-        selected: false,
+        selected: frameSelected,
         zIndex: -1000 + frame.zIndex,
         style: { width: frame.size.width, height: frame.size.height },
         data: {
@@ -329,42 +352,55 @@ export const NodeCanvas: React.FC = () => {
           frameId: frame.id,
           width: frame.size.width,
           height: frame.size.height,
-          selected: false,
-          dropTarget: dropTargetFrameId.current === frame.id,
+          selected: frameSelected,
+          dropTarget: false,
         },
         draggable: true,
         selectable: true,
         connectable: false,
       });
     }
-    flowNodesRef.current = nextNodes;
-    setFlowNodes(nextNodes);
-  }, [nodesStore, nodeSpecs, framesStore]);
+    return nextNodes;
+  }, [nodesStore, nodeSpecs, framesStore, selectionState]);
+  // Synchronous state reset: when store-derived nodes change, push to
+  // React state immediately (during render, not after paint).  React
+  // supports this pattern — it discards the stale render and restarts
+  // with the updated state, avoiding the tearing loop.
+  const [prevDerivedNodes, setPrevDerivedNodes] = useState(derivedNodes);
+  if (prevDerivedNodes !== derivedNodes) {
+    setPrevDerivedNodes(derivedNodes);
+    setFlowNodes(derivedNodes);
+  }
 
-  useEffect(() => {
-    const prev = flowEdgesRef.current;
-    const nextEdges: FlowEdge[] = connectionsStore.map(conn => {
-      const existing = prev.find(e => e.id === conn.id);
-      return {
-        id: conn.id,
-        source: conn.fromNode,
-        sourceHandle: conn.fromPort,
-        target: conn.toNode,
-        targetHandle: conn.toPort,
-        type: 'default',
-        reconnectable: true,
-        selected: existing?.selected ?? false,
-        style: {
-          stroke: getEdgeColor(conn.fromNode, conn.fromPort),
-          strokeWidth: 2,
-        },
-        selectable: true,
-        focusable: true,
-      };
-    });
-    setFlowEdges(nextEdges);
-  }, [connectionsStore, getEdgeColor]);
+  // Same pattern for edges
+  const derivedEdges = useMemo((): FlowEdge[] => {
+    return connectionsStore.map(conn => ({
+      id: conn.id,
+      source: conn.fromNode,
+      sourceHandle: conn.fromPort,
+      target: conn.toNode,
+      targetHandle: conn.toPort,
+      type: 'default',
+      reconnectable: true,
+      selected: selectionState.get(conn.id) ?? false,
+      style: {
+        stroke: getEdgeColor(conn.fromNode, conn.fromPort),
+        strokeWidth: 2,
+      },
+      selectable: true,
+      focusable: true,
+    }));
+  }, [connectionsStore, getEdgeColor, selectionState]);
+  const [prevDerivedEdges, setPrevDerivedEdges] = useState(derivedEdges);
+  if (prevDerivedEdges !== derivedEdges) {
+    setPrevDerivedEdges(derivedEdges);
+    setFlowEdges(derivedEdges);
+  }
 
+
+  // Keep flowNodesRef in sync for event handlers that need a stable
+  // reference without stale closures (e.g. onNodesChange).
+  useEffect(() => { flowNodesRef.current = flowNodes; });
   const setSelectedNodes = useGraphStore(s => s.setSelectedNodes);
 
   const refitFrames = useCallback((excludeNodeIds?: Set<string>) => {
@@ -593,7 +629,7 @@ export const NodeCanvas: React.FC = () => {
     // Flow's internal initialization from overwriting programmatic positions.
     const next = applyNodeChanges(nonRemovals, flowNodesRef.current);
     setFlowNodes(next);
-    // Selection sync
+    // Sync selection state so useMemo derivation preserves it
     let selectionChanged = false;
     for (const change of nonRemovals) {
       if (change.type === 'select') {
@@ -604,11 +640,27 @@ export const NodeCanvas: React.FC = () => {
       }
     }
     if (selectionChanged) {
+      setSelectionState(prev => {
+        const updated = new Map(prev);
+        for (const change of nonRemovals) {
+          if (change.type === 'select') {
+            updated.set(change.id, change.selected);
+          }
+        }
+        return updated;
+      });
       const selectedIds = next.filter(n => n.selected && !n.id.startsWith('frame__')).map(n => n.id);
       setSelectedNodes(selectedIds);
     }
     if (removals.length > 0) {
       const deletedNodeIds = new Set<string>();
+      setSelectionState(prev => {
+        const updated = new Map(prev);
+        removals.forEach(change => {
+          if (change.type === 'remove') updated.delete(change.id);
+        });
+        return updated;
+      });
       removals.forEach(change => {
         if (change.type === 'remove') {
           if (change.id.startsWith('frame__')) {
@@ -628,6 +680,24 @@ export const NodeCanvas: React.FC = () => {
   const onEdgesChange = useCallback((changes: EdgeChange[]) => {
     const removals = changes.filter(c => c.type === 'remove');
     const nonRemovals = changes.filter(c => c.type !== 'remove');
+
+    // Sync edge selection state for useMemo preservation
+    let edgeSelChanged = false;
+    for (const change of nonRemovals) {
+      if (change.type === 'select') edgeSelChanged = true;
+    }
+    if (edgeSelChanged || removals.length > 0) {
+      setSelectionState(prev => {
+        const updated = new Map(prev);
+        for (const change of nonRemovals) {
+          if (change.type === 'select') updated.set(change.id, change.selected);
+        }
+        for (const change of removals) {
+          if (change.type === 'remove') updated.delete(change.id);
+        }
+        return updated;
+      });
+    }
 
     setFlowEdges(prev => applyEdgeChanges(nonRemovals, prev));
 
@@ -675,42 +745,73 @@ export const NodeCanvas: React.FC = () => {
 
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
+    // Show 'copy' cursor for image file drops, 'move' for node library drags
+    const hasFiles = event.dataTransfer.types.includes('Files');
+    event.dataTransfer.dropEffect = hasFiles ? 'copy' : 'move';
   }, []);
 
   const onDrop = useCallback(
     async (event: React.DragEvent) => {
       event.preventDefault();
+      // Handle image file drops — create a load_image node and load the file
+      const files = event.dataTransfer.files;
+      if (files.length > 0) {
+        // Handle .compnode file drops — import custom nodes
+        const compnodeFiles = Array.from(files).filter(f => f.name.endsWith('.compnode'));
+        if (compnodeFiles.length > 0) {
+          const importCustomNodes = useGraphStore.getState().importCustomNodes;
+          for (const file of compnodeFiles) {
+            try {
+              const text = await file.text();
+              await importCustomNodes(text);
+            } catch (e) {
+              console.error('[Drop] compnode import failed:', e);
+            }
+          }
+          return;
+        }
+        const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+        if (imageFiles.length > 0) {
+          const loadImageFile = useGraphStore.getState().loadImageFile;
+          for (let i = 0; i < imageFiles.length; i++) {
+            const position = screenToFlowPosition({
+              x: event.clientX + i * 220,
+              y: event.clientY,
+            });
+            try {
+              const newId = await addNode('load_image', position);
+              pendingImageFiles.set(newId, imageFiles[i]);
+              loadImageFile(newId, imageFiles[i]);
+            } catch (e) {
+              console.error('[Drop] image addNode failed:', e);
+            }
+          }
+          return;
+        }
+      }
       const typeId = event.dataTransfer.getData('application/reactflow');
-      console.log('[Drop] typeId:', typeId);
       if (!typeId) return;
       const position = screenToFlowPosition({
         x: event.clientX,
         y: event.clientY,
       });
-
       const edges = getEdges();
       const nodes = getNodes();
       const state = useGraphStore.getState();
-
       const HIT_SLOP = 50;
       let closestEdge: FlowEdge | null = null;
       let minDistance = HIT_SLOP;
-
       for (const edge of edges) {
         const sourceNode = nodes.find(n => n.id === edge.source);
         const targetNode = nodes.find(n => n.id === edge.target);
         if (!sourceNode || !targetNode) continue;
-
         const sW = sourceNode.measured?.width ?? 150;
         const sH = sourceNode.measured?.height ?? 50;
         const tH = targetNode.measured?.height ?? 50;
-
         const sx = sourceNode.position.x + sW;
         const sy = sourceNode.position.y + sH / 2;
         const tx = targetNode.position.x;
         const ty = targetNode.position.y + tH / 2;
-
         const A = position.x - sx;
         const B = position.y - sy;
         const C = tx - sx;
@@ -726,28 +827,23 @@ export const NodeCanvas: React.FC = () => {
         const dx = position.x - nearX;
         const dy = position.y - nearY;
         const dist = Math.sqrt(dx * dx + dy * dy);
-
         if (dist < minDistance) {
           minDistance = dist;
           closestEdge = edge;
         }
       }
-
       if (closestEdge && closestEdge.sourceHandle && closestEdge.targetHandle) {
         const newNodeSpec = state.nodeSpecs.find(s => s.id === typeId);
         const srcStoreNode = state.nodes.get(closestEdge.source);
         const tgtStoreNode = state.nodes.get(closestEdge.target);
         const srcSpec = srcStoreNode ? state.nodeSpecs.find(s => s.id === srcStoreNode.typeId) : null;
         const tgtSpec = tgtStoreNode ? state.nodeSpecs.find(s => s.id === tgtStoreNode.typeId) : null;
-
         if (newNodeSpec && srcSpec && tgtSpec) {
           const srcOutPort = srcSpec.outputs.find(o => o.name === closestEdge!.sourceHandle);
           const tgtInPort = tgtSpec.inputs.find(i => i.name === closestEdge!.targetHandle);
-
-           if (srcOutPort && tgtInPort) {
-             const matchingInput = newNodeSpec.inputs.find(i => typesCompatible(srcOutPort.ty, i.ty));
+          if (srcOutPort && tgtInPort) {
+            const matchingInput = newNodeSpec.inputs.find(i => typesCompatible(srcOutPort.ty, i.ty));
              const matchingOutput = newNodeSpec.outputs.find(o => typesCompatible(o.ty, tgtInPort.ty));
-
             if (matchingInput && matchingOutput) {
               try {
                 const newId = await addNode(typeId, position);
@@ -762,7 +858,6 @@ export const NodeCanvas: React.FC = () => {
           }
         }
       }
-
       addNode(typeId, position).catch(e => {
         console.error('[Drop] addNode failed:', e);
       });
@@ -899,6 +994,55 @@ export const NodeCanvas: React.FC = () => {
 
     return () => unregisters.forEach(fn => fn());
   }, [copySelected, pasteClipboard, frameSelectedNodes, getMeasuredNodeSizes, createGroup, ungroupNode, enterGroup, exitGroup, isInsideGroup, toggleMuteSelected]);
+
+  // Paste handler for clipboard images (e.g. screenshots via Cmd+V)
+  useEffect(() => {
+    const handlePaste = async (event: ClipboardEvent) => {
+      const items = event.clipboardData?.items;
+      if (!items) return;
+
+      const imageItems: DataTransferItem[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          imageItems.push(items[i]);
+        }
+      }
+      if (imageItems.length === 0) return;
+
+      // Don't intercept paste if user is typing in an input/textarea
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLInputElement ||
+        active instanceof HTMLTextAreaElement ||
+        (active instanceof HTMLElement && active.isContentEditable)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+
+      const { addNode: storeAddNode, loadImageFile: storeLoadImageFile } = useGraphStore.getState();
+      for (let i = 0; i < imageItems.length; i++) {
+        const file = imageItems[i].getAsFile();
+        if (!file) continue;
+        // Place at center of current viewport
+        const position = screenToFlowPosition({
+          x: window.innerWidth / 2 + i * 220,
+          y: window.innerHeight / 2,
+        });
+        try {
+          const newId = await storeAddNode('load_image', position);
+          pendingImageFiles.set(newId, file);
+          storeLoadImageFile(newId, file);
+        } catch (e) {
+          console.error('[Paste] image addNode failed:', e);
+        }
+      }
+    };
+
+    document.addEventListener('paste', handlePaste);
+    return () => document.removeEventListener('paste', handlePaste);
+  }, [screenToFlowPosition]);
   return (
     <section
       style={{ width: '100%', height: '100%', background: 'var(--bg-canvas)' }}

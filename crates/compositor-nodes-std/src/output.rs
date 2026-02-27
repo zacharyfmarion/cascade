@@ -411,3 +411,83 @@ impl Node for ExportImageSequence {
         self
     }
 }
+
+pub struct ExportImageBatch;
+
+impl ExportImageBatch {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ExportImageBatch {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "export_image_batch".to_string(),
+            display_name: "Export Image Batch".to_string(),
+            category: "Output".to_string(),
+            description: "Export a batch of processed images".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "filename".to_string(),
+                    label: "Filename".to_string(),
+                    ty: ValueType::String,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "display".to_string(),
+                label: "Display".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "format".to_string(),
+                    label: "Format".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec!["PNG".to_string(), "JPEG".to_string()]),
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "quality".to_string(),
+                    label: "Quality".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(90),
+                    min: Some(1.0),
+                    max: Some(100.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+            let mut outputs = HashMap::new();
+            outputs.insert("display".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}

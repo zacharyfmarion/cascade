@@ -11,15 +11,16 @@ use compositor_core::error::CompositorError;
 use compositor_core::eval::{CacheKey, Evaluator};
 use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{
-    GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
+    GroupDefinition, InternalConnection, InternalNode, NodePackage, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-use compositor_core::types::{ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value};
+use compositor_core::types::{ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value, ValueType};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{GpuContext, KernelManifest};
 use compositor_nodes_std::{
     decode_response_image, encode_image_png, register_standard_nodes, ColorPaletteNode,
-    GpuScriptDraftNode, GroupNode, LoadImage, LoadImageSequence, SequenceInfo, Viewer,
+    GpuScriptDraftNode, GroupNode, LoadImage, LoadImageBatch, LoadImageSequence, SequenceInfo,
+    Viewer,
 };
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
@@ -235,6 +236,15 @@ impl Engine {
         serde_wasm_bindgen::to_value(&specs).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+
+    pub fn types_compatible(&self, from_type: &str, to_type: &str) -> Result<bool, JsValue> {
+        let from: ValueType = serde_json::from_str(&format!("\"{from_type}\""))
+            .map_err(|e| JsValue::from_str(&format!("Invalid from type '{from_type}': {e}")))?;
+        let to: ValueType = serde_json::from_str(&format!("\"{to_type}\""))
+            .map_err(|e| JsValue::from_str(&format!("Invalid to type '{to_type}': {e}")))?;
+        Ok(compositor_core::graph::types_compatible(&from, &to))
+    }
+
     fn register_group(&mut self, def: GroupDefinition) -> Result<NodeSpec, String> {
         let arc_def = Arc::new(def);
         let interface = GroupNode::derive_interface(&arc_def, &self.registry)?;
@@ -242,6 +252,86 @@ impl Engine {
         Arc::make_mut(&mut self.registry).register_spec(&spec.id, spec.clone());
         self.group_definitions.insert(spec.id.clone(), arc_def);
         Ok(spec)
+    }
+
+
+    fn collect_group_deps(
+        &self,
+        group_def_id: &str,
+        collected: &mut Vec<GroupDefinition>,
+        visited: &mut HashSet<String>,
+    ) {
+        if !visited.insert(group_def_id.to_string()) {
+            return;
+        }
+        if let Some(def) = self.group_definitions.get(group_def_id) {
+            for node in &def.internal_graph.nodes {
+                if node.type_id.starts_with("group::") {
+                    self.collect_group_deps(&node.type_id, collected, visited);
+                }
+            }
+            collected.push(def.as_ref().clone());
+        }
+    }
+
+    pub fn export_group_as_package(
+        &self,
+        group_def_id: &str,
+    ) -> Result<JsValue, JsValue> {
+        let _def = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| JsValue::from_str("Group definition not found"))?;
+
+        let mut collected = Vec::new();
+        let mut visited = HashSet::new();
+        self.collect_group_deps(group_def_id, &mut collected, &mut visited);
+
+        let package = NodePackage {
+            version: 1,
+            compositor_version: env!("CARGO_PKG_VERSION").to_string(),
+            exported_at: String::new(),
+            nodes: collected,
+        };
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        package
+            .serialize(&serializer)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn import_custom_nodes(
+        &mut self,
+        package_js: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let package: NodePackage = serde_wasm_bindgen::from_value(package_js)
+            .map_err(|e| JsValue::from_str(&format!("Invalid node package: {e}")))?;
+
+        let mut id_remap: HashMap<String, String> = HashMap::new();
+        let mut imported_specs: Vec<NodeSpec> = Vec::new();
+
+        for mut def in package.nodes {
+            let original_id = def.id.clone();
+            let new_id = format!("group::imported_{}", Uuid::new_v4());
+            def.id = new_id.clone();
+            def.is_builtin = false;
+            id_remap.insert(original_id, new_id);
+
+            for node in &mut def.internal_graph.nodes {
+                if let Some(remapped) = id_remap.get(&node.type_id) {
+                    node.type_id = remapped.clone();
+                }
+            }
+
+            let spec = self
+                .register_group(def)
+                .map_err(|e| JsValue::from_str(&e))?;
+            imported_specs.push(spec);
+        }
+
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        imported_specs
+            .serialize(&serializer)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> Result<JsValue, JsValue> {
@@ -480,6 +570,99 @@ impl Engine {
             .downcast_ref::<LoadImageSequence>()
             .ok_or_else(|| JsValue::from_str("Node is not LoadImageSequence"))?;
         seq_node.set_frame_data(frame, data).map_err(to_js_error)
+    }
+
+    pub fn batch_clear(&mut self, node_id: &str) -> Result<(), JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageBatch"))?;
+        batch_node.clear().map_err(to_js_error)?;
+        self.evaluator.remove_node_cache(id);
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
+    pub fn batch_add_image(&mut self, node_id: &str, filename: &str, data: &[u8]) -> Result<(), JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageBatch"))?;
+        batch_node.add_image(filename, data).map_err(to_js_error)?;
+        self.evaluator.remove_node_cache(id);
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
+    pub fn get_batch_info(&self, export_node_id: &str) -> Result<JsValue, JsValue> {
+        let export_id = parse_node_id(&self.uuid_map, export_node_id).map_err(to_js_error)?;
+
+        // Walk upstream from the export node to find a LoadImageBatch node
+        let mut visited = std::collections::HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(export_id);
+        visited.insert(export_id);
+
+        let mut found_batch_nodes: Vec<NodeId> = Vec::new();
+
+        while let Some(current) = queue.pop_front() {
+            // Check if this node is a LoadImageBatch
+            let instance = self.graph.nodes.get(current);
+            if let Some(inst) = instance {
+                if inst.type_id == "load_image_batch" {
+                    found_batch_nodes.push(current);
+                    continue; // Don't walk further upstream from batch node
+                }
+            }
+
+            // Walk upstream: find all nodes connected to this node's inputs
+            for conn in self.graph.connections_to(current) {
+                if visited.insert(conn.from_node) {
+                    queue.push_back(conn.from_node);
+                }
+            }
+        }
+
+        if found_batch_nodes.is_empty() {
+            return Err(JsValue::from_str("No LoadImageBatch node found upstream"));
+        }
+        if found_batch_nodes.len() > 1 {
+            return Err(JsValue::from_str("Multiple LoadImageBatch nodes found upstream (ambiguous)"));
+        }
+
+        let batch_id = found_batch_nodes[0];
+        let batch_node = self
+            .nodes
+            .get(&batch_id)
+            .ok_or_else(|| JsValue::from_str("Batch node instance not found"))?;
+        let batch = batch_node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageBatch"))?;
+
+        let count = batch.image_count().map_err(to_js_error)?;
+        let filenames = batch.filenames().map_err(to_js_error)?;
+
+        let obj = js_sys::Object::new();
+        js_sys::Reflect::set(&obj, &"count".into(), &JsValue::from_f64(count as f64))
+            .map_err(|_| JsValue::from_str("Failed to set count"))?;
+        let arr = js_sys::Array::new();
+        for name in &filenames {
+            arr.push(&JsValue::from_str(name));
+        }
+        js_sys::Reflect::set(&obj, &"filenames".into(), &arr.into())
+            .map_err(|_| JsValue::from_str("Failed to set filenames"))?;
+        Ok(obj.into())
     }
 
     pub fn set_sequence_info(
@@ -789,10 +972,12 @@ impl Engine {
     }
 
     pub async fn run_ai_node(&mut self, node_id: &str) -> Result<(), JsValue> {
+        // Phase 1: Extract everything we need from &mut self.
+        // This borrow is short and synchronous — it completes before any .await,
+        // so the RefCell is released before JS can call other engine methods.
         let nid = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
         let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
         state.status = RunStatus::Running;
-
         let instance = self
             .graph
             .nodes
@@ -802,7 +987,6 @@ impl Engine {
             .registry
             .get_spec(&instance.type_id)
             .ok_or_else(|| JsValue::from_str("Unknown node type"))?;
-
         let mut inputs = HashMap::new();
         for input in spec.all_inputs().iter() {
             if let Some((up_node, up_port)) = self.graph.get_upstream(nid, &input.name) {
@@ -811,7 +995,6 @@ impl Engine {
                 }
             }
         }
-
         let mut merged_params = Evaluator::merge_params(instance, spec);
         Evaluator::apply_promoted_params(
             &mut merged_params,
@@ -826,19 +1009,28 @@ impl Engine {
             .get(&nid)
             .ok_or_else(|| JsValue::from_str("Node instance not found"))?
             .clone();
+        // Clone the remaining fields that EvalContext borrows, so we own them
+        // across the .await and don't hold &self during the async AI API call.
+        let cm = self.color_management.clone();
+        let ai_prov = self.ai_provider.clone();
+        let pf = self.project_format.clone();
+        // Phase 1 ends — &mut self borrow is released here.
 
-        let cm = &self.color_management;
+        // Phase 2: Async evaluate — no borrow on self held.
+        // The JS event loop is free to call other engine methods during this await.
         let ctx = compositor_core::node::EvalContext {
             inputs,
             params: &merged_params,
             frame_time: FrameTime { frame: 0 },
-            color_management: cm,
-            ai_provider: self.ai_provider.as_deref(),
-            project_format: &self.project_format,
+            color_management: &cm,
+            ai_provider: ai_prov.as_deref(),
+            project_format: &pf,
             ai_cached_outputs: None,
         };
+        let result = node_arc.evaluate(&ctx).await;
 
-        match node_arc.evaluate(&ctx).await {
+        // Phase 3: Store results — short &mut self re-borrow.
+        match result {
             Ok(outputs) => {
                 self.ai_node_cache.insert(nid, outputs);
                 let cache_key = self.evaluator.compute_node_cache_key(
@@ -1009,6 +1201,7 @@ impl Engine {
             id: NodeId,
             type_id: String,
             params: HashMap<String, ParamValue>,
+            input_defaults: HashMap<String, ParamValue>,
             position: (f64, f64),
         }
 
@@ -1027,6 +1220,7 @@ impl Engine {
                 id: inst.id,
                 type_id: inst.type_id.clone(),
                 params: inst.params.clone(),
+                input_defaults: inst.input_defaults.clone(),
                 position: inst.position,
             });
         }
@@ -1132,6 +1326,7 @@ impl Engine {
                 type_id: info.type_id.clone(),
                 params,
                 image_data,
+                input_defaults: info.input_defaults.clone(),
             });
         }
         avg_y /= node_count;
@@ -1149,6 +1344,7 @@ impl Engine {
             type_id: "group_input".to_string(),
             params: gi_params,
             image_data: None,
+            input_defaults: HashMap::new(),
         });
 
         let mut go_params = HashMap::new();
@@ -1162,6 +1358,7 @@ impl Engine {
             type_id: "group_output".to_string(),
             params: go_params,
             image_data: None,
+            input_defaults: HashMap::new(),
         });
 
         for b in &incoming {
@@ -1338,12 +1535,16 @@ impl Engine {
             for (k, v) in &params {
                 self.graph.set_param(new_id, k, v.clone());
             }
+            for (k, v) in &internal.input_defaults {
+                self.graph.set_input_default(new_id, k, v.clone());
+            }
             id_map.insert(internal.id.clone(), new_id);
             restored.push(RestoredNode {
                 id: new_str,
                 type_id: internal.type_id.clone(),
                 position: pos,
                 params,
+                input_defaults: internal.input_defaults.clone(),
             });
         }
 
@@ -1433,6 +1634,7 @@ impl Engine {
                 type_id: internal.type_id.clone(),
                 params,
                 position: (ox, oy),
+                input_defaults: internal.input_defaults.clone(),
             });
         }
 
@@ -1602,6 +1804,7 @@ impl Engine {
                 .inputs
                 .iter()
                 .find(|port| port.name == from_port)
+                .cloned()
                 .ok_or_else(|| CompositorError::PortNotFound {
                     node_type: from_internal.type_id.clone(),
                     port_name: from_port.to_string(),
@@ -1620,6 +1823,7 @@ impl Engine {
                 .outputs
                 .iter()
                 .find(|port| port.name == from_port)
+                .cloned()
                 .ok_or_else(|| CompositorError::PortNotFound {
                     node_type: from_internal.type_id.clone(),
                     port_name: from_port.to_string(),
@@ -1631,6 +1835,7 @@ impl Engine {
                 .outputs
                 .iter()
                 .find(|port| port.name == to_port)
+                .cloned()
                 .ok_or_else(|| CompositorError::PortNotFound {
                     node_type: to_internal.type_id.clone(),
                     port_name: to_port.to_string(),
@@ -1645,10 +1850,11 @@ impl Engine {
                         to_internal.type_id
                     ))
                 })?;
-            to_spec
-                .inputs
+            let all_inputs = to_spec.all_inputs();
+            all_inputs
                 .iter()
                 .find(|port| port.name == to_port)
+                .cloned()
                 .ok_or_else(|| CompositorError::PortNotFound {
                     node_type: to_internal.type_id.clone(),
                     port_name: to_port.to_string(),
@@ -1918,6 +2124,7 @@ struct RestoredNode {
     type_id: String,
     position: (f64, f64),
     params: HashMap<String, ParamValue>,
+    input_defaults: HashMap<String, ParamValue>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1938,6 +2145,8 @@ struct InternalGraphNode {
     type_id: String,
     params: HashMap<String, ParamValue>,
     position: (f64, f64),
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    input_defaults: HashMap<String, ParamValue>,
 }
 
 #[derive(Serialize, Deserialize)]

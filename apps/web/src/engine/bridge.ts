@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
 
 export interface ColorSpaceInfo {
   id: string;
@@ -101,6 +101,9 @@ export interface EngineBridge {
   loadVideoFile?(nodeId: string, path: string): Promise<VideoInfo>;
   loadSequenceFrameData?(nodeId: string, frame: number, data: Uint8Array): Promise<void> | void;
   setSequenceInfo?(nodeId: string, info: SequenceInfo): Promise<void> | void;
+  batchClear?(nodeId: string): Promise<void> | void;
+  batchAddImage?(nodeId: string, filename: string, data: Uint8Array): Promise<void> | void;
+  getBatchInfo?(exportNodeId: string): Promise<{ count: number; filenames: string[] }> | { count: number; filenames: string[] };
   createGroupFromNodes?(nodeIds: string[], name: string): Promise<CreateGroupResult>;
   ungroupNode?(groupNodeId: string): Promise<UngroupResult>;
   getGroupInternalGraph?(groupNodeId: string): Promise<GroupInternalGraph>;
@@ -118,4 +121,9 @@ export interface EngineBridge {
   setDisplayView?(display: string, view: string): Promise<void> | void;
   setProjectFormat?(width: number, height: number): Promise<void> | void;
   validateEdits?(editsJson: string): EditValidationError[] | Promise<EditValidationError[]>;
+  exportGroupAsPackage?(groupDefId: string): Promise<unknown> | unknown;
+  importCustomNodes?(json: string): Promise<NodeSpec[]> | NodeSpec[];
+  listCustomNodes?(): Promise<CustomNodeInfo[]>;
+  removeCustomNode?(groupDefId: string): Promise<void>;
+  typesCompatible?(fromType: string, toType: string): boolean | Promise<boolean>;
 }

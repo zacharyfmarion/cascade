@@ -1,10 +1,10 @@
 import React from 'react';
 import {
-  Image,
+  Image, Images,
   FileVideo,
   Eye,
   Download,
-  FileOutput,
+  FileOutput, FolderOutput,
   SunMedium,
   Palette,
   CircleOff,
@@ -64,12 +64,14 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
   load_image_sequence: <FileVideo size={ICON_SIZE} />,
   load_video: <Film size={ICON_SIZE} />,
 
+  load_image_batch: <Images size={ICON_SIZE} />,
   // ── Output ──
   viewer: <Eye size={ICON_SIZE} />,
   export_image: <Download size={ICON_SIZE} />,
   export_image_sequence: <FileOutput size={ICON_SIZE} />,
   export_video: <FileVideo size={ICON_SIZE} />,
 
+  export_image_batch: <FolderOutput size={ICON_SIZE} />,
   // ── Color ──
   brightness_contrast: <SunMedium size={ICON_SIZE} />,
   hue_saturation: <Palette size={ICON_SIZE} />,

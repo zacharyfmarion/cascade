@@ -33,9 +33,9 @@ pub use generate::{
     RasterizeField, SolidColor, Text, TextArea, UVMap,
 };
 pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
-pub use input::{LoadImage, LoadImageSequence, LoadVideo, SequenceInfo, srgb_to_linear_lut};
+pub use input::{LoadImage, LoadImageBatch, LoadImageSequence, LoadVideo, SequenceInfo, srgb_to_linear_lut};
 pub use matte::{ChromaKey, CombineRgba, CopyChannels, DifferenceMatte, EdgeBlur, ExtractChannel, LuminanceKey, MatteExpand, MatteShrink, Premultiply, SeparateRgba, SetAlpha, Unpremultiply};
-pub use output::{ExportImageSequence, ExportVideo, Viewer};
+pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use transform::{CornerPin, Crop, Flip, Resize, Rotate, STMap, Transform2D, Translate};
@@ -45,6 +45,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     // Input/Output
     registry.register("load_image", || Arc::new(LoadImage::new()));
     registry.register("load_image_sequence", || Arc::new(LoadImageSequence::new()));
+    registry.register("load_image_batch", || Arc::new(LoadImageBatch::new()));
     registry.register("load_video", || Arc::new(LoadVideo::new()));
     registry.register("viewer", || Arc::new(Viewer::new()));
 
@@ -151,6 +152,9 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     });
     registry.register("export_video", || Arc::new(ExportVideo::new()));
 
+    registry.register("export_image_batch", || {
+        Arc::new(ExportImageBatch::new())
+    });
     registry.register("gpu_script", || {
         Arc::new(GpuScriptDraftNode::new("gpu_script"))
     });
@@ -265,6 +269,7 @@ mod tests {
         let mut params = HashMap::new();
         params.insert("hue".to_string(), ParamValue::Float(0.0));
         params.insert("saturation".to_string(), ParamValue::Float(0.0));
+        params.insert("value".to_string(), ParamValue::Float(0.0));
         let value = eval_field_passthrough(&node, [0.5, 0.5, 0.5, 1.0], params);
         let sampled = sample_field(&value);
         assert_color_approx(sampled, [0.5, 0.5, 0.5, 1.0], "hue/saturation");
@@ -1604,7 +1609,6 @@ mod tests {
     #[test]
     fn test_crop_intersects_data_window() {
         let input = make_offset_image([0.0, 1.0, 0.0, 1.0]);
-
         let node = Crop::new();
         let mut params = HashMap::new();
         params.insert("x".to_string(), ParamValue::Int(102));
@@ -1614,6 +1618,62 @@ mod tests {
 
         let output = eval_image_node(&node, input.clone(), params);
 
+        // Output is always exactly width×height, starting at origin
+        let expected_dw = RectI {
+            min: IVec2::new(0, 0),
+            max: IVec2::new(10, 10),
+        };
+        assert_eq!(output.data_window, expected_dw);
+        assert_eq!(output.width, 10);
+        assert_eq!(output.height, 10);
+        assert_eq!(output.format, input.format);
+        // Pixel at output (0,0) maps to source global (102,101) which is inside the input
+        let px = output.get_rgba(0, 0);
+        assert_color_approx(px, [0.0, 1.0, 0.0, 1.0], "pixel inside crop");
+        // Pixel at output (2,3) maps to source global (104,104) which is outside the input
+        let px_outside = output.get_rgba(2, 3);
+        assert_color_approx(px_outside, [0.0, 0.0, 0.0, 0.0], "pixel outside source is transparent");
+    }
+
+    #[test]
+    fn test_crop_no_overlap_produces_empty() {
+        let input = make_offset_image([1.0, 0.0, 0.0, 1.0]);
+        let node = Crop::new();
+        let mut params = HashMap::new();
+        params.insert("x".to_string(), ParamValue::Int(200));
+        params.insert("y".to_string(), ParamValue::Int(200));
+        params.insert("width".to_string(), ParamValue::Int(10));
+        params.insert("height".to_string(), ParamValue::Int(10));
+
+        let output = eval_image_node(&node, input, params);
+
+        // Output is always exactly width×height, even with no overlap
+        assert_eq!(output.width, 10);
+        assert_eq!(output.height, 10);
+        let px = output.get_rgba(0, 0);
+        assert_color_approx(
+            px,
+            [0.0, 0.0, 0.0, 0.0],
+            "non-overlapping crop is transparent",
+        );
+    }
+
+
+    #[test]
+    fn test_crop_clip_to_source_intersects_data_window() {
+        let input = make_offset_image([0.0, 1.0, 0.0, 1.0]);
+
+        let node = Crop::new();
+        let mut params = HashMap::new();
+        params.insert("x".to_string(), ParamValue::Int(102));
+        params.insert("y".to_string(), ParamValue::Int(101));
+        params.insert("width".to_string(), ParamValue::Int(10));
+        params.insert("height".to_string(), ParamValue::Int(10));
+        params.insert("clip_to_source".to_string(), ParamValue::Bool(true));
+
+        let output = eval_image_node(&node, input.clone(), params);
+
+        // With clip_to_source, output is intersection of crop rect with source data_window
         let expected_dw = RectI {
             min: IVec2::new(102, 101),
             max: IVec2::new(104, 104),
@@ -1628,7 +1688,7 @@ mod tests {
     }
 
     #[test]
-    fn test_crop_no_overlap_produces_empty() {
+    fn test_crop_clip_to_source_no_overlap_produces_empty() {
         let input = make_offset_image([1.0, 0.0, 0.0, 1.0]);
 
         let node = Crop::new();
@@ -1637,9 +1697,11 @@ mod tests {
         params.insert("y".to_string(), ParamValue::Int(200));
         params.insert("width".to_string(), ParamValue::Int(10));
         params.insert("height".to_string(), ParamValue::Int(10));
+        params.insert("clip_to_source".to_string(), ParamValue::Bool(true));
 
         let output = eval_image_node(&node, input, params);
 
+        // With clip_to_source and no overlap, output is 1×1 transparent
         assert_eq!(output.width, 1);
         assert_eq!(output.height, 1);
         let px = output.get_rgba(200, 200);
@@ -1649,7 +1711,6 @@ mod tests {
             "non-overlapping crop is transparent",
         );
     }
-
     #[test]
     fn test_resize_produces_new_format() {
         let input = make_offset_image([0.5, 0.5, 0.5, 1.0]);
@@ -1772,6 +1833,36 @@ mod tests {
             input.data_window.width_u32()
         );
         assert_eq!(output.format, input.format);
+    }
+
+
+    #[test]
+    fn test_transform2d_clamp_preserves_dimensions() {
+        let input =
+            Image::from_f32_data(4, 4, vec![[0.5f32, 0.5, 0.5, 1.0]; 16].concat())
+                .unwrap();
+
+        let node = Transform2D::new();
+        let mut params = HashMap::new();
+        params.insert("translate_x".to_string(), ParamValue::Float(0.0));
+        params.insert("translate_y".to_string(), ParamValue::Float(0.0));
+        params.insert("rotate".to_string(), ParamValue::Float(0.0));
+        params.insert("scale_x".to_string(), ParamValue::Float(2.0));
+        params.insert("scale_y".to_string(), ParamValue::Float(2.0));
+        params.insert("pivot_x".to_string(), ParamValue::Float(0.5));
+        params.insert("pivot_y".to_string(), ParamValue::Float(0.5));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+        params.insert("clamp".to_string(), ParamValue::Bool(true));
+
+        let output = eval_image_node(&node, input.clone(), params);
+
+        // With clamp enabled, data_window must match input exactly
+        assert_eq!(
+            output.data_window, input.data_window,
+            "clamp should preserve original data_window"
+        );
+        assert_eq!(output.width, input.width);
+        assert_eq!(output.height, input.height);
     }
 
     #[test]
