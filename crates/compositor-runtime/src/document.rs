@@ -4,7 +4,10 @@ use std::collections::HashMap;
 
 use crate::SerializableGraph;
 
-pub const CURRENT_FORMAT_VERSION: &str = "1.0.0";
+// Version history:
+// 1.0.0 - Initial format
+// 1.1.0 - Viewer node input port renamed from "image" to "value" for universal value inspection
+pub const CURRENT_FORMAT_VERSION: &str = "1.1.0";
 
 #[derive(Serialize, Deserialize)]
 pub struct CompositorDocument {

@@ -1,6 +1,7 @@
 pub mod ai_provider;
 mod builtin_groups;
 pub mod document;
+pub mod migrations;
 
 use crate::ai_provider::NativeAiProvider;
 use compositor_core::ai::AiProvider;
