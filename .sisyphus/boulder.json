@@ -1,0 +1,13 @@
+{
+  "active_plan": null,
+  "completed_plan": "/Users/zacharymarion/src/compositor/.sisyphus/plans/migration-architecture.md",
+  "completed_at": "2026-03-01T18:30:00Z",
+  "started_at": "2026-03-01T16:59:29.046Z",
+  "session_ids": [
+    "ses_35ecfc62affeDwL4of9zBpikie",
+    "ses_3558eea3effe9rr2tTJBGmUcl5"
+  ],
+  "plan_name": "migration-architecture",
+  "worktree_path": "/Users/zacharymarion/src/compositor",
+  "status": "complete"
+}
