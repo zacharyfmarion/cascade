@@ -5,7 +5,7 @@ export type {
   PortSpec,
   NodeInstance,
   Connection,
-  RenderResult,
+  ViewerResult,
   ValueType,
   ParamDefault,
   ColorStop,

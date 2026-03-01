@@ -41,7 +41,7 @@ export const ExportImageNode: React.FC<NodeProps> = (props) => {
   const qualitySpec = spec.params.find(p => p.key === 'quality');
 
   useEffect(() => {
-    if (result && canvasRef.current) {
+    if (result && 'pixels' in result && canvasRef.current) {
       const canvas = canvasRef.current;
       canvas.width = result.width;
       canvas.height = result.height;

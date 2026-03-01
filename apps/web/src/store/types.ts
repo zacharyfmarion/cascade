@@ -1,4 +1,4 @@
-export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field' | 'String';
+export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field' | 'String' | 'Any';
 
 export interface ColorStop {
   position: number;
@@ -122,14 +122,24 @@ export interface Connection {
   toPort: string;
 }
 
-// Render result from engine
-export interface RenderResult {
-  nodeId: string;
-  width: number;
-  height: number;
-  pixels: Uint8ClampedArray; // RGBA8 sRGB
-  previewScale?: number;
-}
+// Render result from engine — discriminated union over all value types
+export type ViewerResult =
+  | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
+  | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
+  | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
+  | { type: 'float'; nodeId: string; value: number }
+  | { type: 'int'; nodeId: string; value: number }
+  | { type: 'bool'; nodeId: string; value: boolean }
+  | { type: 'color'; nodeId: string; value: [number, number, number, number] }
+  | { type: 'string'; nodeId: string; value: string }
+  | { type: 'none'; nodeId: string };
+
+/** Type guard: does the result carry pixel data? */
+export const isPixelResult = (r: ViewerResult): r is Extract<ViewerResult, { pixels: Uint8ClampedArray }> =>
+  r.type === 'image' || r.type === 'mask' || r.type === 'field';
+
+/** @deprecated Use ViewerResult instead */
+export type RenderResult = Extract<ViewerResult, { type: 'image' }>;
 
 export interface CreateGroupResult {
   groupDefinitionId: string;
@@ -210,4 +220,14 @@ export interface TransactionResult {
   success: boolean;
   diagnostics: TransactionDiagnostics;
   graphRevision: number;
+}
+
+// Custom node package types
+export interface CustomNodeInfo {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  node_count: number;
+  file_path: string;
 }

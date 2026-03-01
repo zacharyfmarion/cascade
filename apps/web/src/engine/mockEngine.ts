@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamValue, RenderResult, NodeInstance, Connection } from '../store/types';
+import type { NodeSpec, ParamValue, ViewerResult, NodeInstance, Connection } from '../store/types';
 import type { EngineBridge, AddNodeResult } from './bridge';
 
 const NODE_SPECS: NodeSpec[] = [
@@ -424,7 +424,7 @@ export class MockEngine implements EngineBridge {
     console.log(`Loading image data for node ${nodeId}`);
   }
 
-  renderViewer(viewerNodeId: string, _frame: number): RenderResult | null {
+  renderViewer(viewerNodeId: string, _frame: number): ViewerResult | null {
     const width = 200;
     const height = 150;
     const pixels = new Uint8ClampedArray(width * height * 4);
@@ -440,6 +440,7 @@ export class MockEngine implements EngineBridge {
     }
 
     return {
+      type: 'image' as const,
       nodeId: viewerNodeId,
       width,
       height,

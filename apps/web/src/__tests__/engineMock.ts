@@ -1,5 +1,5 @@
 import type { EngineBridge, AddNodeResult } from '../engine/bridge';
-import type { NodeSpec, ParamValue, RenderResult } from '../store/types';
+import type { NodeSpec, ParamValue, ViewerResult } from '../store/types';
 
 const NODE_SPECS: NodeSpec[] = [
   {
@@ -123,21 +123,21 @@ export function createMockEngine(): EngineBridge & {
   _nodes: Map<string, { typeId: string; params: Record<string, ParamValue> }>;
   _connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }>;
   _graphState: unknown;
-  _renderResult: RenderResult | null;
-  _setRenderResult: (r: RenderResult | null) => void;
+  _renderResult: ViewerResult | null;
+  _setRenderResult: (r: ViewerResult | null) => void;
 } {
   const nodes = new Map<string, { typeId: string; params: Record<string, ParamValue> }>();
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
   let graphState: unknown = { nodes: [], connections: [] };
-  let renderResult: RenderResult | null = null;
+  let renderResult: ViewerResult | null = null;
 
   return {
     _nodes: nodes,
     _connections: connections,
     _graphState: graphState,
     _renderResult: renderResult,
-    _setRenderResult: (r: RenderResult | null) => { renderResult = r; },
+    _setRenderResult: (r: ViewerResult | null) => { renderResult = r; },
 
     listNodeTypes: () => NODE_SPECS,
 
@@ -193,7 +193,7 @@ export function createMockEngine(): EngineBridge & {
       return imageDataStore.get(nodeId) ?? null;
     },
 
-    renderViewer: (_viewerNodeId: string, _frame: number): RenderResult | null => {
+    renderViewer: (_viewerNodeId: string, _frame: number): ViewerResult | null => {
       return renderResult;
     },
 

@@ -6,7 +6,10 @@ import type {
   NodeSpec,
   PortSpec,
   ParamValue,
-  RenderResult,
+  ViewerResult,
+} from './types';
+import { isPixelResult } from './types';
+import type {
   EditingContext,
   GroupInternalGraph,
   Frame,
@@ -94,7 +97,10 @@ const createScalingCanvas = (width: number, height: number): OffscreenCanvas | H
   return canvas;
 };
 
-const downscaleRenderResult = async (result: RenderResult, scale: number): Promise<RenderResult> => {
+const downscaleRenderResult = async (result: ViewerResult, scale: number): Promise<ViewerResult> => {
+  // Only pixel-carrying results can be downscaled
+  if (!isPixelResult(result)) return result;
+
   if (!Number.isFinite(scale) || scale >= 1) {
     return { ...result, previewScale: 1 };
   }
@@ -222,7 +228,7 @@ interface GraphState {
   selectedFrameId: string | null;
   nodeSpecs: NodeSpec[];
   engineReady: boolean;
-  renderResults: Map<string, RenderResult>;
+  renderResults: Map<string, ViewerResult>;
   lastError: EngineError | null;
   canUndo: boolean;
   canRedo: boolean;
@@ -823,20 +829,26 @@ export const useGraphStore = create<GraphState>()(
             let resolvedToPort = toPort;
 
             if (isAddFrom) {
-              // Creating a new group input — generate unique name
+              // Name the group input after the target node's input port, with dedup
               const existing = internalGraph.inputs;
-              let idx = existing.length + 1;
-              let name = `input_${idx}`;
-              while (existing.some(p => p.name === name)) { idx++; name = `input_${idx}`; }
+              let name = toPort;
+              if (existing.some(p => p.name === name)) {
+                let idx = 2;
+                while (existing.some(p => p.name === `${toPort}_${idx}`)) { idx++; }
+                name = `${toPort}_${idx}`;
+              }
               resolvedFromPort = name;
             }
 
             if (isAddTo) {
-              // Creating a new group output — generate unique name
+              // Name the group output after the source node's output port, with dedup
               const existing = internalGraph.outputs;
-              let idx = existing.length + 1;
-              let name = `output_${idx}`;
-              while (existing.some(p => p.name === name)) { idx++; name = `output_${idx}`; }
+              let name = fromPort;
+              if (existing.some(p => p.name === name)) {
+                let idx = 2;
+                while (existing.some(p => p.name === `${fromPort}_${idx}`)) { idx++; }
+                name = `${fromPort}_${idx}`;
+              }
               resolvedToPort = name;
             }
 
@@ -2786,16 +2798,16 @@ export const useGraphStore = create<GraphState>()(
         // Re-read connections from current state (addNode may have mutated)
         const currentConnections = get().connections;
 
-        // Disconnect any existing connection going into the viewer's "image" input
+        // Disconnect any existing connection going into the viewer's "value" input
         const existingConn = currentConnections.find(
-          c => c.toNode === viewerNodeId && c.toPort === 'image'
+          c => c.toNode === viewerNodeId && c.toPort === 'value'
         );
         if (existingConn) {
           await get().disconnect(existingConn.id);
         }
 
         // Connect the clicked node's output to the viewer's input
-        await get().connect(nodeId, output.name, viewerNodeId, 'image');
+        await get().connect(nodeId, output.name, viewerNodeId, 'value');
       },
     };
   })

@@ -9,7 +9,7 @@ use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{
-    GroupDefinition, InternalConnection, InternalNode, SerializableInternalGraph,
+    CustomNodeInfo, GroupDefinition, InternalConnection, InternalNode, NodePackage, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
 pub use compositor_core::types::{Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value};
@@ -100,6 +100,7 @@ pub struct RestoredNode {
     pub type_id: String,
     pub position: (f64, f64),
     pub params: HashMap<String, ParamValue>,
+    pub input_defaults: HashMap<String, ParamValue>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,6 +121,8 @@ pub struct InternalGraphNode {
     pub type_id: String,
     pub params: HashMap<String, ParamValue>,
     pub position: (f64, f64),
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub input_defaults: HashMap<String, ParamValue>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -338,6 +341,157 @@ impl Engine {
         Ok(spec)
     }
 
+
+    fn collect_group_deps(
+        &self,
+        group_def_id: &str,
+        collected: &mut Vec<GroupDefinition>,
+        visited: &mut HashSet<String>,
+    ) {
+        if !visited.insert(group_def_id.to_string()) {
+            return;
+        }
+        if let Some(def) = self.group_definitions.get(group_def_id) {
+            for node in &def.internal_graph.nodes {
+                if node.type_id.starts_with("group::") {
+                    self.collect_group_deps(&node.type_id, collected, visited);
+                }
+            }
+            collected.push(def.as_ref().clone());
+        }
+    }
+
+    pub fn export_group_as_package(
+        &self,
+        group_def_id: &str,
+    ) -> Result<String, CompositorError> {
+        if !self.group_definitions.contains_key(group_def_id) {
+            return Err(CompositorError::Other(format!(
+                "Group definition not found: {group_def_id}"
+            )));
+        }
+
+        let mut collected = Vec::new();
+        let mut visited = HashSet::new();
+        self.collect_group_deps(group_def_id, &mut collected, &mut visited);
+
+        let package = NodePackage {
+            version: 1,
+            compositor_version: env!("CARGO_PKG_VERSION").to_string(),
+            exported_at: String::new(),
+            nodes: collected,
+        };
+        serde_json::to_string_pretty(&package)
+            .map_err(|e| CompositorError::Other(format!("Serialization failed: {e}")))
+    }
+
+    pub fn import_custom_nodes(
+        &mut self,
+        json: &str,
+    ) -> Result<Vec<NodeSpec>, CompositorError> {
+        let package: NodePackage = serde_json::from_str(json)
+            .map_err(|e| CompositorError::Other(format!("Invalid node package: {e}")))?;
+
+        let mut id_remap: HashMap<String, String> = HashMap::new();
+        let mut imported_specs: Vec<NodeSpec> = Vec::new();
+
+        for mut def in package.nodes {
+            let original_id = def.id.clone();
+            let new_id = format!("group::imported_{}", Uuid::new_v4());
+            def.id = new_id.clone();
+            def.is_builtin = false;
+            id_remap.insert(original_id, new_id);
+
+            for node in &mut def.internal_graph.nodes {
+                if let Some(remapped) = id_remap.get(&node.type_id) {
+                    node.type_id = remapped.clone();
+                }
+            }
+
+            let spec = self.register_group(def).map_err(CompositorError::Other)?;
+            imported_specs.push(spec);
+        }
+
+        Ok(imported_specs)
+    }
+
+    pub fn load_custom_nodes_from_dir(
+        &mut self,
+        dir: &Path,
+    ) -> Result<usize, CompositorError> {
+        if !dir.exists() {
+            return Ok(0);
+        }
+        let mut total = 0usize;
+        let entries = fs::read_dir(dir)
+            .map_err(|e| CompositorError::Other(format!("Failed to read dir: {e}")))?;
+        for entry in entries {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(err) => {
+                    eprintln!("[compositor-runtime] Skipping dir entry: {err}");
+                    continue;
+                }
+            };
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("compnode") {
+                continue;
+            }
+            match fs::read_to_string(&path) {
+                Ok(contents) => match self.import_custom_nodes(&contents) {
+                    Ok(specs) => {
+                        total += specs.len();
+                        eprintln!(
+                            "[compositor-runtime] Loaded {} custom node(s) from {}",
+                            specs.len(),
+                            path.display()
+                        );
+                    }
+                    Err(err) => {
+                        eprintln!(
+                            "[compositor-runtime] Failed to import {}: {err}",
+                            path.display()
+                        );
+                    }
+                },
+                Err(err) => {
+                    eprintln!(
+                        "[compositor-runtime] Failed to read {}: {err}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        Ok(total)
+    }
+
+    pub fn list_custom_nodes(&self) -> Vec<CustomNodeInfo> {
+        self.group_definitions
+            .values()
+            .filter(|def| !def.is_builtin)
+            .map(|def| CustomNodeInfo {
+                id: def.id.clone(),
+                name: def.name.clone(),
+                category: def.category.clone(),
+                description: def.description.clone(),
+                node_count: 1,
+                file_path: String::new(),
+            })
+            .collect()
+    }
+
+    pub fn remove_custom_node(
+        &mut self,
+        group_def_id: &str,
+    ) -> Result<(), CompositorError> {
+        if self.group_definitions.remove(group_def_id).is_none() {
+            return Err(CompositorError::Other(format!(
+                "Custom node not found: {group_def_id}"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn create_group_from_nodes(
         &mut self,
         node_ids: &[&str],
@@ -362,6 +516,7 @@ impl Engine {
             id: NodeId,
             type_id: String,
             params: HashMap<String, ParamValue>,
+            input_defaults: HashMap<String, ParamValue>,
             position: (f64, f64),
         }
 
@@ -380,6 +535,7 @@ impl Engine {
                 id: instance.id,
                 type_id: instance.type_id.clone(),
                 params: instance.params.clone(),
+                input_defaults: instance.input_defaults.clone(),
                 position: instance.position,
             });
         }
@@ -519,6 +675,7 @@ impl Engine {
                 type_id: instance.type_id.clone(),
                 params,
                 image_data,
+                input_defaults: instance.input_defaults.clone(),
             });
         }
         avg_y /= count;
@@ -536,6 +693,7 @@ impl Engine {
             type_id: "group_input".to_string(),
             params: gi_params,
             image_data: None,
+            input_defaults: HashMap::new(),
         });
 
         let mut go_params = HashMap::new();
@@ -549,6 +707,7 @@ impl Engine {
             type_id: "group_output".to_string(),
             params: go_params,
             image_data: None,
+            input_defaults: HashMap::new(),
         });
 
         for boundary in &incoming {
@@ -718,12 +877,16 @@ impl Engine {
                 self.graph.set_param(new_id, key, value.clone());
             }
 
+            for (key, value) in &internal.input_defaults {
+                self.graph.set_input_default(new_id, key, value.clone());
+            }
             id_map.insert(internal.id.clone(), new_id);
             restored_nodes.push(RestoredNode {
                 id: new_id_str,
                 type_id: internal.type_id.clone(),
                 position,
                 params,
+                input_defaults: internal.input_defaults.clone(),
             });
         }
 
@@ -824,6 +987,7 @@ impl Engine {
                 type_id: internal.type_id.clone(),
                 params,
                 position: (offset_x, offset_y),
+                input_defaults: internal.input_defaults.clone(),
             });
         }
 
@@ -2476,7 +2640,7 @@ return pixelated;
             .connect(&load_id, "image", &script_node_id, "image")
             .expect("connect load→pixelate");
         engine
-            .connect(&script_node_id, "image", &viewer_id, "image")
+            .connect(&script_node_id, "image", &viewer_id, "value")
             .expect("connect pixelate→viewer");
 
         // Set pixel_size = 4 (8x8 image with block size 4 → four 4x4 blocks)
@@ -2604,7 +2768,7 @@ return pixelated;
             .connect(&load_id, "image", &pix_id, "image")
             .expect("connect");
         engine
-            .connect(&pix_id, "image", &viewer_id, "image")
+            .connect(&pix_id, "image", &viewer_id, "value")
             .expect("connect");
         engine
             .set_param(&pix_id, "pixel_size", ParamValue::Int(4))

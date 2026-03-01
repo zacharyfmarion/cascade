@@ -1,6 +1,6 @@
 import init, { Engine } from '../wasm-pkg/compositor_wasm';
 import type { EngineBridge, AddNodeResult, ColorManagementInfo, EditValidationError } from './bridge';
-import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
 
 /**
@@ -236,9 +236,9 @@ export class WasmEngine implements EngineBridge {
     });
   }
 
-  renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
-    return this.scheduler.enqueue(async () => {
-      const pixels = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
+  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
+    return this.scheduler.enqueue(async (): Promise<ViewerResult | null> => {
+      const raw = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
 
       try {
         const timingsRaw = this.getEngine().get_last_render_timings();
@@ -255,20 +255,52 @@ export class WasmEngine implements EngineBridge {
         console.warn('[WASM] Failed to get timings:', e);
       }
 
-      if (!pixels || pixels.length === 0) return null;
+      if (!raw || typeof raw !== 'object') return null;
 
-      const dims = await this.getEngine().get_render_dimensions(viewerNodeId, BigInt(frame));
-      if (!dims) return null;
+      const data = raw as Record<string, unknown>;
+      const type = data.type as string;
 
-      return {
-        nodeId: viewerNodeId,
-        width: dims.width,
-        height: dims.height,
-        pixels: new Uint8ClampedArray(pixels.buffer),
-      };
+      switch (type) {
+        case 'image':
+        case 'mask':
+        case 'field': {
+          const pixelsArr = data.pixels as number[];
+          if (!pixelsArr || pixelsArr.length === 0) return null;
+          const r: ViewerResult = {
+            type,
+            nodeId: viewerNodeId,
+            width: data.width as number,
+            height: data.height as number,
+            pixels: new Uint8ClampedArray(pixelsArr),
+          };
+          return r;
+        }
+        case 'float':
+        case 'int': {
+          const r: ViewerResult = { type, nodeId: viewerNodeId, value: data.value as number };
+          return r;
+        }
+        case 'bool': {
+          const r: ViewerResult = { type: 'bool', nodeId: viewerNodeId, value: data.value as boolean };
+          return r;
+        }
+        case 'color': {
+          const r: ViewerResult = { type: 'color', nodeId: viewerNodeId, value: data.value as [number, number, number, number] };
+          return r;
+        }
+        case 'string': {
+          const r: ViewerResult = { type: 'string', nodeId: viewerNodeId, value: data.value as string };
+          return r;
+        }
+        case 'none': {
+          const r: ViewerResult = { type: 'none', nodeId: viewerNodeId };
+          return r;
+        }
+        default:
+          return null;
+      }
     });
   }
-
   exportGraph(): Promise<unknown> {
     return this.scheduler.enqueue(() =>
       this.getEngine().export_graph()

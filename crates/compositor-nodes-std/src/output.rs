@@ -50,15 +50,15 @@ impl Node for Viewer {
             category: "Output".to_string(),
             description: "Display output".to_string(),
             inputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
+                name: "value".to_string(),
+                label: "Value".to_string(),
+                ty: ValueType::Any,
                 ..Default::default()
             }],
             outputs: vec![PortSpec {
                 name: "display".to_string(),
                 label: "Display".to_string(),
-                ty: ValueType::Image,
+                ty: ValueType::Any,
                 ..Default::default()
             }],
             params: vec![],
@@ -67,9 +67,10 @@ impl Node for Viewer {
 
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
-            let image = ctx.get_input_image("image")?;
+            // Generic passthrough: forward whatever value we receive
+            let value = ctx.inputs.get("value").cloned().unwrap_or(Value::None);
             let mut outputs = HashMap::new();
-            outputs.insert("display".to_string(), Value::Image(image.clone()));
+            outputs.insert("display".to_string(), value);
             Ok(outputs)
         })
     }

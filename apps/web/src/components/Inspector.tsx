@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useGraphStore } from '../store/graphStore';
 import { NodeSlider } from './nodes/NodeSlider';
 import { NodeColorPicker } from './nodes/NodeColorPicker';
@@ -6,7 +6,7 @@ import { NodeNumberInput } from './nodes/NodePrimitives';
 import { ScriptNodeEditor } from './ScriptNodeEditor';
 import { ColorRampEditor } from './ColorRampEditor';
 import { CurveEditor } from './nodes/CurveEditor';
-import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec } from '../store/types';
+import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec, ValueType } from '../store/types';
 import { createParamValue, extractParamValue, isConnectableParam } from '../store/types';
 
 const ParamControl: React.FC<{
@@ -474,9 +474,34 @@ const getDefaultValue = (port: PortSpec): number | boolean | undefined => {
   return undefined;
 };
 
+/** Derive a stable internal port name from a human-readable label. */
+const labelToName = (label: string): string => {
+  const slug = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return slug || 'port';
+};
+
+/** Deduplicate port names in-place, appending _2, _3, etc. for collisions. */
+const deduplicateNames = (specs: PortSpec[]): PortSpec[] => {
+  const seen = new Map<string, number>();
+  return specs.map(spec => {
+    const count = seen.get(spec.name) ?? 0;
+    seen.set(spec.name, count + 1);
+    if (count === 0) return spec;
+    let suffix = count + 1;
+    while (seen.has(`${spec.name}_${suffix}`)) { suffix++; }
+    const uniqueName = `${spec.name}_${suffix}`;
+    seen.set(uniqueName, 1);
+    return { ...spec, name: uniqueName };
+  });
+};
+
 const toPortSpec = (port: EditablePort): PortSpec => {
   const base: PortSpec = {
-    name: port.name,
+    name: port.name || labelToName(port.label),
     label: port.label,
     ty: port.ty,
   };
@@ -686,7 +711,7 @@ const GroupIOEditor: React.FC<{
   spec: NodeSpec;
 }> = ({ nodeId, isInput, spec }) => {
   const updateGroupInterface = useGraphStore(s => s.updateGroupInterface);
-  const ports = isInput ? spec.outputs : spec.inputs;
+  const ports = useMemo(() => (isInput ? spec.outputs : spec.inputs).filter(p => !p.name.startsWith('__add_')), [isInput, spec.outputs, spec.inputs]);
   const [editablePorts, setEditablePorts] = useState<EditablePort[]>(() => (
     ports.map((p, i) => ({
       id: `${nodeId}_${i}`,
@@ -715,7 +740,7 @@ const GroupIOEditor: React.FC<{
 
   const commitPorts = useCallback((nextPorts?: EditablePort[]) => {
     const targetPorts = nextPorts ?? editablePorts;
-    const portSpecs = targetPorts.map(toPortSpec);
+    const portSpecs = deduplicateNames(targetPorts.map(toPortSpec));
     if (isInput) {
       updateGroupInterface(portSpecs, null);
     } else {
@@ -725,10 +750,9 @@ const GroupIOEditor: React.FC<{
 
   const handleAdd = useCallback(() => {
     const nextIndex = editablePorts.length + 1;
-    const baseName = isInput ? 'input' : 'output';
     const newPort: EditablePort = {
       id: crypto.randomUUID(),
-      name: `${baseName}_${nextIndex}`,
+      name: '',
       label: `${isInput ? 'Input' : 'Output'} ${nextIndex}`,
       ty: 'Image',
     };
@@ -762,16 +786,7 @@ const GroupIOEditor: React.FC<{
       {editablePorts.map((port, idx) => (
         <PortCard key={port.id} onRemove={() => handleRemove(idx)}>
           <Row>
-            <InputGroup>
-              <Label>Name</Label>
-              <TextInput
-                value={port.name}
-                placeholder="name"
-                onChange={e => handleFieldChange(idx, p => ({ ...p, name: e.target.value }))}
-                onBlur={() => commitPorts()}
-              />
-            </InputGroup>
-            <InputGroup>
+            <InputGroup style={{ flex: 1 }}>
               <Label>Label</Label>
               <TextInput
                 value={port.label}

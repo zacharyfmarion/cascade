@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo } from './bridge';
-import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
 
 type DocumentEnvelope = {
   compositor: unknown;
@@ -84,9 +84,9 @@ export class TauriEngine implements EngineBridge {
     await invoke('set_muted', { nodeId, muted });
   }
 
-  async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, RenderResult>> {
+  async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, ViewerResult>> {
     const buf = await invoke<ArrayBuffer>('set_param_and_render', { nodeId, key, value, frame });
-    const results = new Map<string, RenderResult>();
+    const results = new Map<string, ViewerResult>();
     if (!buf || buf.byteLength < 4) return results;
 
     const view = new DataView(buf);
@@ -107,7 +107,7 @@ export class TauriEngine implements EngineBridge {
       const pixelLen = width * height * 4;
       const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
       offset += pixelLen;
-      results.set(id, { nodeId: id, width, height, pixels });
+      results.set(id, { type: 'image' as const, nodeId: id, width, height, pixels });
     }
     await this.fetchTimings();
     return results;
@@ -139,7 +139,7 @@ export class TauriEngine implements EngineBridge {
     }
   }
 
-  async renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> {
+  async renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
     try {
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame });
       if (!buf || buf.byteLength < 8) return null;
@@ -150,7 +150,7 @@ export class TauriEngine implements EngineBridge {
       const pixels = new Uint8ClampedArray(buf, 8);
 
       await this.fetchTimings();
-      return { nodeId: viewerNodeId, width, height, pixels };
+      return { type: 'image', nodeId: viewerNodeId, width, height, pixels };
     } catch {
       return null;
     }
@@ -312,6 +312,25 @@ export class TauriEngine implements EngineBridge {
 
   async setProjectFormat(width: number, height: number): Promise<void> {
     await invoke('set_project_format', { width, height });
+  }
+
+  async exportGroupAsPackage(groupDefId: string): Promise<unknown> {
+    const json = await invoke<string>('export_group_as_package', { groupDefId });
+    return JSON.parse(json);
+  }
+
+  async importCustomNodes(json: string): Promise<NodeSpec[]> {
+    const result = await invoke<string>('import_custom_nodes', { json });
+    return JSON.parse(result) as NodeSpec[];
+  }
+
+  async listCustomNodes(): Promise<CustomNodeInfo[]> {
+    const json = await invoke<string>('list_custom_nodes');
+    return JSON.parse(json) as CustomNodeInfo[];
+  }
+
+  async removeCustomNode(groupDefId: string): Promise<void> {
+    await invoke('remove_custom_node', { groupDefId });
   }
 }
 

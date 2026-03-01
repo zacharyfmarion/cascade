@@ -2,7 +2,119 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
+import { isPixelResult } from '../store/types';
+import type { ViewerResult } from '../store/types';
 import { ViewerToolbar } from './ViewerToolbar';
+
+/** Renders non-pixel value types (float, int, bool, color, string, none) */
+const ScalarViewer: React.FC<{ result: ViewerResult }> = ({ result }) => {
+  const containerStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    padding: 24,
+    boxSizing: 'border-box',
+  };
+
+  switch (result.type) {
+    case 'float':
+    case 'int':
+      return (
+        <div style={containerStyle}>
+          <div style={{
+            fontSize: '2.5rem',
+            fontFamily: 'monospace',
+            fontVariantNumeric: 'tabular-nums',
+            color: 'var(--text-primary)',
+            textAlign: 'center',
+            wordBreak: 'break-all',
+          }}>
+            {result.type === 'float' ? result.value.toFixed(4) : result.value}
+          </div>
+        </div>
+      );
+    case 'bool':
+      return (
+        <div style={containerStyle}>
+          <div style={{
+            fontSize: '2rem',
+            fontWeight: 600,
+            color: result.value ? 'var(--color-success, #4caf50)' : 'var(--text-muted)',
+          }}>
+            {result.value ? 'True' : 'False'}
+          </div>
+        </div>
+      );
+    case 'color': {
+      const [r, g, b, a] = result.value;
+      // Convert linear to sRGB for display
+      const toSRGB = (v: number) => Math.round(Math.max(0, Math.min(1, v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055)) * 255);
+      const sr = toSRGB(r);
+      const sg = toSRGB(g);
+      const sb = toSRGB(b);
+      const displayAlpha = Math.round(a * 100) / 100;
+      return (
+        <div style={containerStyle}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 120,
+              height: 120,
+              borderRadius: 8,
+              border: '1px solid var(--border-primary)',
+              // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+              background: `rgba(${sr}, ${sg}, ${sb}, ${displayAlpha})`,
+            }} />
+            <div style={{
+              fontFamily: 'monospace',
+              fontSize: '0.8rem',
+              color: 'var(--text-secondary)',
+              textAlign: 'center',
+              lineHeight: 1.6,
+            }}>
+              <div>R: {r.toFixed(3)} G: {g.toFixed(3)}</div>
+              <div>B: {b.toFixed(3)} A: {a.toFixed(3)}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                sRGB: rgb({sr}, {sg}, {sb})
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    case 'string':
+      return (
+        <div style={{
+          ...containerStyle,
+          alignItems: 'flex-start',
+          justifyContent: 'flex-start',
+          overflow: 'auto',
+        }}>
+          <pre style={{
+            fontFamily: 'monospace',
+            fontSize: '0.85rem',
+            color: 'var(--text-primary)',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            margin: 0,
+          }}>
+            {result.value}
+          </pre>
+        </div>
+      );
+    case 'none':
+      return (
+        <div style={containerStyle}>
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            No value
+          </div>
+        </div>
+      );
+    default:
+      return null;
+  }
+};
 
 export const Viewer: React.FC = () => {
   const selectedNodeIds = useGraphStore(s => s.selectedNodeIds);
@@ -76,9 +188,10 @@ export const Viewer: React.FC = () => {
   }, [renderResults, activeViewerId]);
 
   const hasResult = !!activeResult;
+  const hasPixels = activeResult ? isPixelResult(activeResult) : false;
 
   const dimensions = useMemo(() => {
-    if (!activeResult) return null;
+    if (!activeResult || !isPixelResult(activeResult)) return null;
     const scale = activeResult.previewScale ?? 1;
     return {
       w: Math.max(1, Math.round(activeResult.width / scale)),
@@ -88,7 +201,7 @@ export const Viewer: React.FC = () => {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!activeResult || !canvas) {
+    if (!activeResult || !isPixelResult(activeResult) || !canvas) {
       return;
     }
 
@@ -123,9 +236,9 @@ export const Viewer: React.FC = () => {
     canvas.style.imageRendering = previewScale < 1 ? 'pixelated' : 'auto';
 
     if (dimsChanged) {
-      setTimeout(() => fitToView(), 0);
+      setTimeout(() => transformRef.current?.centerView(computeFitScale(), 0), 0);
     }
-  }, [activeResult, fitToView]);
+  }, [activeResult, computeFitScale]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -202,10 +315,11 @@ export const Viewer: React.FC = () => {
                 },
               }}
             >
+              {/* Pixel viewer (image/mask/field) */}
               <div 
                 className="viewer-checkerboard"
                 style={{
-                    display: hasResult ? 'flex' : 'none',
+                    display: hasPixels ? 'flex' : 'none',
                     alignItems: 'center',
                     justifyContent: 'center',
                     width: 'fit-content',
@@ -221,6 +335,10 @@ export const Viewer: React.FC = () => {
                   }}
                 />
               </div>
+              {/* Scalar value viewer */}
+              {hasResult && !hasPixels && activeResult && (
+                <ScalarViewer result={activeResult} />
+              )}
             </TransformComponent>
             
             <ViewerToolbar 
@@ -235,7 +353,7 @@ export const Viewer: React.FC = () => {
         )}
       </TransformWrapper>
       
-      {dimensions && hasResult && (
+      {dimensions && hasPixels && (
         <div style={{
           position: 'absolute',
           top: 4,
@@ -259,7 +377,7 @@ export const Viewer: React.FC = () => {
               fontSize: '0.65rem',
               fontFamily: 'monospace',
               fontVariantNumeric: 'tabular-nums',
-              color: '#fff',
+              color: 'var(--text-primary)',
               background: fpsIndicatorColor,
               padding: '1px 5px',
               borderRadius: 3,

@@ -14,7 +14,7 @@ use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, NodePackage, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-use compositor_core::types::{ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value, ValueType};
+use compositor_core::types::{ColorStop, Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value, ValueType};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{GpuContext, KernelManifest};
 use compositor_nodes_std::{
@@ -694,7 +694,7 @@ impl Engine {
         &mut self,
         viewer_node_id: &str,
         frame: u64,
-    ) -> Result<Vec<u8>, JsValue> {
+    ) -> Result<JsValue, JsValue> {
         let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
         let cm = &self.color_management;
         let eval_result = self
@@ -723,15 +723,75 @@ impl Engine {
                 )
             })
             .collect();
-        match eval_result.value {
-            Value::Image(image) => Ok(Viewer::image_to_rgba8_with_display(
-                &image,
-                cm,
-                &self.active_display,
-                &self.active_view,
-            )),
-            _ => Err(JsValue::from_str("Viewer output is not an image")),
-        }
+        let result = match eval_result.value {
+            Value::Image(ref image) => {
+                let pixels = Viewer::image_to_rgba8_with_display(
+                    image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
+                ViewerResultWasm::Pixels {
+                    value_type: "image".to_string(),
+                    width: image.width,
+                    height: image.height,
+                    pixels,
+                }
+            }
+            Value::Mask(ref image) => {
+                let pixels = Viewer::image_to_rgba8_with_display(
+                    image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
+                ViewerResultWasm::Pixels {
+                    value_type: "mask".to_string(),
+                    width: image.width,
+                    height: image.height,
+                    pixels,
+                }
+            }
+            Value::Float(v) => ViewerResultWasm::Float { value_type: "float".to_string(), value: v },
+            Value::Int(v) => ViewerResultWasm::Int { value_type: "int".to_string(), value: v },
+            Value::Bool(v) => ViewerResultWasm::Bool { value_type: "bool".to_string(), value: v },
+            Value::Color(c) => ViewerResultWasm::Color { value_type: "color".to_string(), value: c },
+            Value::String(ref s) => ViewerResultWasm::StringVal { value_type: "string".to_string(), value: s.clone() },
+            Value::Field(ref field) => {
+                // Rasterize field at project format resolution for preview
+                let w = self.project_format.width();
+                let h = self.project_format.height();
+                let mut pixel_data = vec![0f32; (w * h * 4) as usize];
+                for y in 0..h {
+                    for x in 0..w {
+                        let u = (x as f32 + 0.5) / w as f32;
+                        let v_coord = (y as f32 + 0.5) / h as f32;
+                        let color = (field.sample_fn)(u, v_coord);
+                        let idx = ((y * w + x) * 4) as usize;
+                        pixel_data[idx] = color[0];
+                        pixel_data[idx + 1] = color[1];
+                        pixel_data[idx + 2] = color[2];
+                        pixel_data[idx + 3] = color[3];
+                    }
+                }
+                let field_image = Image::from_f32_data(w, h, pixel_data)
+                    .map_err(to_js_error)?;
+                let pixels = Viewer::image_to_rgba8_with_display(
+                    &field_image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
+                ViewerResultWasm::Pixels {
+                    value_type: "field".to_string(),
+                    width: w,
+                    height: h,
+                    pixels,
+                }
+            }
+            Value::None => ViewerResultWasm::None { value_type: "none".to_string() },
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn get_last_render_timings(&self) -> Result<JsValue, JsValue> {
@@ -2183,6 +2243,49 @@ struct SerializableConnection {
     from_port: String,
     to_node: String,
     to_port: String,
+}
+
+/// Type-tagged result from render_viewer, serialized to JS via serde_wasm_bindgen.
+/// Each variant includes a `type` field for the frontend discriminated union.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ViewerResultWasm {
+    Pixels {
+        #[serde(rename = "type")]
+        value_type: String,
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+    },
+    Float {
+        #[serde(rename = "type")]
+        value_type: String,
+        value: f32,
+    },
+    Int {
+        #[serde(rename = "type")]
+        value_type: String,
+        value: i32,
+    },
+    Bool {
+        #[serde(rename = "type")]
+        value_type: String,
+        value: bool,
+    },
+    Color {
+        #[serde(rename = "type")]
+        value_type: String,
+        value: [f32; 4],
+    },
+    StringVal {
+        #[serde(rename = "type")]
+        value_type: String,
+        value: String,
+    },
+    None {
+        #[serde(rename = "type")]
+        value_type: String,
+    },
 }
 
 #[derive(Serialize, Deserialize)]

@@ -586,6 +586,9 @@ pub enum ValueType {
     Color,
     Field,
     String,
+    /// Wildcard type: compatible with any other type. Used by the Viewer node
+    /// to accept any value for inspection.
+    Any,
 }
 
 #[derive(Debug, Clone)]

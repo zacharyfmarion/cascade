@@ -30,7 +30,7 @@ fn graph_connects_and_evaluates_chain() {
         .connect(&registry, load_id, "image", bc_id, "image")
         .unwrap();
     graph
-        .connect(&registry, bc_id, "image", viewer_id, "image")
+        .connect(&registry, bc_id, "image", viewer_id, "value")
         .unwrap();
 
     let mut nodes: HashMap<_, Arc<dyn Node>> = HashMap::new();
@@ -123,7 +123,7 @@ fn dirty_propagates_downstream() {
     let load_id = graph.add_node("load_image");
     let viewer_id = graph.add_node("viewer");
     graph
-        .connect(&registry, load_id, "image", viewer_id, "image")
+        .connect(&registry, load_id, "image", viewer_id, "value")
         .unwrap();
 
     graph.set_param(load_id, "image_data", ParamValue::String("x".to_string()));

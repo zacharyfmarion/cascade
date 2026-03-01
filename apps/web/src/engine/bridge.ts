@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamValue, PortSpec, RenderResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
 
 export interface ColorSpaceInfo {
   id: string;
@@ -78,12 +78,12 @@ export interface EngineBridge {
   setInputDefault(nodeId: string, portName: string, value: ParamValue): Promise<void> | void;
   setPosition(nodeId: string, x: number, y: number): Promise<void> | void;
   setMuted(nodeId: string, muted: boolean): Promise<void> | void;
-  setParamAndRender?(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, RenderResult>>;
+  setParamAndRender?(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, ViewerResult>>;
   registerGpuKernel?(manifestJson: string): Promise<NodeSpec> | NodeSpec;
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;
   loadImageData(nodeId: string, data: Uint8Array): Promise<void> | void;
   loadPaletteData?(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> | [number, number, number, number][];
-  renderViewer(viewerNodeId: string, frame: number): Promise<RenderResult | null> | RenderResult | null;
+  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> | ViewerResult | null;
   exportGraph(): Promise<unknown> | unknown;
   importGraph(data: unknown): Promise<void> | void;
   exportDocument?(): Promise<unknown> | unknown;
