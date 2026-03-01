@@ -173,7 +173,7 @@ const extractGraphData = (value: unknown): SerializableGraphData => {
 
 const createDocumentEnvelope = (graph: unknown) => ({
   compositor: {
-    format_version: '1.0.0',
+    format_version: '1.1.0',
     app_version: '',
     created_at: '',
     modified_at: '',

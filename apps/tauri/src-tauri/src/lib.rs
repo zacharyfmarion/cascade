@@ -1,7 +1,7 @@
 mod menu;
 
 use compositor_runtime::{
-    AssetReference, CompositorDocument, Engine, PortSpec, RenderResult, SerializableGraph,
+    migrations, AssetReference, CompositorDocument, Engine, NodeSpec, PortSpec, RenderResult, SerializableGraph,
 };
 use std::sync::Mutex;
 use std::time::Instant;
@@ -282,7 +282,14 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
     let file_path = std::path::Path::new(&path);
     let json = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
 
-    if let Ok(document) = serde_json::from_str::<CompositorDocument>(&json) {
+    if let Ok(mut doc_value) = serde_json::from_str::<serde_json::Value>(&json) {
+        // Apply migrations to transform old documents to current version
+        migrations::migrate_document(&mut doc_value).map_err(|e| e.to_string())?;
+        
+        // Deserialize the migrated document
+        let document: CompositorDocument = serde_json::from_value(doc_value)
+            .map_err(|e| e.to_string())?;
+        
         let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
         let assets: Vec<(String, String, String)> = document
             .assets
@@ -315,6 +322,7 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         let graph = s.engine.export_graph();
         serde_json::to_string(&graph).map_err(|e| e.to_string())
     } else {
+        // Fallback: try to load as SerializableGraph (without migration)
         let graph: SerializableGraph = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         s.engine.import_graph(graph).map_err(|e| e.to_string())?;
         let exported = s.engine.export_graph();
@@ -555,6 +563,49 @@ fn rename_group(
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
+
+#[tauri::command]
+fn export_group_as_package(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .export_group_as_package(&group_def_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn import_custom_nodes(
+    state: State<'_, EngineState>,
+    json: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let specs: Vec<NodeSpec> = s
+        .engine
+        .import_custom_nodes(&json)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&specs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_custom_nodes(state: State<'_, EngineState>) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let nodes = s.engine.list_custom_nodes();
+    serde_json::to_string(&nodes).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_custom_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .remove_custom_node(&group_def_id)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn set_ai_api_key(
     state: State<'_, EngineState>,
@@ -685,6 +736,10 @@ pub fn run() {
             add_internal_connection,
             remove_internal_connection,
             rename_group,
+            export_group_as_package,
+            import_custom_nodes,
+            list_custom_nodes,
+            remove_custom_node,
             set_ai_api_key,
             is_ai_configured,
             get_last_render_timings,
