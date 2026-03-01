@@ -2520,9 +2520,24 @@ export const useGraphStore = create<GraphState>()(
 
       loadProject: (file) => {
         file.text().then(async text => {
-          const data = JSON.parse(text);
-          const graphData = extractGraphData(data);
+          let data = JSON.parse(text);
           const eng = getEngine();
+
+          // Run migrations if needed
+          if (eng?.needsMigration) {
+            try {
+              if (eng.needsMigration(text)) {
+                const migratedJson = eng.migrateDocument!(text);
+                data = JSON.parse(migratedJson);
+                console.info('[Migration] Project upgraded to latest format');
+              }
+            } catch (e) {
+              console.warn('[Migration] Migration failed, loading original:', e);
+              // Continue with original data — migration failure shouldn't block loading
+            }
+          }
+
+          const graphData = extractGraphData(data);
 
           if (eng.importDocument) {
             await eng.importDocument(data);

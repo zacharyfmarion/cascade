@@ -395,7 +395,7 @@ Wave FINAL (After ALL tasks):
 
 ---
 
-- [ ] 6. Integrate migration in loadProject
+- [x] 6. Integrate migration in loadProject
 
   **What to do**:
   - In `apps/web/src/store/graphStore.ts`, find the `loadProject` function
