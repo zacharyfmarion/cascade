@@ -342,7 +342,7 @@ Wave FINAL (After ALL tasks):
 
 ---
 
-- [ ] 5. Add EngineBridge migration methods
+- [x] 5. Add EngineBridge migration methods
 
   **What to do**:
   - In `apps/web/src/engine/bridge.ts`, add to `EngineBridge` interface:

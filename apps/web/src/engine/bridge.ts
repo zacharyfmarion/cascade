@@ -126,4 +126,6 @@ export interface EngineBridge {
   listCustomNodes?(): Promise<CustomNodeInfo[]>;
   removeCustomNode?(groupDefId: string): Promise<void>;
   typesCompatible?(fromType: string, toType: string): boolean | Promise<boolean>;
-}
+  migrateDocument?(jsonStr: string): string;
+  needsMigration?(jsonStr: string): boolean;
+  }

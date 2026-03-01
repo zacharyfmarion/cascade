@@ -603,5 +603,13 @@ export class WasmEngine implements EngineBridge {
     const eng = this.getEngine();
     return eng.types_compatible(fromType, toType);
   }
+
+  migrateDocument(jsonStr: string): string {
+    return (this.getEngine() as any).migrate_document_json(jsonStr);
+  }
+
+  needsMigration(jsonStr: string): boolean {
+    return (this.getEngine() as any).needs_migration_json(jsonStr);
+  }
 }
 export const wasmEngine = new WasmEngine();

@@ -472,6 +472,16 @@ export class MockEngine implements EngineBridge {
 
   setProjectFormat(_width: number, _height: number): void {
   }
+
+  migrateDocument(_jsonStr: string): string {
+    // Stub implementation
+    return _jsonStr;  // Pass-through for now
+  }
+
+  needsMigration(_jsonStr: string): boolean {
+    // Stub implementation
+    return false;
+  }
 }
 
 export const mockEngine = new MockEngine();

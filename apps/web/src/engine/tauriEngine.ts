@@ -332,6 +332,16 @@ export class TauriEngine implements EngineBridge {
   async removeCustomNode(groupDefId: string): Promise<void> {
     await invoke('remove_custom_node', { groupDefId });
   }
+
+  migrateDocument(_jsonStr: string): string {
+    // TODO: Implement Tauri IPC for migration
+    return _jsonStr;  // Pass-through for now
+  }
+
+  needsMigration(_jsonStr: string): boolean {
+    // TODO: Implement Tauri IPC
+    return false;
+  }
 }
 
 export const tauriEngine = new TauriEngine();
