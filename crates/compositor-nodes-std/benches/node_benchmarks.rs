@@ -90,6 +90,7 @@ fn bench_color_hue_saturation(c: &mut Criterion) {
         let mut params = HashMap::new();
         params.insert("hue".to_string(), ParamValue::Float(45.0));
         params.insert("saturation".to_string(), ParamValue::Float(0.3));
+        params.insert("value".to_string(), ParamValue::Float(0.0));
         let ctx = make_context(inputs, &params);
 
         group.throughput(Throughput::Elements((size * size) as u64));

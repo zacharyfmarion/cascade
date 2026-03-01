@@ -5,6 +5,7 @@ import { NodeDropZone } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
+import { pendingImageFiles } from './pendingImageFiles';
 
 type NodeData = {
   label: string;
@@ -20,6 +21,20 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Check for a pending image file from canvas drop/paste
+  useEffect(() => {
+    const pending = pendingImageFiles.get(props.id);
+    if (pending) {
+      pendingImageFiles.delete(props.id);
+      setFileName(pending.name || 'Pasted image');
+      const url = URL.createObjectURL(pending);
+      setThumbnail(url);
+      return;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.id]);
+
+  // Recover thumbnail from engine for embedded images (e.g. after undo/redo)
   useEffect(() => {
     if (thumbnail) return;
     let revoked = false;

@@ -174,6 +174,17 @@ impl Node for Crop {
                     ui_hint: UiHint::NumberInput,
                     promotable: true,
                 },
+                ParamSpec {
+                    key: "clip_to_source".to_string(),
+                    label: "Clip to Source".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
+                    promotable: true,
+                },
             ],
         }
     }
@@ -185,6 +196,7 @@ impl Node for Crop {
             let y = ctx.get_param_int("y")? as i32;
             let width = ctx.get_param_int("width")?.max(1) as u32;
             let height = ctx.get_param_int("height")?.max(1) as u32;
+            let clip_to_source = ctx.get_param_bool("clip_to_source").unwrap_or(false);
 
             // Crop rect in global coordinates
             let crop_rect = RectI {
@@ -195,61 +207,96 @@ impl Node for Crop {
                 },
             };
 
-            // Output data_window is intersection of crop rect with input's data_window
-            let out_dw = image.data_window.intersect(crop_rect);
+            if clip_to_source {
+                // Clip mode: output is the intersection of crop rect with source data_window
+                let out_dw = image.data_window.intersect(crop_rect);
 
-            // If intersection is empty (no overlap), produce a 1×1 transparent image
-            let out_w = out_dw.width_u32().max(1);
-            let out_h = out_dw.height_u32().max(1);
+                if out_dw.width_u32() == 0 || out_dw.height_u32() == 0 {
+                    let data = vec![0.0f32; 4];
+                    let empty_dw = RectI {
+                        min: IVec2 {
+                            x: crop_rect.min.x,
+                            y: crop_rect.min.y,
+                        },
+                        max: IVec2 {
+                            x: crop_rect.min.x + 1,
+                            y: crop_rect.min.y + 1,
+                        },
+                    };
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        empty_dw,
+                        data,
+                        image.color_space.clone(),
+                    )?;
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    return Ok(outputs);
+                }
 
-            if out_dw.width_u32() == 0 || out_dw.height_u32() == 0 {
-                let data = vec![0.0f32; 4];
-                let empty_dw = RectI {
-                    min: IVec2 {
-                        x: crop_rect.min.x,
-                        y: crop_rect.min.y,
-                    },
-                    max: IVec2 {
-                        x: crop_rect.min.x + 1,
-                        y: crop_rect.min.y + 1,
-                    },
-                };
+                let out_w = out_dw.width_u32() as usize;
+                let out_h = out_dw.height_u32() as usize;
+                let mut data = vec![0.0f32; out_w * out_h * 4];
+                data.par_chunks_exact_mut(4)
+                    .enumerate()
+                    .for_each(|(i, out)| {
+                        let px = (i % out_w) as i32;
+                        let py = (i / out_w) as i32;
+                        let gx = out_dw.min.x + px;
+                        let gy = out_dw.min.y + py;
+                        let rgba = image.get_rgba(gx, gy);
+                        out[0] = rgba[0];
+                        out[1] = rgba[1];
+                        out[2] = rgba[2];
+                        out[3] = rgba[3];
+                    });
+
                 let output = Image::new_with_domain(
                     image.format.clone(),
-                    empty_dw,
+                    out_dw,
                     data,
                     image.color_space.clone(),
                 )?;
                 let mut outputs = HashMap::new();
                 outputs.insert("image".to_string(), Value::Image(output));
-                return Ok(outputs);
+                Ok(outputs)
+            } else {
+                // Default: output is always exactly width×height.
+                // X and Y pan the sample origin. Out-of-bounds pixels are transparent black.
+                let out_dw = RectI {
+                    min: IVec2 { x: 0, y: 0 },
+                    max: IVec2 {
+                        x: width as i32,
+                        y: height as i32,
+                    },
+                };
+            let out_w = width as usize;
+                let out_h = height as usize;
+                let mut data = vec![0.0f32; out_w * out_h * 4];
+                data.par_chunks_exact_mut(4)
+                    .enumerate()
+                    .for_each(|(i, out)| {
+                        let px = (i % out_w) as i32;
+                        let py = (i / out_w) as i32;
+                        let gx = x + px;
+                        let gy = y + py;
+                        let rgba = image.get_rgba(gx, gy);
+                        out[0] = rgba[0];
+                        out[1] = rgba[1];
+                        out[2] = rgba[2];
+                        out[3] = rgba[3];
+                    });
+
+                let output = Image::new_with_domain(
+                    image.format.clone(),
+                    out_dw,
+                    data,
+                    image.color_space.clone(),
+                )?;
+                let mut outputs = HashMap::new();
+                outputs.insert("image".to_string(), Value::Image(output));
+                Ok(outputs)
             }
-
-            let out_w_usize = out_w as usize;
-            let mut data = vec![0.0f32; out_w_usize * out_h as usize * 4];
-            data.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, out)| {
-                    let px = (i % out_w_usize) as i32;
-                    let py = (i / out_w_usize) as i32;
-                    let gx = out_dw.min.x + px;
-                    let gy = out_dw.min.y + py;
-                    let rgba = image.get_rgba(gx, gy);
-                    out[0] = rgba[0];
-                    out[1] = rgba[1];
-                    out[2] = rgba[2];
-                    out[3] = rgba[3];
-                });
-
-            let output = Image::new_with_domain(
-                image.format.clone(),
-                out_dw,
-                data,
-                image.color_space.clone(),
-            )?;
-            let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(output));
-            Ok(outputs)
         })
     }
 
@@ -957,6 +1004,17 @@ impl Node for Transform2D {
                     ui_hint: UiHint::Dropdown(vec!["Nearest".to_string(), "Bilinear".to_string()]),
                     promotable: true,
                 },
+                ParamSpec {
+                    key: "clamp".to_string(),
+                    label: "Clamp to Format".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
+                    promotable: true,
+                },
             ],
         }
     }
@@ -972,6 +1030,7 @@ impl Node for Transform2D {
             let pivot_x = ctx.get_param_float("pivot_x")? as f32;
             let pivot_y = ctx.get_param_float("pivot_y")? as f32;
             let filter = ctx.get_param_int("filter")?.clamp(0, 1) as i32;
+            let clamp = ctx.get_param_bool("clamp").unwrap_or(false);
 
             let is_identity = tx.abs() < 0.0001
                 && ty_val.abs() < 0.0001
@@ -1026,15 +1085,19 @@ impl Node for Transform2D {
                 max_y = max_y.max(out_y);
             }
 
-            let out_dw = RectI {
-                min: IVec2 {
-                    x: min_x.floor() as i32,
-                    y: min_y.floor() as i32,
-                },
-                max: IVec2 {
-                    x: max_x.ceil() as i32,
-                    y: max_y.ceil() as i32,
-                },
+            let out_dw = if clamp {
+                image.data_window
+            } else {
+                RectI {
+                    min: IVec2 {
+                        x: min_x.floor() as i32,
+                        y: min_y.floor() as i32,
+                    },
+                    max: IVec2 {
+                        x: max_x.ceil() as i32,
+                        y: max_y.ceil() as i32,
+                    },
+                }
             };
             let out_w = out_dw.width_u32().max(1);
             let out_h = out_dw.height_u32().max(1);

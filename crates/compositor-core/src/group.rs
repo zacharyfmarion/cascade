@@ -31,6 +31,8 @@ pub struct InternalNode {
     pub params: HashMap<String, ParamValue>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_data: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub input_defaults: HashMap<String, ParamValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,4 +55,37 @@ pub struct Promotion {
 pub struct GroupInterface {
     pub inputs: Vec<PortSpec>,
     pub outputs: Vec<PortSpec>,
+}
+
+/// Portable package format for sharing custom nodes (.compnode files).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodePackage {
+    /// Format version for forward compatibility.
+    pub version: u32,
+    /// The compositor version that exported this package (informational).
+    #[serde(default)]
+    pub compositor_version: String,
+    /// ISO 8601 timestamp of when the package was exported.
+    #[serde(default)]
+    pub exported_at: String,
+    /// One or more group definitions. Ordered so dependencies come first.
+    pub nodes: Vec<GroupDefinition>,
+}
+
+/// Metadata about an installed custom node package (used by the desktop manager).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomNodeInfo {
+    /// The group definition ID (e.g. "group::imported_<uuid>").
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Category in the node library.
+    pub category: String,
+    /// Description text.
+    pub description: String,
+    /// Number of group definitions in the source package.
+    pub node_count: usize,
+    /// Path to the .compnode file on disk (desktop only).
+    #[serde(default)]
+    pub file_path: String,
 }

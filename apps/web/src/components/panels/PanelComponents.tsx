@@ -12,7 +12,7 @@ import { DslEditor } from '../DslEditor';
 import { shortcutDispatcher } from '../../shortcuts/dispatcher';
 
 const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
-  const [aiOpen, setAiOpen] = useState(true);
+  const [aiOpen, setAiOpen] = useState(false);
 
   useEffect(() => {
     const unregister = shortcutDispatcher.register('ui.toggleAi', () => {

@@ -67,27 +67,25 @@ See the [error handling plan](./reviews/error-handling-plan.md) for the comprehe
 
 Items that prevent the app from degrading under real workloads. These unlock 4K workflows and multi-viewer setups.
 
-### 2.1 Evaluator cache eviction
-- [ ] Track approximate byte size per cached `Value::Image` (width × height × 16 bytes)
-- [ ] Implement LRU eviction in the evaluator cache, capped by total byte budget (e.g., 512MB default, configurable)
-- [ ] Evict on every evaluation pass, not just on OOM
-- [ ] Add cache hit/miss/eviction metrics (logged or exposed to frontend)
+### 2.1 Evaluator cache eviction ✅
+- [x] Track approximate byte size per cached `Value::Image` via `estimate_bytes()` on `Value`
+- [x] Implement LRU eviction in the evaluator cache, capped by total byte budget (512MB default, configurable via `set_budget()`)
+- [x] Evict on every evaluation pass via `evict_if_needed()`, with `EvalScope` to defer eviction during multi-viewer evaluation
+- [x] Add cache hit/miss/eviction metrics (`CacheMetrics` struct with `hit_count`, `miss_count`, `eviction_count`, `total_bytes`, `entry_count`)
+- [ ] Expose cache metrics to frontend (currently internal to Rust evaluator only)
 
 ### 2.2 Selective viewer invalidation
 - [ ] Replace `triggerAllViewers()` with dirty-viewer tracking: after a mutation (connect, disconnect, setParam), compute which viewer nodes' upstream subgraphs are affected
 - [ ] Only re-evaluate dirty viewers
 - [ ] Use existing dirty propagation in the graph to determine affected outputs
 
-### 2.3 Evaluator upstream hash optimization
-- [ ] `compute_upstream_hash()` (eval.rs) walks the entire upstream dependency tree per node — O(n²) for deep graphs
-- [ ] Cache upstream hashes per node, invalidate incrementally when params change (per-param-key dirty tracking)
-- [ ] Benchmark before/after with a 50-node deep graph
+### 2.3 Evaluator upstream hash optimization ✅
+`compute_upstream_hash()` hashes only immediate upstream cache keys per node (O(inputs) per node, not O(n²)), since each cache key already encodes its own upstream state transitively. The original concern about full tree walks was unfounded — the cache-key-chaining design handles this efficiently.
 
 ### 2.4 GPU texture pooling
 - [ ] Pool GPU textures by (width, height, format) instead of allocating per-evaluation
 - [ ] Detect consecutive GPU nodes in evaluation order and keep intermediate textures on GPU (skip CPU readback/re-upload)
 - [ ] Add GPU memory budget tracking in `GpuContext`
-
 ---
 
 ## Phase 3: Frontend Architecture (2–4 weeks)
@@ -95,7 +93,7 @@ Items that prevent the app from degrading under real workloads. These unlock 4K 
 Items that make the frontend testable, maintainable, and performant. Can run in parallel with Phase 2.
 
 ### 3.1 Split the monolithic store
-Break `graphStore.ts` (2,441 lines, 156 actions) into focused stores:
+Break `graphStore.ts` (~2,800 lines) into focused stores:
 - [ ] `graphStructureStore` — nodes, connections, positions, selections
 - [ ] `renderStore` — renderResults, nodeTimings, render lock/suspend state
 - [ ] `playbackStore` — currentFrame, fps, loopMode, playback state

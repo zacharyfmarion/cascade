@@ -158,9 +158,9 @@ impl Node for HueSaturation {
     fn spec(&self) -> NodeSpec {
         NodeSpec {
             id: "hue_saturation".to_string(),
-            display_name: "Hue / Saturation".to_string(),
+            display_name: "Hue / Saturation / Value".to_string(),
             category: "Color".to_string(),
-            description: "Adjust hue and saturation".to_string(),
+            description: "Adjust hue, saturation, and value (lightness)".to_string(),
             inputs: vec![
                 PortSpec {
                     name: "image".to_string(),
@@ -204,6 +204,17 @@ impl Node for HueSaturation {
                     ui_hint: UiHint::Slider,
                     promotable: true,
                 },
+                ParamSpec {
+                    key: "value".to_string(),
+                    label: "Value".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(0.0),
+                    min: Some(-1.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
             ],
         }
     }
@@ -214,6 +225,7 @@ impl Node for HueSaturation {
                 ImageOrField::Field(field) => {
                     let hue_shift = ctx.get_param_float("hue")? as f32;
                     let sat_shift = ctx.get_param_float("saturation")? as f32;
+                    let val_shift = ctx.get_param_float("value")? as f32;
                     let source = field.sample_fn.clone();
                     let transform = field.transform.clone();
                     let adjusted = Field::with_transform(
@@ -225,7 +237,8 @@ impl Node for HueSaturation {
                                 h += 360.0;
                             }
                             s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
-                            let (nr, ng, nb) = hsl_to_rgb(h, s, l);
+                            let l_adj = (l + val_shift).clamp(0.0, 1.0);
+                            let (nr, ng, nb) = hsl_to_rgb(h, s, l_adj);
                             [nr, ng, nb, a]
                         },
                         transform,
@@ -237,6 +250,7 @@ impl Node for HueSaturation {
                 ImageOrField::Image(image) => {
                     let hue_shift = ctx.get_param_float("hue")? as f32;
                     let sat_shift = ctx.get_param_float("saturation")? as f32;
+                    let val_shift = ctx.get_param_float("value")? as f32;
                     let pixel_count = image.pixel_count();
                     let mut data = vec![0.0f32; pixel_count * 4];
                     data.par_chunks_exact_mut(4)
@@ -253,7 +267,8 @@ impl Node for HueSaturation {
                                 h += 360.0;
                             }
                             s = (s * (1.0 + sat_shift)).clamp(0.0, 1.0);
-                            let (nr, ng, nb) = hsl_to_rgb(h, s, l);
+                            let l_adj = (l + val_shift).clamp(0.0, 1.0);
+                            let (nr, ng, nb) = hsl_to_rgb(h, s, l_adj);
                             out[0] = nr;
                             out[1] = ng;
                             out[2] = nb;

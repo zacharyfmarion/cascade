@@ -24,3 +24,9 @@ export const hexToLinear = (hex: string): [number, number, number] => {
   const b = parseInt(hex.slice(5, 7), 16) / 255;
   return [srgbToLinearChannel(r), srgbToLinearChannel(g), srgbToLinearChannel(b)];
 };
+
+/**
+ * Convert a linear-space float to an sRGB byte (0-255).
+ * Use this for CSS rgba() display values when working with linear color data.
+ */
+export const linearToSrgbByte = (v: number): number => floatToByte(linearToSrgbChannel(v));

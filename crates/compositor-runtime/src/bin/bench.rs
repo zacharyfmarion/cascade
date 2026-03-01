@@ -200,6 +200,9 @@ impl NodeKind {
                 engine
                     .set_param(node_id, "saturation", ParamValue::Float(0.2))
                     .map_err(|e| e.to_string())?;
+                engine
+                    .set_param(node_id, "value", ParamValue::Float(0.0))
+                    .map_err(|e| e.to_string())?;
                 Ok(())
             }
             Self::BrightnessContrast => {

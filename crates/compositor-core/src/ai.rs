@@ -33,6 +33,8 @@ pub enum AiInputValue {
     Number(f64),
     /// A boolean value.
     Bool(bool),
+    /// A list of strings (e.g., multiple image URIs for Gemini).
+    StringList(Vec<String>),
 }
 
 impl From<&str> for AiInputValue {
@@ -56,6 +58,12 @@ impl From<f64> for AiInputValue {
 impl From<bool> for AiInputValue {
     fn from(b: bool) -> Self {
         AiInputValue::Bool(b)
+    }
+}
+
+impl From<Vec<String>> for AiInputValue {
+    fn from(v: Vec<String>) -> Self {
+        AiInputValue::StringList(v)
     }
 }
 

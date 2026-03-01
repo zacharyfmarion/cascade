@@ -6,6 +6,7 @@ import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue, ColorStop } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
+import { linearToHex, hexToLinear, linearToSrgbByte } from './colorUtils';
 
 type NodeData = {
   label: string;
@@ -13,19 +14,6 @@ type NodeData = {
   params: Record<string, ParamValue>;
 };
 
-const floatToByte = (v: number) => Math.min(255, Math.max(0, Math.round(v * 255)));
-
-const colorToHex = (c: [number, number, number, number]): string => {
-  const toHex = (v: number) => floatToByte(v).toString(16).padStart(2, '0');
-  return `#${toHex(c[0])}${toHex(c[1])}${toHex(c[2])}`;
-};
-
-const hexToFloat = (hex: string, alpha: number): [number, number, number, number] => [
-  parseInt(hex.slice(1, 3), 16) / 255,
-  parseInt(hex.slice(3, 5), 16) / 255,
-  parseInt(hex.slice(5, 7), 16) / 255,
-  alpha,
-];
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -122,7 +110,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
       const parts: string[] = [];
       for (let i = 0; i < sorted.length; i++) {
         const [r, g, b, a] = sorted[i].color;
-        const rgba = `rgba(${floatToByte(r)},${floatToByte(g)},${floatToByte(b)},${a})`;
+        const rgba = `rgba(${linearToSrgbByte(r)},${linearToSrgbByte(g)},${linearToSrgbByte(b)},${a})`;
         const from = sorted[i].position * 100;
         const to = i < sorted.length - 1 ? sorted[i + 1].position * 100 : 100;
         parts.push(`${rgba} ${from}%`, `${rgba} ${to}%`);
@@ -132,7 +120,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     return `linear-gradient(to right, ${
       sorted.map(s => {
         const [r, g, b, a] = s.color;
-        return `rgba(${floatToByte(r)},${floatToByte(g)},${floatToByte(b)},${a}) ${s.position * 100}%`;
+        return `rgba(${linearToSrgbByte(r)},${linearToSrgbByte(g)},${linearToSrgbByte(b)},${a}) ${s.position * 100}%`;
       }).join(', ')
     })`;
   }, [displayStops, interpolation]);
@@ -253,7 +241,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     if (idx === -1) return;
     
     const updated: ColorStop[] = [...stops];
-    updated[idx] = { ...updated[idx], color: hexToFloat(hex, updated[idx].color[3]) };
+    updated[idx] = { ...updated[idx], color: [...hexToLinear(hex), updated[idx].color[3]] as [number, number, number, number] };
     setParamLive(props.id, 'stops', { ColorRamp: updated } as ParamValue);
   }, [selectedStopId, stopIds, stops, props.id, setParamLive]);
 
@@ -262,7 +250,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     if (idx === -1) return;
     
     const updated: ColorStop[] = [...stops];
-    updated[idx] = { ...updated[idx], color: hexToFloat(hex, updated[idx].color[3]) };
+    updated[idx] = { ...updated[idx], color: [...hexToLinear(hex), updated[idx].color[3]] as [number, number, number, number] };
     const value = { ColorRamp: updated } as ParamValue;
     setParamLive(props.id, 'stops', value);
     setParamCommit(props.id, 'stops', value);
@@ -334,7 +322,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
                   <div
                     className="node-color-ramp__stop-handle"
                     style={{
-                      color: colorToHex(stop.color)
+                      color: linearToHex(stop.color[0], stop.color[1], stop.color[2])
                     }}
                   />
                 </div>
@@ -350,12 +338,12 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
                 className="node-color-swatch__preview"
                 style={{
                   // eslint-disable-next-line compositor-theme/no-hardcoded-colors
-                  background: `rgba(${floatToByte(selectedStop.color[0])},${floatToByte(selectedStop.color[1])},${floatToByte(selectedStop.color[2])},1)`,
+                  background: `rgba(${linearToSrgbByte(selectedStop.color[0])},${linearToSrgbByte(selectedStop.color[1])},${linearToSrgbByte(selectedStop.color[2])},1)`,
                 }}
               />
               <input
                 type="color"
-                value={colorToHex(selectedStop.color)}
+                value={linearToHex(selectedStop.color[0], selectedStop.color[1], selectedStop.color[2])}
                 onInput={(e) => handleColorInput((e.target as HTMLInputElement).value)}
                 onChange={(e) => handleColorCommit(e.target.value)}
                 className="node-color-swatch__input"

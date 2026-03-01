@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { linearToHex, hexToLinear, linearToSrgbByte } from './nodes/colorUtils';
 
 export interface ColorStop {
   position: number;
@@ -10,20 +11,6 @@ interface ColorRampEditorProps {
   onChange: (stops: ColorStop[]) => void;
 }
 
-const floatToByte = (v: number) => Math.min(255, Math.max(0, Math.round(v * 255)));
-
-const colorToHex = (color: [number, number, number, number]): string => {
-  const [r, g, b] = color;
-  const toHex = (v: number) => floatToByte(v).toString(16).padStart(2, '0');
-  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
-};
-
-const hexToColor = (hex: string, alpha: number): [number, number, number, number] => {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  return [r, g, b, alpha];
-};
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
@@ -63,7 +50,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
   const gradientCSS = `linear-gradient(to right, ${
     sortedStopsForGradient.map(s => {
       const [r, g, b, a] = s.color;
-      return `rgba(${floatToByte(r)}, ${floatToByte(g)}, ${floatToByte(b)}, ${a}) ${s.position * 100}%`;
+      return `rgba(${linearToSrgbByte(r)}, ${linearToSrgbByte(g)}, ${linearToSrgbByte(b)}, ${a}) ${s.position * 100}%`;
     }).join(', ')
   })`;
 
@@ -132,7 +119,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
       const oldAlpha = updated[selectedIndex].color[3];
       updated[selectedIndex] = {
         ...updated[selectedIndex],
-        color: hexToColor(hex, oldAlpha)
+        color: [...hexToLinear(hex), oldAlpha] as [number, number, number, number]
       };
       onChange(updated);
     }
@@ -212,11 +199,11 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
             borderRadius: '3px',
             overflow: 'hidden',
             border: '1px solid var(--border-default)',
-            background: `rgba(${floatToByte(selectedStop.color[0])}, ${floatToByte(selectedStop.color[1])}, ${floatToByte(selectedStop.color[2])}, 1)`
+            background: `rgba(${linearToSrgbByte(selectedStop.color[0])}, ${linearToSrgbByte(selectedStop.color[1])}, ${linearToSrgbByte(selectedStop.color[2])}, 1)`
           }}>
             <input
               type="color"
-              value={colorToHex(selectedStop.color)}
+              value={linearToHex(selectedStop.color[0], selectedStop.color[1], selectedStop.color[2])}
               onChange={(e) => handleColorChange(e.target.value)}
               style={{
                 opacity: 0,

@@ -26,12 +26,14 @@ pub fn color_range_group() -> GroupDefinition {
             type_id: "group_input".to_string(),
             params: HashMap::new(),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         InternalNode {
             id: "sep".to_string(),
             type_id: "separate_hsva".to_string(),
             params: HashMap::new(),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Greater Than: hue > hue_min
         InternalNode {
@@ -43,6 +45,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Less Than: hue < hue_max
         InternalNode {
@@ -54,6 +57,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Multiply: gt_low * lt_high → hue mask
         InternalNode {
@@ -65,6 +69,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Greater Than: saturation > sat_min
         InternalNode {
@@ -76,6 +81,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Greater Than: value > val_min
         InternalNode {
@@ -87,6 +93,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Multiply: mul_hue * gt_sat → hue+sat mask
         InternalNode {
@@ -98,6 +105,7 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         // Multiply: mul_sat * gt_val → final mask
         InternalNode {
@@ -109,12 +117,14 @@ pub fn color_range_group() -> GroupDefinition {
                 ("clamp_result".to_string(), ParamValue::Bool(false)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         InternalNode {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
             params: HashMap::new(),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
     ];
 
@@ -292,6 +302,7 @@ pub fn pixelate_group() -> GroupDefinition {
             type_id: "group_input".to_string(),
             params: HashMap::new(),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         InternalNode {
             id: "kernel".to_string(),
@@ -303,12 +314,14 @@ pub fn pixelate_group() -> GroupDefinition {
                 ("dither_amount".to_string(), ParamValue::Float(1.0)),
             ]),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
         InternalNode {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
             params: HashMap::new(),
             image_data: None,
+            input_defaults: HashMap::new(),
         },
     ];
 

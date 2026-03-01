@@ -5,6 +5,7 @@ import { NodeSection, NodeButton } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
+import { linearToHex, hexToLinear, linearToSrgbByte } from './colorUtils';
 
 type NodeData = {
   label: string;
@@ -12,19 +13,6 @@ type NodeData = {
   params: Record<string, ParamValue>;
 };
 
-const floatToByte = (v: number) => Math.min(255, Math.max(0, Math.round(v * 255)));
-
-const colorToHex = (c: [number, number, number, number]): string => {
-  const toHex = (v: number) => floatToByte(v).toString(16).padStart(2, '0');
-  return `#${toHex(c[0])}${toHex(c[1])}${toHex(c[2])}`;
-};
-
-const hexToFloat = (hex: string, alpha: number): [number, number, number, number] => [
-  parseInt(hex.slice(1, 3), 16) / 255,
-  parseInt(hex.slice(3, 5), 16) / 255,
-  parseInt(hex.slice(5, 7), 16) / 255,
-  alpha,
-];
 
 export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
@@ -58,13 +46,13 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
 
   const handleColorInput = useCallback((index: number, hex: string) => {
     const updated = [...colors];
-    updated[index] = hexToFloat(hex, updated[index][3]);
+    updated[index] = [...hexToLinear(hex), updated[index][3]] as [number, number, number, number];
     setParamLive(props.id, 'colors', { ColorPalette: updated } as ParamValue);
   }, [colors, props.id, setParamLive]);
 
   const handleColorCommit = useCallback((index: number, hex: string) => {
     const updated = [...colors];
-    updated[index] = hexToFloat(hex, updated[index][3]);
+    updated[index] = [...hexToLinear(hex), updated[index][3]] as [number, number, number, number];
     const value = { ColorPalette: updated } as ParamValue;
     // Ensure pre-commit snapshot exists even if onInput never fired
     setParamLive(props.id, 'colors', value);
@@ -117,7 +105,7 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                   position: 'relative',
                   width: '20px',
                   height: '20px',
-                  background: `rgba(${floatToByte(color[0])},${floatToByte(color[1])},${floatToByte(color[2])},1)`,
+                  background: `rgba(${linearToSrgbByte(color[0])},${linearToSrgbByte(color[1])},${linearToSrgbByte(color[2])},1)`,
                   border: '1px solid var(--border-default)',
                   borderRadius: '2px',
                   cursor: 'pointer',
@@ -125,7 +113,7 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
               >
                 <input
                   type="color"
-                  value={colorToHex(color)}
+                  value={linearToHex(color[0], color[1], color[2])}
                   onInput={(e) => handleColorInput(i, (e.target as HTMLInputElement).value)}
                   onChange={(e) => handleColorCommit(i, e.target.value)}
                   style={{

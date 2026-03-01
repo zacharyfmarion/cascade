@@ -669,6 +669,7 @@ dependencies = [
  "compositor-core",
  "compositor-gpu",
  "compositor-nodes-std",
+ "compositor-runtime",
  "console_error_panic_hook",
  "getrandom 0.3.4",
  "image",

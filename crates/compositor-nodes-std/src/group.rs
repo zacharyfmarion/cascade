@@ -194,24 +194,22 @@ impl GroupNode {
         }
 
         let (group_input_id, group_output_id) = Self::find_group_nodes(definition)?;
-        let mut inputs_map: HashMap<String, PortSpec> = HashMap::new();
-        let mut outputs_map: HashMap<String, PortSpec> = HashMap::new();
-
+        let mut inputs: Vec<PortSpec> = Vec::new();
+        let mut outputs: Vec<PortSpec> = Vec::new();
         for conn in &definition.internal_graph.connections {
-            if conn.from_node == group_input_id {
+            if conn.from_node == group_input_id
+                && !inputs.iter().any(|p| p.name == conn.from_port)
+            {
                 let input_spec = Self::derive_input_port(definition, registry, conn)?;
-                Self::insert_port(&mut inputs_map, input_spec)?;
+                inputs.push(input_spec);
             }
-            if conn.to_node == group_output_id {
+            if conn.to_node == group_output_id
+                && !outputs.iter().any(|p| p.name == conn.to_port)
+            {
                 let output_spec = Self::derive_output_port(definition, registry, conn)?;
-                Self::insert_port(&mut outputs_map, output_spec)?;
+                outputs.push(output_spec);
             }
         }
-
-        let mut inputs: Vec<PortSpec> = inputs_map.into_values().collect();
-        let mut outputs: Vec<PortSpec> = outputs_map.into_values().collect();
-        inputs.sort_by(|a, b| a.name.cmp(&b.name));
-        outputs.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(GroupInterface { inputs, outputs })
     }
 
@@ -234,6 +232,10 @@ impl GroupNode {
             id_map.insert(node.id.clone(), node_id);
             for (key, value) in &node.params {
                 graph.set_param(node_id, key, value.clone());
+            }
+
+            for (key, value) in &node.input_defaults {
+                graph.set_input_default(node_id, key, value.clone());
             }
 
             let instance: Arc<dyn Node> = if node.type_id == "group_input" {
@@ -326,8 +328,8 @@ impl GroupNode {
         let to_spec = registry
             .get_spec(&to_node.type_id)
             .ok_or_else(|| format!("Unknown node type: {}", to_node.type_id))?;
-        let input_port = to_spec
-            .inputs
+        let all_inputs = to_spec.all_inputs();
+        let input_port = all_inputs
             .iter()
             .find(|port| port.name == conn.to_port)
             .ok_or_else(|| format!("Unknown port: {}", conn.to_port))?;
@@ -371,17 +373,6 @@ impl GroupNode {
             .iter()
             .find(|node| node.id == node_id)
             .ok_or_else(|| format!("Unknown internal node: {}", node_id))
-    }
-
-    fn insert_port(map: &mut HashMap<String, PortSpec>, spec: PortSpec) -> Result<(), String> {
-        if let Some(existing) = map.get(&spec.name) {
-            if existing.ty != spec.ty {
-                return Err(format!("Port type mismatch for {}", spec.name));
-            }
-        } else {
-            map.insert(spec.name.clone(), spec);
-        }
-        Ok(())
     }
 }
 

@@ -65,7 +65,7 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
     : 0;
 
   useEffect(() => {
-    if (result && canvasRef.current) {
+    if (result && 'pixels' in result && canvasRef.current) {
       const canvas = canvasRef.current;
       canvas.width = result.width;
       canvas.height = result.height;

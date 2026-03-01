@@ -93,7 +93,7 @@ pub trait Node: Send + Sync + Any {
 | LoadImage | Input | — | image (Image) | image_data (Hidden) | Mutex-wrapped state; set_image_data() decodes PNG/JPEG/BMP/WebP via `image` crate, converts sRGB u8 → linear f32 |
 | Viewer | Output | image (Image) | display (Image) | — | Passthrough; image_to_rgba8() converts linear f32 → sRGB u8 for display |
 | BrightnessContrast | Color | image (Image) | image (Image) | brightness [-1,1], contrast [-1,1] | Per-pixel: v = (v - 0.5) * (1 + contrast) + 0.5 + brightness, clamped |
-| HueSaturation | Color | image (Image) | image (Image) | hue [-180°,180°], saturation [-1,1] | RGB→HSL, shift hue/sat, HSL→RGB |
+| HueSaturation | Color | image (Image) | image (Image) | hue [-180°,180°], saturation [-1,1], value [-1,1] | RGB→HSL, shift hue/sat/lightness, HSL→RGB |
 | Invert | Color | image (Image) | image (Image) | — | Per-channel: 1.0 - value (alpha preserved) |
 | GaussianBlur | Filter | image (Image) | image (Image) | sigma [0.1, 100] | Separable 2-pass (horizontal then vertical), kernel radius = ceil(3σ), edge clamping |
 

@@ -8,7 +8,7 @@ import { validateAst } from './dsl/validator';
 import { diffAst } from './dsl/differ';
 import { applyMutations } from './dsl/executor';
 import { captureViewerThumbnail } from './viewerSnapshot';
-import { snakeToPascal, labelToSnake } from './dsl/types';
+import { snakeToPascal, labelToSnake, pascalToSnake } from './dsl/types';
 import type { DslAst } from './dsl/types';
 import { getSharedHandleMap } from './dsl/instance';
 
@@ -164,13 +164,6 @@ const toolExecutors = {
 
   get_node_schema: async ({ node_type }: GetNodeSchemaArgs) => {
     const specs = useGraphStore.getState().nodeSpecs;
-    const pascalToSnake = (name: string): string =>
-      name
-        .split('::')
-        .map(part =>
-          part.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
-        )
-        .join('::');
     const typeId = pascalToSnake(node_type);
     const spec = specs.find((s: NodeSpec) => s.id === typeId);
     if (!spec) {

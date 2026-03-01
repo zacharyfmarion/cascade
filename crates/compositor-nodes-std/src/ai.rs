@@ -188,7 +188,7 @@ impl Node for AiRemoveBackground {
             id: "ai_remove_background".to_string(),
             display_name: "AI Remove Background".to_string(),
             category: "AI".to_string(),
-            description: "Remove background from an image using AI (BRIA RMBG 2.0)".to_string(),
+            description: "Remove background from an image using AI".to_string(),
             inputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
@@ -201,7 +201,20 @@ impl Node for AiRemoveBackground {
                 ty: ValueType::Image,
                 ..Default::default()
             }],
-            params: vec![],
+            params: vec![ParamSpec {
+                key: "model".to_string(),
+                label: "Model".to_string(),
+                ty: ValueType::Float,
+                default: ParamDefault::String("851 Labs".to_string()),
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: UiHint::Dropdown(vec![
+                    "851 Labs".to_string(),
+                    "BRIA RMBG 2.0".to_string(),
+                ]),
+                promotable: false,
+            }],
         }
     }
 
@@ -233,13 +246,22 @@ impl Node for AiRemoveBackground {
             let png_bytes = encode_image_png(input_image)?;
             let image_data_uri = png_bytes_to_data_uri(&png_bytes);
 
+            let model_name = ctx.get_param_string("model").unwrap_or("851 Labs");
+
             let mut input = HashMap::new();
             input.insert("image".to_string(), image_data_uri.into());
-
-            let request = AiPredictionRequest {
-                version: String::new(),
-                model: Some("bria/remove-background".to_string()),
-                input,
+            let request = match model_name {
+                "BRIA RMBG 2.0" => AiPredictionRequest {
+                    version: String::new(),
+                    model: Some("bria/remove-background".to_string()),
+                    input,
+                },
+                // Default: 851 Labs (community model, requires version hash)
+                _ => AiPredictionRequest {
+                    version: "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc".to_string(),
+                    model: None,
+                    input,
+                },
             };
 
             let result = ai.predict(request).await?;
@@ -447,15 +469,11 @@ impl Node for AiUpscale {
 }
 
 pub struct AiInpaint;
-
 impl AiInpaint {
     pub fn new() -> Self {
         Self
     }
 }
-
-const SDXL_INPAINTING_VERSION: &str =
-    "a4a8bafd6089e1716b06057c42b19378250d008b80fe87caa5cd36d40c1edd90";
 
 impl Node for AiInpaint {
     fn spec(&self) -> NodeSpec {
@@ -463,8 +481,7 @@ impl Node for AiInpaint {
             id: "ai_inpaint".to_string(),
             display_name: "AI Inpaint".to_string(),
             category: "AI".to_string(),
-            description: "Edit or fill image regions using AI (Stable Diffusion Inpainting)"
-                .to_string(),
+            description: "Edit or fill image regions using AI".to_string(),
             inputs: vec![
                 PortSpec {
                     name: "image".to_string(),
@@ -475,7 +492,7 @@ impl Node for AiInpaint {
                 PortSpec {
                     name: "mask".to_string(),
                     label: "Mask".to_string(),
-                    ty: ValueType::Mask,
+                    ty: ValueType::Image,
                     ..Default::default()
                 },
             ],
@@ -489,12 +506,38 @@ impl Node for AiInpaint {
                 ParamSpec {
                     key: "prompt".to_string(),
                     label: "Prompt".to_string(),
-                    ty: ValueType::Float,
+                    ty: ValueType::String,
                     default: ParamDefault::String(String::new()),
                     min: None,
                     max: None,
                     step: None,
                     ui_hint: UiHint::TextArea,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "model".to_string(),
+                    label: "Model".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::String("FLUX Fill Pro".to_string()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Dropdown(vec![
+                        "FLUX Fill Pro".to_string(),
+                        "FLUX Fill Dev".to_string(),
+                        "SD Inpainting".to_string(),
+                    ]),
+                    promotable: false,
+                },
+                ParamSpec {
+                    key: "guidance".to_string(),
+                    label: "Guidance".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(30.0),
+                    min: Some(1.0),
+                    max: Some(100.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Slider,
                     promotable: true,
                 },
                 ParamSpec {
@@ -508,21 +551,9 @@ impl Node for AiInpaint {
                     ui_hint: UiHint::Slider,
                     promotable: true,
                 },
-                ParamSpec {
-                    key: "guidance_scale".to_string(),
-                    label: "Guidance Scale".to_string(),
-                    ty: ValueType::Float,
-                    default: ParamDefault::Float(7.5),
-                    min: Some(1.0),
-                    max: Some(20.0),
-                    step: Some(0.5),
-                    ui_hint: UiHint::Slider,
-                    promotable: true,
-                },
             ],
         }
     }
-
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             if let Some(cached) = ctx.ai_cached_outputs {
@@ -534,54 +565,58 @@ impl Node for AiInpaint {
                     Ok(outputs)
                 };
             }
-
             let ai = ctx.ai_provider.ok_or_else(|| {
                 CompositorError::Other(
                     "AI provider not configured. Set an API key in Settings.".to_string(),
                 )
             })?;
-
             if !ai.is_configured() {
                 return Err(CompositorError::Other(
                     "AI provider not configured. Set an API key in Settings.".to_string(),
                 ));
             }
-
             let prompt = ctx.get_param_string("prompt").unwrap_or("");
             if prompt.is_empty() {
                 return Err(CompositorError::Other(
                     "Prompt is required for AI Inpaint".to_string(),
                 ));
             }
-
+            let model_name = ctx.get_param_string("model").unwrap_or("FLUX Fill Pro");
+            let guidance = ctx.get_param_float("guidance").unwrap_or(30.0);
             let strength = ctx.get_param_float("strength").unwrap_or(0.8);
-            let guidance_scale = ctx.get_param_float("guidance_scale").unwrap_or(7.5);
-
             let mut input = HashMap::new();
             input.insert("prompt".to_string(), prompt.to_string().into());
-            input.insert("strength".to_string(), (strength as f64).into());
-            input.insert("guidance_scale".to_string(), (guidance_scale as f64).into());
-
             if let Some(img) = ctx.get_optional_input_image("image") {
                 let png_bytes = encode_image_png(img)?;
                 input.insert("image".to_string(), png_bytes_to_data_uri(&png_bytes).into());
             }
-
-            if let Some(mask_val) = ctx.inputs.get("mask") {
-                if let Value::Mask(m) = mask_val {
-                    let png_bytes = encode_image_png(m)?;
-                    input.insert("mask".to_string(), png_bytes_to_data_uri(&png_bytes).into());
-                }
+            if let Some(mask) = ctx.get_optional_input_image("mask") {
+                let png_bytes = encode_image_png(mask)?;
+                input.insert("mask".to_string(), png_bytes_to_data_uri(&png_bytes).into());
             }
-
+            let model_id = match model_name {
+                "FLUX Fill Pro" => {
+                    input.insert("guidance".to_string(), guidance.into());
+                    "black-forest-labs/flux-fill-pro"
+                }
+                "FLUX Fill Dev" => {
+                    input.insert("guidance".to_string(), guidance.into());
+                    "black-forest-labs/flux-fill-dev"
+                }
+                "SD Inpainting" => {
+                    input.insert("strength".to_string(), strength.into());
+                    input.insert("guidance_scale".to_string(), guidance.into());
+                    "stability-ai/stable-diffusion-inpainting"
+                }
+                _ => "black-forest-labs/flux-fill-pro",
+            };
             let request = AiPredictionRequest {
-                version: SDXL_INPAINTING_VERSION.to_string(),
-                model: None,
+                version: String::new(),
+                model: Some(model_id.to_string()),
                 input,
             };
 
             let result = ai.predict(request).await?;
-
             let output_url = result
                 .output
                 .first_url()
@@ -591,7 +626,6 @@ impl Node for AiInpaint {
                     )
                 })?
                 .to_string();
-
             let image_bytes = ai.fetch_url(&output_url).await?;
             let output_image = decode_response_image(&image_bytes)?;
 
@@ -610,22 +644,64 @@ impl Node for AiInpaint {
     }
 }
 
-pub struct AiGenerateImage;
+/// Collect connected reference images from optional input ports, in deterministic order.
+/// Returns data URIs suitable for API payloads.
+fn collect_reference_image_uris(
+    ctx: &EvalContext<'_>,
+    port_names: &[&str],
+) -> Result<Vec<String>, CompositorError> {
+    let mut uris = Vec::new();
+    for &name in port_names {
+        if let Some(img) = ctx.get_optional_input_image(name) {
+            let png_bytes = encode_image_png(img)?;
+            uris.push(png_bytes_to_data_uri(&png_bytes));
+        }
+    }
+    Ok(uris)
+}
 
+pub struct AiGenerateImage;
 impl AiGenerateImage {
     pub fn new() -> Self {
         Self
     }
-}
 
+    /// Reference image port names in connection order.
+    const REF_PORTS: [&str; 4] = ["ref_1", "ref_2", "ref_3", "ref_4"];
+}
 impl Node for AiGenerateImage {
     fn spec(&self) -> NodeSpec {
         NodeSpec {
             id: "ai_generate_image".to_string(),
             display_name: "AI Generate Image".to_string(),
             category: "AI".to_string(),
-            description: "Generate an image from a text prompt using AI".to_string(),
-            inputs: vec![],
+            description: "Generate an image from a text prompt using AI, optionally with reference images".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "ref_1".to_string(),
+                    label: "Reference 1".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "ref_2".to_string(),
+                    label: "Reference 2".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "ref_3".to_string(),
+                    label: "Reference 3".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "ref_4".to_string(),
+                    label: "Reference 4".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
@@ -648,15 +724,18 @@ impl Node for AiGenerateImage {
                     key: "model".to_string(),
                     label: "Model".to_string(),
                     ty: ValueType::Float,
-                    default: ParamDefault::String("FLUX 1.1 Pro".to_string()),
+                    default: ParamDefault::String("Nano Banana 2".to_string()),
                     min: None,
                     max: None,
                     step: None,
                     ui_hint: UiHint::Dropdown(vec![
+                        "Nano Banana 2".to_string(),
+                        "Nano Banana Pro".to_string(),
+                        "Gemini 2.5 Flash".to_string(),
                         "FLUX 1.1 Pro".to_string(),
                         "FLUX 1.1 Pro Ultra".to_string(),
                         "FLUX Schnell".to_string(),
-                        "Nano Banana Pro".to_string(),
+                        "FLUX Kontext".to_string(),
                         "Seedream 4.5".to_string(),
                         "Ideogram v3".to_string(),
                     ]),
@@ -679,10 +758,20 @@ impl Node for AiGenerateImage {
                     ]),
                     promotable: false,
                 },
+                ParamSpec {
+                    key: "guidance".to_string(),
+                    label: "Guidance".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(2.5),
+                    min: Some(1.0),
+                    max: Some(10.0),
+                    step: Some(0.5),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
             ],
         }
     }
-
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             if let Some(cached) = ctx.ai_cached_outputs {
@@ -694,13 +783,11 @@ impl Node for AiGenerateImage {
                     Ok(outputs)
                 };
             }
-
             let ai = ctx.ai_provider.ok_or_else(|| {
                 CompositorError::Other(
                     "AI provider not configured. Set an API key in Settings.".to_string(),
                 )
             })?;
-
             if !ai.is_configured() {
                 return Err(CompositorError::Other(
                     "AI provider not configured. Set an API key in Settings.".to_string(),
@@ -708,30 +795,57 @@ impl Node for AiGenerateImage {
             }
 
             let prompt = ctx.get_param_string("prompt").unwrap_or("").to_string();
-
             if prompt.is_empty() {
                 return Err(CompositorError::Other(
                     "Prompt is required for AI Generate Image".to_string(),
                 ));
             }
-
-            let model_name = ctx.get_param_string("model").unwrap_or("FLUX 1.1 Pro");
+            let model_name = ctx.get_param_string("model").unwrap_or("Nano Banana 2");
             let aspect_ratio = ctx.get_param_string("aspect_ratio").unwrap_or("1:1");
-
-            let model_id = match model_name {
-                "FLUX 1.1 Pro" => "black-forest-labs/flux-1.1-pro",
-                "FLUX 1.1 Pro Ultra" => "black-forest-labs/flux-1.1-pro-ultra",
-                "FLUX Schnell" => "black-forest-labs/flux-schnell",
-                "Nano Banana Pro" => "google/nano-banana-pro",
-                "Seedream 4.5" => "bytedance/seedream-4.5",
-                "Ideogram v3" => "ideogram-ai/ideogram-v3-balanced",
-                _ => "black-forest-labs/flux-1.1-pro",
-            };
-
+            let ref_uris = collect_reference_image_uris(ctx, &Self::REF_PORTS)?;
             let mut input = HashMap::new();
             input.insert("prompt".to_string(), prompt.into());
             input.insert("aspect_ratio".to_string(), aspect_ratio.to_string().into());
-
+            // Build model-specific payload
+            let model_id = match model_name {
+                "FLUX Kontext" => {
+                    // Kontext accepts a single input_image + prompt.
+                    // Uses match_input_image aspect ratio when a ref is connected.
+                    if let Some(uri) = ref_uris.first() {
+                        input.insert("input_image".to_string(), uri.clone().into());
+                        input.insert(
+                            "aspect_ratio".to_string(),
+                            "match_input_image".to_string().into(),
+                        );
+                    }
+                    let guidance = ctx.get_param_float("guidance").unwrap_or(2.5);
+                    input.insert("guidance".to_string(), guidance.into());
+                    "black-forest-labs/flux-kontext-dev"
+                }
+                "Gemini 2.5 Flash" | "Nano Banana Pro" | "Nano Banana 2" => {
+                    // Gemini / Nano Banana models accept image_input as an array of URIs.
+                    if !ref_uris.is_empty() {
+                        input.insert("image_input".to_string(), ref_uris.into());
+                    }
+                    match model_name {
+                        "Nano Banana Pro" => "google/nano-banana-pro",
+                        "Nano Banana 2" => "google/nano-banana-2",
+                        _ => "google/gemini-2.5-flash-image",
+                    }
+                }
+                _ => {
+                    // Text-only models: FLUX 1.1 Pro, Ultra, Schnell, etc.
+                    // Reference images are silently ignored for models that don't support them.
+                    match model_name {
+                        "FLUX 1.1 Pro" => "black-forest-labs/flux-1.1-pro",
+                        "FLUX 1.1 Pro Ultra" => "black-forest-labs/flux-1.1-pro-ultra",
+                        "FLUX Schnell" => "black-forest-labs/flux-schnell",
+                        "Seedream 4.5" => "bytedance/seedream-4.5",
+                        "Ideogram v3" => "ideogram-ai/ideogram-v3-balanced",
+                        _ => "black-forest-labs/flux-1.1-pro",
+                    }
+                }
+            };
             let request = AiPredictionRequest {
                 version: String::new(),
                 model: Some(model_id.to_string()),
@@ -739,7 +853,6 @@ impl Node for AiGenerateImage {
             };
 
             let result = ai.predict(request).await?;
-
             let output_url = result
                 .output
                 .first_url()
@@ -749,20 +862,16 @@ impl Node for AiGenerateImage {
                     )
                 })?
                 .to_string();
-
             let image_bytes = ai.fetch_url(&output_url).await?;
             let output_image = decode_response_image(&image_bytes)?;
-
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output_image));
             Ok(outputs)
         })
     }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
-
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }

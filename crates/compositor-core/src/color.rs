@@ -33,6 +33,7 @@ pub trait ColorManagement: Send + Sync {
     ) -> Result<Box<dyn ColorProcessor>, CompositorError>;
 }
 
+#[derive(Clone)]
 pub struct BuiltinColorManagement {
     working_space: ColorSpaceId,
 }
