@@ -293,7 +293,7 @@ Wave FINAL (After ALL tasks):
 
 ---
 
-- [ ] 4. Add WASM bridge functions
+- [x] 4. Add WASM bridge functions
 
   **What to do**:
   - In `crates/compositor-wasm/src/lib.rs`, add two new `#[wasm_bindgen]` functions:
