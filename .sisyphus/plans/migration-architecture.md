@@ -52,10 +52,10 @@ Create a robust, extensible migration system that automatically upgrades project
 - Updated `CURRENT_FORMAT_VERSION` to "1.1.0"
 
 ### Definition of Done
-- [ ] `cargo test --workspace` passes with new migration tests
-- [ ] Loading a v1.0.0 project file with Viewer connections works correctly
-- [ ] Saving a migrated file uses format_version "1.1.0"
-- [ ] Future version detection shows appropriate error
+- [x] `cargo test --workspace` passes with new migration tests
+- [x] Loading a v1.0.0 project file with Viewer connections works correctly
+- [x] Saving a migrated file uses format_version "1.1.0"
+- [x] Future version detection shows appropriate error
 
 ### Must Have
 - Version comparison logic (semver-aware)
@@ -451,15 +451,15 @@ Wave FINAL (After ALL tasks):
 
 > 3 review tasks run in PARALLEL. ALL must APPROVE.
 
-- [ ] F1. **Run cargo test for migrations** — `quick`
+- [x] F1. **Run cargo test for migrations** — `quick`
   Run `cargo test -p compositor-runtime migrate`. Verify all migration unit tests pass. Check that version comparison, migration chain, and Viewer port rename all work.
   Output: `Tests [N pass/N fail] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Run cargo clippy** — `quick`
+- [x] F2. **Run cargo clippy** — `quick`
   Run `cargo clippy --workspace -- -D warnings`. Verify no new warnings from migration code.
   Output: `Clippy [PASS/FAIL] | VERDICT`
 
-- [ ] F3. **Run frontend typecheck** — `quick`
+- [x] F3. **Run frontend typecheck** — `quick`
   Run `cd apps/web && npx tsc -b --noEmit`. Verify no new TypeScript errors (pre-existing errors are OK).
   Output: `TypeScript [PASS/FAIL with N errors] | VERDICT`
 
@@ -494,9 +494,9 @@ cargo check -p compositor-wasm  # Expected: compiles
 ```
 
 ### Final Checklist
-- [ ] All migration unit tests pass
-- [ ] v1.0.0 document with Viewer connection loads correctly
-- [ ] Saved document has format_version "1.1.0"
-- [ ] Future version document shows error message
-- [ ] Console logs migration when applied
-- [ ] No UI prompts during migration
+- [x] All migration unit tests pass
+- [x] v1.0.0 document with Viewer connection loads correctly
+- [x] Saved document has format_version "1.1.0"
+- [x] Future version document shows error message
+- [x] Console logs migration when applied
+- [x] No UI prompts during migration
