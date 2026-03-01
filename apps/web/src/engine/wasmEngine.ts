@@ -1,4 +1,4 @@
-import init, { Engine } from '../wasm-pkg/compositor_wasm';
+import init, { Engine, needs_migration_json, migrate_document_json } from '../wasm-pkg/compositor_wasm';
 import type { EngineBridge, AddNodeResult, ColorManagementInfo, EditValidationError } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
@@ -605,11 +605,11 @@ export class WasmEngine implements EngineBridge {
   }
 
   migrateDocument(jsonStr: string): string {
-    return (this.getEngine() as any).migrate_document_json(jsonStr);
+    return migrate_document_json(jsonStr);
   }
 
   needsMigration(jsonStr: string): boolean {
-    return (this.getEngine() as any).needs_migration_json(jsonStr);
+    return needs_migration_json(jsonStr);
   }
 }
 export const wasmEngine = new WasmEngine();
