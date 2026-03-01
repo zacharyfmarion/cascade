@@ -1,8 +1,10 @@
+#[cfg(not(target_arch = "wasm32"))]
 pub mod ai_provider;
 mod builtin_groups;
 pub mod document;
 pub mod migrations;
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::ai_provider::NativeAiProvider;
 use compositor_core::ai::AiProvider;
 use compositor_core::color::{BuiltinColorManagement, ColorManagement};
@@ -292,6 +294,7 @@ impl Engine {
 
     pub fn set_ai_api_key(&mut self, provider: &str, key: &str) -> Result<(), CompositorError> {
         match provider {
+            #[cfg(not(target_arch = "wasm32"))]
             "replicate" | "native" => {
                 let ai = Arc::new(NativeAiProvider::new());
                 ai.set_api_key(key.to_string());
