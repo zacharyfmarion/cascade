@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 compositor-core = { path = "../compositor-core" }
 compositor-nodes-std = { path = "../compositor-nodes-std" }
 compositor-gpu = { path = "../compositor-gpu" }
+compositor-runtime = { path = "../compositor-runtime" }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"

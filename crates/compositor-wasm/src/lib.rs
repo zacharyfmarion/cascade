@@ -28,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
+use compositor_runtime::migrations;
 
 #[derive(Debug, Clone)]
 enum RunStatus {
@@ -2509,6 +2510,26 @@ impl EngineErrorDto {
         }
     }
 }
+
+#[wasm_bindgen]
+pub fn migrate_document_json(json_str: &str) -> Result<String, JsValue> {
+    let mut doc: serde_json::Value = serde_json::from_str(json_str)
+        .map_err(|e| JsValue::from_str(&format!("Invalid JSON: {e}")))?;
+    
+    migrations::migrate_document(&mut doc)
+        .map_err(|e| JsValue::from_str(&format!("Migration failed: {e}")))?;
+    
+    serde_json::to_string(&doc)
+        .map_err(|e| JsValue::from_str(&format!("Serialization failed: {e}")))
+}
+
+#[wasm_bindgen]
+pub fn needs_migration_json(json_str: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(json_str)
+        .map(|doc| migrations::needs_migration(&doc))
+        .unwrap_or(true)
+}
+
 
 fn serialize_engine_error(dto: &EngineErrorDto) -> JsValue {
     serde_wasm_bindgen::to_value(dto)
