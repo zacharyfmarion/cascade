@@ -158,6 +158,10 @@ export class WasmEngine implements EngineBridge {
     });
   }
 
+  getAffectedViewers(nodeId: string): string[] {
+    return this.getEngine().get_affected_viewers(nodeId);
+  }
+
   setParam(nodeId: string, key: string, value: ParamValue): Promise<void> {
     return this.scheduler.enqueue(() => {
       const raw = paramValueToWasm(value);

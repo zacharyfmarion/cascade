@@ -427,6 +427,18 @@ impl Engine {
         }
     }
 
+    /// Returns the UUIDs of viewer/output nodes affected by changes to the given node.
+    /// Used for selective viewer invalidation — only re-render viewers whose upstream changed.
+    pub fn get_affected_viewers(&self, node_id: &str) -> Result<Vec<String>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let viewer_ids = self.graph.get_affected_viewers(id);
+        let uuids: Vec<String> = viewer_ids
+            .into_iter()
+            .filter_map(|vid| self.graph.nodes.get(vid).map(|n| n.uuid.clone()))
+            .collect();
+        Ok(uuids)
+    }
+
     pub fn set_param(&mut self, node_id: &str, key: &str, value: JsValue) -> Result<(), JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
         let spec = self

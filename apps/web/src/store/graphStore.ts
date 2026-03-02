@@ -375,6 +375,43 @@ export const useGraphStore = create<GraphState>()(
     };
 
     /**
+     * Trigger re-render only for viewers affected by changes to the given node(s).
+     * Falls back to triggerAllViewers() if the engine doesn't support selective
+     * invalidation or if an error occurs.
+     */
+    const triggerAffectedViewers = (changedNodeIds: string[]) => {
+      if (renderSuspendCount > 0) {
+        renderNeededWhileSuspended = true;
+        return;
+      }
+      const eng = getEngine();
+      if (!eng.getAffectedViewers) {
+        triggerAllViewers();
+        return;
+      }
+      try {
+        const affectedSet = new Set<string>();
+        for (const nodeId of changedNodeIds) {
+          const viewers = eng.getAffectedViewers(nodeId);
+          // Handle both sync (string[]) and async (Promise<string[]>) returns
+          if (Array.isArray(viewers)) {
+            for (const v of viewers) affectedSet.add(v);
+          } else {
+            // Async path — fall back to all viewers for now
+            triggerAllViewers();
+            return;
+          }
+        }
+        for (const viewerId of affectedSet) {
+          get().triggerRender(viewerId);
+        }
+      } catch (e) {
+        console.warn('Selective viewer invalidation failed, falling back to all viewers:', e);
+        triggerAllViewers();
+      }
+    };
+
+    /**
      * Normalize complex param values after deserialization (load/import).
      * Clamps values to valid ranges and ensures structural integrity.
      */
@@ -863,7 +900,7 @@ export const useGraphStore = create<GraphState>()(
               connections: [...state.connections, newConnection],
               nodeSpecs: withGroupIOSpecs(specs, updatedGraph),
             }));
-            triggerAllViewers();
+            triggerAffectedViewers([fromNode, toNode]);
             return;
           }
           await eng.addInternalConnection(ctx.groupDefId!, fromNode, fromPort, toNode, toPort);
@@ -886,7 +923,7 @@ export const useGraphStore = create<GraphState>()(
           const specs = await Promise.resolve(eng.listNodeTypes());
           set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
         }
-        triggerAllViewers();
+        triggerAffectedViewers([fromNode, toNode]);
       },
 
       disconnect: async (connectionId) => {
@@ -920,7 +957,7 @@ export const useGraphStore = create<GraphState>()(
             const specs = await Promise.resolve(eng.listNodeTypes());
             set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
           }
-          triggerAllViewers();
+          triggerAffectedViewers([conn.fromNode, conn.toNode]);
         }
       },
 
@@ -935,7 +972,7 @@ export const useGraphStore = create<GraphState>()(
           newNodes.set(nodeId, { ...node });
           set({ nodes: newNodes });
         }
-        triggerAllViewers();
+        triggerAffectedViewers([nodeId]);
       },
 
       setDslHandle: (nodeId, handle) => {
@@ -1004,7 +1041,7 @@ export const useGraphStore = create<GraphState>()(
         } else {
           pendingLiveRender = () => {
             getEngine().setParam(nodeId, key, value);
-            triggerAllViewers();
+            triggerAffectedViewers([nodeId]);
           };
         }
 
@@ -1020,7 +1057,7 @@ export const useGraphStore = create<GraphState>()(
         idlePreviewTimer = setTimeout(() => {
           idlePreviewTimer = null;
           set({ previewScale: 1 });
-          triggerAllViewers();
+          triggerAffectedViewers([nodeId]);
         }, useSettingsStore.getState().previewIdleDelay);
       },
 
@@ -1074,7 +1111,7 @@ export const useGraphStore = create<GraphState>()(
           }).catch((e: unknown) => { const error = parseEngineError(e); if (error.code !== 'MISSING_INPUT') { set({ lastError: error }); } });
         } else {
           await getEngine().setParam(nodeId, key, value);
-          triggerAllViewers();
+          triggerAffectedViewers([nodeId]);
         }
       },
 
@@ -1089,7 +1126,7 @@ export const useGraphStore = create<GraphState>()(
           newNodes.set(nodeId, { ...node });
           set({ nodes: newNodes });
         }
-        triggerAllViewers();
+        triggerAffectedViewers([nodeId]);
       },
 
       setInputDefaultLive: async (nodeId, portName, value) => {
@@ -1129,7 +1166,7 @@ export const useGraphStore = create<GraphState>()(
 
         pendingLiveRender = () => {
           getEngine().setInputDefault(nodeId, portName, value);
-          triggerAllViewers();
+          triggerAffectedViewers([nodeId]);
         };
 
         if (liveRenderRaf === null) {
@@ -1144,7 +1181,7 @@ export const useGraphStore = create<GraphState>()(
         idlePreviewTimer = setTimeout(() => {
           idlePreviewTimer = null;
           set({ previewScale: 1 });
-          triggerAllViewers();
+          triggerAffectedViewers([nodeId]);
         }, useSettingsStore.getState().previewIdleDelay);
       },
 
@@ -1181,7 +1218,7 @@ export const useGraphStore = create<GraphState>()(
         }
 
         await getEngine().setInputDefault(nodeId, portName, value);
-        triggerAllViewers();
+        triggerAffectedViewers([nodeId]);
       },
 
       setPosition: (nodeId, position) => {
@@ -1238,7 +1275,7 @@ export const useGraphStore = create<GraphState>()(
         }
         set({ nodes: newNodes });
 
-        triggerAllViewers();
+        triggerAffectedViewers([...selectedIds]);
       },
 
       addFrame: (position, size, label) => {
@@ -1901,7 +1938,7 @@ export const useGraphStore = create<GraphState>()(
         }
 
         set({ nodeSpecs: specs, dirty: true });
-        triggerAllViewers();
+        triggerAffectedViewers([nodeId]);
         return spec;
       },
 

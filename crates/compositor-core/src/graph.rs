@@ -282,6 +282,41 @@ impl Graph {
         out
     }
 
+    /// Node type IDs that act as output/viewer nodes for selective invalidation.
+    pub const VIEWER_TYPE_IDS: &'static [&'static str] = &[
+        "viewer",
+        "export_image",
+        "export_image_sequence",
+        "export_video",
+        "export_image_batch",
+    ];
+
+    /// Returns all viewer/output nodes downstream of `changed_node_id`.
+    /// If `changed_node_id` is itself a viewer, it is included.
+    /// Returns an empty Vec if the node doesn't exist or has no downstream viewers.
+    pub fn get_affected_viewers(&self, changed_node_id: NodeId) -> Vec<NodeId> {
+        // Check if the changed node itself is a viewer
+        let mut viewers = Vec::new();
+        if let Some(instance) = self.nodes.get(changed_node_id) {
+            if Self::VIEWER_TYPE_IDS.contains(&instance.type_id.as_str()) {
+                viewers.push(changed_node_id);
+            }
+        } else {
+            return viewers; // Node doesn't exist
+        }
+
+        // Check all downstream nodes
+        for downstream_id in self.get_downstream(changed_node_id) {
+            if let Some(instance) = self.nodes.get(downstream_id) {
+                if Self::VIEWER_TYPE_IDS.contains(&instance.type_id.as_str()) {
+                    viewers.push(downstream_id);
+                }
+            }
+        }
+
+        viewers
+    }
+
     fn has_path(&self, start: NodeId, target: NodeId, extra: Option<&Connection>) -> bool {
         let mut visited = HashSet::new();
         let mut stack = vec![start];
@@ -441,6 +476,24 @@ mod tests {
             };
             Arc::new(TestNode { spec })
         });
+        registry.register("viewer", || {
+            let spec = NodeSpec {
+                id: "viewer".to_string(),
+                display_name: "Viewer".to_string(),
+                category: "Output".to_string(),
+                description: "Test viewer".to_string(),
+                inputs: vec![PortSpec {
+                    name: "input".to_string(),
+                    label: "Input".to_string(),
+                    ty: ValueType::Float,
+                    ..Default::default()
+                }],
+                outputs: vec![],
+                params: vec![],
+            };
+            Arc::new(TestNode { spec })
+        });
+
         registry
     }
 
@@ -803,4 +856,111 @@ mod tests {
         assert!(!types_compatible(&ValueType::Bool, &ValueType::Float));
         assert!(!types_compatible(&ValueType::String, &ValueType::Int));
     }
+
+    #[test]
+    fn test_get_affected_viewers_linear_chain() {
+        let registry = create_test_registry();
+        let mut graph = Graph::new();
+        let a = graph.add_node("process");
+        let b = graph.add_node("process");
+        let viewer = graph.add_node("viewer");
+        graph.connect(&registry, a, "output", b, "input").unwrap();
+        graph.connect(&registry, b, "output", viewer, "input").unwrap();
+
+        let affected = graph.get_affected_viewers(a);
+        assert_eq!(affected, vec![viewer]);
+
+        let affected = graph.get_affected_viewers(b);
+        assert_eq!(affected, vec![viewer]);
+    }
+
+    #[test]
+    fn test_get_affected_viewers_diamond_graph() {
+        let registry = create_test_registry();
+        let mut graph = Graph::new();
+        let a = graph.add_node("process");
+        let b = graph.add_node("process");
+        let c = graph.add_node("process");
+        let d = graph.add_node("process");
+        let viewer = graph.add_node("viewer");
+        graph.connect(&registry, a, "output", b, "input").unwrap();
+        graph.connect(&registry, a, "output", c, "input").unwrap();
+        graph.connect(&registry, b, "output", d, "input").unwrap();
+        // c -> viewer directly, d also has output but not connected to viewer
+        graph.connect(&registry, d, "output", viewer, "input").unwrap();
+
+        let affected = graph.get_affected_viewers(a);
+        assert_eq!(affected, vec![viewer]);
+    }
+
+    #[test]
+    fn test_get_affected_viewers_no_viewers() {
+        let registry = create_test_registry();
+        let mut graph = Graph::new();
+        let a = graph.add_node("process");
+        let b = graph.add_node("process");
+        graph.connect(&registry, a, "output", b, "input").unwrap();
+
+        let affected = graph.get_affected_viewers(a);
+        assert!(affected.is_empty());
+    }
+
+    #[test]
+    fn test_get_affected_viewers_viewer_itself() {
+        let _registry = create_test_registry();
+        let mut graph = Graph::new();
+        let viewer = graph.add_node("viewer");
+
+        let affected = graph.get_affected_viewers(viewer);
+        assert_eq!(affected, vec![viewer]);
+    }
+
+    #[test]
+    fn test_get_affected_viewers_invalid_node() {
+        let graph = Graph::new();
+        // Use a default NodeId that doesn't exist
+        let fake_id = slotmap::KeyData::from_ffi(u64::MAX).into();
+        let affected = graph.get_affected_viewers(fake_id);
+        assert!(affected.is_empty());
+    }
+
+    #[test]
+    fn test_get_affected_viewers_multiple_viewers() {
+        let registry = create_test_registry();
+        let mut graph = Graph::new();
+        let a = graph.add_node("process");
+        let viewer1 = graph.add_node("viewer");
+        let viewer2 = graph.add_node("viewer");
+        graph.connect(&registry, a, "output", viewer1, "input").unwrap();
+        graph.connect(&registry, a, "output", viewer2, "input").unwrap();
+
+        let mut affected = graph.get_affected_viewers(a);
+        affected.sort_by_key(|id| id.0);
+        let mut expected = vec![viewer1, viewer2];
+        expected.sort_by_key(|id| id.0);
+        assert_eq!(affected, expected);
+    }
+
+    #[test]
+    fn test_get_affected_viewers_disconnected_subgraph() {
+        let registry = create_test_registry();
+        let mut graph = Graph::new();
+        // Branch 1: a -> viewer1
+        let a = graph.add_node("process");
+        let viewer1 = graph.add_node("viewer");
+        graph.connect(&registry, a, "output", viewer1, "input").unwrap();
+        // Branch 2: b -> viewer2 (disconnected)
+        let b = graph.add_node("process");
+        let viewer2 = graph.add_node("viewer");
+        graph.connect(&registry, b, "output", viewer2, "input").unwrap();
+
+        // Changing a should only affect viewer1
+        let affected = graph.get_affected_viewers(a);
+        assert_eq!(affected, vec![viewer1]);
+
+        // Changing b should only affect viewer2
+        let affected = graph.get_affected_viewers(b);
+        assert_eq!(affected, vec![viewer2]);
+    }
+
 }

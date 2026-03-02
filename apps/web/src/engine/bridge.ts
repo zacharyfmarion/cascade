@@ -74,6 +74,7 @@ export interface EngineBridge {
   removeNode(nodeId: string): Promise<void> | void;
   connect(fromNode: string, fromPort: string, toNode: string, toPort: string): Promise<void> | void;
   disconnect(toNode: string, toPort: string): Promise<void> | void;
+  getAffectedViewers?(nodeId: string): Promise<string[]> | string[];
   setParam(nodeId: string, key: string, value: ParamValue): Promise<void> | void;
   setInputDefault(nodeId: string, portName: string, value: ParamValue): Promise<void> | void;
   setPosition(nodeId: string, x: number, y: number): Promise<void> | void;
