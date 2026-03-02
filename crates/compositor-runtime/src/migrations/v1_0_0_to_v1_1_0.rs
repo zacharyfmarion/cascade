@@ -54,8 +54,7 @@ fn migrate_connections(
         .and_then(|c| c.as_array_mut())
         .ok_or_else(|| {
             MigrationError::InvalidStructure(format!(
-                "Missing or invalid connections array at {}",
-                path
+                "Missing or invalid connections array at {path}"
             ))
         })?;
 
@@ -88,7 +87,8 @@ fn migrate_group_definition_connections(
     if let Some(group_defs) = group_defs {
         for group_def in group_defs.iter_mut() {
             // Extract viewer IDs from internal graph
-            let internal_viewer_ids = if let Some(internal_graph) = group_def.get("internal_graph") {
+            let internal_viewer_ids = if let Some(internal_graph) = group_def.get("internal_graph")
+            {
                 extract_viewer_ids_from_internal_graph(internal_graph)?
             } else {
                 HashSet::new()
@@ -96,7 +96,10 @@ fn migrate_group_definition_connections(
 
             // Migrate internal connections
             if let Some(internal_graph) = group_def.get_mut("internal_graph") {
-                if let Some(connections) = internal_graph.get_mut("connections").and_then(|c| c.as_array_mut()) {
+                if let Some(connections) = internal_graph
+                    .get_mut("connections")
+                    .and_then(|c| c.as_array_mut())
+                {
                     for conn in connections.iter_mut() {
                         if let (Some(to_node), Some(to_port)) = (
                             conn.get("to_node").and_then(|n| n.as_str()),

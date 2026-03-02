@@ -144,6 +144,7 @@ impl Evaluator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn evaluate(
         &mut self,
         graph: &mut Graph,
@@ -269,7 +270,9 @@ impl Evaluator {
             // Muted nodes pass data through without processing
             if instance.muted {
                 for output in spec.outputs.iter() {
-                    let pass_value = spec.inputs.iter()
+                    let pass_value = spec
+                        .inputs
+                        .iter()
                         .find(|inp| inp.ty == output.ty)
                         .and_then(|inp| inputs.get(&inp.name))
                         .cloned()
@@ -318,13 +321,14 @@ impl Evaluator {
                 },
             };
             let start = Instant::now();
-            let outputs = node.evaluate(&ctx).await.map_err(|e| {
-                CompositorError::EvalFailed {
+            let outputs = node
+                .evaluate(&ctx)
+                .await
+                .map_err(|e| CompositorError::EvalFailed {
                     node_id: instance.uuid.clone(),
                     node_type: instance.type_id.clone(),
                     source: Box::new(e),
-                }
-            })?;
+                })?;
             let elapsed = start.elapsed();
             node_timings.insert(node_id, elapsed);
             for output in spec.outputs.iter() {
@@ -365,6 +369,7 @@ impl Evaluator {
         })
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn visit_postorder(
         &self,
         graph: &Graph,
@@ -435,11 +440,7 @@ impl Evaluator {
             .map(|entry| &entry.key)
     }
 
-    pub fn get_cached_key_value(
-        &self,
-        node_id: NodeId,
-        port: &str,
-    ) -> Option<(&CacheKey, &Value)> {
+    pub fn get_cached_key_value(&self, node_id: NodeId, port: &str) -> Option<(&CacheKey, &Value)> {
         self.cache
             .get(&(node_id, port.to_string()))
             .map(|entry| (&entry.key, &entry.value))
@@ -1207,15 +1208,18 @@ mod tests {
             };
             Arc::new(MockNode::new(
                 spec,
-                Value::Image(Image::new_with_domain(
-                    Format::hd(),
-                    RectI {
-                        min: IVec2::new(50, 50),
-                        max: IVec2::new(54, 54),
-                    },
-                    vec![0.5f32; 64],
-                    crate::types::ColorSpaceId::default_working(),
-                ).unwrap()),
+                Value::Image(
+                    Image::new_with_domain(
+                        Format::hd(),
+                        RectI {
+                            min: IVec2::new(50, 50),
+                            max: IVec2::new(54, 54),
+                        },
+                        vec![0.5f32; 64],
+                        crate::types::ColorSpaceId::default_working(),
+                    )
+                    .unwrap(),
+                ),
             ))
         });
 
@@ -1641,7 +1645,10 @@ mod tests {
             .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
             .unwrap();
 
-        assert_eq!(key1, key2, "Cache key should be identical for unchanged state");
+        assert_eq!(
+            key1, key2,
+            "Cache key should be identical for unchanged state"
+        );
     }
 
     #[test]
@@ -1757,10 +1764,22 @@ mod tests {
         let format = Format::hd();
 
         let key_frame_0 = evaluator
-            .compute_node_cache_key(&graph, &registry, processor_id, FrameTime { frame: 0 }, &format)
+            .compute_node_cache_key(
+                &graph,
+                &registry,
+                processor_id,
+                FrameTime { frame: 0 },
+                &format,
+            )
             .unwrap();
         let key_frame_1 = evaluator
-            .compute_node_cache_key(&graph, &registry, processor_id, FrameTime { frame: 1 }, &format)
+            .compute_node_cache_key(
+                &graph,
+                &registry,
+                processor_id,
+                FrameTime { frame: 1 },
+                &format,
+            )
             .unwrap();
 
         assert_ne!(

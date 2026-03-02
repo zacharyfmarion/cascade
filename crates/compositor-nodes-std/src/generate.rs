@@ -8,6 +8,12 @@ use std::f32::consts::PI;
 
 pub struct SolidColor;
 
+impl Default for SolidColor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SolidColor {
     pub fn new() -> Self {
         Self
@@ -124,6 +130,12 @@ impl Node for SolidColor {
 }
 
 pub struct Noise;
+
+impl Default for Noise {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Noise {
     pub fn new() -> Self {
@@ -427,6 +439,12 @@ impl Node for Noise {
 
 pub struct Gradient;
 
+impl Default for Gradient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Gradient {
     pub fn new() -> Self {
         Self
@@ -601,6 +619,12 @@ impl Node for Gradient {
 
 pub struct Checkerboard;
 
+impl Default for Checkerboard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Checkerboard {
     pub fn new() -> Self {
         Self
@@ -756,6 +780,12 @@ impl Node for Checkerboard {
 }
 
 pub struct Shape;
+
+impl Default for Shape {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Shape {
     pub fn new() -> Self {
@@ -1000,6 +1030,12 @@ impl Node for Shape {
 
 pub struct RasterizeField;
 
+impl Default for RasterizeField {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RasterizeField {
     pub fn new() -> Self {
         Self
@@ -1075,6 +1111,12 @@ impl Node for RasterizeField {
 
 pub struct FloatConstant;
 
+impl Default for FloatConstant {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FloatConstant {
     pub fn new() -> Self {
         Self
@@ -1129,6 +1171,12 @@ impl Node for FloatConstant {
 
 pub struct IntegerConstant;
 
+impl Default for IntegerConstant {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IntegerConstant {
     pub fn new() -> Self {
         Self
@@ -1182,6 +1230,12 @@ impl Node for IntegerConstant {
 }
 
 pub struct ColorConstant;
+
+impl Default for ColorConstant {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ColorConstant {
     pub fn new() -> Self {
@@ -1245,6 +1299,12 @@ impl Node for ColorConstant {
 
 pub struct BooleanConstant;
 
+impl Default for BooleanConstant {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BooleanConstant {
     pub fn new() -> Self {
         Self
@@ -1298,6 +1358,12 @@ impl Node for BooleanConstant {
 }
 
 pub struct TextArea;
+
+impl Default for TextArea {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl TextArea {
     pub fn new() -> Self {
@@ -1793,6 +1859,12 @@ fn noise_eval_3d(x: f32, y: f32, z: f32, p: &NoiseParams) -> f32 {
 
 pub struct Text;
 
+impl Default for Text {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Text {
     pub fn new() -> Self {
         Self
@@ -1892,9 +1964,7 @@ impl Node for Text {
 
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
-            let text = ctx
-                .get_param_string("text")
-                .unwrap_or("Text");
+            let text = ctx.get_param_string("text").unwrap_or("Text");
             let font_size = ctx.get_param_float("font_size")? as f32;
             let color = ctx.get_param_color("color")?;
             let w = ctx.get_param_int("width")?.max(1) as u32;
@@ -1907,7 +1977,7 @@ impl Node for Text {
             let color_a = color[3] as f32;
 
             let font = ab_glyph::FontRef::try_from_slice(DEFAULT_FONT_DATA)
-                .map_err(|e| CompositorError::Other(format!("Font error: {}", e)))?;
+                .map_err(|e| CompositorError::Other(format!("Font error: {e}")))?;
 
             use ab_glyph::{Font, ScaleFont};
             let scaled = font.as_scaled(ab_glyph::PxScale::from(font_size));
@@ -1967,15 +2037,15 @@ impl Node for Text {
                                 let out_a = src_a + dst_a * (1.0 - src_a);
                                 if out_a > 0.0 {
                                     let inv_out_a = 1.0 / out_a;
-                                    data[idx] =
-                                        (color_r * src_a + data[idx] * dst_a * (1.0 - src_a))
-                                            * inv_out_a;
-                                    data[idx + 1] =
-                                        (color_g * src_a + data[idx + 1] * dst_a * (1.0 - src_a))
-                                            * inv_out_a;
-                                    data[idx + 2] =
-                                        (color_b * src_a + data[idx + 2] * dst_a * (1.0 - src_a))
-                                            * inv_out_a;
+                                    data[idx] = (color_r * src_a
+                                        + data[idx] * dst_a * (1.0 - src_a))
+                                        * inv_out_a;
+                                    data[idx + 1] = (color_g * src_a
+                                        + data[idx + 1] * dst_a * (1.0 - src_a))
+                                        * inv_out_a;
+                                    data[idx + 2] = (color_b * src_a
+                                        + data[idx + 2] * dst_a * (1.0 - src_a))
+                                        * inv_out_a;
                                     data[idx + 3] = out_a;
                                 }
                             }
@@ -2004,6 +2074,12 @@ impl Node for Text {
 }
 
 pub struct UVMap;
+
+impl Default for UVMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl UVMap {
     pub fn new() -> Self {
@@ -2062,14 +2138,16 @@ impl Node for UVMap {
 
             let mut data = vec![0.0f32; (w * h) as usize * 4];
 
-            data.par_chunks_exact_mut(4).enumerate().for_each(|(i, out)| {
-                let x = (i % w as usize) as f32;
-                let y = (i / w as usize) as f32;
-                out[0] = x * inv_w;
-                out[1] = y * inv_h;
-                out[2] = 0.0;
-                out[3] = 1.0;
-            });
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let x = (i % w as usize) as f32;
+                    let y = (i / w as usize) as f32;
+                    out[0] = x * inv_w;
+                    out[1] = y * inv_h;
+                    out[2] = 0.0;
+                    out[3] = 1.0;
+                });
 
             let output = Image::from_f32_data(w, h, data)?;
             let mut outputs = HashMap::new();
@@ -2115,9 +2193,7 @@ mod noise_tests {
         }
         assert!(
             min_val >= -0.1 && max_val <= 1.1,
-            "Normalized fBM should be approximately in [0,1], got [{}, {}]",
-            min_val,
-            max_val
+            "Normalized fBM should be approximately in [0,1], got [{min_val}, {max_val}]"
         );
     }
 
@@ -2135,10 +2211,7 @@ mod noise_tests {
 
         assert!(
             (fbm - multi).abs() > 0.001 || (fbm - ridged).abs() > 0.001,
-            "Different noise types should produce different values: fbm={}, multi={}, ridged={}",
-            fbm,
-            multi,
-            ridged
+            "Different noise types should produce different values: fbm={fbm}, multi={multi}, ridged={ridged}"
         );
     }
 
@@ -2170,9 +2243,7 @@ mod noise_tests {
         let with_distort = noise_eval_2d(x, y, &np_with);
         assert!(
             (no_distort - with_distort).abs() > 0.001,
-            "Distortion should change the output: {} vs {}",
-            no_distort,
-            with_distort
+            "Distortion should change the output: {no_distort} vs {with_distort}"
         );
     }
 
@@ -2182,9 +2253,7 @@ mod noise_tests {
         let b = perlin_signed_2d(1.001, 1.0);
         assert!(
             (a - b).abs() < 0.01,
-            "Nearby points should have similar values: {} vs {}",
-            a,
-            b
+            "Nearby points should have similar values: {a} vs {b}"
         );
 
         let c = perlin_signed_2d(50.0, 50.0);

@@ -1,7 +1,8 @@
 mod menu;
 
 use compositor_runtime::{
-    migrations, AssetReference, CompositorDocument, Engine, NodeSpec, PortSpec, RenderResult, SerializableGraph,
+    migrations, AssetReference, CompositorDocument, Engine, NodeSpec, PortSpec, RenderResult,
+    SerializableGraph,
 };
 use std::sync::Mutex;
 use std::time::Instant;
@@ -285,11 +286,11 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
     if let Ok(mut doc_value) = serde_json::from_str::<serde_json::Value>(&json) {
         // Apply migrations to transform old documents to current version
         migrations::migrate_document(&mut doc_value).map_err(|e| e.to_string())?;
-        
+
         // Deserialize the migrated document
-        let document: CompositorDocument = serde_json::from_value(doc_value)
-            .map_err(|e| e.to_string())?;
-        
+        let document: CompositorDocument =
+            serde_json::from_value(doc_value).map_err(|e| e.to_string())?;
+
         let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
         let assets: Vec<(String, String, String)> = document
             .assets
@@ -563,7 +564,6 @@ fn rename_group(
     serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
-
 #[tauri::command]
 fn export_group_as_package(
     state: State<'_, EngineState>,
@@ -576,10 +576,7 @@ fn export_group_as_package(
 }
 
 #[tauri::command]
-fn import_custom_nodes(
-    state: State<'_, EngineState>,
-    json: String,
-) -> Result<String, String> {
+fn import_custom_nodes(state: State<'_, EngineState>, json: String) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let specs: Vec<NodeSpec> = s
         .engine
@@ -596,10 +593,7 @@ fn list_custom_nodes(state: State<'_, EngineState>) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn remove_custom_node(
-    state: State<'_, EngineState>,
-    group_def_id: String,
-) -> Result<(), String> {
+fn remove_custom_node(state: State<'_, EngineState>, group_def_id: String) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.engine
         .remove_custom_node(&group_def_id)

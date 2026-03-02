@@ -24,19 +24,15 @@ impl fmt::Display for MigrationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             MigrationError::InvalidStructure(msg) => {
-                write!(f, "Invalid document structure: {}", msg)
+                write!(f, "Invalid document structure: {msg}")
             }
             MigrationError::FutureVersion(from, to) => {
-                write!(
-                    f,
-                    "Document version {} is newer than supported {}",
-                    from, to
-                )
+                write!(f, "Document version {from} is newer than supported {to}")
             }
             MigrationError::NoMigrationPath(from, to) => {
-                write!(f, "No migration path from {} to {}", from, to)
+                write!(f, "No migration path from {from} to {to}")
             }
-            MigrationError::MigrationFailed(msg) => write!(f, "Migration failed: {}", msg),
+            MigrationError::MigrationFailed(msg) => write!(f, "Migration failed: {msg}"),
         }
     }
 }
@@ -66,14 +62,12 @@ struct Migration {
 /// Each migration transforms a document from one version to the next
 /// Array of available migrations in order
 /// Each migration transforms a document from one version to the next
-static MIGRATIONS: &[Migration] = &[
-    Migration {
-        from_version: "1.0.0",
-        to_version: "1.1.0",
-        description: "Rename Viewer input port 'image' to 'value'",
-        migrate: v1_0_0_to_v1_1_0::migrate,
-    },
-];
+static MIGRATIONS: &[Migration] = &[Migration {
+    from_version: "1.0.0",
+    to_version: "1.1.0",
+    description: "Rename Viewer input port 'image' to 'value'",
+    migrate: v1_0_0_to_v1_1_0::migrate,
+}];
 
 /// Extract the format version from a document
 fn extract_version(doc: &Value) -> Result<String, MigrationError> {
@@ -372,8 +366,14 @@ mod tests {
 
         v1_0_0_to_v1_1_0::migrate(&mut doc).unwrap();
 
-        assert_eq!(doc["graph"]["connections"][0]["to_port"].as_str().unwrap(), "value");
-        assert_eq!(doc["graph"]["connections"][1]["to_port"].as_str().unwrap(), "value");
+        assert_eq!(
+            doc["graph"]["connections"][0]["to_port"].as_str().unwrap(),
+            "value"
+        );
+        assert_eq!(
+            doc["graph"]["connections"][1]["to_port"].as_str().unwrap(),
+            "value"
+        );
     }
 
     #[test]
@@ -427,10 +427,16 @@ mod tests {
         });
 
         v1_0_0_to_v1_1_0::migrate(&mut doc).unwrap();
-        assert_eq!(doc["graph"]["connections"][0]["to_port"].as_str().unwrap(), "value");
+        assert_eq!(
+            doc["graph"]["connections"][0]["to_port"].as_str().unwrap(),
+            "value"
+        );
 
         v1_0_0_to_v1_1_0::migrate(&mut doc).unwrap();
-        assert_eq!(doc["graph"]["connections"][0]["to_port"].as_str().unwrap(), "value");
+        assert_eq!(
+            doc["graph"]["connections"][0]["to_port"].as_str().unwrap(),
+            "value"
+        );
     }
 
     #[test]

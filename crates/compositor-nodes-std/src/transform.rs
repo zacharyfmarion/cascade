@@ -7,6 +7,12 @@ use std::collections::HashMap;
 
 pub struct Resize;
 
+impl Default for Resize {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Resize {
     pub fn new() -> Self {
         Self
@@ -103,6 +109,12 @@ impl Node for Resize {
 }
 
 pub struct Crop;
+
+impl Default for Crop {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Crop {
     pub fn new() -> Self {
@@ -270,7 +282,7 @@ impl Node for Crop {
                         y: height as i32,
                     },
                 };
-            let out_w = width as usize;
+                let out_w = width as usize;
                 let out_h = height as usize;
                 let mut data = vec![0.0f32; out_w * out_h * 4];
                 data.par_chunks_exact_mut(4)
@@ -310,6 +322,12 @@ impl Node for Crop {
 }
 
 pub struct Flip;
+
+impl Default for Flip {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Flip {
     pub fn new() -> Self {
@@ -407,6 +425,12 @@ impl Node for Flip {
 }
 
 pub struct Rotate;
+
+impl Default for Rotate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Rotate {
     pub fn new() -> Self {
@@ -577,6 +601,12 @@ impl Node for Rotate {
 }
 
 pub struct Translate;
+
+impl Default for Translate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Translate {
     pub fn new() -> Self {
@@ -890,6 +920,12 @@ fn precompute_cubic_axis(
 
 pub struct Transform2D;
 
+impl Default for Transform2D {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Transform2D {
     pub fn new() -> Self {
         Self
@@ -1170,6 +1206,12 @@ impl Node for Transform2D {
 
 pub struct CornerPin;
 
+impl Default for CornerPin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CornerPin {
     pub fn new() -> Self {
         Self
@@ -1442,8 +1484,8 @@ fn compute_perspective_inverse(dst: &[[f32; 2]; 4], src: &[[f32; 2]; 4]) -> [f32
         // Find pivot
         let mut max_row = col;
         let mut max_val = a[col][col].abs();
-        for row in (col + 1)..8 {
-            let v = a[row][col].abs();
+        for (row, row_values) in a.iter().enumerate().skip(col + 1) {
+            let v = row_values[col].abs();
             if v > max_val {
                 max_val = v;
                 max_row = row;
@@ -1478,6 +1520,12 @@ fn compute_perspective_inverse(dst: &[[f32; 2]; 4], src: &[[f32; 2]; 4]) -> [f32
 }
 
 pub struct STMap;
+
+impl Default for STMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl STMap {
     pub fn new() -> Self {

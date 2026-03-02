@@ -12,6 +12,12 @@ const DEPTH_ANYTHING_V2_VERSION: &str =
 
 pub struct AiDepthEstimate;
 
+impl Default for AiDepthEstimate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AiDepthEstimate {
     pub fn new() -> Self {
         Self
@@ -102,9 +108,7 @@ impl Node for AiDepthEstimate {
                 .get_field("grey_depth")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| {
-                    CompositorError::Other(
-                        "Depth model did not return grey_depth URL".to_string(),
-                    )
+                    CompositorError::Other("Depth model did not return grey_depth URL".to_string())
                 })?
                 .to_string();
 
@@ -143,12 +147,16 @@ fn png_bytes_to_data_uri(bytes: &[u8]) -> String {
 }
 
 pub fn decode_response_image(bytes: &[u8]) -> Result<Image, CompositorError> {
-    let decoded = image::load_from_memory(bytes)
-        .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
+    let decoded =
+        image::load_from_memory(bytes).map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
     let rgba = decoded.to_rgba8();
     let (width, height) = rgba.dimensions();
     if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-        return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+        return Err(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        });
     }
     let raw = rgba.as_raw();
     let pixel_count = (width as usize) * (height as usize);
@@ -162,7 +170,7 @@ pub fn decode_response_image(bytes: &[u8]) -> Result<Image, CompositorError> {
             out[2] = srgb_to_linear(raw[idx + 2]);
             out[3] = raw[idx + 3] as f32 / 255.0;
         });
-    Ok(Image::from_f32_data(width, height, data)?)
+    Image::from_f32_data(width, height, data)
 }
 
 fn srgb_to_linear(v: u8) -> f32 {
@@ -175,6 +183,12 @@ fn srgb_to_linear(v: u8) -> f32 {
 }
 
 pub struct AiRemoveBackground;
+
+impl Default for AiRemoveBackground {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl AiRemoveBackground {
     pub fn new() -> Self {
@@ -258,7 +272,8 @@ impl Node for AiRemoveBackground {
                 },
                 // Default: 851 Labs (community model, requires version hash)
                 _ => AiPredictionRequest {
-                    version: "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc".to_string(),
+                    version: "a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc"
+                        .to_string(),
                     model: None,
                     input,
                 },
@@ -295,6 +310,12 @@ impl Node for AiRemoveBackground {
 }
 
 pub struct AiUpscale;
+
+impl Default for AiUpscale {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl AiUpscale {
     pub fn new() -> Self {
@@ -416,10 +437,7 @@ impl Node for AiUpscale {
                 "Clarity Upscaler" => {
                     let mut input = HashMap::new();
                     input.insert("image".to_string(), image_data_uri.into());
-                    input.insert(
-                        "scale_factor".to_string(),
-                        (scale as f64).into(),
-                    );
+                    input.insert("scale_factor".to_string(), (scale as f64).into());
                     ("philz1337x/clarity-upscaler", input)
                 }
                 // Default: Real-ESRGAN
@@ -444,9 +462,7 @@ impl Node for AiUpscale {
                 .output
                 .first_url()
                 .ok_or_else(|| {
-                    CompositorError::Other(
-                        "Upscale model did not return an output URL".to_string(),
-                    )
+                    CompositorError::Other("Upscale model did not return an output URL".to_string())
                 })?
                 .to_string();
 
@@ -469,6 +485,12 @@ impl Node for AiUpscale {
 }
 
 pub struct AiInpaint;
+impl Default for AiInpaint {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AiInpaint {
     pub fn new() -> Self {
         Self
@@ -588,7 +610,10 @@ impl Node for AiInpaint {
             input.insert("prompt".to_string(), prompt.to_string().into());
             if let Some(img) = ctx.get_optional_input_image("image") {
                 let png_bytes = encode_image_png(img)?;
-                input.insert("image".to_string(), png_bytes_to_data_uri(&png_bytes).into());
+                input.insert(
+                    "image".to_string(),
+                    png_bytes_to_data_uri(&png_bytes).into(),
+                );
             }
             if let Some(mask) = ctx.get_optional_input_image("mask") {
                 let png_bytes = encode_image_png(mask)?;
@@ -661,6 +686,12 @@ fn collect_reference_image_uris(
 }
 
 pub struct AiGenerateImage;
+impl Default for AiGenerateImage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AiGenerateImage {
     pub fn new() -> Self {
         Self
@@ -675,7 +706,9 @@ impl Node for AiGenerateImage {
             id: "ai_generate_image".to_string(),
             display_name: "AI Generate Image".to_string(),
             category: "AI".to_string(),
-            description: "Generate an image from a text prompt using AI, optionally with reference images".to_string(),
+            description:
+                "Generate an image from a text prompt using AI, optionally with reference images"
+                    .to_string(),
             inputs: vec![
                 PortSpec {
                     name: "ref_1".to_string(),

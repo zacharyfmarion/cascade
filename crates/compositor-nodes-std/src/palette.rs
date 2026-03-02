@@ -9,6 +9,12 @@ pub struct ColorPaletteNode {
     loaded_file_data: Mutex<Option<Vec<u8>>>,
 }
 
+impl Default for ColorPaletteNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ColorPaletteNode {
     pub fn new() -> Self {
         Self {
@@ -60,13 +66,13 @@ fn parse_gpl(text: &str) -> Result<Vec<[f64; 4]>, CompositorError> {
         if parts.len() >= 3 {
             let r = parts[0]
                 .parse::<u8>()
-                .map_err(|e| CompositorError::Other(format!("GPL parse error: {}", e)))?;
+                .map_err(|e| CompositorError::Other(format!("GPL parse error: {e}")))?;
             let g = parts[1]
                 .parse::<u8>()
-                .map_err(|e| CompositorError::Other(format!("GPL parse error: {}", e)))?;
+                .map_err(|e| CompositorError::Other(format!("GPL parse error: {e}")))?;
             let b = parts[2]
                 .parse::<u8>()
-                .map_err(|e| CompositorError::Other(format!("GPL parse error: {}", e)))?;
+                .map_err(|e| CompositorError::Other(format!("GPL parse error: {e}")))?;
 
             colors.push([
                 srgb_byte_to_linear(r),

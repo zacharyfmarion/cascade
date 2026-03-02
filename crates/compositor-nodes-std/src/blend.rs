@@ -6,6 +6,12 @@ use std::collections::HashMap;
 
 pub struct Blend;
 
+impl Default for Blend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Blend {
     pub fn new() -> Self {
         Self
@@ -147,8 +153,12 @@ impl Node for Blend {
                     out[3] = out_a;
                 });
 
-            let output =
-                Image::new_with_domain(base.format.clone(), out_dw, data, base.color_space.clone())?;
+            let output = Image::new_with_domain(
+                base.format.clone(),
+                out_dw,
+                data,
+                base.color_space.clone(),
+            )?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -165,6 +175,12 @@ impl Node for Blend {
 }
 
 pub struct AlphaOver;
+
+impl Default for AlphaOver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl AlphaOver {
     pub fn new() -> Self {
@@ -372,6 +388,12 @@ fn soft_light(base: f32, blend: f32) -> f32 {
 
 pub struct Merge;
 
+impl Default for Merge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Merge {
     pub fn new() -> Self {
         Self
@@ -510,8 +532,12 @@ impl Node for Merge {
                         y: out_dw.min.y + 1,
                     },
                 };
-                let output =
-                    Image::new_with_domain(a.format.clone(), empty_dw, data, a.color_space.clone())?;
+                let output = Image::new_with_domain(
+                    a.format.clone(),
+                    empty_dw,
+                    data,
+                    a.color_space.clone(),
+                )?;
                 let mut outputs = HashMap::new();
                 outputs.insert("image".to_string(), Value::Image(output));
                 return Ok(outputs);

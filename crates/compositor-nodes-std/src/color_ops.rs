@@ -10,6 +10,12 @@ const CURVE_LUT_SCALE: f32 = (CURVE_LUT_SIZE - 1) as f32;
 
 pub struct Levels;
 
+impl Default for Levels {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Levels {
     pub fn new() -> Self {
         Self
@@ -130,12 +136,12 @@ impl Node for Levels {
                         move |u, v| {
                             let [r, g, b, a] = (source)(u, v);
                             let mut rgb = [r, g, b];
-                            for c in 0..3 {
-                                let mut value = (rgb[c] - in_black) * inv_input_range;
+                            for channel in rgb.iter_mut() {
+                                let mut value = (*channel - in_black) * inv_input_range;
                                 value = value.clamp(0.0, 1.0);
                                 value = value.powf(inv_gamma);
                                 value = out_black + value * output_range;
-                                rgb[c] = value;
+                                *channel = value;
                             }
                             [rgb[0], rgb[1], rgb[2], a]
                         },
@@ -172,12 +178,12 @@ impl Node for Levels {
                             let mut rgb =
                                 [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                             let a = image.data[idx + 3];
-                            for c in 0..3 {
-                                let mut v = (rgb[c] - in_black) * inv_input_range;
+                            for channel in rgb.iter_mut() {
+                                let mut v = (*channel - in_black) * inv_input_range;
                                 v = v.clamp(0.0, 1.0);
                                 v = v.powf(inv_gamma);
                                 v = out_black + v * output_range;
-                                rgb[c] = v;
+                                *channel = v;
                             }
                             out[0] = rgb[0];
                             out[1] = rgb[1];
@@ -214,10 +220,7 @@ impl Node for Levels {
 }
 
 fn default_curve_points() -> Vec<CurvePoint> {
-    vec![
-        CurvePoint { x: 0.0, y: 0.0 },
-        CurvePoint { x: 1.0, y: 1.0 },
-    ]
+    vec![CurvePoint { x: 0.0, y: 0.0 }, CurvePoint { x: 1.0, y: 1.0 }]
 }
 
 fn is_identity_curve(points: &[CurvePoint]) -> bool {
@@ -241,8 +244,8 @@ fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
     let mut lut = vec![0.0f32; CURVE_LUT_SIZE];
 
     if points.len() <= 1 {
-        for i in 0..CURVE_LUT_SIZE {
-            lut[i] = i as f32 / CURVE_LUT_SCALE;
+        for (i, entry) in lut.iter_mut().enumerate() {
+            *entry = i as f32 / CURVE_LUT_SCALE;
         }
         return lut;
     }
@@ -265,8 +268,8 @@ fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
 
     let n = knots.len();
     if n <= 1 {
-        for i in 0..CURVE_LUT_SIZE {
-            lut[i] = i as f32 / CURVE_LUT_SCALE;
+        for (i, entry) in lut.iter_mut().enumerate() {
+            *entry = i as f32 / CURVE_LUT_SCALE;
         }
         return lut;
     }
@@ -276,10 +279,14 @@ fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
         let (x0, y0) = knots[0];
         let (x1, y1) = knots[1];
         let dx = x1 - x0;
-        let slope = if dx.abs() < 1e-12 { 0.0 } else { (y1 - y0) / dx };
-        for i in 0..CURVE_LUT_SIZE {
+        let slope = if dx.abs() < 1e-12 {
+            0.0
+        } else {
+            (y1 - y0) / dx
+        };
+        for (i, entry) in lut.iter_mut().enumerate() {
             let x = i as f64 / CURVE_LUT_SCALE as f64;
-            lut[i] = (y0 + slope * (x - x0)) as f32;
+            *entry = (y0 + slope * (x - x0)) as f32;
         }
         return lut;
     }
@@ -321,20 +328,20 @@ fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
     }
 
     // Evaluate LUT using cubic Hermite interpolation
-    for i in 0..CURVE_LUT_SIZE {
+    for (i, entry) in lut.iter_mut().enumerate() {
         let x = i as f64 / CURVE_LUT_SCALE as f64;
 
         // Extrapolate left
         if x <= knots[0].0 {
             let slope = tangents[0];
-            lut[i] = (knots[0].1 + slope * (x - knots[0].0)) as f32;
+            *entry = (knots[0].1 + slope * (x - knots[0].0)) as f32;
             continue;
         }
 
         // Extrapolate right
         if x >= knots[n - 1].0 {
             let slope = tangents[n - 1];
-            lut[i] = (knots[n - 1].1 + slope * (x - knots[n - 1].0)) as f32;
+            *entry = (knots[n - 1].1 + slope * (x - knots[n - 1].0)) as f32;
             continue;
         }
 
@@ -346,7 +353,7 @@ fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
 
         let dx = knots[seg + 1].0 - knots[seg].0;
         if dx.abs() < 1e-12 {
-            lut[i] = knots[seg].1 as f32;
+            *entry = knots[seg].1 as f32;
             continue;
         }
 
@@ -365,7 +372,7 @@ fn build_monotone_cubic_lut(points: &[CurvePoint]) -> Vec<f32> {
             + h01 * knots[seg + 1].1
             + h11 * dx * tangents[seg + 1];
 
-        lut[i] = y as f32;
+        *entry = y as f32;
     }
 
     lut
@@ -401,6 +408,12 @@ fn make_curve_param(key: &str, label: &str) -> ParamSpec {
 
 pub struct Curves;
 
+impl Default for Curves {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Curves {
     pub fn new() -> Self {
         Self
@@ -413,7 +426,8 @@ impl Node for Curves {
             id: "curves".to_string(),
             display_name: "Curves".to_string(),
             category: "Color".to_string(),
-            description: "Per-channel curve adjustment with monotone cubic interpolation".to_string(),
+            description: "Per-channel curve adjustment with monotone cubic interpolation"
+                .to_string(),
             inputs: vec![
                 PortSpec {
                     name: "image".to_string(),
@@ -590,6 +604,12 @@ impl Node for Curves {
 }
 
 pub struct ColorBalance;
+
+impl Default for ColorBalance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ColorBalance {
     pub fn new() -> Self {
@@ -844,6 +864,12 @@ impl Node for ColorBalance {
 
 pub struct ChannelShuffle;
 
+impl Default for ChannelShuffle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChannelShuffle {
     pub fn new() -> Self {
         Self
@@ -1028,6 +1054,12 @@ impl Node for ChannelShuffle {
 
 pub struct Threshold;
 
+impl Default for Threshold {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Threshold {
     pub fn new() -> Self {
         Self
@@ -1145,6 +1177,12 @@ impl Node for Threshold {
 
 pub struct Posterize;
 
+impl Default for Posterize {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Posterize {
     pub fn new() -> Self {
         Self
@@ -1204,9 +1242,9 @@ impl Node for Posterize {
                         move |u, v| {
                             let [r, g, b, a] = (source)(u, v);
                             let mut rgb = [r, g, b];
-                            for c in 0..3 {
-                                let value = rgb[c].clamp(0.0, 1.0);
-                                rgb[c] = ((value * max_level) + 0.5).floor() / max_level;
+                            for channel in rgb.iter_mut() {
+                                let value = (*channel).clamp(0.0, 1.0);
+                                *channel = ((value * max_level) + 0.5).floor() / max_level;
                             }
                             [rgb[0], rgb[1], rgb[2], a]
                         },
@@ -1228,9 +1266,9 @@ impl Node for Posterize {
                             let mut rgb =
                                 [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                             let a = image.data[idx + 3];
-                            for c in 0..3 {
-                                let v = rgb[c].clamp(0.0, 1.0);
-                                rgb[c] = ((v * max_level) + 0.5).floor() / max_level;
+                            for channel in rgb.iter_mut() {
+                                let v = (*channel).clamp(0.0, 1.0);
+                                *channel = ((v * max_level) + 0.5).floor() / max_level;
                             }
                             out[0] = rgb[0];
                             out[1] = rgb[1];
@@ -1267,6 +1305,12 @@ impl Node for Posterize {
 }
 
 pub struct Gamma;
+
+impl Default for Gamma {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Gamma {
     pub fn new() -> Self {
@@ -1371,8 +1415,8 @@ impl Node for Gamma {
                                 let mut rgb =
                                     [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                                 let a = image.data[idx + 3];
-                                for c in 0..3 {
-                                    rgb[c] = rgb[c].powf(inv_gamma);
+                                for channel in rgb.iter_mut() {
+                                    *channel = (*channel).powf(inv_gamma);
                                 }
                                 out[0] = rgb[0];
                                 out[1] = rgb[1];
@@ -1410,6 +1454,12 @@ impl Node for Gamma {
 }
 
 pub struct WhiteBalance;
+
+impl Default for WhiteBalance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl WhiteBalance {
     pub fn new() -> Self {
@@ -1555,6 +1605,12 @@ impl Node for WhiteBalance {
 
 pub struct Vibrance;
 
+impl Default for Vibrance {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Vibrance {
     pub fn new() -> Self {
         Self
@@ -1675,6 +1731,12 @@ impl Node for Vibrance {
 }
 
 pub struct GradientMap;
+
+impl Default for GradientMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl GradientMap {
     pub fn new() -> Self {
@@ -1946,6 +2008,12 @@ impl Node for GradientMap {
 
 pub struct ToneMap;
 
+impl Default for ToneMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToneMap {
     pub fn new() -> Self {
         Self
@@ -2115,8 +2183,6 @@ impl Node for ToneMap {
     }
 }
 
-
-
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
@@ -2189,6 +2255,12 @@ fn clamp_channel_source(value: i64) -> usize {
 }
 
 pub struct Grade;
+
+impl Default for Grade {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Grade {
     pub fn new() -> Self {
@@ -2388,9 +2460,21 @@ impl Node for Grade {
                         ctx.get_param_float("gain_b")? as f32,
                     ];
                     let inv_gamma = [
-                        if gamma[0].abs() > f32::EPSILON { 1.0 / gamma[0] } else { 1.0 },
-                        if gamma[1].abs() > f32::EPSILON { 1.0 / gamma[1] } else { 1.0 },
-                        if gamma[2].abs() > f32::EPSILON { 1.0 / gamma[2] } else { 1.0 },
+                        if gamma[0].abs() > f32::EPSILON {
+                            1.0 / gamma[0]
+                        } else {
+                            1.0
+                        },
+                        if gamma[1].abs() > f32::EPSILON {
+                            1.0 / gamma[1]
+                        } else {
+                            1.0
+                        },
+                        if gamma[2].abs() > f32::EPSILON {
+                            1.0 / gamma[2]
+                        } else {
+                            1.0
+                        },
                     ];
                     let pixel_count = image.pixel_count();
                     let mut data = vec![0.0f32; pixel_count * 4];
@@ -2398,11 +2482,8 @@ impl Node for Grade {
                         .enumerate()
                         .for_each(|(i, out)| {
                             let idx = i * 4;
-                            let mut rgb = [
-                                image.data[idx],
-                                image.data[idx + 1],
-                                image.data[idx + 2],
-                            ];
+                            let mut rgb =
+                                [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                             let a = image.data[idx + 3];
                             for c in 0..3 {
                                 let lifted = rgb[c] + lift[c];
@@ -2444,6 +2525,12 @@ impl Node for Grade {
 }
 
 pub struct Clamp;
+
+impl Default for Clamp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Clamp {
     pub fn new() -> Self {

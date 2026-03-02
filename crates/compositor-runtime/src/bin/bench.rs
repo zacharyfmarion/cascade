@@ -730,8 +730,8 @@ fn run() -> Result<(), String> {
 
     let cm = BuiltinColorManagement::new();
     let mut header_printed = false;
-    let mut frame_index = 0u64;
-    for frame in start_frame..=end_frame {
+    for (frame_index, frame) in (start_frame..=end_frame).enumerate() {
+        let frame_index = frame_index as u64;
         let eval_start = Instant::now();
         let eval_result = engine
             .evaluate_node(&export_id, frame)
@@ -740,7 +740,7 @@ fn run() -> Result<(), String> {
 
         let image = match eval_result.value {
             Value::Image(img) => img,
-            _ => return Err(format!("Frame {} output is not an image", frame)),
+            _ => return Err(format!("Frame {frame} output is not an image")),
         };
 
         if !header_printed {
@@ -749,7 +749,7 @@ fn run() -> Result<(), String> {
                 None => "<none>".to_string(),
             };
             eprintln!("compositor-bench v{}", env!("CARGO_PKG_VERSION"));
-            eprintln!("Profile: {}", profile);
+            eprintln!("Profile: {profile}");
             eprintln!(
                 "Input: {} ({} frames, {}x{})",
                 input_dir, total_frames, image.width, image.height
@@ -757,7 +757,7 @@ fn run() -> Result<(), String> {
             eprintln!("Output: {} ({})", output_label, format.label());
             eprintln!("Node: {}", node.label());
             eprintln!("Threads: {} (rayon)", rayon::current_num_threads());
-            eprintln!("");
+            eprintln!();
             eprintln!("Frame   Evaluate(ms)  Convert(ms)  Encode(ms)  Write(ms)  Total(ms)");
             header_printed = true;
         }
@@ -798,14 +798,7 @@ fn run() -> Result<(), String> {
 
         let total_ms = eval_ms + convert_ms + encode_ms + write_ms;
         eprintln!(
-            "{:0>width$}    {:>10.1}   {:>10.1}   {:>10.1}   {:>9.1}   {:>10.1}",
-            frame,
-            eval_ms,
-            convert_ms,
-            encode_ms,
-            write_ms,
-            total_ms,
-            width = padding
+            "{frame:0>padding$}    {eval_ms:>10.1}   {convert_ms:>10.1}   {encode_ms:>10.1}   {write_ms:>9.1}   {total_ms:>10.1}"
         );
 
         let is_warmup = frame_index < warmup;
@@ -816,12 +809,11 @@ fn run() -> Result<(), String> {
             write_times.push(write_ms);
             total_times.push(total_ms);
         }
-        frame_index += 1;
     }
 
-    eprintln!("");
-    eprintln!("WARMUP: {} frames discarded", warmup);
-    eprintln!("");
+    eprintln!();
+    eprintln!("WARMUP: {warmup} frames discarded");
+    eprintln!();
 
     let eval_stats = Stats::from_samples(&eval_times);
     let convert_stats = Stats::from_samples(&convert_times);

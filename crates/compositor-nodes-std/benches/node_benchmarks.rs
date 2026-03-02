@@ -3,7 +3,6 @@ use compositor_core::node::{EvalContext, Node};
 use compositor_core::types::{Format, FrameTime, Image, ParamValue, Value};
 use compositor_nodes_std::*;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use pollster;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 

@@ -6,6 +6,12 @@ use std::collections::HashMap;
 
 pub struct MapRange;
 
+impl Default for MapRange {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MapRange {
     pub fn new() -> Self {
         Self
@@ -110,9 +116,9 @@ impl Node for MapRange {
                     let idx = i * 4;
                     let mut rgb = [image.data[idx], image.data[idx + 1], image.data[idx + 2]];
                     let a = image.data[idx + 3];
-                    for c in 0..3 {
+                    for channel in rgb.iter_mut() {
                         let mapped = if denom.abs() > f32::EPSILON {
-                            (rgb[c] - from_min) / denom * (to_max - to_min) + to_min
+                            (*channel - from_min) / denom * (to_max - to_min) + to_min
                         } else {
                             to_min
                         };
@@ -120,7 +126,7 @@ impl Node for MapRange {
                         if clamp {
                             value = value.clamp(clamp_min, clamp_max);
                         }
-                        rgb[c] = value;
+                        *channel = value;
                     }
                     out[0] = rgb[0];
                     out[1] = rgb[1];
@@ -149,6 +155,12 @@ impl Node for MapRange {
 }
 
 pub struct MathNode;
+
+impl Default for MathNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MathNode {
     pub fn new() -> Self {
@@ -309,6 +321,12 @@ fn luminance_at(image: &Image, idx: usize) -> f32 {
 /// Image-based math node: applies math operations per-pixel on images.
 /// Used internally by builtin groups like Color Range.
 pub struct ImageMath;
+
+impl Default for ImageMath {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ImageMath {
     pub fn new() -> Self {
@@ -508,6 +526,12 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 
 pub struct Dot;
 
+impl Default for Dot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dot {
     pub fn new() -> Self {
         Self
@@ -556,6 +580,12 @@ impl Node for Dot {
 }
 
 pub struct ProjectInfo;
+
+impl Default for ProjectInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ProjectInfo {
     pub fn new() -> Self {
@@ -612,10 +642,7 @@ impl Node for ProjectInfo {
                 "pixel_aspect".to_string(),
                 Value::Float(fmt.pixel_aspect.as_f32()),
             );
-            outputs.insert(
-                "frame".to_string(),
-                Value::Int(ctx.frame_time.frame as i32),
-            );
+            outputs.insert("frame".to_string(), Value::Int(ctx.frame_time.frame as i32));
             Ok(outputs)
         })
     }
@@ -630,6 +657,12 @@ impl Node for ProjectInfo {
 }
 
 pub struct ImageInfo;
+
+impl Default for ImageInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ImageInfo {
     pub fn new() -> Self {

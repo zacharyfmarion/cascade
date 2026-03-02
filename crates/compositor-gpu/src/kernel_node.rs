@@ -345,8 +345,8 @@ impl Node for GpuKernelNode {
                 });
                 pass.set_pipeline(&pipeline.pipeline);
                 pass.set_bind_group(0, &bind_group, &[]);
-                let x = (width + 15) / 16;
-                let y = (height + 15) / 16;
+                let x = width.div_ceil(16);
+                let y = height.div_ceil(16);
                 pass.dispatch_workgroups(x, y, 1);
             }
             self.context.queue.submit(Some(encoder.finish()));
@@ -493,7 +493,13 @@ pub(crate) async fn read_texture_to_image(
         .map_err(|e| CompositorError::Other(format!("Map error: {e:?}")))?;
 
     let data = buffer_slice.get_mapped_range();
-    let byte_len = (unpadded_bytes_per_row as usize).checked_mul(height as usize).ok_or_else(|| CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM })?;
+    let byte_len = (unpadded_bytes_per_row as usize)
+        .checked_mul(height as usize)
+        .ok_or(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        })?;
     let mut output_bytes = vec![0u8; byte_len];
     for row in 0..height as usize {
         let src_start = row * padded_bytes_per_row as usize;
@@ -505,12 +511,19 @@ pub(crate) async fn read_texture_to_image(
     drop(data);
     buffer.unmap();
 
-    let pixel_cap = (width as usize).checked_mul(height as usize).and_then(|p| p.checked_mul(4)).ok_or_else(|| CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM })?;
+    let pixel_cap = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|p| p.checked_mul(4))
+        .ok_or(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        })?;
     let mut out = Vec::with_capacity(pixel_cap);
     for chunk in output_bytes.chunks_exact(2) {
         out.push(f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
     }
-    Ok(Image::from_f32_data(width, height, out)?)
+    Image::from_f32_data(width, height, out)
 }
 
 fn collect_image_inputs<'a>(

@@ -197,15 +197,12 @@ impl GroupNode {
         let mut inputs: Vec<PortSpec> = Vec::new();
         let mut outputs: Vec<PortSpec> = Vec::new();
         for conn in &definition.internal_graph.connections {
-            if conn.from_node == group_input_id
-                && !inputs.iter().any(|p| p.name == conn.from_port)
+            if conn.from_node == group_input_id && !inputs.iter().any(|p| p.name == conn.from_port)
             {
                 let input_spec = Self::derive_input_port(definition, registry, conn)?;
                 inputs.push(input_spec);
             }
-            if conn.to_node == group_output_id
-                && !outputs.iter().any(|p| p.name == conn.to_port)
-            {
+            if conn.to_node == group_output_id && !outputs.iter().any(|p| p.name == conn.to_port) {
                 let output_spec = Self::derive_output_port(definition, registry, conn)?;
                 outputs.push(output_spec);
             }
@@ -372,7 +369,7 @@ impl GroupNode {
             .nodes
             .iter()
             .find(|node| node.id == node_id)
-            .ok_or_else(|| format!("Unknown internal node: {}", node_id))
+            .ok_or_else(|| format!("Unknown internal node: {node_id}"))
     }
 }
 

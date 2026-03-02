@@ -14,7 +14,9 @@ use compositor_core::group::{
     GroupDefinition, InternalConnection, InternalNode, NodePackage, SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
-use compositor_core::types::{ColorStop, Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value, ValueType};
+use compositor_core::types::{
+    ColorStop, Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value, ValueType,
+};
 use compositor_gpu::kernel_node::GpuKernelNode;
 use compositor_gpu::{GpuContext, KernelManifest};
 use compositor_nodes_std::{
@@ -22,13 +24,13 @@ use compositor_nodes_std::{
     GpuScriptDraftNode, GroupNode, LoadImage, LoadImageBatch, LoadImageSequence, SequenceInfo,
     Viewer,
 };
+use compositor_runtime::migrations;
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
-use compositor_runtime::migrations;
 
 #[derive(Debug, Clone)]
 enum RunStatus {
@@ -86,10 +88,20 @@ struct EditValidationError {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
 enum EditErrorKind {
-    TypeMismatch { from_type: String, to_type: String },
-    PortNotFound { node_type: String, port_name: String },
-    NodeNotFound { node_id: String },
-    UnknownNodeType { type_id: String },
+    TypeMismatch {
+        from_type: String,
+        to_type: String,
+    },
+    PortNotFound {
+        node_type: String,
+        port_name: String,
+    },
+    NodeNotFound {
+        node_id: String,
+    },
+    UnknownNodeType {
+        type_id: String,
+    },
     CycleDetected,
 }
 
@@ -111,6 +123,12 @@ pub struct Engine {
     active_display: String,
     active_view: String,
     project_format: Format,
+}
+
+impl Default for Engine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
@@ -164,7 +182,7 @@ impl Engine {
     pub fn is_ai_configured(&self) -> bool {
         self.ai_provider
             .as_ref()
-            .map_or(false, |provider| provider.is_configured())
+            .is_some_and(|provider| provider.is_configured())
     }
 
     pub fn compile_script_node(
@@ -237,7 +255,6 @@ impl Engine {
         serde_wasm_bindgen::to_value(&specs).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-
     pub fn types_compatible(&self, from_type: &str, to_type: &str) -> Result<bool, JsValue> {
         let from: ValueType = serde_json::from_str(&format!("\"{from_type}\""))
             .map_err(|e| JsValue::from_str(&format!("Invalid from type '{from_type}': {e}")))?;
@@ -254,7 +271,6 @@ impl Engine {
         self.group_definitions.insert(spec.id.clone(), arc_def);
         Ok(spec)
     }
-
 
     fn collect_group_deps(
         &self,
@@ -275,10 +291,7 @@ impl Engine {
         }
     }
 
-    pub fn export_group_as_package(
-        &self,
-        group_def_id: &str,
-    ) -> Result<JsValue, JsValue> {
+    pub fn export_group_as_package(&self, group_def_id: &str) -> Result<JsValue, JsValue> {
         let _def = self
             .group_definitions
             .get(group_def_id)
@@ -300,10 +313,7 @@ impl Engine {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
-    pub fn import_custom_nodes(
-        &mut self,
-        package_js: JsValue,
-    ) -> Result<JsValue, JsValue> {
+    pub fn import_custom_nodes(&mut self, package_js: JsValue) -> Result<JsValue, JsValue> {
         let package: NodePackage = serde_wasm_bindgen::from_value(package_js)
             .map_err(|e| JsValue::from_str(&format!("Invalid node package: {e}")))?;
 
@@ -342,7 +352,9 @@ impl Engine {
                 type_id: actual_type_id,
             })
             .map_err(|e| JsValue::from_str(&e.to_string())),
-            None => Err(JsValue::from_str(&format!("Failed to add node of type '{}'", type_id))),
+            None => Err(JsValue::from_str(&format!(
+                "Failed to add node of type '{type_id}'"
+            ))),
         }
     }
 
@@ -601,7 +613,12 @@ impl Engine {
         Ok(())
     }
 
-    pub fn batch_add_image(&mut self, node_id: &str, filename: &str, data: &[u8]) -> Result<(), JsValue> {
+    pub fn batch_add_image(
+        &mut self,
+        node_id: &str,
+        filename: &str,
+        data: &[u8],
+    ) -> Result<(), JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
         let node = self
             .nodes
@@ -650,7 +667,9 @@ impl Engine {
             return Err(JsValue::from_str("No LoadImageBatch node found upstream"));
         }
         if found_batch_nodes.len() > 1 {
-            return Err(JsValue::from_str("Multiple LoadImageBatch nodes found upstream (ambiguous)"));
+            return Err(JsValue::from_str(
+                "Multiple LoadImageBatch nodes found upstream (ambiguous)",
+            ));
         }
 
         let batch_id = found_batch_nodes[0];
@@ -765,11 +784,26 @@ impl Engine {
                     pixels,
                 }
             }
-            Value::Float(v) => ViewerResultWasm::Float { value_type: "float".to_string(), value: v },
-            Value::Int(v) => ViewerResultWasm::Int { value_type: "int".to_string(), value: v },
-            Value::Bool(v) => ViewerResultWasm::Bool { value_type: "bool".to_string(), value: v },
-            Value::Color(c) => ViewerResultWasm::Color { value_type: "color".to_string(), value: c },
-            Value::String(ref s) => ViewerResultWasm::StringVal { value_type: "string".to_string(), value: s.clone() },
+            Value::Float(v) => ViewerResultWasm::Float {
+                value_type: "float".to_string(),
+                value: v,
+            },
+            Value::Int(v) => ViewerResultWasm::Int {
+                value_type: "int".to_string(),
+                value: v,
+            },
+            Value::Bool(v) => ViewerResultWasm::Bool {
+                value_type: "bool".to_string(),
+                value: v,
+            },
+            Value::Color(c) => ViewerResultWasm::Color {
+                value_type: "color".to_string(),
+                value: c,
+            },
+            Value::String(ref s) => ViewerResultWasm::StringVal {
+                value_type: "string".to_string(),
+                value: s.clone(),
+            },
             Value::Field(ref field) => {
                 // Rasterize field at project format resolution for preview
                 let w = self.project_format.width();
@@ -787,8 +821,7 @@ impl Engine {
                         pixel_data[idx + 3] = color[3];
                     }
                 }
-                let field_image = Image::from_f32_data(w, h, pixel_data)
-                    .map_err(to_js_error)?;
+                let field_image = Image::from_f32_data(w, h, pixel_data).map_err(to_js_error)?;
                 let pixels = Viewer::image_to_rgba8_with_display(
                     &field_image,
                     cm,
@@ -802,13 +835,16 @@ impl Engine {
                     pixels,
                 }
             }
-            Value::None => ViewerResultWasm::None { value_type: "none".to_string() },
+            Value::None => ViewerResultWasm::None {
+                value_type: "none".to_string(),
+            },
         };
         serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn get_last_render_timings(&self) -> Result<JsValue, JsValue> {
-        serde_wasm_bindgen::to_value(&self.last_timings).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&self.last_timings)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn get_color_management_info(&self) -> Result<JsValue, JsValue> {
@@ -845,7 +881,11 @@ impl Engine {
         self.evaluator = Evaluator::new();
     }
 
-    pub async fn get_render_dimensions(&mut self, viewer_node_id: &str, frame: u64) -> Result<JsValue, JsValue> {
+    pub async fn get_render_dimensions(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<JsValue, JsValue> {
         let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
         let cm = &self.color_management;
         let eval_result = self
@@ -915,7 +955,9 @@ impl Engine {
         // a plain JS object instead of a JS Map. Required because
         // JSON.stringify (used in saveProject) silently drops Map entries.
         let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
-        graph.serialize(&serializer).map_err(|e| JsValue::from_str(&e.to_string()))
+        graph
+            .serialize(&serializer)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub async fn export_image(&mut self, node_id: &str, frame: u64) -> Result<Vec<u8>, JsValue> {
@@ -1049,7 +1091,10 @@ impl Engine {
         // This borrow is short and synchronous — it completes before any .await,
         // so the RefCell is released before JS can call other engine methods.
         let nid = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
-        let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
+        let state = self
+            .node_exec_state
+            .entry(nid)
+            .or_insert_with(NodeExecutionState::new);
         state.status = RunStatus::Running;
         let instance = self
             .graph
@@ -1106,21 +1151,30 @@ impl Engine {
         match result {
             Ok(outputs) => {
                 self.ai_node_cache.insert(nid, outputs);
-                let cache_key = self.evaluator.compute_node_cache_key(
-                    &self.graph,
-                    &self.registry,
-                    nid,
-                    FrameTime { frame: 0 },
-                    &self.project_format,
-                ).ok();
-                let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
+                let cache_key = self
+                    .evaluator
+                    .compute_node_cache_key(
+                        &self.graph,
+                        &self.registry,
+                        nid,
+                        FrameTime { frame: 0 },
+                        &self.project_format,
+                    )
+                    .ok();
+                let state = self
+                    .node_exec_state
+                    .entry(nid)
+                    .or_insert_with(NodeExecutionState::new);
                 state.status = RunStatus::Complete;
                 state.last_run_cache_key = cache_key;
                 self.graph.mark_dirty(nid);
                 Ok(())
             }
             Err(e) => {
-                let state = self.node_exec_state.entry(nid).or_insert_with(NodeExecutionState::new);
+                let state = self
+                    .node_exec_state
+                    .entry(nid)
+                    .or_insert_with(NodeExecutionState::new);
                 state.status = RunStatus::Error(e.to_string());
                 Err(to_js_error(e))
             }
@@ -1149,7 +1203,9 @@ impl Engine {
                                 FrameTime { frame: 0 },
                                 &self.project_format,
                             ) {
-                                Ok(current_key) => s.last_run_cache_key.as_ref() != Some(&current_key),
+                                Ok(current_key) => {
+                                    s.last_run_cache_key.as_ref() != Some(&current_key)
+                                }
                                 Err(_) => false,
                             }
                         }
@@ -1846,16 +1902,14 @@ impl Engine {
             .iter()
             .find(|node| node.id == from_node)
             .ok_or_else(|| {
-                CompositorError::Other(format!("Internal node not found: {}", from_node))
+                CompositorError::Other(format!("Internal node not found: {from_node}"))
             })?;
         let to_internal = updated
             .internal_graph
             .nodes
             .iter()
             .find(|node| node.id == to_node)
-            .ok_or_else(|| {
-                CompositorError::Other(format!("Internal node not found: {}", to_node))
-            })?;
+            .ok_or_else(|| CompositorError::Other(format!("Internal node not found: {to_node}")))?;
 
         updated
             .internal_graph
@@ -2016,7 +2070,7 @@ impl Engine {
 
     pub fn validate_edits(&self, edits_json: &str) -> Result<JsValue, JsValue> {
         let edits: Vec<EditOp> = serde_json::from_str(edits_json)
-            .map_err(|e| to_js_error(CompositorError::Other(format!("Invalid edits JSON: {}", e))))?;
+            .map_err(|e| to_js_error(CompositorError::Other(format!("Invalid edits JSON: {e}"))))?;
         let errors = self.validate_edits_internal(&edits);
         serde_wasm_bindgen::to_value(&errors)
             .map_err(|e| to_js_error(CompositorError::Other(e.to_string())))
@@ -2038,12 +2092,12 @@ impl Engine {
                             kind: EditErrorKind::UnknownNodeType {
                                 type_id: type_id.clone(),
                             },
-                            message: format!("Unknown node type: {}", type_id),
+                            message: format!("Unknown node type: {type_id}"),
                         });
                         continue;
                     }
                     let id = shadow.add_node(type_id);
-                    temp_ids.insert(format!("__temp_{}", op_id), id);
+                    temp_ids.insert(format!("__temp_{op_id}"), id);
                 }
                 EditOp::RemoveNode { op_id, node_id } => {
                     match self.resolve_edit_node_id(&shadow, &temp_ids, node_id) {
@@ -2054,7 +2108,7 @@ impl Engine {
                                 kind: EditErrorKind::NodeNotFound {
                                     node_id: node_id.clone(),
                                 },
-                                message: format!("Node not found: {}", node_id),
+                                message: format!("Node not found: {node_id}"),
                             });
                         }
                     }
@@ -2070,13 +2124,9 @@ impl Engine {
                     let to_id = self.resolve_edit_node_id(&shadow, &temp_ids, to_node);
                     match (from_id, to_id) {
                         (Some(fid), Some(tid)) => {
-                            if let Err(e) = shadow.connect(
-                                &self.registry,
-                                fid,
-                                from_port,
-                                tid,
-                                to_port,
-                            ) {
+                            if let Err(e) =
+                                shadow.connect(&self.registry, fid, from_port, tid, to_port)
+                            {
                                 errors.push(EditValidationError {
                                     op_id: *op_id,
                                     kind: compositor_error_to_edit_kind(&e),
@@ -2090,7 +2140,7 @@ impl Engine {
                                 kind: EditErrorKind::NodeNotFound {
                                     node_id: from_node.clone(),
                                 },
-                                message: format!("Source node not found: {}", from_node),
+                                message: format!("Source node not found: {from_node}"),
                             });
                         }
                         (_, None) => {
@@ -2099,7 +2149,7 @@ impl Engine {
                                 kind: EditErrorKind::NodeNotFound {
                                     node_id: to_node.clone(),
                                 },
-                                message: format!("Target node not found: {}", to_node),
+                                message: format!("Target node not found: {to_node}"),
                             });
                         }
                     }
@@ -2157,7 +2207,7 @@ fn compositor_error_to_edit_kind(err: &CompositorError) -> EditErrorKind {
             port_name: port_name.clone(),
         },
         CompositorError::NodeNotFound(id) => EditErrorKind::NodeNotFound {
-            node_id: format!("{:?}", id),
+            node_id: format!("{id:?}"),
         },
         CompositorError::CycleDetected => EditErrorKind::CycleDetected,
         _ => EditErrorKind::NodeNotFound {
@@ -2368,61 +2418,51 @@ fn convert_param_value(
                 }
             }
             compositor_core::types::ValueType::Float => {
-                if matches!(spec.ui_hint, compositor_core::types::UiHint::ColorRamp) {
-                    if Array::is_array(&value) {
-                        let stops: Vec<ColorStop> =
-                            serde_wasm_bindgen::from_value(value).map_err(|e| {
-                                JsValue::from_str(&format!(
-                                    "Invalid ColorRamp stops: {}",
-                                    e
-                                ))
-                            })?;
-                        return Ok(ParamValue::ColorRamp(stops));
-                    }
+                if matches!(spec.ui_hint, compositor_core::types::UiHint::ColorRamp)
+                    && Array::is_array(&value)
+                {
+                    let stops: Vec<ColorStop> = serde_wasm_bindgen::from_value(value)
+                        .map_err(|e| JsValue::from_str(&format!("Invalid ColorRamp stops: {e}")))?;
+                    return Ok(ParamValue::ColorRamp(stops));
                 }
-                if matches!(spec.ui_hint, compositor_core::types::UiHint::CurveEditor) {
-                    if Array::is_array(&value) {
-                        let points: Vec<compositor_core::types::CurvePoint> =
-                            serde_wasm_bindgen::from_value(value).map_err(|e| {
-                                JsValue::from_str(&format!(
-                                    "Invalid CurvePoints: {}",
-                                    e
-                                ))
-                            })?;
-                        return Ok(ParamValue::CurvePoints(points));
-                    }
+                if matches!(spec.ui_hint, compositor_core::types::UiHint::CurveEditor)
+                    && Array::is_array(&value)
+                {
+                    let points: Vec<compositor_core::types::CurvePoint> =
+                        serde_wasm_bindgen::from_value(value)
+                            .map_err(|e| JsValue::from_str(&format!("Invalid CurvePoints: {e}")))?;
+                    return Ok(ParamValue::CurvePoints(points));
                 }
                 if let Some(v) = value.as_f64() {
                     return Ok(ParamValue::Float(v));
                 }
             }
             compositor_core::types::ValueType::Color => {
-                if matches!(spec.ui_hint, compositor_core::types::UiHint::ColorPalette) {
-                    if Array::is_array(&value) {
-                        let outer = Array::from(&value);
-                        let mut colors = Vec::with_capacity(outer.length() as usize);
-                        for i in 0..outer.length() {
-                            let inner = Array::from(&outer.get(i));
-                            if inner.length() == 4 {
-                                let mut c = [0.0f64; 4];
-                                for j in 0..4 {
-                                    c[j as usize] =
-                                        inner.get(j as u32).as_f64().ok_or_else(|| {
-                                            JsValue::from_str("Invalid palette color component")
-                                        })?;
-                                }
-                                colors.push(c);
+                if matches!(spec.ui_hint, compositor_core::types::UiHint::ColorPalette)
+                    && Array::is_array(&value)
+                {
+                    let outer = Array::from(&value);
+                    let mut colors = Vec::with_capacity(outer.length() as usize);
+                    for i in 0..outer.length() {
+                        let inner = Array::from(&outer.get(i));
+                        if inner.length() == 4 {
+                            let mut c = [0.0f64; 4];
+                            for j in 0..4 {
+                                c[j as usize] = inner.get(j as u32).as_f64().ok_or_else(|| {
+                                    JsValue::from_str("Invalid palette color component")
+                                })?;
                             }
+                            colors.push(c);
                         }
-                        return Ok(ParamValue::ColorPalette(colors));
                     }
+                    return Ok(ParamValue::ColorPalette(colors));
                 }
                 if Array::is_array(&value) {
                     let array = Array::from(&value);
                     if array.length() == 4 {
                         let mut out = [0.0f64; 4];
-                        for i in 0..4 {
-                            out[i] = array
+                        for (i, value) in out.iter_mut().enumerate() {
+                            *value = array
                                 .get(i as u32)
                                 .as_f64()
                                 .ok_or_else(|| JsValue::from_str("Invalid color component"))?;
@@ -2448,8 +2488,8 @@ fn convert_param_value(
         let array = Array::from(&value);
         if array.length() == 4 {
             let mut out = [0.0f64; 4];
-            for i in 0..4 {
-                out[i] = array
+            for (i, value) in out.iter_mut().enumerate() {
+                *value = array
                     .get(i as u32)
                     .as_f64()
                     .ok_or_else(|| JsValue::from_str("Invalid color component"))?;
@@ -2476,7 +2516,12 @@ struct EngineErrorDto {
 
 impl EngineErrorDto {
     fn from_compositor_error(err: &CompositorError) -> Self {
-        if let CompositorError::EvalFailed { node_id, node_type, source } = err {
+        if let CompositorError::EvalFailed {
+            node_id,
+            node_type,
+            source,
+        } = err
+        {
             let inner = Self::from_compositor_error(source);
             return Self {
                 code: "EVAL_FAILED".to_string(),
@@ -2527,10 +2572,10 @@ impl EngineErrorDto {
 pub fn migrate_document_json(json_str: &str) -> Result<String, JsValue> {
     let mut doc: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| JsValue::from_str(&format!("Invalid JSON: {e}")))?;
-    
+
     migrations::migrate_document(&mut doc)
         .map_err(|e| JsValue::from_str(&format!("Migration failed: {e}")))?;
-    
+
     serde_json::to_string(&doc)
         .map_err(|e| JsValue::from_str(&format!("Serialization failed: {e}")))
 }
@@ -2542,14 +2587,16 @@ pub fn needs_migration_json(json_str: &str) -> bool {
         .unwrap_or(true)
 }
 
-
 fn serialize_engine_error(dto: &EngineErrorDto) -> JsValue {
-    serde_wasm_bindgen::to_value(dto)
-        .unwrap_or_else(|_| JsValue::from_str(&dto.message))
+    serde_wasm_bindgen::to_value(dto).unwrap_or_else(|_| JsValue::from_str(&dto.message))
 }
 fn to_js_error(err: CompositorError) -> JsValue {
     serialize_engine_error(&EngineErrorDto::from_compositor_error(&err))
 }
 fn to_js_error_str(err: String) -> JsValue {
-    serialize_engine_error(&EngineErrorDto::from_string(&err, "RUNTIME_ERROR", "runtime"))
+    serialize_engine_error(&EngineErrorDto::from_string(
+        &err,
+        "RUNTIME_ERROR",
+        "runtime",
+    ))
 }

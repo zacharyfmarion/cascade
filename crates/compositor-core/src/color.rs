@@ -90,8 +90,7 @@ impl ColorManagement for BuiltinColorManagement {
             (ColorSpaceId::LINEAR_SRGB, ColorSpaceId::SRGB) => Ok(Box::new(LinearToSrgbProcessor)),
             (a, b) if a == b => Ok(Box::new(NoopProcessor)),
             _ => Err(CompositorError::Other(format!(
-                "Builtin color management cannot convert from '{}' to '{}'",
-                from, to
+                "Builtin color management cannot convert from '{from}' to '{to}'"
             ))),
         }
     }
@@ -117,12 +116,12 @@ struct SrgbToLinearProcessor;
 impl ColorProcessor for SrgbToLinearProcessor {
     fn apply(&self, pixels: &mut [f32]) {
         pixels.par_chunks_exact_mut(4).for_each(|rgba| {
-            for c in 0..3 {
-                let v = rgba[c].clamp(0.0, 1.0);
-                rgba[c] = if v <= 0.04045 {
-                    v / 12.92
+            for v in rgba.iter_mut().take(3) {
+                let clamped = v.clamp(0.0, 1.0);
+                *v = if clamped <= 0.04045 {
+                    clamped / 12.92
                 } else {
-                    ((v + 0.055) / 1.055).powf(2.4)
+                    ((clamped + 0.055) / 1.055).powf(2.4)
                 };
             }
         });
@@ -135,10 +134,10 @@ impl ColorProcessor for LinearToSrgbProcessor {
     fn apply(&self, pixels: &mut [f32]) {
         let lut = linear_to_srgb_lut();
         pixels.par_chunks_exact_mut(4).for_each(|rgba| {
-            for c in 0..3 {
-                let linear = rgba[c].clamp(0.0, 1.0);
+            for v in rgba.iter_mut().take(3) {
+                let linear = v.clamp(0.0, 1.0);
                 let lut_idx = (linear * 4095.0) as usize;
-                rgba[c] = lut[lut_idx.min(4095)];
+                *v = lut[lut_idx.min(4095)];
             }
         });
     }
@@ -148,14 +147,14 @@ fn linear_to_srgb_lut() -> &'static [f32; 4096] {
     static LUT: OnceLock<[f32; 4096]> = OnceLock::new();
     LUT.get_or_init(|| {
         let mut table = [0.0f32; 4096];
-        for i in 0..4096 {
+        for (i, entry) in table.iter_mut().enumerate() {
             let linear = i as f32 / 4095.0;
             let srgb = if linear <= 0.0031308 {
                 linear * 12.92
             } else {
                 1.055 * linear.powf(1.0 / 2.4) - 0.055
             };
-            table[i] = srgb;
+            *entry = srgb;
         }
         table
     })

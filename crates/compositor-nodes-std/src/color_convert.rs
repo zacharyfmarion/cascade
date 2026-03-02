@@ -7,6 +7,12 @@ use std::collections::HashMap;
 
 pub struct ColorConvert;
 
+impl Default for ColorConvert {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ColorConvert {
     pub fn new() -> Self {
         Self

@@ -7,6 +7,12 @@ use std::collections::HashMap;
 
 pub struct Premultiply;
 
+impl Default for Premultiply {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Premultiply {
     pub fn new() -> Self {
         Self
@@ -86,6 +92,12 @@ impl Node for Premultiply {
 
 pub struct Unpremultiply;
 
+impl Default for Unpremultiply {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Unpremultiply {
     pub fn new() -> Self {
         Self
@@ -161,6 +173,12 @@ impl Node for Unpremultiply {
 }
 
 pub struct SetAlpha;
+
+impl Default for SetAlpha {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl SetAlpha {
     pub fn new() -> Self {
@@ -255,6 +273,12 @@ impl Node for SetAlpha {
 
 pub struct ExtractChannel;
 
+impl Default for ExtractChannel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExtractChannel {
     pub fn new() -> Self {
         Self
@@ -338,6 +362,12 @@ impl Node for ExtractChannel {
 }
 
 pub struct ChromaKey;
+
+impl Default for ChromaKey {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ChromaKey {
     pub fn new() -> Self {
@@ -480,6 +510,12 @@ impl Node for ChromaKey {
 }
 
 pub struct Despill;
+
+impl Default for Despill {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Despill {
     pub fn new() -> Self {
@@ -640,6 +676,12 @@ fn clamp_channel(value: i64) -> usize {
 
 pub struct SeparateRgba;
 
+impl Default for SeparateRgba {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SeparateRgba {
     pub fn new() -> Self {
         Self
@@ -746,6 +788,12 @@ impl Node for SeparateRgba {
 }
 
 pub struct CombineRgba;
+
+impl Default for CombineRgba {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CombineRgba {
     pub fn new() -> Self {
@@ -860,6 +908,12 @@ impl Node for CombineRgba {
 }
 
 pub struct CopyChannels;
+
+impl Default for CopyChannels {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl CopyChannels {
     pub fn new() -> Self {
@@ -1023,12 +1077,8 @@ impl Node for CopyChannels {
                     out_px[3] = pick(a_src);
                 });
 
-            let output = Image::new_with_domain(
-                a.format.clone(),
-                out_dw,
-                data,
-                a.color_space.clone(),
-            )?;
+            let output =
+                Image::new_with_domain(a.format.clone(), out_dw, data, a.color_space.clone())?;
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(output));
             Ok(outputs)
@@ -1045,6 +1095,12 @@ impl Node for CopyChannels {
 }
 
 pub struct LuminanceKey;
+
+impl Default for LuminanceKey {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LuminanceKey {
     pub fn new() -> Self {
@@ -1170,7 +1226,11 @@ impl Node for LuminanceKey {
                     };
 
                     let mut key = if range <= f32::EPSILON {
-                        if sample >= low { 1.0 } else { 0.0 }
+                        if sample >= low {
+                            1.0
+                        } else {
+                            0.0
+                        }
                     } else {
                         ((sample - low) / range).clamp(0.0, 1.0)
                     };
@@ -1220,6 +1280,12 @@ impl Node for LuminanceKey {
 
 pub struct DifferenceMatte;
 
+impl Default for DifferenceMatte {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DifferenceMatte {
     pub fn new() -> Self {
         Self
@@ -1232,7 +1298,8 @@ impl Node for DifferenceMatte {
             id: "difference_matte".to_string(),
             display_name: "Difference Matte".to_string(),
             category: "Matte".to_string(),
-            description: "Generate matte from difference between footage and clean plate".to_string(),
+            description: "Generate matte from difference between footage and clean plate"
+                .to_string(),
             inputs: vec![
                 PortSpec {
                     name: "image".to_string(),
@@ -1372,6 +1439,12 @@ impl Node for DifferenceMatte {
 
 pub struct EdgeBlur;
 
+impl Default for EdgeBlur {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EdgeBlur {
     pub fn new() -> Self {
         Self
@@ -1494,15 +1567,13 @@ impl Node for EdgeBlur {
             }
 
             let mut out = vec![0.0f32; w * h * 4];
-            out.par_chunks_exact_mut(4)
-                .enumerate()
-                .for_each(|(i, px)| {
-                    let idx = i * 4;
-                    let mix = edge_mask[i];
-                    for c in 0..4 {
-                        px[c] = src[idx + c] * (1.0 - mix) + blurred[idx + c] * mix;
-                    }
-                });
+            out.par_chunks_exact_mut(4).enumerate().for_each(|(i, px)| {
+                let idx = i * 4;
+                let mix = edge_mask[i];
+                for c in 0..4 {
+                    px[c] = src[idx + c] * (1.0 - mix) + blurred[idx + c] * mix;
+                }
+            });
 
             let output = Image::new_with_domain(
                 image.format.clone(),
@@ -1526,6 +1597,12 @@ impl Node for EdgeBlur {
 }
 
 pub struct MatteExpand;
+
+impl Default for MatteExpand {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MatteExpand {
     pub fn new() -> Self {
@@ -1586,16 +1663,24 @@ impl Node for MatteExpand {
                 for y in 0..h {
                     for x in 0..w {
                         let mut max_a = alpha[y * w + x];
-                        if x > 0 { max_a = max_a.max(alpha[y * w + x - 1]); }
-                        if x + 1 < w { max_a = max_a.max(alpha[y * w + x + 1]); }
+                        if x > 0 {
+                            max_a = max_a.max(alpha[y * w + x - 1]);
+                        }
+                        if x + 1 < w {
+                            max_a = max_a.max(alpha[y * w + x + 1]);
+                        }
                         tmp[y * w + x] = max_a;
                     }
                 }
                 for y in 0..h {
                     for x in 0..w {
                         let mut max_a = tmp[y * w + x];
-                        if y > 0 { max_a = max_a.max(tmp[(y - 1) * w + x]); }
-                        if y + 1 < h { max_a = max_a.max(tmp[(y + 1) * w + x]); }
+                        if y > 0 {
+                            max_a = max_a.max(tmp[(y - 1) * w + x]);
+                        }
+                        if y + 1 < h {
+                            max_a = max_a.max(tmp[(y + 1) * w + x]);
+                        }
                         alpha[y * w + x] = max_a;
                     }
                 }
@@ -1634,6 +1719,12 @@ impl Node for MatteExpand {
 }
 
 pub struct MatteShrink;
+
+impl Default for MatteShrink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MatteShrink {
     pub fn new() -> Self {
@@ -1694,16 +1785,24 @@ impl Node for MatteShrink {
                 for y in 0..h {
                     for x in 0..w {
                         let mut min_a = alpha[y * w + x];
-                        if x > 0 { min_a = min_a.min(alpha[y * w + x - 1]); }
-                        if x + 1 < w { min_a = min_a.min(alpha[y * w + x + 1]); }
+                        if x > 0 {
+                            min_a = min_a.min(alpha[y * w + x - 1]);
+                        }
+                        if x + 1 < w {
+                            min_a = min_a.min(alpha[y * w + x + 1]);
+                        }
                         tmp[y * w + x] = min_a;
                     }
                 }
                 for y in 0..h {
                     for x in 0..w {
                         let mut min_a = tmp[y * w + x];
-                        if y > 0 { min_a = min_a.min(tmp[(y - 1) * w + x]); }
-                        if y + 1 < h { min_a = min_a.min(tmp[(y + 1) * w + x]); }
+                        if y > 0 {
+                            min_a = min_a.min(tmp[(y - 1) * w + x]);
+                        }
+                        if y + 1 < h {
+                            min_a = min_a.min(tmp[(y + 1) * w + x]);
+                        }
                         alpha[y * w + x] = min_a;
                     }
                 }

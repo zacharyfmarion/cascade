@@ -12,7 +12,8 @@ use compositor_core::error::CompositorError;
 use compositor_core::eval::Evaluator;
 use compositor_core::graph::{Graph, NodeId};
 use compositor_core::group::{
-    CustomNodeInfo, GroupDefinition, InternalConnection, InternalNode, NodePackage, SerializableInternalGraph,
+    CustomNodeInfo, GroupDefinition, InternalConnection, InternalNode, NodePackage,
+    SerializableInternalGraph,
 };
 use compositor_core::node::{Node, NodeRegistry};
 pub use compositor_core::types::{Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value};
@@ -21,8 +22,7 @@ use compositor_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use compositor_nodes_std::input::LoadImage as InputLoadImage;
 pub use compositor_nodes_std::SequenceInfo;
 use compositor_nodes_std::{
-    register_standard_nodes, GpuScriptDraftNode, GroupNode,
-    LoadImageSequence, Viewer,
+    register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -204,10 +204,7 @@ impl Engine {
         if let Some(kernels_dir) = find_kernels_dir() {
             let path = kernels_dir.to_string_lossy();
             if let Err(err) = engine.load_kernels_from_dir(&path) {
-                eprintln!(
-                    "[compositor-runtime] Failed to load kernels from {}: {err}",
-                    path
-                );
+                eprintln!("[compositor-runtime] Failed to load kernels from {path}: {err}");
             }
         }
         engine
@@ -312,7 +309,7 @@ impl Engine {
     pub fn is_ai_configured(&self) -> bool {
         self.ai_provider
             .as_ref()
-            .map_or(false, |provider| provider.is_configured())
+            .is_some_and(|provider| provider.is_configured())
     }
 
     pub fn register_gpu_kernel(&mut self, manifest_json: &str) -> Result<NodeSpec, String> {
@@ -346,7 +343,6 @@ impl Engine {
         Ok(spec)
     }
 
-
     fn collect_group_deps(
         &self,
         group_def_id: &str,
@@ -366,10 +362,7 @@ impl Engine {
         }
     }
 
-    pub fn export_group_as_package(
-        &self,
-        group_def_id: &str,
-    ) -> Result<String, CompositorError> {
+    pub fn export_group_as_package(&self, group_def_id: &str) -> Result<String, CompositorError> {
         if !self.group_definitions.contains_key(group_def_id) {
             return Err(CompositorError::Other(format!(
                 "Group definition not found: {group_def_id}"
@@ -390,10 +383,7 @@ impl Engine {
             .map_err(|e| CompositorError::Other(format!("Serialization failed: {e}")))
     }
 
-    pub fn import_custom_nodes(
-        &mut self,
-        json: &str,
-    ) -> Result<Vec<NodeSpec>, CompositorError> {
+    pub fn import_custom_nodes(&mut self, json: &str) -> Result<Vec<NodeSpec>, CompositorError> {
         let package: NodePackage = serde_json::from_str(json)
             .map_err(|e| CompositorError::Other(format!("Invalid node package: {e}")))?;
 
@@ -420,10 +410,7 @@ impl Engine {
         Ok(imported_specs)
     }
 
-    pub fn load_custom_nodes_from_dir(
-        &mut self,
-        dir: &Path,
-    ) -> Result<usize, CompositorError> {
+    pub fn load_custom_nodes_from_dir(&mut self, dir: &Path) -> Result<usize, CompositorError> {
         if !dir.exists() {
             return Ok(0);
         }
@@ -485,10 +472,7 @@ impl Engine {
             .collect()
     }
 
-    pub fn remove_custom_node(
-        &mut self,
-        group_def_id: &str,
-    ) -> Result<(), CompositorError> {
+    pub fn remove_custom_node(&mut self, group_def_id: &str) -> Result<(), CompositorError> {
         if self.group_definitions.remove(group_def_id).is_none() {
             return Err(CompositorError::Other(format!(
                 "Custom node not found: {group_def_id}"
@@ -1132,16 +1116,14 @@ impl Engine {
             .iter()
             .find(|node| node.id == from_node)
             .ok_or_else(|| {
-                CompositorError::Other(format!("Internal node not found: {}", from_node))
+                CompositorError::Other(format!("Internal node not found: {from_node}"))
             })?;
         let to_internal = updated_def
             .internal_graph
             .nodes
             .iter()
             .find(|node| node.id == to_node)
-            .ok_or_else(|| {
-                CompositorError::Other(format!("Internal node not found: {}", to_node))
-            })?;
+            .ok_or_else(|| CompositorError::Other(format!("Internal node not found: {to_node}")))?;
 
         updated_def
             .internal_graph
@@ -1465,7 +1447,7 @@ impl Engine {
         let node_id = self.graph.add_node(&actual_type_id);
         self.graph.set_position(node_id, x, y);
         let node = self.registry.create(&actual_type_id).ok_or_else(|| {
-            CompositorError::Other(format!("Unknown node type: {}", actual_type_id))
+            CompositorError::Other(format!("Unknown node type: {actual_type_id}"))
         })?;
         self.nodes.insert(node_id, node);
         let uuid = self.register_uuid_for_node(node_id);
@@ -1609,8 +1591,7 @@ impl Engine {
             .ok_or_else(|| CompositorError::Other("Node is not LoadVideo".to_string()))?;
 
         let decoder = Arc::new(
-            compositor_video::VideoDecoder::new(path)
-                .map_err(|e| CompositorError::Other(e))?,
+            compositor_video::VideoDecoder::new(path).map_err(|e| CompositorError::Other(e))?,
         );
         let info = decoder.info().clone();
 
@@ -1799,7 +1780,7 @@ impl Engine {
         let mut merged_timings = HashMap::new();
         let cm = self.color_management.as_ref();
         for (vid, vid_str) in viewer_ids {
-            match pollster::block_on(self.evaluator.evaluate(
+            if let Ok(eval_result) = pollster::block_on(self.evaluator.evaluate(
                 &mut self.graph,
                 &self.registry,
                 &self.nodes,
@@ -1811,33 +1792,30 @@ impl Engine {
                 &self.project_format,
                 &HashMap::new(),
             )) {
-                Ok(eval_result) => {
-                    for (nid, duration) in eval_result.node_timings {
-                        merged_timings.insert(
-                            format_node_id(&self.graph, nid),
-                            duration.as_secs_f64() * 1000.0,
-                        );
-                    }
-                    if let Value::Image(image) = eval_result.value {
-                        let width = image.width;
-                        let height = image.height;
-                        let pixels = Viewer::image_to_rgba8_with_display(
-                            &image,
-                            cm,
-                            &self.active_display,
-                            &self.active_view,
-                        );
-                        results.push((
-                            vid_str,
-                            RenderResult {
-                                width,
-                                height,
-                                pixels,
-                            },
-                        ));
-                    }
+                for (nid, duration) in eval_result.node_timings {
+                    merged_timings.insert(
+                        format_node_id(&self.graph, nid),
+                        duration.as_secs_f64() * 1000.0,
+                    );
                 }
-                _ => {}
+                if let Value::Image(image) = eval_result.value {
+                    let width = image.width;
+                    let height = image.height;
+                    let pixels = Viewer::image_to_rgba8_with_display(
+                        &image,
+                        cm,
+                        &self.active_display,
+                        &self.active_view,
+                    );
+                    results.push((
+                        vid_str,
+                        RenderResult {
+                            width,
+                            height,
+                            pixels,
+                        },
+                    ));
+                }
             }
         }
         self.last_timings = merged_timings;
@@ -1852,7 +1830,7 @@ impl Engine {
         if self
             .active_job
             .as_ref()
-            .map_or(false, |j| !j.completed.load(Ordering::Acquire))
+            .is_some_and(|j| !j.completed.load(Ordering::Acquire))
         {
             return Err(CompositorError::Other(
                 "A render job is already running".to_string(),
@@ -1879,8 +1857,7 @@ impl Engine {
         let output_path = std::path::Path::new(&output_dir);
         if !output_path.is_dir() {
             return Err(CompositorError::Other(format!(
-                "Output directory does not exist: {}",
-                output_dir
+                "Output directory does not exist: {output_dir}"
             )));
         }
 
@@ -1958,8 +1935,7 @@ impl Engine {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {
                                 let rgba8 = Viewer::image_to_rgba8(&image, cm);
-                                let filename =
-                                    format!("{:0>width$}.{}", frame, ext, width = padding);
+                                let filename = format!("{frame:0>padding$}.{ext}");
                                 let path = std::path::Path::new(&output_dir).join(&filename);
 
                                 let encode_result = if format == 1 {
@@ -1993,19 +1969,18 @@ impl Engine {
                                 if let Err(e) = encode_result {
                                     let mut err_guard = job.error.lock().unwrap();
                                     *err_guard =
-                                        Some(format!("Frame {} encode/write failed: {}", frame, e));
+                                        Some(format!("Frame {frame} encode/write failed: {e}"));
                                     return;
                                 }
                             } else {
                                 let mut err_guard = job.error.lock().unwrap();
-                                *err_guard =
-                                    Some(format!("Frame {} output is not an image", frame));
+                                *err_guard = Some(format!("Frame {frame} output is not an image"));
                                 return;
                             }
                         }
                         Err(e) => {
                             let mut err_guard = job.error.lock().unwrap();
-                            *err_guard = Some(format!("Frame {} evaluation failed: {}", frame, e));
+                            *err_guard = Some(format!("Frame {frame} evaluation failed: {e}"));
                             return;
                         }
                     }
@@ -2017,9 +1992,9 @@ impl Engine {
             // Handle panics — convert to error message
             if let Err(panic_info) = result {
                 let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
-                    format!("Render thread panicked: {}", s)
+                    format!("Render thread panicked: {s}")
                 } else if let Some(s) = panic_info.downcast_ref::<&str>() {
-                    format!("Render thread panicked: {}", s)
+                    format!("Render thread panicked: {s}")
                 } else {
                     "Render thread panicked with unknown error".to_string()
                 };
@@ -2456,7 +2431,7 @@ fn parse_node_id_from_map(
     }
     let value = id
         .parse::<u64>()
-        .map_err(|_| CompositorError::Other(format!("Unknown node id: {}", id)))?;
+        .map_err(|_| CompositorError::Other(format!("Unknown node id: {id}")))?;
     Ok(NodeId::from(slotmap::KeyData::from_ffi(value)))
 }
 
@@ -2723,8 +2698,7 @@ return pixelated;
         assert_eq!(p00.3, 255, "Alpha should be preserved");
 
         println!(
-            "Pixelate E2E test PASSED — block (0,0): {:?}, block (4,0): {:?}, block (0,4): {:?}",
-            p00, p40, p04
+            "Pixelate E2E test PASSED — block (0,0): {p00:?}, block (4,0): {p40:?}, block (0,4): {p04:?}"
         );
     }
 
@@ -2823,7 +2797,7 @@ return pixelated;
         let result_palette = engine.render_viewer(&viewer_id, 1).expect("render");
         assert_eq!(result_palette.width, 8);
         assert_eq!(result_palette.height, 8);
-        let idx = (0 * 8 + 0) * 4;
+        let idx = 0;
         let p = (
             result_palette.pixels[idx],
             result_palette.pixels[idx + 1],
@@ -2837,8 +2811,7 @@ return pixelated;
             || (p.0 > 200 && p.1 > 200 && p.2 > 200);
         assert!(
             is_palette_color,
-            "Output pixel should be snapped to a palette color, got {:?}",
-            p
+            "Output pixel should be snapped to a palette color, got {p:?}"
         );
         println!("Pixelate GROUP E2E test PASSED");
     }

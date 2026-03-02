@@ -7,6 +7,12 @@ use std::collections::HashMap;
 
 pub struct Viewer;
 
+impl Default for Viewer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Viewer {
     pub fn new() -> Self {
         Self
@@ -85,6 +91,12 @@ impl Node for Viewer {
 }
 
 pub struct ExportImage;
+
+impl Default for ExportImage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ExportImage {
     pub fn new() -> Self {
@@ -168,6 +180,12 @@ impl Node for ExportImage {
 }
 
 pub struct ExportVideo;
+
+impl Default for ExportVideo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ExportVideo {
     pub fn new() -> Self {
@@ -299,6 +317,12 @@ impl Node for ExportVideo {
 
 pub struct ExportImageSequence;
 
+impl Default for ExportImageSequence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExportImageSequence {
     pub fn new() -> Self {
         Self
@@ -414,6 +438,12 @@ impl Node for ExportImageSequence {
 }
 
 pub struct ExportImageBatch;
+
+impl Default for ExportImageBatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ExportImageBatch {
     pub fn new() -> Self {

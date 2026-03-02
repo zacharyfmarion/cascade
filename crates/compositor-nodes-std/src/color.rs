@@ -7,6 +7,12 @@ use std::collections::HashMap;
 
 pub struct BrightnessContrast;
 
+impl Default for BrightnessContrast {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BrightnessContrast {
     pub fn new() -> Self {
         Self
@@ -79,10 +85,10 @@ impl Node for BrightnessContrast {
                         move |u, v| {
                             let [r, g, b, a] = (source)(u, v);
                             let mut out = [r, g, b, a];
-                            for c in 0..3 {
-                                let mut v = (out[c] - 0.5) * (1.0 + contrast) + 0.5;
+                            for value in out.iter_mut().take(3) {
+                                let mut v = (*value - 0.5) * (1.0 + contrast) + 0.5;
                                 v += brightness;
-                                out[c] = v.clamp(0.0, 1.0);
+                                *value = v.clamp(0.0, 1.0);
                             }
                             out
                         },
@@ -107,10 +113,10 @@ impl Node for BrightnessContrast {
                                 image.data[idx + 2],
                                 image.data[idx + 3],
                             ];
-                            for c in 0..3 {
-                                let mut v = (rgba[c] - 0.5) * (1.0 + contrast) + 0.5;
+                            for value in rgba.iter_mut().take(3) {
+                                let mut v = (*value - 0.5) * (1.0 + contrast) + 0.5;
                                 v += brightness;
-                                rgba[c] = v.clamp(0.0, 1.0);
+                                *value = v.clamp(0.0, 1.0);
                             }
                             out[0] = rgba[0];
                             out[1] = rgba[1];
@@ -147,6 +153,12 @@ impl Node for BrightnessContrast {
 }
 
 pub struct HueSaturation;
+
+impl Default for HueSaturation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl HueSaturation {
     pub fn new() -> Self {
@@ -305,6 +317,12 @@ impl Node for HueSaturation {
 
 pub struct SeparateHsva;
 
+impl Default for SeparateHsva {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SeparateHsva {
     pub fn new() -> Self {
         Self
@@ -428,6 +446,12 @@ impl Node for SeparateHsva {
 
 pub struct CombineHsva;
 
+impl Default for CombineHsva {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CombineHsva {
     pub fn new() -> Self {
         Self
@@ -522,6 +546,12 @@ impl Node for CombineHsva {
 }
 
 pub struct Invert;
+
+impl Default for Invert {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Invert {
     pub fn new() -> Self {
@@ -729,6 +759,12 @@ fn luminance_at(image: &Image, idx: usize) -> f32 {
 
 pub struct ColorRampNode;
 
+impl Default for ColorRampNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ColorRampNode {
     pub fn new() -> Self {
         Self
@@ -917,10 +953,10 @@ fn evaluate_color_ramp(stops: &[ColorStop], t: f32, interpolation: i64) -> [f32;
                 0.0
             };
             let mut out = [0.0f32; 4];
-            for c in 0..4 {
+            for (c, value) in out.iter_mut().enumerate() {
                 let left_val = left.color[c] as f32;
                 let right_val = right.color[c] as f32;
-                out[c] = left_val * (1.0 - t_norm) + right_val * t_norm;
+                *value = left_val * (1.0 - t_norm) + right_val * t_norm;
             }
             return out;
         }

@@ -865,7 +865,9 @@ mod tests {
         let b = graph.add_node("process");
         let viewer = graph.add_node("viewer");
         graph.connect(&registry, a, "output", b, "input").unwrap();
-        graph.connect(&registry, b, "output", viewer, "input").unwrap();
+        graph
+            .connect(&registry, b, "output", viewer, "input")
+            .unwrap();
 
         let affected = graph.get_affected_viewers(a);
         assert_eq!(affected, vec![viewer]);
@@ -887,7 +889,9 @@ mod tests {
         graph.connect(&registry, a, "output", c, "input").unwrap();
         graph.connect(&registry, b, "output", d, "input").unwrap();
         // c -> viewer directly, d also has output but not connected to viewer
-        graph.connect(&registry, d, "output", viewer, "input").unwrap();
+        graph
+            .connect(&registry, d, "output", viewer, "input")
+            .unwrap();
 
         let affected = graph.get_affected_viewers(a);
         assert_eq!(affected, vec![viewer]);
@@ -931,8 +935,12 @@ mod tests {
         let a = graph.add_node("process");
         let viewer1 = graph.add_node("viewer");
         let viewer2 = graph.add_node("viewer");
-        graph.connect(&registry, a, "output", viewer1, "input").unwrap();
-        graph.connect(&registry, a, "output", viewer2, "input").unwrap();
+        graph
+            .connect(&registry, a, "output", viewer1, "input")
+            .unwrap();
+        graph
+            .connect(&registry, a, "output", viewer2, "input")
+            .unwrap();
 
         let mut affected = graph.get_affected_viewers(a);
         affected.sort_by_key(|id| id.0);
@@ -948,11 +956,15 @@ mod tests {
         // Branch 1: a -> viewer1
         let a = graph.add_node("process");
         let viewer1 = graph.add_node("viewer");
-        graph.connect(&registry, a, "output", viewer1, "input").unwrap();
+        graph
+            .connect(&registry, a, "output", viewer1, "input")
+            .unwrap();
         // Branch 2: b -> viewer2 (disconnected)
         let b = graph.add_node("process");
         let viewer2 = graph.add_node("viewer");
-        graph.connect(&registry, b, "output", viewer2, "input").unwrap();
+        graph
+            .connect(&registry, b, "output", viewer2, "input")
+            .unwrap();
 
         // Changing a should only affect viewer1
         let affected = graph.get_affected_viewers(a);
@@ -962,5 +974,4 @@ mod tests {
         let affected = graph.get_affected_viewers(b);
         assert_eq!(affected, vec![viewer2]);
     }
-
 }

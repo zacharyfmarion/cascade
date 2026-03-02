@@ -138,7 +138,7 @@ mod tests {
                 assert_eq!(spec.id, "test_passthrough");
             }
             Err(e) => {
-                println!("GPU not available (expected in CI): {}", e);
+                println!("GPU not available (expected in CI): {e}");
             }
         }
     }
@@ -148,7 +148,7 @@ mod tests {
         let ctx = match GpuContext::new() {
             Ok(ctx) => Arc::new(ctx),
             Err(e) => {
-                println!("GPU not available, skipping: {}", e);
+                println!("GPU not available, skipping: {e}");
                 return;
             }
         };
@@ -252,7 +252,7 @@ mod tests {
         let ctx = match GpuContext::new() {
             Ok(ctx) => Arc::new(ctx),
             Err(e) => {
-                println!("GPU not available, skipping: {}", e);
+                println!("GPU not available, skipping: {e}");
                 return;
             }
         };
@@ -312,7 +312,7 @@ mod tests {
         let ctx = match GpuContext::new() {
             Ok(ctx) => Arc::new(ctx),
             Err(e) => {
-                println!("GPU not available, skipping: {}", e);
+                println!("GPU not available, skipping: {e}");
                 return;
             }
         };

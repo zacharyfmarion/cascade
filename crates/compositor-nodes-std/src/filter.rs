@@ -6,6 +6,12 @@ use std::collections::HashMap;
 
 pub struct GaussianBlur;
 
+impl Default for GaussianBlur {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GaussianBlur {
     pub fn new() -> Self {
         Self
@@ -211,7 +217,7 @@ pub(crate) fn box_blur_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: u
                 }
 
                 let add_x = (x + r + 1).min(w - 1);
-                let sub_x = if x >= r { x - r } else { 0 };
+                let sub_x = x.saturating_sub(r);
                 let add = row + add_x * 4;
                 let sub = row + sub_x * 4;
 
@@ -266,7 +272,7 @@ pub(crate) fn box_blur_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: us
                 }
 
                 let add_y = (y + r + 1).min(h - 1);
-                let sub_y = if y >= r { y - r } else { 0 };
+                let sub_y = y.saturating_sub(r);
                 let add = add_y * stride + col;
                 let sub = sub_y * stride + col;
 

@@ -20,6 +20,12 @@ pub struct LoadImage {
     original_bytes: Mutex<Option<Vec<u8>>>,
 }
 
+impl Default for LoadImage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadImage {
     pub fn new() -> Self {
         Self {
@@ -34,7 +40,11 @@ impl LoadImage {
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
         if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-            return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+            return Err(CompositorError::ImageTooLarge {
+                width,
+                height,
+                max: MAX_IMAGE_DIM,
+            });
         }
         let raw = rgba.as_raw();
         let lut = srgb_to_linear_lut();
@@ -165,6 +175,12 @@ impl FrameCache {
     }
 }
 
+impl Default for LoadImageSequence {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadImageSequence {
     pub fn new() -> Self {
         Self {
@@ -188,7 +204,11 @@ impl LoadImageSequence {
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
         if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-            return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+            return Err(CompositorError::ImageTooLarge {
+                width,
+                height,
+                max: MAX_IMAGE_DIM,
+            });
         }
         let raw = rgba.as_raw();
         let lut = srgb_to_linear_lut();
@@ -245,9 +265,8 @@ impl LoadImageSequence {
             .map_err(|e| CompositorError::Other(format!("Invalid pattern: {e}")))?;
 
         let mut frame_numbers: Vec<u64> = Vec::new();
-        let entries = std::fs::read_dir(dir).map_err(|e| {
-            CompositorError::Other(format!("Failed to read directory {}: {e}", dir))
-        })?;
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| CompositorError::Other(format!("Failed to read directory {dir}: {e}")))?;
 
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
@@ -302,7 +321,7 @@ impl LoadImageSequence {
                 out[2] = lut[raw[idx + 2] as usize];
                 out[3] = raw[idx + 3] as f32 / 255.0;
             });
-        Ok(Image::from_f32_data(width, height, data)?)
+        Image::from_f32_data(width, height, data)
     }
 }
 
@@ -455,7 +474,7 @@ pub fn detect_sequence_pattern(dir: &str) -> String {
                 &sample[m.end()..]
             )
         }
-        None => format!("{{frame:4}}.png"),
+        None => "{frame:4}.png".to_string(),
     }
 }
 
@@ -488,19 +507,27 @@ fn normalize_pattern(pattern: &str) -> String {
 }
 
 fn format_frame_number(frame: u64, padding: usize) -> String {
-    format!("{:0>width$}", frame, width = padding)
+    format!("{frame:0>padding$}")
 }
 
 fn build_frame_regex(pattern: &str) -> String {
     let normalized = normalize_pattern(pattern);
     let escaped = regex::escape(&normalized);
     let with_capture = escaped.replace("\\{frame\\}", "(\\d+)");
-    format!("^{}$", with_capture)
+    format!("^{with_capture}$")
 }
+
+type FrameLoader = Box<dyn Fn(u64) -> Result<Image, CompositorError> + Send>;
 
 pub struct LoadVideo {
     frame_cache: Mutex<FrameCache>,
-    frame_loader: Mutex<Option<Box<dyn Fn(u64) -> Result<Image, CompositorError> + Send>>>,
+    frame_loader: Mutex<Option<FrameLoader>>,
+}
+
+impl Default for LoadVideo {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LoadVideo {
@@ -514,10 +541,7 @@ impl LoadVideo {
     /// Set a closure that decodes a single frame on demand.
     /// The closure receives a frame index and returns the decoded Image
     /// (already converted to f32 linear).
-    pub fn set_frame_loader(
-        &self,
-        loader: Box<dyn Fn(u64) -> Result<Image, CompositorError> + Send>,
-    ) -> Result<(), CompositorError> {
+    pub fn set_frame_loader(&self, loader: FrameLoader) -> Result<(), CompositorError> {
         let mut guard = self
             .frame_loader
             .lock()
@@ -617,14 +641,14 @@ pub fn srgb_to_linear_lut() -> &'static [f32; 256] {
     static LUT: OnceLock<[f32; 256]> = OnceLock::new();
     LUT.get_or_init(|| {
         let mut table = [0.0f32; 256];
-        for i in 0..256 {
+        for (i, entry) in table.iter_mut().enumerate() {
             let v = i as f32 / 255.0;
             let linear = if v <= 0.04045 {
                 v / 12.92
             } else {
                 ((v + 0.055) / 1.055).powf(2.4)
             };
-            table[i] = linear;
+            *entry = linear;
         }
         table
     })
@@ -634,6 +658,12 @@ pub struct LoadImageBatch {
     entries: Mutex<Vec<(String, Vec<u8>)>>,
     frame_cache: Mutex<FrameCache>,
 }
+impl Default for LoadImageBatch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LoadImageBatch {
     pub fn new() -> Self {
         Self {
@@ -663,7 +693,11 @@ impl LoadImageBatch {
             .into_dimensions()
             .map_err(|e| CompositorError::ImageDecode(e.to_string()))?;
         if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-            return Err(CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+            return Err(CompositorError::ImageTooLarge {
+                width,
+                height,
+                max: MAX_IMAGE_DIM,
+            });
         }
         let stem = std::path::Path::new(filename)
             .file_stem()
@@ -711,9 +745,9 @@ impl LoadImageBatch {
                 .entries
                 .lock()
                 .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
-            let (_, raw) = entries
-                .get(index)
-                .ok_or_else(|| CompositorError::MissingInput("Batch index out of range".to_string()))?;
+            let (_, raw) = entries.get(index).ok_or_else(|| {
+                CompositorError::MissingInput("Batch index out of range".to_string())
+            })?;
             raw.clone()
         };
 
@@ -776,13 +810,12 @@ impl Node for LoadImageBatch {
             let image = self.decode_frame(frame)?;
 
             let stem = {
-                let entries = self
-                    .entries
-                    .lock()
-                    .map_err(|_| CompositorError::Other("Batch entries mutex poisoned".to_string()))?;
-                let (stem, _) = entries
-                    .get(frame)
-                    .ok_or_else(|| CompositorError::MissingInput("Batch index out of range".to_string()))?;
+                let entries = self.entries.lock().map_err(|_| {
+                    CompositorError::Other("Batch entries mutex poisoned".to_string())
+                })?;
+                let (stem, _) = entries.get(frame).ok_or_else(|| {
+                    CompositorError::MissingInput("Batch index out of range".to_string())
+                })?;
                 stem.clone()
             };
             let mut outputs = HashMap::new();

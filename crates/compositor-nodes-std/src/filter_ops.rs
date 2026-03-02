@@ -7,6 +7,12 @@ use std::collections::HashMap;
 
 pub struct Sharpen;
 
+impl Default for Sharpen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Sharpen {
     pub fn new() -> Self {
         Self
@@ -153,6 +159,12 @@ impl Node for Sharpen {
 
 pub struct EdgeDetect;
 
+impl Default for EdgeDetect {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EdgeDetect {
     pub fn new() -> Self {
         Self
@@ -290,6 +302,12 @@ impl Node for EdgeDetect {
 
 pub struct Dilate;
 
+impl Default for Dilate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dilate {
     pub fn new() -> Self {
         Self
@@ -391,6 +409,12 @@ impl Node for Dilate {
 }
 
 pub struct Erode;
+
+impl Default for Erode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Erode {
     pub fn new() -> Self {
@@ -494,6 +518,12 @@ impl Node for Erode {
 
 pub struct Median;
 
+impl Default for Median {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Median {
     pub fn new() -> Self {
         Self
@@ -568,7 +598,7 @@ impl Node for Median {
                 let x = i % w;
                 let y = i / w;
                 let mut values = Vec::with_capacity(area);
-                for c in 0..4 {
+                for (c, channel) in px.iter_mut().enumerate().take(4) {
                     values.clear();
                     let start_y = y.saturating_sub(radius);
                     let end_y = (y + radius).min(h - 1);
@@ -581,7 +611,7 @@ impl Node for Median {
                         }
                     }
                     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
-                    px[c] = values[values.len() / 2];
+                    *channel = values[values.len() / 2];
                 }
             });
 
@@ -614,6 +644,12 @@ impl Node for Median {
 }
 
 pub struct Vignette;
+
+impl Default for Vignette {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Vignette {
     pub fn new() -> Self {
@@ -753,6 +789,12 @@ impl Node for Vignette {
 }
 
 pub struct Glow;
+
+impl Default for Glow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Glow {
     pub fn new() -> Self {
@@ -939,8 +981,6 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-
-
 fn max_filter_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
     if r == 0 {
         dst.copy_from_slice(src);
@@ -1034,6 +1074,12 @@ fn min_filter_h(src: &[f32], dst: &mut [f32], w: usize, _h: usize, r: usize) {
 }
 
 pub struct LensDistortion;
+
+impl Default for LensDistortion {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LensDistortion {
     pub fn new() -> Self {
@@ -1274,6 +1320,12 @@ fn min_filter_v(src: &[f32], dst: &mut [f32], w: usize, h: usize, r: usize) {
 
 pub struct DirectionalBlur;
 
+impl Default for DirectionalBlur {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DirectionalBlur {
     pub fn new() -> Self {
         Self
@@ -1394,9 +1446,7 @@ impl Node for DirectionalBlur {
                         let idx = i * 4;
                         let mut sum = [0.0f32; 4];
                         let mut count = 1.0f32;
-                        for c in 0..4 {
-                            sum[c] = src_buf[idx + c];
-                        }
+                        sum.copy_from_slice(&src_buf[idx..(idx + 4)]);
                         for sign in &[1.0f32, -1.0f32] {
                             let sx = x + ox * sign;
                             let sy = y + oy * sign;
@@ -1466,6 +1516,12 @@ impl Node for DirectionalBlur {
 // ── Radial Blur ──────────────────────────────────────────────────────
 
 pub struct RadialBlur;
+
+impl Default for RadialBlur {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl RadialBlur {
     pub fn new() -> Self {

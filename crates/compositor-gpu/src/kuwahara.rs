@@ -226,8 +226,8 @@ impl Node for GpuKuwaharaNode {
                     });
                     pass.set_pipeline(&pipeline.pipeline);
                     pass.set_bind_group(0, &bind_group, &[]);
-                    let x = (width + 15) / 16;
-                    let y = (height + 15) / 16;
+                    let x = width.div_ceil(16);
+                    let y = height.div_ceil(16);
                     pass.dispatch_workgroups(x, y, 1);
                 }
             } else {
@@ -281,8 +281,8 @@ impl Node for GpuKuwaharaNode {
                     });
                     pass.set_pipeline(&tensor_pipeline.pipeline);
                     pass.set_bind_group(0, &tensor_bind_group, &[]);
-                    let x = (width + 15) / 16;
-                    let y = (height + 15) / 16;
+                    let x = width.div_ceil(16);
+                    let y = height.div_ceil(16);
                     pass.dispatch_workgroups(x, y, 1);
                 }
 
@@ -382,8 +382,8 @@ impl Node for GpuKuwaharaNode {
                                 });
                             pass.set_pipeline(&blur_h_pipeline.pipeline);
                             pass.set_bind_group(0, &blur_h_bind_group, &[]);
-                            let x = (width + 15) / 16;
-                            let y = (height + 15) / 16;
+                            let x = width.div_ceil(16);
+                            let y = height.div_ceil(16);
                             pass.dispatch_workgroups(x, y, 1);
                         }
 
@@ -431,8 +431,8 @@ impl Node for GpuKuwaharaNode {
                                 });
                             pass.set_pipeline(&blur_v_pipeline.pipeline);
                             pass.set_bind_group(0, &blur_v_bind_group, &[]);
-                            let x = (width + 15) / 16;
-                            let y = (height + 15) / 16;
+                            let x = width.div_ceil(16);
+                            let y = height.div_ceil(16);
                             pass.dispatch_workgroups(x, y, 1);
                         }
                     }
@@ -501,8 +501,8 @@ impl Node for GpuKuwaharaNode {
                     });
                     pass.set_pipeline(&aniso_pipeline.pipeline);
                     pass.set_bind_group(0, &aniso_bind_group, &[]);
-                    let x = (width + 15) / 16;
-                    let y = (height + 15) / 16;
+                    let x = width.div_ceil(16);
+                    let y = height.div_ceil(16);
                     pass.dispatch_workgroups(x, y, 1);
                 }
             }
@@ -883,7 +883,13 @@ async fn read_texture_to_image(
         .map_err(|e| CompositorError::Other(format!("Map error: {e:?}")))?;
 
     let data = buffer_slice.get_mapped_range();
-    let byte_len = (unpadded_bytes_per_row as usize).checked_mul(height as usize).ok_or_else(|| CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM })?;
+    let byte_len = (unpadded_bytes_per_row as usize)
+        .checked_mul(height as usize)
+        .ok_or(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        })?;
     let mut output_bytes = vec![0u8; byte_len];
     for row in 0..height as usize {
         let src_start = row * padded_bytes_per_row as usize;
@@ -895,12 +901,19 @@ async fn read_texture_to_image(
     drop(data);
     buffer.unmap();
 
-    let pixel_cap = (width as usize).checked_mul(height as usize).and_then(|p| p.checked_mul(4)).ok_or_else(|| CompositorError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM })?;
+    let pixel_cap = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|p| p.checked_mul(4))
+        .ok_or(CompositorError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        })?;
     let mut out = Vec::with_capacity(pixel_cap);
     for chunk in output_bytes.chunks_exact(2) {
         out.push(half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
     }
-    Ok(Image::from_f32_data(width, height, out)?)
+    Image::from_f32_data(width, height, out)
 }
 
 fn pack_image_data(image: &Image) -> (Vec<u8>, u32, u32) {
@@ -956,7 +969,11 @@ fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
         .collect()
 }
 
-fn apply_mask_cpu(original: &Image, processed: &Image, mask: &Image) -> Result<Image, CompositorError> {
+fn apply_mask_cpu(
+    original: &Image,
+    processed: &Image,
+    mask: &Image,
+) -> Result<Image, CompositorError> {
     let pixel_count = processed.pixel_count();
     let proc_width = processed.width as usize;
     let mask_width = mask.width as usize;

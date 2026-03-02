@@ -1,8 +1,8 @@
 #[cfg(target_arch = "wasm32")]
 mod imp {
     use compositor_core::ai::{
-        AiFuture, AiPredictionOutput, AiPredictionRequest, AiPredictionResult, AiJobId,
-        AiJobStatus, AiProvider,
+        AiFuture, AiJobId, AiJobStatus, AiPredictionOutput, AiPredictionRequest,
+        AiPredictionResult, AiProvider,
     };
     use compositor_core::error::CompositorError;
     use std::collections::HashMap;
@@ -74,17 +74,13 @@ mod imp {
                 .map_err(|_| CompositorError::Other("Failed to create headers".to_string()))?;
             headers
                 .set("Content-Type", "application/json")
-                .map_err(|_| {
-                    CompositorError::Other("Failed to set content-type".to_string())
-                })?;
+                .map_err(|_| CompositorError::Other("Failed to set content-type".to_string()))?;
             headers
                 .set("Authorization", &format!("Bearer {api_key}"))
-                .map_err(|_| {
-                    CompositorError::Other("Failed to set authorization".to_string())
-                })?;
-            headers.set("Prefer", "wait").map_err(|_| {
-                CompositorError::Other("Failed to set prefer header".to_string())
-            })?;
+                .map_err(|_| CompositorError::Other("Failed to set authorization".to_string()))?;
+            headers
+                .set("Prefer", "wait")
+                .map_err(|_| CompositorError::Other("Failed to set prefer header".to_string()))?;
             init.set_headers(&headers);
 
             let http_request = Request::new_with_str_and_init(&url, &init)
@@ -106,15 +102,16 @@ mod imp {
                 )));
             }
 
-            let json_text = JsFuture::from(response.text().map_err(|_| {
-                CompositorError::Other("Failed to read response body".to_string())
-            })?)
-            .await
-            .map_err(|_| CompositorError::Other("Failed to read response body".to_string()))?
-            .as_string()
-            .ok_or_else(|| {
-                CompositorError::Other("Response body is not a string".to_string())
-            })?;
+            let json_text =
+                JsFuture::from(response.text().map_err(|_| {
+                    CompositorError::Other("Failed to read response body".to_string())
+                })?)
+                .await
+                .map_err(|_| CompositorError::Other("Failed to read response body".to_string()))?
+                .as_string()
+                .ok_or_else(|| {
+                    CompositorError::Other("Response body is not a string".to_string())
+                })?;
 
             let parsed: ReplicateResponse = serde_json::from_str(&json_text)
                 .map_err(|e| CompositorError::Other(format!("Failed to parse response: {e}")))?;
@@ -268,7 +265,7 @@ mod imp {
 #[cfg(not(target_arch = "wasm32"))]
 mod imp {
     use compositor_core::ai::{
-        AiFuture, AiPredictionRequest, AiPredictionResult, AiJobId, AiJobStatus, AiProvider,
+        AiFuture, AiJobId, AiJobStatus, AiPredictionRequest, AiPredictionResult, AiProvider,
     };
     use compositor_core::error::CompositorError;
 

@@ -1,5 +1,5 @@
 use compositor_core::ai::{
-    AiFuture, AiPredictionOutput, AiPredictionRequest, AiPredictionResult, AiJobId, AiJobStatus,
+    AiFuture, AiJobId, AiJobStatus, AiPredictionOutput, AiPredictionRequest, AiPredictionResult,
     AiProvider,
 };
 use compositor_core::error::CompositorError;
@@ -88,9 +88,7 @@ impl NativeAiProvider {
         match parsed.status.as_str() {
             "succeeded" => {
                 let output = parsed.output.ok_or_else(|| {
-                    CompositorError::Other(
-                        "Prediction succeeded but output is null".to_string(),
-                    )
+                    CompositorError::Other("Prediction succeeded but output is null".to_string())
                 })?;
                 Ok(AiPredictionResult { output })
             }

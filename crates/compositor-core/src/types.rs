@@ -275,10 +275,7 @@ impl Image {
     pub fn new(width: u32, height: u32) -> Self {
         debug_assert!(
             width <= MAX_IMAGE_DIM && height <= MAX_IMAGE_DIM,
-            "Image::new called with oversized dimensions: {}x{} (max {})",
-            width,
-            height,
-            MAX_IMAGE_DIM
+            "Image::new called with oversized dimensions: {width}x{height} (max {MAX_IMAGE_DIM})"
         );
         let len = (width as usize) * (height as usize) * 4;
         let dw = RectI::from_dimensions(width, height);
@@ -438,10 +435,10 @@ impl Image {
             .enumerate()
             .for_each(|(i, rgba_out)| {
                 let idx = i * 4;
-                for c in 0..3 {
+                for (c, out_byte) in rgba_out.iter_mut().take(3).enumerate() {
                     let linear = self.data[idx + c].clamp(0.0, 1.0);
                     let lut_idx = (linear * 4095.0) as usize;
-                    rgba_out[c] = lut[lut_idx.min(4095)];
+                    *out_byte = lut[lut_idx.min(4095)];
                 }
                 let a = self.data[idx + 3].clamp(0.0, 1.0);
                 rgba_out[3] = (a * 255.0 + 0.5) as u8;
@@ -865,14 +862,14 @@ fn linear_to_srgb_lut() -> &'static [u8; 4096] {
     static LUT: OnceLock<[u8; 4096]> = OnceLock::new();
     LUT.get_or_init(|| {
         let mut table = [0u8; 4096];
-        for i in 0..4096 {
+        for (i, entry) in table.iter_mut().enumerate() {
             let linear = i as f32 / 4095.0;
             let srgb = if linear <= 0.0031308 {
                 linear * 12.92
             } else {
                 1.055 * linear.powf(1.0 / 2.4) - 0.055
             };
-            table[i] = (srgb * 255.0 + 0.5) as u8;
+            *entry = (srgb * 255.0 + 0.5) as u8;
         }
         table
     })
@@ -960,7 +957,7 @@ mod tests {
                 assert_eq!(height, 100);
                 assert_eq!(max, MAX_IMAGE_DIM);
             }
-            other => panic!("Expected ImageTooLarge, got {:?}", other),
+            other => panic!("Expected ImageTooLarge, got {other:?}"),
         }
     }
 }
