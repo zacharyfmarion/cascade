@@ -21,8 +21,8 @@ use compositor_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use compositor_nodes_std::input::LoadImage as InputLoadImage;
 pub use compositor_nodes_std::SequenceInfo;
 use compositor_nodes_std::{
-    register_standard_nodes, srgb_to_linear_lut, GpuScriptDraftNode, GroupNode,
-    LoadImageSequence, LoadVideo, Viewer,
+    register_standard_nodes, GpuScriptDraftNode, GroupNode,
+    LoadImageSequence, Viewer,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -231,6 +231,7 @@ impl Engine {
         Ok(())
     }
 
+    #[cfg(feature = "ocio")]
     fn sync_active_display_view(&mut self) {
         let displays = self.color_management.available_displays();
         let display = displays
@@ -292,12 +293,12 @@ impl Engine {
         self.evaluator = Evaluator::new();
     }
 
-    pub fn set_ai_api_key(&mut self, provider: &str, key: &str) -> Result<(), CompositorError> {
+    pub fn set_ai_api_key(&mut self, provider: &str, _key: &str) -> Result<(), CompositorError> {
         match provider {
             #[cfg(not(target_arch = "wasm32"))]
             "replicate" | "native" => {
                 let ai = Arc::new(NativeAiProvider::new());
-                ai.set_api_key(key.to_string());
+                ai.set_api_key(_key.to_string());
                 let ai_provider: Arc<dyn AiProvider> = ai;
                 self.ai_provider = Some(ai_provider);
                 Ok(())
