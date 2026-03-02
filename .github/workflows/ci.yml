@@ -9,6 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
+  # Crates requiring system libraries (glib, OpenColorIO, webkit2gtk) not available on CI
+  WORKSPACE_EXCLUDES: --exclude compositor-ocio-sys --exclude compositor-ocio --exclude compositor-tauri
 
 jobs:
   rust-check:
@@ -22,10 +24,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check (all crates)
-        run: cargo check --workspace
+        run: cargo check --workspace $WORKSPACE_EXCLUDES
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --workspace $WORKSPACE_EXCLUDES
 
   rust-lint:
     name: Rust Lint (clippy + fmt)
@@ -40,7 +42,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets $WORKSPACE_EXCLUDES -- -D warnings
 
       - name: Rustfmt
         run: cargo fmt --all -- --check
@@ -64,7 +66,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Compile benchmarks
-        run: cargo bench --no-run --workspace
+        run: cargo bench --no-run --workspace $WORKSPACE_EXCLUDES
 
   frontend-lint:
     name: Frontend Lint & Typecheck
