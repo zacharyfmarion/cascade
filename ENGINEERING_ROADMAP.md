@@ -74,11 +74,13 @@ Items that prevent the app from degrading under real workloads. These unlock 4K 
 - [x] Add cache hit/miss/eviction metrics (`CacheMetrics` struct with `hit_count`, `miss_count`, `eviction_count`, `total_bytes`, `entry_count`)
 - [ ] Expose cache metrics to frontend (currently internal to Rust evaluator only)
 
-### 2.2 Selective viewer invalidation
-- [ ] Replace `triggerAllViewers()` with dirty-viewer tracking: after a mutation (connect, disconnect, setParam), compute which viewer nodes' upstream subgraphs are affected
-- [ ] Only re-evaluate dirty viewers
-- [ ] Use existing dirty propagation in the graph to determine affected outputs
-
+### 2.2 Selective viewer invalidation ✅
+- [x] Add `get_affected_viewers(node_id)` to Graph struct — filters `get_downstream()` for viewer/output node types (`VIEWER_TYPE_IDS` constant)
+- [x] Expose via WASM bridge (`get_affected_viewers(node_id: &str) -> Result<Vec<String>, JsValue>`)
+- [x] Add `triggerAffectedViewers(changedNodeIds)` to graphStore with error fallback to `triggerAllViewers()`
+- [x] Replace 13 single-node mutation call sites (setParam, connect, disconnect, toggleMute, etc.) with selective invalidation
+- [x] Keep `triggerAllViewers()` for bulk operations (undo/redo, frame changes, graph import, group navigation)
+- [x] 7 unit tests covering linear chain, diamond graph, disconnected subgraphs, no viewers, viewer-as-changed-node, invalid node, multiple viewers
 ### 2.3 Evaluator upstream hash optimization ✅
 `compute_upstream_hash()` hashes only immediate upstream cache keys per node (O(inputs) per node, not O(n²)), since each cache key already encodes its own upstream state transitively. The original concern about full tree walks was unfounded — the cache-key-chaining design handles this efficiently.
 

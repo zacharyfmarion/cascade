@@ -810,6 +810,16 @@ export const useGraphStore = create<GraphState>()(
         const newNodes = new Map(get().nodes);
         newNodes.delete(id);
         
+        // Collect affected nodes BEFORE removing connections
+        const affectedNodeIds = new Set<string>();
+        for (const conn of get().connections) {
+          if (conn.fromNode === id) {
+            affectedNodeIds.add(conn.toNode);
+          } else if (conn.toNode === id) {
+            affectedNodeIds.add(conn.fromNode);
+          }
+        }
+        
         const newConnections = get().connections.filter(
           c => c.fromNode !== id && c.toNode !== id
         );
@@ -832,10 +842,20 @@ export const useGraphStore = create<GraphState>()(
           sequenceInfoMap: newInfoMap,
         });
 
+        // Clear render result for removed viewer nodes
+        if (removedNode?.typeId === 'viewer') {
+          const newResults = new Map(get().renderResults);
+          newResults.delete(id);
+          set({ renderResults: newResults });
+        }
+
         if (removedNode?.typeId === 'load_image_sequence') {
           sequenceFrameManager.clear(id);
           recomputeSequenceState();
         }
+        
+        // Trigger viewers affected by the removed node
+        triggerAffectedViewers(Array.from(affectedNodeIds));
       },
 
       connect: async (fromNode, fromPort, toNode, toPort) => {
@@ -1866,6 +1886,9 @@ export const useGraphStore = create<GraphState>()(
         } else {
           await eng.importGraph(emptyGraph);
         }
+        // Clear module-level undo/redo stacks
+        undoStack.length = 0;
+        redoStack.length = 0;
         set({
           nodes: new Map(),
           connections: [],
@@ -1878,11 +1901,14 @@ export const useGraphStore = create<GraphState>()(
           lastError: null,
           hasSequenceNodes: false,
           sequenceInfoMap: new Map(),
-
-           nodeTimings: new Map(),
-           aiNodeStatuses: {},
-           aiNodeStale: {},
-         });
+          canUndo: false,
+          canRedo: false,
+          currentFrame: 0,
+          isPlaying: false,
+          nodeTimings: new Map(),
+          aiNodeStatuses: {},
+          aiNodeStale: {},
+        });
        },
 
        saveProject: () => {
