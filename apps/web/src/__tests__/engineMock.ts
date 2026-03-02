@@ -125,12 +125,15 @@ export function createMockEngine(): EngineBridge & {
   _graphState: unknown;
   _renderResult: ViewerResult | null;
   _setRenderResult: (r: ViewerResult | null) => void;
+  _renderCalls: string[];
+  _clearRenderCalls: () => void;
 } {
   const nodes = new Map<string, { typeId: string; params: Record<string, ParamValue> }>();
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
   let graphState: unknown = { nodes: [], connections: [] };
   let renderResult: ViewerResult | null = null;
+  const renderCalls: string[] = [];
 
   return {
     _nodes: nodes,
@@ -138,6 +141,8 @@ export function createMockEngine(): EngineBridge & {
     _graphState: graphState,
     _renderResult: renderResult,
     _setRenderResult: (r: ViewerResult | null) => { renderResult = r; },
+    _renderCalls: renderCalls,
+    _clearRenderCalls: () => { renderCalls.length = 0; },
 
     listNodeTypes: () => NODE_SPECS,
 
@@ -193,7 +198,8 @@ export function createMockEngine(): EngineBridge & {
       return imageDataStore.get(nodeId) ?? null;
     },
 
-    renderViewer: (_viewerNodeId: string, _frame: number): ViewerResult | null => {
+    renderViewer: (viewerNodeId: string, _frame: number): ViewerResult | null => {
+      renderCalls.push(viewerNodeId);
       return renderResult;
     },
 
@@ -211,6 +217,28 @@ export function createMockEngine(): EngineBridge & {
     isAiConfigured: () => true,
     runAiNode: async () => {},
     getNodeExecutionState: () => ({ status: 'idle', isStale: false, error: '' }),
+
+    getAffectedViewers: (nodeId: string): string[] => {
+      // Walk downstream from nodeId through connections, collect viewer/export nodes
+      const visited = new Set<string>();
+      const queue = [nodeId];
+      const viewers: string[] = [];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (visited.has(current)) continue;
+        visited.add(current);
+        const node = nodes.get(current);
+        if (node && ['viewer', 'export_image', 'export_image_sequence', 'export_video', 'export_image_batch'].includes(node.typeId)) {
+          viewers.push(current);
+        }
+        for (const conn of connections) {
+          if (conn.fromNode === current && !visited.has(conn.toNode)) {
+            queue.push(conn.toNode);
+          }
+        }
+      }
+      return viewers;
+    },
   };
 }
 
