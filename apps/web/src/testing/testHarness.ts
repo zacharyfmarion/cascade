@@ -6,7 +6,7 @@
  * It provides a stable, programmatic API for driving the app
  * without fragile UI interactions (dragging ports, etc.).
  */
-import { useGraphStore } from '../store/graphStore';
+import { useGraphStore, getEngine } from '../store/graphStore';
 import type { ParamValue } from '../store/types';
 
 export interface CompositorTestHarness {
@@ -41,6 +41,24 @@ export interface CompositorTestHarness {
   stepForward(): void;
   stepBackward(): void;
 
+  // --- Groups ---
+  createGroup(nodeIds: string[], name?: string): Promise<void>;
+  enterGroup(groupNodeId: string): Promise<void>;
+  exitGroup(): void;
+  getEditingStack(): Array<{ id: string; label: string }>;
+
+  // --- Playback (extended) ---
+  togglePlayback(): void;
+  setFps(fps: number): void;
+  setLoopPlayback(loop: boolean): void;
+
+  // --- Save/Load ---
+  saveProject(): unknown;
+  loadProject(data: unknown): Promise<void>;
+
+  // --- Export ---
+  exportImage(nodeId: string): Promise<void>;
+
   // --- State queries ---
   getState(): {
     engineReady: boolean;
@@ -53,6 +71,9 @@ export interface CompositorTestHarness {
     canUndo: boolean;
     canRedo: boolean;
     isPlaying: boolean;
+    fps: number;
+    loopPlayback: boolean;
+    editingStackDepth: number;
     selectedNodeIds: string[];
     connections: Array<{
       fromNode: string;
@@ -145,6 +166,9 @@ function createTestHarness(): CompositorTestHarness {
         canUndo: s.canUndo,
         canRedo: s.canRedo,
         isPlaying: s.isPlaying,
+        fps: s.fps,
+        loopPlayback: s.loopPlayback,
+        editingStackDepth: s.editingStack.length,
         selectedNodeIds: [...s.selectedNodeIds],
         connections: s.connections.map((c) => ({
           fromNode: c.fromNode,
@@ -258,19 +282,19 @@ function createTestHarness(): CompositorTestHarness {
     },
 
     exportGraph(): unknown {
-      const engine = useGraphStore.getState();
-      // Use the internal engine bridge to get the serialized graph
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (engine as any)._getEngine?.()?.exportGraph?.() ?? null;
+      try {
+        return getEngine().exportGraph();
+      } catch {
+        return null;
+      }
     },
 
     async importGraph(data: unknown): Promise<void> {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const engine = (useGraphStore.getState() as any)._getEngine?.();
-      if (engine?.importGraph) {
-        engine.importGraph(JSON.stringify(data));
-        // Refresh the store state from engine
-        // Note: refreshFromEngine is not available — state will be synced on next render
+      try {
+        const graphData = typeof data === 'string' ? data : JSON.stringify(data);
+        await getEngine().importGraph(graphData);
+      } catch {
+        // Engine not initialized or import failed
       }
     },
 
@@ -285,6 +309,57 @@ function createTestHarness(): CompositorTestHarness {
           }
         }
       });
+    },
+
+    // --- Groups ---
+    async createGroup(nodeIds: string[], name?: string): Promise<void> {
+      await useGraphStore.getState().createGroup(nodeIds, name);
+    },
+    async enterGroup(groupNodeId: string): Promise<void> {
+      await useGraphStore.getState().enterGroup(groupNodeId);
+    },
+    exitGroup(): void {
+      const s = useGraphStore.getState();
+      if (s.editingStack.length > 1) {
+        s.navigateToBreadcrumb(0);
+      }
+    },
+    getEditingStack(): Array<{ id: string; label: string }> {
+      return useGraphStore.getState().editingStack.map((e) => ({
+        id: e.id,
+        label: e.label,
+      }));
+    },
+
+    // --- Playback (extended) ---
+    togglePlayback(): void {
+      useGraphStore.getState().togglePlayback();
+    },
+    setFps(fps: number): void {
+      useGraphStore.getState().setFps(fps);
+    },
+    setLoopPlayback(loop: boolean): void {
+      useGraphStore.getState().setLoopPlayback(loop);
+    },
+
+    // --- Save/Load ---
+    saveProject(): unknown {
+      // Delegate to our exportGraph method that accesses the engine bridge directly
+      return this.exportGraph();
+    },
+    async loadProject(data: unknown): Promise<void> {
+      // Create a synthetic File and use the store's loadProject to ensure
+      // all migrations, state syncing, and applyGraphData happen correctly.
+      const jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
+      const file = new File([jsonStr], 'test-project.json', { type: 'application/json' });
+      useGraphStore.getState().loadProject(file);
+      // loadProject reads file async — wait a tick for state to settle
+      await new Promise(resolve => setTimeout(resolve, 200));
+    },
+
+    // --- Export ---
+    async exportImage(nodeId: string): Promise<void> {
+      await useGraphStore.getState().exportImage(nodeId);
     },
   };
 }

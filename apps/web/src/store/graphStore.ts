@@ -203,7 +203,7 @@ async function createEngine(): Promise<EngineBridge> {
   }
 }
 
-function getEngine(): EngineBridge {
+export function getEngine(): EngineBridge {
   if (!engine) throw new Error('Engine not initialized');
   return engine;
 }
