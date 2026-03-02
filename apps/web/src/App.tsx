@@ -17,6 +17,13 @@ import './store/themeStore';
 import './styles/theme.css';
 import './App.css';
 
+// Install test harness in development mode for E2E tests
+if (import.meta.env.DEV) {
+  import('./testing/testHarness').then(({ installTestHarness }) => {
+    installTestHarness();
+  });
+}
+
 function useBeforeUnload() {
   const dirty = useGraphStore(s => s.dirty);
 
@@ -131,6 +138,7 @@ function App() {
   if (!engineReady) {
     return (
       <div
+        data-testid="app-loading"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -146,7 +154,7 @@ function App() {
 
   return (
     <>
-      <div className="app-layout">
+      <div className="app-layout" data-testid="app-ready">
         <Toolbar />
         <DockviewReact
           components={panelComponents}

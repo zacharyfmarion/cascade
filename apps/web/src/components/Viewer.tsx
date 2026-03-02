@@ -275,6 +275,7 @@ export const Viewer: React.FC = () => {
 
   return (
     <div 
+      data-testid="viewer-panel"
       className="panel" 
       style={{
         width: '100%',
@@ -328,6 +329,7 @@ export const Viewer: React.FC = () => {
               >
                 <canvas
                   ref={canvasRef}
+                  data-testid="viewer-canvas"
                   data-viewer-canvas
                   style={{
                     display: 'block',
