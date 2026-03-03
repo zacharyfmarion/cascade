@@ -96,6 +96,7 @@ const EXPECTED_KEYS: string[] = [
   'newProject',
   'pause',
   'play',
+  'pushUndo',
   'redo',
   'refreshAiNodeStale',
   'removeFrame',

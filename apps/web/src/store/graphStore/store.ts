@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { StateCreator } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type {
   NodeInstance,
@@ -23,7 +24,6 @@ import { useSettingsStore } from '../settingsStore';
 import {
   ADD_INPUT_PORT,
   ADD_OUTPUT_PORT,
-  DEFAULT_FRAME_COLOR,
   kernel,
   cloneEditingStack,
   createDocumentEnvelope,
@@ -37,10 +37,14 @@ import {
   withGroupIOSpecs,
 } from './kernel';
 import type { SerializableGraphData, UndoSnapshot } from './kernel';
+import type { FramesSlice } from './slices/framesSlice';
+import { createFramesSlice } from './slices/framesSlice';
+import type { SelectionSlice } from './slices/selectionSlice';
+import { createSelectionSlice } from './slices/selectionSlice';
 
 export { ADD_INPUT_PORT, ADD_OUTPUT_PORT, getEngine } from './kernel';
 
-interface GraphState {
+export interface GraphState {
   nodes: Map<string, NodeInstance>;
   connections: Connection[];
   selectedNodeIds: Set<string>;
@@ -117,6 +121,7 @@ interface GraphState {
   compileScriptNode: (nodeId: string, manifestJson: string) => Promise<NodeSpec>;
   undo: () => void;
   redo: () => void;
+  pushUndo: () => Promise<void>;
 
   play: () => void;
   pause: () => void;
@@ -164,8 +169,9 @@ interface GraphState {
   typesCompatible: (fromType: string, toType: string) => boolean;
 }
 
-export const useGraphStore = create<GraphState>()(
-  devtools((set, get) => {
+type CoreSlice = Omit<GraphState, keyof FramesSlice | keyof SelectionSlice>;
+
+const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [], CoreSlice> = (set, get) => {
     const triggerAllViewers = () => {
       if (kernel.renderSuspendCount > 0) {
         kernel.renderNeededWhileSuspended = true;
@@ -495,9 +501,6 @@ export const useGraphStore = create<GraphState>()(
     return {
       nodes: new Map(),
       connections: [],
-      selectedNodeIds: new Set(),
-      frames: new Map(),
-      selectedFrameId: null,
       nodeSpecs: [],
       engineReady: false,
       renderResults: new Map(),
@@ -1057,14 +1060,6 @@ export const useGraphStore = create<GraphState>()(
         }
       },
 
-      selectNode: (id) => {
-        set({ selectedNodeIds: id ? new Set([id]) : new Set() });
-      },
-
-      setSelectedNodes: (ids) => {
-        set({ selectedNodeIds: new Set(ids), selectedFrameId: null });
-      },
-
       toggleMuteSelected: async () => {
         tagUiOrigin();
         const UNMUTABLE_TYPES = new Set([
@@ -1101,84 +1096,6 @@ export const useGraphStore = create<GraphState>()(
         set({ nodes: newNodes });
 
         triggerAffectedViewers([...selectedIds]);
-      },
-
-      addFrame: (position, size, label) => {
-        void pushUndo();
-        const id = crypto.randomUUID();
-        const frames = new Map(get().frames);
-        const maxZ = frames.size > 0 ? Math.max(...Array.from(frames.values()).map(frame => frame.zIndex)) : 0;
-        frames.set(id, {
-          id,
-          label: label ?? 'Frame',
-      color: DEFAULT_FRAME_COLOR,
-          position,
-          size: size ?? { width: 400, height: 300 },
-          zIndex: maxZ + 1,
-        });
-        set({ frames, dirty: true });
-        return id;
-      },
-
-      removeFrame: (id) => {
-        void pushUndo();
-        const frames = new Map(get().frames);
-        frames.delete(id);
-        const selectedFrameId = get().selectedFrameId === id ? null : get().selectedFrameId;
-        set({ frames, selectedFrameId, dirty: true });
-      },
-
-      updateFrame: (id, updates) => {
-        const frames = new Map(get().frames);
-        const existing = frames.get(id);
-        if (!existing) return;
-        frames.set(id, { ...existing, ...updates, id });
-        set({ frames, dirty: true });
-      },
-
-      selectFrame: (id) => {
-        set({ selectedFrameId: id, selectedNodeIds: id ? new Set() : get().selectedNodeIds });
-      },
-
-      frameSelectedNodes: (nodeSizes) => {
-        const { selectedNodeIds, nodes } = get();
-        if (selectedNodeIds.size === 0) return null;
-
-        const selectedNodes = Array.from(selectedNodeIds)
-          .map(nodeId => nodes.get(nodeId))
-          .filter((node): node is NodeInstance => !!node);
-
-        if (selectedNodes.length === 0) return null;
-
-        const PADDING = 40;
-        const HEADER_HEIGHT = 30;
-        const DEFAULT_W = 200;
-        const DEFAULT_H = 100;
-        const minX = Math.min(...selectedNodes.map(node => node.position.x)) - PADDING;
-        const minY = Math.min(...selectedNodes.map(node => node.position.y)) - PADDING - HEADER_HEIGHT;
-        const maxX = Math.max(...selectedNodes.map(node => {
-          const sz = nodeSizes?.get(node.id);
-          return node.position.x + (sz?.width ?? DEFAULT_W);
-        })) + PADDING;
-        const maxY = Math.max(...selectedNodes.map(node => {
-          const sz = nodeSizes?.get(node.id);
-          return node.position.y + (sz?.height ?? DEFAULT_H);
-        })) + PADDING;
-
-        void pushUndo();
-        const id = crypto.randomUUID();
-        const frames = new Map(get().frames);
-        const maxZ = frames.size > 0 ? Math.max(...Array.from(frames.values()).map(frame => frame.zIndex)) : 0;
-        frames.set(id, {
-          id,
-          label: 'Frame',
-      color: DEFAULT_FRAME_COLOR,
-          position: { x: minX, y: minY },
-          size: { width: maxX - minX, height: maxY - minY },
-          zIndex: maxZ + 1,
-        });
-        set({ frames, dirty: true });
-        return id;
       },
 
       loadImageFile: (nodeId, file) => {
@@ -1919,6 +1836,8 @@ export const useGraphStore = create<GraphState>()(
         });
       },
 
+      pushUndo,
+
       isInsideGroup: () => {
         return get().editingStack.length > 1;
       },
@@ -2640,64 +2559,15 @@ export const useGraphStore = create<GraphState>()(
           graphRevision: kernel.graphRevision,
         };
       },
-
-      linkToViewer: async (nodeId, outputIndex) => {
-        const { nodes, nodeSpecs } = get();
-        const clickedNode = nodes.get(nodeId);
-        if (!clickedNode) return;
-
-        const clickedSpec = nodeSpecs.find(s => s.id === clickedNode.typeId);
-        if (!clickedSpec || clickedSpec.outputs.length === 0) return;
-
-        // Determine which output to connect
-        const idx = outputIndex ?? 0;
-        const output = clickedSpec.outputs[idx % clickedSpec.outputs.length];
-
-        // Find an existing viewer node
-        let viewerNodeId: string | null = null;
-        for (const [id, node] of nodes) {
-          if (node.typeId === 'viewer') {
-            viewerNodeId = id;
-            break;
-          }
-        }
-
-        // If no viewer exists, create one to the right of all existing nodes
-        if (!viewerNodeId) {
-          let maxX = -Infinity;
-          let avgY = 0;
-          let count = 0;
-          for (const node of nodes.values()) {
-            if (node.position.x > maxX) maxX = node.position.x;
-            avgY += node.position.y;
-            count++;
-          }
-          if (count > 0) avgY /= count;
-          else avgY = 0;
-          if (!isFinite(maxX)) maxX = 0;
-
-          const viewerX = maxX + 400;
-          const viewerY = avgY;
-
-          viewerNodeId = await get().addNode('viewer', { x: viewerX, y: viewerY });
-        }
-
-        // Re-read connections from current state (addNode may have mutated)
-        const currentConnections = get().connections;
-
-        // Disconnect any existing connection going into the viewer's "value" input
-        const existingConn = currentConnections.find(
-          c => c.toNode === viewerNodeId && c.toPort === 'value'
-        );
-        if (existingConn) {
-          await get().disconnect(existingConn.id);
-        }
-
-        // Connect the clicked node's output to the viewer's input
-        await get().connect(nodeId, output.name, viewerNodeId, 'value');
-      },
     };
-  })
+};
+
+export const useGraphStore = create<GraphState>()(
+  devtools((...args) => ({
+    ...createCoreSlice(...args),
+    ...createFramesSlice(...args),
+    ...createSelectionSlice(...args),
+  }))
 );
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {

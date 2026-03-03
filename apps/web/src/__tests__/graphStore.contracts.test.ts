@@ -46,6 +46,8 @@ const createInitialState = () => ({
   nodes: new Map<string, NodeInstance>(),
   connections: [] as Connection[],
   selectedNodeIds: new Set<string>(),
+  frames: new Map(),
+  selectedFrameId: null,
   nodeSpecs: [] as NodeSpec[],
   engineReady: false,
   renderResults: new Map(),
@@ -265,6 +267,47 @@ describe('Selective viewer invalidation contracts', () => {
   });
 });
 
+describe('Frame and selection contracts', () => {
+  it('frameSelectedNodes creates a frame that bounds selected nodes', async () => {
+    const s = useGraphStore.getState();
+    const nodeA = await s.addNode('load_image', { x: 100, y: 200 });
+    const nodeB = await s.addNode('brightness_contrast', { x: 400, y: 300 });
+
+    s.setSelectedNodes([nodeA, nodeB]);
+
+    const nodeSizes = new Map<string, { width: number; height: number }>([
+      [nodeA, { width: 120, height: 80 }],
+      [nodeB, { width: 200, height: 160 }],
+    ]);
+
+    const frameId = s.frameSelectedNodes(nodeSizes);
+    expect(frameId).toBeTruthy();
+
+    const state = useGraphStore.getState();
+    const frame = frameId ? state.frames.get(frameId) : null;
+    expect(frame).toBeTruthy();
+    expect(frame?.position).toEqual({ x: 60, y: 130 });
+    expect(frame?.size).toEqual({ width: 580, height: 370 });
+    expect(state.dirty).toBe(true);
+  });
+
+  it('linkToViewer creates a viewer connection', async () => {
+    const s = useGraphStore.getState();
+    const source = await s.addNode('load_image', { x: 0, y: 0 });
+
+    await s.linkToViewer(source);
+
+    const state = useGraphStore.getState();
+    const viewer = Array.from(state.nodes.values()).find(node => node.typeId === 'viewer');
+    expect(viewer).toBeTruthy();
+
+    const connection = state.connections.find(conn => (
+      conn.fromNode === source && conn.toNode === viewer?.id && conn.toPort === 'value'
+    ));
+    expect(connection).toBeTruthy();
+  });
+});
+
 // ===========================================================================
 // 3. Render Suspension & Batching Contracts
 // ===========================================================================
@@ -445,8 +488,7 @@ describe('Node lifecycle contracts', () => {
 
     expect(useGraphStore.getState().nodes.has(bright)).toBe(false);
     expect(useGraphStore.getState().connections.length).toBe(0);
-    // Current behavior: removing a node does not trigger a render.
-    expect(mockEngine._renderCalls.length).toBe(0);
+    expect(mockEngine._renderCalls.length).toBe(1);
   });
 
 });

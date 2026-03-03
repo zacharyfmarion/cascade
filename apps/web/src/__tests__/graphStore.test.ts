@@ -8,6 +8,8 @@ if (!('window' in globalThis)) {
 }
 
 let mockEngine = createMockEngine();
+let addOutputPort: string;
+let addInputPort: string;
 
 vi.mock('../engine/wasmEngine', () => ({
   initWasmEngine: vi.fn(),
@@ -60,6 +62,8 @@ beforeEach(async () => {
   mockEngine = createMockEngine();
   const mod = await import('../store/graphStore');
   useGraphStore = mod.useGraphStore;
+  addOutputPort = mod.ADD_OUTPUT_PORT;
+  addInputPort = mod.ADD_INPUT_PORT;
   useGraphStore.setState(createInitialState());
   resetNodeCounter();
   await useGraphStore.getState().initEngine();
@@ -423,8 +427,14 @@ describe('graphStore helper behaviors', () => {
     const specs = useGraphStore.getState().nodeSpecs;
     const groupInput = specs.find(s => s.id === 'group_input');
     const groupOutput = specs.find(s => s.id === 'group_output');
-    expect(groupInput?.outputs).toEqual(internalGraph.inputs as PortSpec[]);
-    expect(groupOutput?.inputs).toEqual(internalGraph.outputs as PortSpec[]);
+    expect(groupInput?.outputs).toEqual([
+      ...internalGraph.inputs,
+      { name: addOutputPort, label: '+', ty: 'Image' },
+    ] as PortSpec[]);
+    expect(groupOutput?.inputs).toEqual([
+      ...internalGraph.outputs,
+      { name: addInputPort, label: '+', ty: 'Image' },
+    ] as PortSpec[]);
   });
 });
 
