@@ -26,17 +26,14 @@ import {
   ADD_OUTPUT_PORT,
   kernel,
   cloneEditingStack,
-  createDocumentEnvelope,
   createEngine,
   downscaleRenderResult,
-  extractFrames,
   extractGraphData,
   getEngine,
-  isTauri,
   nextRenderGeneration,
   withGroupIOSpecs,
 } from './kernel';
-import type { SerializableGraphData, UndoSnapshot } from './kernel';
+import type { UndoSnapshot } from './kernel';
 import type { FramesSlice } from './slices/framesSlice';
 import { createFramesSlice } from './slices/framesSlice';
 import type { SelectionSlice } from './slices/selectionSlice';
@@ -45,6 +42,8 @@ import type { BatchExportSlice } from './slices/batchExportSlice';
 import { createBatchExportSlice } from './slices/batchExportSlice';
 import type { SequenceVideoSlice } from './slices/sequenceVideoSlice';
 import { createSequenceVideoSlice } from './slices/sequenceVideoSlice';
+import type { ProjectSlice } from './slices/projectSlice';
+import { createProjectSlice } from './slices/projectSlice';
 
 export { ADD_INPUT_PORT, ADD_OUTPUT_PORT, getEngine } from './kernel';
 
@@ -179,7 +178,7 @@ export interface GraphState {
 
 type CoreSlice = Omit<
   GraphState,
-  keyof FramesSlice | keyof SelectionSlice | keyof BatchExportSlice | keyof SequenceVideoSlice
+  keyof FramesSlice | keyof SelectionSlice | keyof BatchExportSlice | keyof SequenceVideoSlice | keyof ProjectSlice
 >;
 
 const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [], CoreSlice> = (set, get) => {
@@ -231,99 +230,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         console.warn('Selective viewer invalidation failed, falling back to all viewers:', e);
         triggerAllViewers();
       }
-    };
-
-    /**
-     * Normalize complex param values after deserialization (load/import).
-     * Clamps values to valid ranges and ensures structural integrity.
-     */
-    const normalizeParamValue = (value: ParamValue): ParamValue => {
-      if ('CurvePoints' in value) {
-        const pts = value.CurvePoints;
-        if (!Array.isArray(pts) || pts.length < 2) {
-          return { CurvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] };
-        }
-        return {
-          CurvePoints: pts.map(p => ({
-            x: Math.max(0, Math.min(1, Number(p.x) || 0)),
-            y: Math.max(0, Math.min(1, Number(p.y) || 0)),
-          })),
-        };
-      }
-      if ('ColorRamp' in value) {
-        const stops = value.ColorRamp;
-        if (!Array.isArray(stops) || stops.length < 2) {
-          return { ColorRamp: [
-            { position: 0, color: [0, 0, 0, 1] },
-            { position: 1, color: [1, 1, 1, 1] },
-          ]};
-        }
-        return {
-          ColorRamp: stops.map(s => ({
-            position: Math.max(0, Math.min(1, Number(s.position) || 0)),
-            color: (Array.isArray(s.color) && s.color.length === 4
-              ? s.color.map(c => Math.max(0, Math.min(1, Number(c) || 0)))
-              : [0, 0, 0, 1]
-            ) as [number, number, number, number],
-          })),
-        };
-      }
-      return value;
-    };
-
-    const applyGraphData = (graphData: SerializableGraphData) => {
-      const newNodes = new Map<string, NodeInstance>();
-      const newConnections: Connection[] = [];
-
-      if (Array.isArray(graphData.nodes)) {
-        for (const node of graphData.nodes) {
-          const spec = get().nodeSpecs.find(s => s.id === node.type_id);
-          const params: Record<string, ParamValue> = {};
-          if (spec) {
-            spec.params.forEach(p => {
-              const rawValue = node.params?.[p.key] ?? p.default;
-              params[p.key] = normalizeParamValue(rawValue as ParamValue);
-            });
-          } else if (node.params) {
-            Object.assign(params, node.params);
-          }
-          const [x, y] = node.position;
-          newNodes.set(node.id, {
-            id: node.id,
-            typeId: node.type_id,
-            params,
-            inputDefaults: node.input_defaults ?? {},
-            position: { x, y },
-            muted: node.muted ?? false,
-          });
-        }
-      }
-
-      if (Array.isArray(graphData.connections)) {
-        for (const conn of graphData.connections) {
-          newConnections.push({
-            id: crypto.randomUUID(),
-            fromNode: conn.from_node,
-            fromPort: conn.from_port,
-            toNode: conn.to_node,
-            toPort: conn.to_port,
-          });
-        }
-      }
-
-      set({
-        nodes: newNodes,
-        connections: newConnections,
-        selectedNodeIds: new Set(),
-        frames: new Map(),
-        selectedFrameId: null,
-        renderResults: new Map(),
-        editingStack: [{ id: 'root', label: 'Root' }],
-        dirty: false,
-        fitViewRequestId: get().fitViewRequestId + 1,
-      });
-
-      triggerAllViewers();
     };
 
     const updateNodeTimings = () => {
@@ -491,7 +397,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       canUndo: false,
       canRedo: false,
       previewScale: 1,
-      dirty: false,
       fitViewRequestId: 0,
       editingStack: [{ id: 'root', label: 'Root' }],
 
@@ -1151,78 +1056,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         set({ dirty: true });
         triggerAllViewers();
       },
-      newProject: async () => {
-        const eng = getEngine();
-        const emptyGraph = { nodes: [], connections: [] };
-        if (eng.importDocument) {
-          await eng.importDocument(emptyGraph);
-        } else {
-          await eng.importGraph(emptyGraph);
-        }
-        // Clear module-level undo/redo stacks
-        kernel.undoStack.length = 0;
-        kernel.redoStack.length = 0;
-        set({
-          nodes: new Map(),
-          connections: [],
-          selectedNodeIds: new Set(),
-          frames: new Map(),
-          selectedFrameId: null,
-          renderResults: new Map(),
-          editingStack: [{ id: 'root', label: 'Root' }],
-          dirty: false,
-          lastError: null,
-          hasSequenceNodes: false,
-          sequenceInfoMap: new Map(),
-          canUndo: false,
-          canRedo: false,
-          currentFrame: 0,
-          isPlaying: false,
-          nodeTimings: new Map(),
-          aiNodeStatuses: {},
-          aiNodeStale: {},
-        });
-       },
-
-       saveProject: () => {
-        const eng = getEngine();
-        if (isTauri() && eng.saveProject) {
-          import('@tauri-apps/plugin-dialog').then(({ save }) => {
-            save({
-              filters: [{ name: 'Compositor Project', extensions: ['compositor'] }],
-              defaultPath: 'project.compositor',
-            }).then(async path => {
-              if (path) {
-                await eng.saveProject?.(path);
-                set({ dirty: false });
-              }
-            });
-          });
-          return;
-        }
-
-        const exportPromise = eng.exportDocument
-          ? Promise.resolve(eng.exportDocument())
-          : Promise.resolve(eng.exportGraph()).then(graphData => createDocumentEnvelope(graphData));
-
-        exportPromise.then(projectDoc => {
-          const framesArray = Array.from(get().frames.values());
-          if (framesArray.length > 0) {
-            const projectRecord = projectDoc as Record<string, unknown>;
-            projectRecord.frames = framesArray;
-          }
-          const json = JSON.stringify(projectDoc, null, 2);
-          const blob = new Blob([json], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = 'project.compositor';
-          link.click();
-          URL.revokeObjectURL(url);
-          set({ dirty: false });
-        });
-      },
-
       compileScriptNode: async (nodeId, manifestJson) => {
         const eng = getEngine();
         if (!eng.compileScriptNode) throw new Error("Engine doesn't support script compilation");
@@ -1709,70 +1542,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         });
       },
 
-      loadProjectFromPath: () => {
-        const eng = getEngine();
-        if (!isTauri() || !eng.loadProject) {
-          set({ lastError: makeEngineError('Project loading is only available in the desktop app') });
-          return;
-        }
-
-        import('@tauri-apps/plugin-dialog').then(({ open }) => {
-          open({
-            filters: [{ name: 'Compositor Project', extensions: ['compositor'] }],
-            multiple: false,
-          }).then(async path => {
-            if (typeof path === 'string') {
-              const loaded = await eng.loadProject?.(path);
-              const graphData = extractGraphData(loaded);
-              applyGraphData(graphData);
-              const framesData = extractFrames(loaded);
-              const frameMap = new Map<string, Frame>();
-              for (const frame of framesData) {
-                frameMap.set(frame.id, frame);
-              }
-              set({ frames: frameMap });
-            }
-          });
-        });
-      },
-
-      loadProject: (file) => {
-        file.text().then(async text => {
-          let data = JSON.parse(text);
-          const eng = getEngine();
-
-          // Run migrations if needed
-          if (eng?.needsMigration) {
-            try {
-              if (eng.needsMigration(text)) {
-                const migratedJson = eng.migrateDocument!(text);
-                data = JSON.parse(migratedJson);
-                console.info('[Migration] Project upgraded to latest format');
-              }
-            } catch (e) {
-              console.warn('[Migration] Migration failed, loading original:', e);
-              // Continue with original data — migration failure shouldn't block loading
-            }
-          }
-
-          const graphData = extractGraphData(data);
-
-          if (eng.importDocument) {
-            await eng.importDocument(data);
-          } else {
-            await eng.importGraph(graphData);
-          }
-
-          applyGraphData(graphData);
-          const framesData = extractFrames(data);
-          const frameMap = new Map<string, Frame>();
-          for (const frame of framesData) {
-            frameMap.set(frame.id, frame);
-          }
-          set({ frames: frameMap });
-        });
-      },
-
       setAiApiKey: async (provider, key) => {
         const eng = getEngine();
         if (eng.setAiApiKey) {
@@ -1992,6 +1761,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 export const useGraphStore = create<GraphState>()(
   devtools((...args) => ({
     ...createCoreSlice(...args),
+    ...createProjectSlice(...args),
     ...createFramesSlice(...args),
     ...createSelectionSlice(...args),
     ...createBatchExportSlice(...args),
