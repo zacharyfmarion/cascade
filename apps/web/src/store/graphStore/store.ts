@@ -44,6 +44,12 @@ import type { SequenceVideoSlice } from './slices/sequenceVideoSlice';
 import { createSequenceVideoSlice } from './slices/sequenceVideoSlice';
 import type { ProjectSlice } from './slices/projectSlice';
 import { createProjectSlice } from './slices/projectSlice';
+import type { AssetsSlice } from './slices/assetsSlice';
+import { createAssetsSlice } from './slices/assetsSlice';
+import type { ColorSlice } from './slices/colorSlice';
+import { createColorSlice } from './slices/colorSlice';
+import type { AiSlice } from './slices/aiSlice';
+import { createAiSlice } from './slices/aiSlice';
 
 export { ADD_INPUT_PORT, ADD_OUTPUT_PORT, getEngine } from './kernel';
 
@@ -139,6 +145,7 @@ export interface GraphState {
   pushSequenceFrames: (frame: number) => Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
   triggerAllViewers: () => void;
+  triggerAffectedViewers: (changedNodeIds: string[]) => void;
 
   editingStack: EditingContext[];
   enterGroup: (groupNodeId: string) => Promise<void>;
@@ -178,7 +185,14 @@ export interface GraphState {
 
 type CoreSlice = Omit<
   GraphState,
-  keyof FramesSlice | keyof SelectionSlice | keyof BatchExportSlice | keyof SequenceVideoSlice | keyof ProjectSlice
+  keyof FramesSlice
+  | keyof SelectionSlice
+  | keyof BatchExportSlice
+  | keyof SequenceVideoSlice
+  | keyof ProjectSlice
+  | keyof AssetsSlice
+  | keyof ColorSlice
+  | keyof AiSlice
 >;
 
 const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [], CoreSlice> = (set, get) => {
@@ -292,14 +306,11 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       await kernel.renderLock;
     };
     const collectImageData = async (): Promise<Map<string, Uint8Array>> => {
-      const eng = getEngine();
       const imgData = new Map<string, Uint8Array>();
-      if (!eng.getImageData) return imgData;
       for (const [nodeId, node] of get().nodes) {
         if (node.typeId !== 'load_image') continue;
         try {
-          const result = eng.getImageData(nodeId);
-          const bytes = result instanceof Promise ? await result : result;
+          const bytes = await get().getImageData(nodeId);
           if (bytes) imgData.set(nodeId, bytes);
         } catch {
           // Node may not have image loaded yet
@@ -402,9 +413,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 
       nodeTimings: new Map(),
       nodeErrors: new Map(),
-      aiNodeStatuses: {},
-      aiNodeStale: {},
-      colorManagement: null,
 
       initEngine: async () => {
         kernel.engine = await createEngine();
@@ -429,6 +437,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
             console.warn('Failed to load color management info:', e);
           }
         }
+        get().refreshAiNodeStale();
       },
 
       addNode: async (typeId, position) => {
@@ -677,16 +686,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
           set({ nodes: newNodes });
         }
         triggerAffectedViewers([nodeId]);
-      },
-
-      setDslHandle: (nodeId, handle) => {
-        const newNodes = new Map(get().nodes);
-        const node = newNodes.get(nodeId);
-        if (!node) return;
-        if (node.dslHandle === handle) return;
-        node.dslHandle = handle;
-        newNodes.set(nodeId, { ...node });
-        set({ nodes: newNodes });
       },
 
       setParamLive: async (nodeId, key, value) => {
@@ -974,43 +973,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         triggerAffectedViewers([...selectedIds]);
       },
 
-      loadImageFile: (nodeId, file) => {
-        file.arrayBuffer().then(async buffer => {
-          const data = new Uint8Array(buffer);
-          await getEngine().loadImageData(nodeId, data);
-          set({ dirty: true });
-          triggerAllViewers();
-        }).catch(e => {
-          console.error('loadImageFile failed:', e);
-        });
-      },
-
-      getImageData: async (nodeId) => {
-        const eng = getEngine();
-        if (eng.getImageData) {
-          return Promise.resolve(eng.getImageData(nodeId)) ?? null;
-        }
-        return null;
-      },
-
-      loadPaletteFile: (nodeId, file) => {
-        file.arrayBuffer().then(async buffer => {
-          const data = new Uint8Array(buffer);
-          const eng = getEngine();
-          if (!eng.loadPaletteData) return;
-          const colors = await eng.loadPaletteData(nodeId, data);
-          const newNodes = new Map(get().nodes);
-          const node = newNodes.get(nodeId);
-          if (node) {
-            node.params = { ...node.params, colors: { ColorPalette: colors } as ParamValue };
-            newNodes.set(nodeId, { ...node });
-            set({ nodes: newNodes, dirty: true });
-          }
-          triggerAllViewers();
-        }).catch(e => {
-          console.error('loadPaletteFile failed:', e);
-        });
-      },
 
       triggerRender: (viewerNodeId) => {
         const frame = get().currentFrame;
@@ -1043,37 +1005,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       },
 
 
-      loadBatchFiles: async (nodeId, files) => {
-        const eng = getEngine();
-        if (!eng.batchClear || !eng.batchAddImage) return;
-        await eng.batchClear(nodeId);
-        const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
-        for (const file of sorted) {
-          const buffer = await file.arrayBuffer();
-          const data = new Uint8Array(buffer);
-          await eng.batchAddImage(nodeId, file.name, data);
-        }
-        set({ dirty: true });
-        triggerAllViewers();
-      },
-      compileScriptNode: async (nodeId, manifestJson) => {
-        const eng = getEngine();
-        if (!eng.compileScriptNode) throw new Error("Engine doesn't support script compilation");
-        const spec = await eng.compileScriptNode(nodeId, manifestJson);
-        const specs = await eng.listNodeTypes();
-        
-        // Manually merge the compiled spec because listNodeTypes filters out gpu_script nodes
-        const existingIdx = specs.findIndex(s => s.id === spec.id);
-        if (existingIdx >= 0) {
-          specs[existingIdx] = spec;
-        } else {
-          specs.push(spec);
-        }
-
-        set({ nodeSpecs: specs, dirty: true });
-        triggerAffectedViewers([nodeId]);
-        return spec;
-      },
 
       undo: () => {
         const snapshot = kernel.undoStack.pop();
@@ -1097,6 +1028,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       pushSequenceFrames,
       renderAllViewersAsync,
       triggerAllViewers,
+      triggerAffectedViewers,
 
       isInsideGroup: () => {
         return get().editingStack.length > 1;
@@ -1542,102 +1474,8 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         });
       },
 
-      setAiApiKey: async (provider, key) => {
-        const eng = getEngine();
-        if (eng.setAiApiKey) {
-          await eng.setAiApiKey(provider, key);
-        }
-      },
-
-      isAiConfigured: async () => {
-        const eng = getEngine();
-        if (eng.isAiConfigured) {
-          return eng.isAiConfigured();
-        }
-        return false;
-      },
-
-      refreshAiNodeStale: () => {
-        const eng = getEngine();
-        if (!eng.getNodeExecutionState) return;
-        const state = get();
-        const newStale: Record<string, boolean> = {};
-        for (const nodeId of Object.keys(state.aiNodeStatuses)) {
-          const execState = eng.getNodeExecutionState(nodeId);
-          newStale[nodeId] = execState.isStale;
-        }
-        set({ aiNodeStale: newStale });
-      },
-
-      runAiNode: async (nodeId) => {
-        const eng = getEngine();
-        if (!eng.runAiNode) return;
-        set(state => ({
-          aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'running' }
-        }));
-        try {
-          await eng.runAiNode(nodeId);
-          set(state => ({
-            aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'complete' },
-            aiNodeStale: { ...state.aiNodeStale, [nodeId]: false },
-          }));
-          renderAllViewersAsync();
-        } catch (e) {
-          const execState = eng.getNodeExecutionState?.(nodeId);
-          set(state => ({
-            aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${execState?.error ?? e}` }
-          }));
-        }
-      },
-
-      loadColorManagementInfo: async () => {
-        const eng = getEngine();
-        if (eng.getColorManagementInfo) {
-          const info = await eng.getColorManagementInfo();
-          set({ colorManagement: info });
-        }
-      },
-
-      getViewsForDisplay: async (display: string) => {
-        const eng = getEngine();
-        if (eng.getViewsForDisplay) {
-          return eng.getViewsForDisplay(display);
-        }
-        return [];
-      },
-
-      setDisplayView: async (display: string, view: string) => {
-        const eng = getEngine();
-        if (eng.setDisplayView) {
-          await eng.setDisplayView(display, view);
-          const cm = get().colorManagement;
-          if (cm) {
-            set({ colorManagement: { ...cm, activeDisplay: display, activeView: view } });
-          }
-          renderAllViewersAsync();
-        }
-      },
-
-      setProjectFormat: async (width: number, height: number) => {
-        const eng = getEngine();
-        if (eng.setProjectFormat) {
-          await eng.setProjectFormat(width, height);
-          useSettingsStore.getState().setProjectFormat(width, height);
-          renderAllViewersAsync();
-        }
-      },
-
       graphRevision: 0,
       lastTransactionOrigin: null,
-      aiActionInProgress: false,
-
-      beginAiAction: async () => {
-        set({ aiActionInProgress: true });
-      },
-      endAiAction: () => {
-        set({ aiActionInProgress: false });
-      },
-
       flushRender: async () => {
         if (kernel.renderNeededWhileSuspended) {
           kernel.renderNeededWhileSuspended = false;
@@ -1766,6 +1604,9 @@ export const useGraphStore = create<GraphState>()(
     ...createSelectionSlice(...args),
     ...createBatchExportSlice(...args),
     ...createSequenceVideoSlice(...args),
+    ...createAssetsSlice(...args),
+    ...createColorSlice(...args),
+    ...createAiSlice(...args),
   }))
 );
 

@@ -133,6 +133,7 @@ const EXPECTED_KEYS: string[] = [
   'stepForward',
   'toggleMuteSelected',
   'togglePlayback',
+  'triggerAffectedViewers',
   'triggerAllViewers',
   'triggerRender',
   'typesCompatible',
