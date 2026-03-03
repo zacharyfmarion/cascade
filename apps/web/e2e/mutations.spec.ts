@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { harness, waitForApp } from './helpers';
 
 type GraphNodeData = {
   id: string;
@@ -19,29 +20,15 @@ type GraphData = {
   connections?: GraphConnectionData[];
 };
 
-async function waitForApp(page: import('@playwright/test').Page) {
-  await page.waitForSelector('[data-testid="app-ready"]', { timeout: 30_000 });
-  await page.waitForFunction(() => !!(window as any).__compositorTest, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__compositorTest.waitForEngine());
-}
-
-async function harness(page: import('@playwright/test').Page, method: string, ...args: unknown[]) {
-  return page.evaluate(
-    ({ method, args }) => {
-      const h = (window as any).__compositorTest;
-      const fn = h[method];
-      if (typeof fn !== 'function') throw new Error(`Harness method ${method} not found`);
-      return fn.apply(h, args);
-    },
-    { method, args },
-  );
-}
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 const extractGraph = (data: unknown): GraphData => {
-  if (data && typeof data === 'object' && 'graph' in (data as any)) {
-    return ((data as any).graph ?? {}) as GraphData;
+  if (isRecord(data) && 'graph' in data) {
+    const graph = data.graph;
+    return (isRecord(graph) ? graph : {}) as GraphData;
   }
-  return (data ?? {}) as GraphData;
+  return (isRecord(data) ? data : {}) as GraphData;
 };
 
 
@@ -66,72 +53,80 @@ test.describe('Undo/redo across mutation types', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const resizeId = await harness(page, 'addNode', 'resize', { x: 300, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 600, y: 100 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const resizeId = (await harness(page, 'addNode', 'resize', { x: 300, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 600, y: 100 })) as string;
     await harness(page, 'connect', solidId, 'field', resizeId, 'image');
     await harness(page, 'connect', resizeId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const resultBefore = await harness(page, 'getViewerResult', viewerId);
+    const resultBefore = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultBefore).not.toBeNull();
     const widthBefore = resultBefore?.width ?? null;
 
     await harness(page, 'setParam', resizeId, 'width', { Int: 640 });
     await harness(page, 'waitForRenderIdle');
 
-    const resultAfter = await harness(page, 'getViewerResult', viewerId);
+    const resultAfter = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultAfter?.width).toBe(640);
     expect(resultAfter?.width).not.toBe(widthBefore);
 
     await harness(page, 'undo');
     await harness(page, 'waitForRenderIdle');
-    const resultAfterUndoParam = await harness(page, 'getViewerResult', viewerId);
+    const resultAfterUndoParam = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultAfterUndoParam?.width).toBe(widthBefore);
 
     await harness(page, 'undo');
-    const stateAfterUndoConnect = await harness(page, 'getState');
+    const stateAfterUndoConnect = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterUndoConnect.connectionCount).toBe(1);
 
     await harness(page, 'undo');
-    const stateAfterUndoConnectTwo = await harness(page, 'getState');
+    const stateAfterUndoConnectTwo = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterUndoConnectTwo.connectionCount).toBe(0);
 
     await harness(page, 'undo');
-    const stateAfterUndoViewer = await harness(page, 'getState');
+    const stateAfterUndoViewer = (await harness(page, 'getState')) as { nodeCount: number };
     expect(stateAfterUndoViewer.nodeCount).toBe(2);
 
     await harness(page, 'undo');
-    const stateAfterUndoResize = await harness(page, 'getState');
+    const stateAfterUndoResize = (await harness(page, 'getState')) as { nodeCount: number };
     expect(stateAfterUndoResize.nodeCount).toBe(1);
 
     await harness(page, 'undo');
-    const stateAfterUndoSolid = await harness(page, 'getState');
+    const stateAfterUndoSolid = (await harness(page, 'getState')) as { nodeCount: number };
     expect(stateAfterUndoSolid.nodeCount).toBe(0);
 
     await harness(page, 'redo');
-    const stateAfterRedoSolid = await harness(page, 'getState');
+    const stateAfterRedoSolid = (await harness(page, 'getState')) as { nodeCount: number };
     expect(stateAfterRedoSolid.nodeCount).toBe(1);
 
     await harness(page, 'redo');
-    const stateAfterRedoResize = await harness(page, 'getState');
+    const stateAfterRedoResize = (await harness(page, 'getState')) as { nodeCount: number };
     expect(stateAfterRedoResize.nodeCount).toBe(2);
 
     await harness(page, 'redo');
-    const stateAfterRedoViewer = await harness(page, 'getState');
+    const stateAfterRedoViewer = (await harness(page, 'getState')) as { nodeCount: number };
     expect(stateAfterRedoViewer.nodeCount).toBe(3);
 
     await harness(page, 'redo');
-    const stateAfterRedoConnect = await harness(page, 'getState');
+    const stateAfterRedoConnect = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterRedoConnect.connectionCount).toBe(1);
 
     await harness(page, 'redo');
-    const stateAfterRedoConnectTwo = await harness(page, 'getState');
+    const stateAfterRedoConnectTwo = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterRedoConnectTwo.connectionCount).toBe(2);
 
     await harness(page, 'redo');
     await harness(page, 'waitForRenderIdle');
-    const resultAfterRedo = await harness(page, 'getViewerResult', viewerId);
+    const resultAfterRedo = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultAfterRedo?.width).toBe(640);
   });
 
@@ -139,15 +134,15 @@ test.describe('Undo/redo across mutation types', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 400, y: 100 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 400, y: 100 })) as string;
     await harness(page, 'connect', solidId, 'field', viewerId, 'value');
 
-    const stateAfterConnect = await harness(page, 'getState');
+    const stateAfterConnect = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterConnect.connectionCount).toBe(1);
 
     await harness(page, 'undo');
-    const stateAfterUndo = await harness(page, 'getState');
+    const stateAfterUndo = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterUndo.connectionCount).toBe(0);
   });
 
@@ -155,8 +150,8 @@ test.describe('Undo/redo across mutation types', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 400, y: 100 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 400, y: 100 })) as string;
     await harness(page, 'connect', solidId, 'field', viewerId, 'value');
 
     const expected = normalizeGraph(extractGraph(await harness(page, 'exportGraph')));
@@ -177,16 +172,18 @@ test.describe('Undo/redo across mutation types', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const resizeId = await harness(page, 'addNode', 'resize', { x: 300, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 600, y: 100 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const resizeId = (await harness(page, 'addNode', 'resize', { x: 300, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 600, y: 100 })) as string;
     await harness(page, 'connect', solidId, 'field', resizeId, 'image');
     await harness(page, 'connect', resizeId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
     await harness(page, 'setParam', resizeId, 'width', { Int: 300 });
     await harness(page, 'waitForRenderIdle');
-    const widthAfterSet = (await harness(page, 'getViewerResult', viewerId))?.width ?? null;
+    const widthAfterSet = ((await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null)?.width ?? null;
     expect(widthAfterSet).toBe(300);
 
     await harness(page, 'setParam', resizeId, 'width', { Int: 480 });
@@ -194,9 +191,13 @@ test.describe('Undo/redo across mutation types', () => {
 
     await harness(page, 'undo');
     await harness(page, 'waitForRenderIdle');
-    const widthAfterUndo = (await harness(page, 'getViewerResult', viewerId))?.width ?? null;
+    const widthAfterUndo = ((await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null)?.width ?? null;
     expect(widthAfterUndo).toBe(300);
-    const viewerResult = await harness(page, 'getViewerResult', viewerId);
+    const viewerResult = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(viewerResult).not.toBeNull();
   });
 
@@ -205,11 +206,11 @@ test.describe('Undo/redo across mutation types', () => {
     await waitForApp(page);
 
     await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const stateAfterAdd = await harness(page, 'getState');
+    const stateAfterAdd = (await harness(page, 'getState')) as { canUndo: boolean };
     expect(stateAfterAdd.canUndo).toBe(true);
 
     await harness(page, 'newProject');
-    const stateAfterNew = await harness(page, 'getState');
+    const stateAfterNew = (await harness(page, 'getState')) as { canUndo: boolean; nodeCount: number };
     expect(stateAfterNew.canUndo).toBe(false);
     expect(stateAfterNew.nodeCount).toBe(0);
   });
@@ -220,15 +221,17 @@ test.describe('Node removal cascade', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const sourceId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const middleId = await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 600, y: 100 });
+    const sourceId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const middleId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 600, y: 100 })) as string;
     await harness(page, 'connect', sourceId, 'field', middleId, 'image');
     await harness(page, 'connect', middleId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
     await harness(page, 'removeNode', middleId);
-    const stateAfterRemove = await harness(page, 'getState');
+    const stateAfterRemove = (await harness(page, 'getState')) as {
+      nodeCount: number; nodeIds: string[]; connectionCount: number;
+    };
     expect(stateAfterRemove.nodeCount).toBe(2);
     expect(stateAfterRemove.nodeIds).toContain(sourceId);
     expect(stateAfterRemove.nodeIds).toContain(viewerId);
@@ -239,17 +242,19 @@ test.describe('Node removal cascade', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const sourceId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const viewerA = await harness(page, 'addNode', 'viewer', { x: 400, y: 50 });
-    const viewerB = await harness(page, 'addNode', 'viewer', { x: 400, y: 150 });
+    const sourceId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const viewerA = (await harness(page, 'addNode', 'viewer', { x: 400, y: 50 })) as string;
+    const viewerB = (await harness(page, 'addNode', 'viewer', { x: 400, y: 150 })) as string;
     await harness(page, 'connect', sourceId, 'field', viewerA, 'value');
     await harness(page, 'connect', sourceId, 'field', viewerB, 'value');
 
-    const stateAfterConnect = await harness(page, 'getState');
+    const stateAfterConnect = (await harness(page, 'getState')) as { connectionCount: number };
     expect(stateAfterConnect.connectionCount).toBe(2);
 
     await harness(page, 'removeNode', viewerA);
-    const stateAfterRemove = await harness(page, 'getState');
+    const stateAfterRemove = (await harness(page, 'getState')) as {
+      nodeCount: number; nodeIds: string[]; connectionCount: number; connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }>;
+    };
     expect(stateAfterRemove.nodeCount).toBe(2);
     expect(stateAfterRemove.nodeIds).toContain(sourceId);
     expect(stateAfterRemove.nodeIds).toContain(viewerB);
@@ -268,21 +273,25 @@ test.describe('Node removal cascade', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const sourceId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const middleId = await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 600, y: 100 });
+    const sourceId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const middleId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 600, y: 100 })) as string;
     await harness(page, 'connect', sourceId, 'field', middleId, 'image');
     await harness(page, 'connect', middleId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const resultBefore = await harness(page, 'getViewerResult', viewerId);
+    const resultBefore = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultBefore).not.toBeNull();
     expect(resultBefore?.hasPixels).toBe(true);
 
     await harness(page, 'removeNode', middleId);
     await harness(page, 'waitForRenderIdle');
     await harness(page, 'waitForRenderIdle');
-    const resultAfter = await harness(page, 'getViewerResult', viewerId);
+    const resultAfter = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultAfter === null || resultAfter.hasPixels === false).toBe(true);
   });
 });
@@ -292,11 +301,13 @@ test.describe('Input default values', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 200, y: 100 });
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 200, y: 100 })) as string;
     await harness(page, 'setInputDefault', viewerId, 'value', { Float: 0.25 });
     await harness(page, 'waitForRenderIdle');
 
-    const result = await harness(page, 'getViewerResult', viewerId);
+    const result = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(result).not.toBeNull();
     expect(result?.hasPixels).toBe(false);
     expect(result?.type).toBe('float');
@@ -306,19 +317,23 @@ test.describe('Input default values', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const sourceId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 400, y: 100 });
+    const sourceId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 400, y: 100 })) as string;
 
     await harness(page, 'setInputDefault', viewerId, 'value', { Float: 0.5 });
     await harness(page, 'waitForRenderIdle');
-    const resultDefault = await harness(page, 'getViewerResult', viewerId);
+    const resultDefault = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultDefault).not.toBeNull();
     expect(resultDefault?.hasPixels).toBe(false);
     expect(resultDefault?.type).toBe('float');
 
     await harness(page, 'connect', sourceId, 'field', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
-    const resultConnected = await harness(page, 'getViewerResult', viewerId);
+    const resultConnected = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number; type?: string;
+    } | null;
     expect(resultConnected).not.toBeNull();
     expect(resultConnected?.hasPixels).toBe(true);
   });

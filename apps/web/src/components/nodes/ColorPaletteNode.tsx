@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useMemo } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeSection, NodeButton } from './NodePrimitives';
@@ -17,22 +17,29 @@ type NodeData = {
 export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { spec, params } = data;
+  const nodeId = props.id;
   const setParam = useGraphStore(s => s.setParam);
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);
   const loadPaletteFile = useGraphStore(s => s.loadPaletteFile);
 
-  const colorsValue = params['colors'] ?? spec.params.find(p => p.key === 'colors')?.default;
-  const colors: [number, number, number, number][] = colorsValue && 'ColorPalette' in colorsValue
-    ? (colorsValue as { ColorPalette: [number, number, number, number][] }).ColorPalette
-    : [[0, 0, 0, 1], [1, 1, 1, 1]];
+  const colorsValue = useMemo(
+    () => params['colors'] ?? spec.params.find(p => p.key === 'colors')?.default,
+    [params, spec]
+  );
+  const colors = useMemo<[number, number, number, number][]>(() => {
+    if (colorsValue && 'ColorPalette' in colorsValue) {
+      return (colorsValue as { ColorPalette: [number, number, number, number][] }).ColorPalette;
+    }
+    return [[0, 0, 0, 1], [1, 1, 1, 1]];
+  }, [colorsValue]);
 
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const updateColors = useCallback((newColors: [number, number, number, number][]) => {
-    setParam(props.id, 'colors', { ColorPalette: newColors } as ParamValue);
-  }, [props.id, setParam]);
+    setParam(nodeId, 'colors', { ColorPalette: newColors } as ParamValue);
+  }, [nodeId, setParam]);
 
   const handleAddColor = useCallback(() => {
     updateColors([...colors, [1, 1, 1, 1]]);
@@ -47,17 +54,17 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
   const handleColorInput = useCallback((index: number, hex: string) => {
     const updated = [...colors];
     updated[index] = [...hexToLinear(hex), updated[index][3]] as [number, number, number, number];
-    setParamLive(props.id, 'colors', { ColorPalette: updated } as ParamValue);
-  }, [colors, props.id, setParamLive]);
+    setParamLive(nodeId, 'colors', { ColorPalette: updated } as ParamValue);
+  }, [colors, nodeId, setParamLive]);
 
   const handleColorCommit = useCallback((index: number, hex: string) => {
     const updated = [...colors];
     updated[index] = [...hexToLinear(hex), updated[index][3]] as [number, number, number, number];
     const value = { ColorPalette: updated } as ParamValue;
     // Ensure pre-commit snapshot exists even if onInput never fired
-    setParamLive(props.id, 'colors', value);
-    setParamCommit(props.id, 'colors', value);
-  }, [colors, props.id, setParamLive, setParamCommit]);
+    setParamLive(nodeId, 'colors', value);
+    setParamCommit(nodeId, 'colors', value);
+  }, [colors, nodeId, setParamLive, setParamCommit]);
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
@@ -66,12 +73,12 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      loadPaletteFile(props.id, file);
+      loadPaletteFile(nodeId, file);
     }
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, [loadPaletteFile, props.id]);
+  }, [loadPaletteFile, nodeId]);
 
   return (
     <BaseNode {...props} data={data} minWidth="240px" maxWidth="280px" headerIcon={getNodeIcon('color_palette', 'Color')}>
@@ -96,8 +103,9 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
             }}
           >
             {colors.map((color, i) => (
-              <div
-                key={i}
+              <button
+                key={`${color.join('-')}-${i}`}
+                type="button"
                 className="node-palette__swatch"
                 onMouseEnter={() => setHoverIdx(i)}
                 onMouseLeave={() => setHoverIdx(null)}
@@ -105,10 +113,13 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                   position: 'relative',
                   width: '20px',
                   height: '20px',
+                  padding: 0,
+                  // eslint-disable-next-line compositor-theme/no-hardcoded-colors
                   background: `rgba(${linearToSrgbByte(color[0])},${linearToSrgbByte(color[1])},${linearToSrgbByte(color[2])},1)`,
                   border: '1px solid var(--border-default)',
                   borderRadius: '2px',
                   cursor: 'pointer',
+                  outline: 'none',
                 }}
               >
                 <input
@@ -127,7 +138,8 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                   }}
                 />
                 {hoverIdx === i && colors.length > 1 && (
-                  <div
+                  <button
+                    type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRemoveColor(i);
@@ -149,14 +161,18 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                       color: 'var(--text-primary)',
                       pointerEvents: 'auto',
                       zIndex: 10,
+                      padding: 0,
+                      cursor: 'pointer',
                     }}
+                    aria-label="Remove color"
                   >
                     ×
-                  </div>
+                  </button>
                 )}
-              </div>
+              </button>
             ))}
-            <div
+            <button
+              type="button"
               className="node-palette__add"
               onClick={handleAddColor}
               style={{
@@ -171,10 +187,11 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                 cursor: 'pointer',
                 color: 'var(--text-secondary)',
                 fontSize: '14px',
+                padding: 0,
               }}
             >
               +
-            </div>
+            </button>
           </div>
         </NodeSection>
         

@@ -23,7 +23,7 @@ import { sequenceFrameManager } from '../engine/sequenceFrameManager';
 import { parseEngineError, makeEngineError } from '../engine/engineError';
 import type { EngineError } from '../engine/engineError';
 
-const DEFAULT_FRAME_COLOR = 'purple'; // eslint-disable-line compositor-theme/no-hardcoded-colors
+const DEFAULT_FRAME_COLOR = 'purple';
 let engine: EngineBridge | null = null;
 
 /** Sentinel port name appended to GroupInput outputs — drag from this to create a new group input. */
@@ -125,7 +125,8 @@ const downscaleRenderResult = async (result: ViewerResult, scale: number): Promi
   sourceCtx.putImageData(imageData, 0, 0);
 
   targetCtx.imageSmoothingEnabled = true;
-  targetCtx.drawImage(sourceCanvas as any, 0, 0, targetWidth, targetHeight);
+  const sourceImage: CanvasImageSource = sourceCanvas;
+  targetCtx.drawImage(sourceImage, 0, 0, targetWidth, targetHeight);
 
   const scaledImage = targetCtx.getImageData(0, 0, targetWidth, targetHeight);
   return {
@@ -160,6 +161,8 @@ type SerializableGraphData = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
+const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+
 const isDocumentEnvelope = (value: unknown): value is { compositor: unknown; graph: unknown } => (
   isRecord(value) && 'compositor' in value && 'graph' in value
 );
@@ -169,6 +172,11 @@ const extractGraphData = (value: unknown): SerializableGraphData => {
     return isRecord(value.graph) ? value.graph as SerializableGraphData : {};
   }
   return isRecord(value) ? value as SerializableGraphData : {};
+};
+
+const extractFrames = (value: unknown): Frame[] => {
+  const record = asRecord(value);
+  return Array.isArray(record.frames) ? record.frames as Frame[] : [];
 };
 
 const createDocumentEnvelope = (graph: unknown) => ({
@@ -1454,7 +1462,10 @@ export const useGraphStore = create<GraphState>()(
         const mimeType = formatIdx === 1 ? 'image/jpeg' : 'image/png';
 
         getEngine().exportImage(nodeId, frame).then(bytes => {
-          const blob = new Blob([bytes as any], { type: mimeType });
+          const buffer = bytes.buffer instanceof ArrayBuffer
+            ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+            : Uint8Array.from(bytes).buffer;
+          const blob = new Blob([buffer], { type: mimeType });
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -1935,7 +1946,8 @@ export const useGraphStore = create<GraphState>()(
         exportPromise.then(projectDoc => {
           const framesArray = Array.from(get().frames.values());
           if (framesArray.length > 0) {
-            (projectDoc as any).frames = framesArray;
+            const projectRecord = projectDoc as Record<string, unknown>;
+            projectRecord.frames = framesArray;
           }
           const json = JSON.stringify(projectDoc, null, 2);
           const blob = new Blob([json], { type: 'application/json' });
@@ -2211,7 +2223,7 @@ export const useGraphStore = create<GraphState>()(
           }
 
           const graphData = await Promise.resolve(eng.exportGraph());
-          const data = graphData as any;
+          const data = extractGraphData(graphData);
           const specs = await Promise.resolve(eng.listNodeTypes());
           const newNodes = new Map<string, NodeInstance>();
           const newConnections: Connection[] = [];
@@ -2367,7 +2379,7 @@ export const useGraphStore = create<GraphState>()(
         });
 
         const graphData = await Promise.resolve(eng.exportGraph());
-        const data = graphData as any;
+        const data = extractGraphData(graphData);
         if (data.connections) {
           const updatedConnections: Connection[] = [];
           for (const conn of data.connections) {
@@ -2410,7 +2422,7 @@ export const useGraphStore = create<GraphState>()(
         }
 
         const graphData = await Promise.resolve(eng.exportGraph());
-        const data = graphData as any;
+        const data = extractGraphData(graphData);
         const newConnections: Connection[] = [];
         if (data.connections) {
           for (const conn of data.connections) {
@@ -2570,7 +2582,7 @@ export const useGraphStore = create<GraphState>()(
               const loaded = await eng.loadProject?.(path);
               const graphData = extractGraphData(loaded);
               applyGraphData(graphData);
-              const framesData: Frame[] = Array.isArray((loaded as any).frames) ? (loaded as any).frames : [];
+              const framesData = extractFrames(loaded);
               const frameMap = new Map<string, Frame>();
               for (const frame of framesData) {
                 frameMap.set(frame.id, frame);
@@ -2609,7 +2621,7 @@ export const useGraphStore = create<GraphState>()(
           }
 
           applyGraphData(graphData);
-          const framesData: Frame[] = Array.isArray((data as any).frames) ? (data as any).frames : [];
+          const framesData = extractFrames(data);
           const frameMap = new Map<string, Frame>();
           for (const frame of framesData) {
             frameMap.set(frame.id, frame);
@@ -2892,5 +2904,6 @@ export const useGraphStore = create<GraphState>()(
 );
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
-  (window as any).__compositorStore = useGraphStore;
+  const debugWindow = window as Window & { __compositorStore?: typeof useGraphStore };
+  debugWindow.__compositorStore = useGraphStore;
 }

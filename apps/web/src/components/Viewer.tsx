@@ -41,7 +41,7 @@ const ScalarViewer: React.FC<{ result: ViewerResult }> = ({ result }) => {
           <div style={{
             fontSize: '2rem',
             fontWeight: 600,
-            color: result.value ? 'var(--color-success, #4caf50)' : 'var(--text-muted)',
+            color: result.value ? 'var(--color-success, var(--status-success-bright))' : 'var(--text-muted)',
           }}>
             {result.value ? 'True' : 'False'}
           </div>
@@ -63,9 +63,9 @@ const ScalarViewer: React.FC<{ result: ViewerResult }> = ({ result }) => {
               height: 120,
               borderRadius: 8,
               border: '1px solid var(--border-primary)',
-              // eslint-disable-next-line compositor-theme/no-hardcoded-colors
-              background: `rgba(${sr}, ${sg}, ${sb}, ${displayAlpha})`,
-            }} />
+              background: 'var(--viewer-color-preview)',
+              '--viewer-color-preview': `rgba(${sr}, ${sg}, ${sb}, ${displayAlpha})`,
+            } as React.CSSProperties} />
             <div style={{
               fontFamily: 'monospace',
               fontSize: '0.8rem',
@@ -161,7 +161,7 @@ export const Viewer: React.FC = () => {
   const selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds).pop()! : null;
 
   useEffect(() => {
-    // If user selected a viewer node, switch to it
+    /* eslint-disable react-hooks/set-state-in-effect -- Syncs selected viewer state with external store updates. */
     if (selectedNodeId) {
       const node = nodes.get(selectedNodeId);
       if (node && node.typeId === 'viewer') {
@@ -169,18 +169,16 @@ export const Viewer: React.FC = () => {
         return;
       }
     }
-    // If no viewer is active yet, pick any viewer node that exists
-    // (handles the case where a viewer is created while another node is selected)
     if (!activeViewerId) {
       const viewerNode = Array.from(nodes.values()).find(n => n.typeId === 'viewer');
       if (viewerNode) {
         setActiveViewerId(viewerNode.id);
       }
     }
-    // If active viewer was deleted, clear it so we pick a new one next render
     if (activeViewerId && !nodes.has(activeViewerId)) {
       setActiveViewerId(null);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedNodeId, nodes, activeViewerId]);
 
   const activeResult = useMemo(() => {
@@ -274,9 +272,10 @@ export const Viewer: React.FC = () => {
   }, [fitToView]);
 
   return (
-    <div 
+    <section 
       data-testid="viewer-panel"
       className="panel" 
+      aria-label="Viewer"
       style={{
         width: '100%',
         height: '100%',
@@ -285,7 +284,8 @@ export const Viewer: React.FC = () => {
         outline: 'none',
       }}
       ref={containerRef}
-      tabIndex={0}
+      tabIndex={-1}
+      onPointerDown={() => containerRef.current?.focus()}
     >
       <TransformWrapper
         ref={transformRef}
@@ -368,7 +368,7 @@ export const Viewer: React.FC = () => {
           <div style={{
             fontSize: '0.65rem',
             color: 'var(--text-muted)',
-            background: 'rgba(0,0,0,0.45)',
+            background: 'var(--overlay-label)',
             padding: '1px 5px',
             borderRadius: 3,
           }}>
@@ -422,6 +422,6 @@ export const Viewer: React.FC = () => {
           {lastError.message}
         </div>
       )}
-    </div>
+    </section>
   );
 };

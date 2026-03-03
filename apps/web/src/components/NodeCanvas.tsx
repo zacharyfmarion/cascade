@@ -77,7 +77,7 @@ const PORT_COLORS: Record<string, string> = {
 
 interface ClipboardEntry {
   typeId: string;
-  params: Record<string, unknown>;
+  params: Record<string, ParamValue>;
   offsetX: number;
   offsetY: number;
 }
@@ -87,6 +87,7 @@ import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 import { shortcutDispatcher } from '../shortcuts/dispatcher';
 import { pendingImageFiles } from './nodes/pendingImageFiles';
+import type { ParamValue } from '../store/types';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
@@ -898,7 +899,7 @@ export const NodeCanvas: React.FC = () => {
       const pos = { x: baseX + entry.offsetX, y: baseY + entry.offsetY };
       const newId = await addNode(entry.typeId, pos);
       for (const [key, val] of Object.entries(entry.params)) {
-        await setParam(newId, key, val as any);
+        await setParam(newId, key, val);
       }
     }
 

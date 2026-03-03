@@ -1,37 +1,22 @@
 import { test, expect } from '@playwright/test';
-
-async function waitForApp(page: import('@playwright/test').Page) {
-  await page.waitForSelector('[data-testid="app-ready"]', { timeout: 30_000 });
-  await page.waitForFunction(() => !!(window as any).__compositorTest, { timeout: 10_000 });
-  await page.evaluate(() => (window as any).__compositorTest.waitForEngine());
-}
-
-async function harness(page: import('@playwright/test').Page, method: string, ...args: unknown[]) {
-  return page.evaluate(
-    ({ method, args }) => {
-      const h = (window as any).__compositorTest;
-      const fn = h[method];
-      if (typeof fn !== 'function') throw new Error(`Harness method ${method} not found`);
-      return fn.apply(h, args);
-    },
-    { method, args },
-  );
-}
+import { harness, waitForApp } from './helpers';
 
 test.describe('Multi-node graph rendering', () => {
   test('renders SolidColor → BrightnessContrast → Viewer chain', async ({ page }) => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const bcId = await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 100 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 540, y: 100 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 540, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const result = await harness(page, 'getViewerResult', viewerId);
+    const result = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(result).not.toBeNull();
     expect(result?.hasPixels).toBe(true);
   });
@@ -40,17 +25,19 @@ test.describe('Multi-node graph rendering', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 140 });
-    const bcId = await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 140 });
-    const invertId = await harness(page, 'addNode', 'invert', { x: 540, y: 140 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 760, y: 140 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 140 })) as string;
+    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 140 })) as string;
+    const invertId = (await harness(page, 'addNode', 'invert', { x: 540, y: 140 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 760, y: 140 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', invertId, 'image');
     await harness(page, 'connect', invertId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const result = await harness(page, 'getViewerResult', viewerId);
+    const result = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(result).not.toBeNull();
     expect(result?.hasPixels).toBe(true);
   });
@@ -59,11 +46,11 @@ test.describe('Multi-node graph rendering', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 80, y: 200 });
-    const bcId = await harness(page, 'addNode', 'brightness_contrast', { x: 280, y: 120 });
-    const invertId = await harness(page, 'addNode', 'invert', { x: 280, y: 280 });
-    const viewerA = await harness(page, 'addNode', 'viewer', { x: 520, y: 120 });
-    const viewerB = await harness(page, 'addNode', 'viewer', { x: 520, y: 280 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 80, y: 200 })) as string;
+    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 280, y: 120 })) as string;
+    const invertId = (await harness(page, 'addNode', 'invert', { x: 280, y: 280 })) as string;
+    const viewerA = (await harness(page, 'addNode', 'viewer', { x: 520, y: 120 })) as string;
+    const viewerB = (await harness(page, 'addNode', 'viewer', { x: 520, y: 280 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', solidId, 'field', invertId, 'image');
@@ -71,12 +58,16 @@ test.describe('Multi-node graph rendering', () => {
     await harness(page, 'connect', invertId, 'image', viewerB, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const resultA = await harness(page, 'getViewerResult', viewerA);
-    const resultB = await harness(page, 'getViewerResult', viewerB);
+    const resultA = (await harness(page, 'getViewerResult', viewerA)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
+    const resultB = (await harness(page, 'getViewerResult', viewerB)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(resultA).not.toBeNull();
     expect(resultB).not.toBeNull();
 
-    const state = await harness(page, 'getState');
+    const state = (await harness(page, 'getState')) as { connectionCount: number };
     expect(state.connectionCount).toBe(4);
   });
 
@@ -84,21 +75,25 @@ test.describe('Multi-node graph rendering', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 100, y: 240 });
-    const bcId = await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 240 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 540, y: 240 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 240 })) as string;
+    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 240 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 540, y: 240 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const before = await harness(page, 'getViewerResult', viewerId);
+    const before = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(before).not.toBeNull();
 
     await harness(page, 'setParam', bcId, 'brightness', { type: 'float', value: 0.25 });
     await harness(page, 'waitForRenderIdle');
 
-    const after = await harness(page, 'getViewerResult', viewerId);
+    const after = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(after).not.toBeNull();
   });
 });
@@ -108,10 +103,10 @@ test.describe('Selective viewer invalidation', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidA = await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 });
-    const viewerA = await harness(page, 'addNode', 'viewer', { x: 340, y: 100 });
-    const solidB = await harness(page, 'addNode', 'solid_color', { x: 100, y: 260 });
-    const viewerB = await harness(page, 'addNode', 'viewer', { x: 340, y: 260 });
+    const solidA = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const viewerA = (await harness(page, 'addNode', 'viewer', { x: 340, y: 100 })) as string;
+    const solidB = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 260 })) as string;
+    const viewerB = (await harness(page, 'addNode', 'viewer', { x: 340, y: 260 })) as string;
 
     await harness(page, 'connect', solidA, 'field', viewerA, 'value');
     await harness(page, 'connect', solidB, 'field', viewerB, 'value');
@@ -120,12 +115,16 @@ test.describe('Selective viewer invalidation', () => {
     await harness(page, 'setParam', solidA, 'color', { type: 'color', value: [0, 1, 0, 1] });
     await harness(page, 'waitForRenderIdle');
 
-    const resultA = await harness(page, 'getViewerResult', viewerA);
-    const resultB = await harness(page, 'getViewerResult', viewerB);
+    const resultA = (await harness(page, 'getViewerResult', viewerA)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
+    const resultB = (await harness(page, 'getViewerResult', viewerB)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(resultA).not.toBeNull();
     expect(resultB).not.toBeNull();
 
-    const state = await harness(page, 'getState');
+    const state = (await harness(page, 'getState')) as { connectionCount: number };
     expect(state.connectionCount).toBe(2);
   });
 
@@ -133,10 +132,10 @@ test.describe('Selective viewer invalidation', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidA = await harness(page, 'addNode', 'solid_color', { x: 100, y: 120 });
-    const viewerA = await harness(page, 'addNode', 'viewer', { x: 340, y: 120 });
-    const solidB = await harness(page, 'addNode', 'solid_color', { x: 100, y: 300 });
-    const viewerB = await harness(page, 'addNode', 'viewer', { x: 340, y: 300 });
+    const solidA = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 120 })) as string;
+    const viewerA = (await harness(page, 'addNode', 'viewer', { x: 340, y: 120 })) as string;
+    const solidB = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 300 })) as string;
+    const viewerB = (await harness(page, 'addNode', 'viewer', { x: 340, y: 300 })) as string;
 
     await harness(page, 'connect', solidA, 'field', viewerA, 'value');
     await harness(page, 'connect', solidB, 'field', viewerB, 'value');
@@ -145,11 +144,13 @@ test.describe('Selective viewer invalidation', () => {
     await harness(page, 'disconnect', viewerA, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const state = await harness(page, 'getState');
+    const state = (await harness(page, 'getState')) as { connectionCount: number; connections: Array<{ toNode: string; toPort: string }> };
     expect(state.connectionCount).toBe(1);
     expect(state.connections[0]).toMatchObject({ toNode: viewerB, toPort: 'value' });
 
-    const resultB = await harness(page, 'getViewerResult', viewerB);
+    const resultB = (await harness(page, 'getViewerResult', viewerB)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(resultB).not.toBeNull();
   });
 
@@ -157,10 +158,10 @@ test.describe('Selective viewer invalidation', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidA = await harness(page, 'addNode', 'solid_color', { x: 100, y: 140 });
-    const viewerA = await harness(page, 'addNode', 'viewer', { x: 340, y: 140 });
-    const solidB = await harness(page, 'addNode', 'solid_color', { x: 100, y: 340 });
-    const viewerB = await harness(page, 'addNode', 'viewer', { x: 340, y: 340 });
+    const solidA = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 140 })) as string;
+    const viewerA = (await harness(page, 'addNode', 'viewer', { x: 340, y: 140 })) as string;
+    const solidB = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 340 })) as string;
+    const viewerB = (await harness(page, 'addNode', 'viewer', { x: 340, y: 340 })) as string;
 
     await harness(page, 'connect', solidA, 'field', viewerA, 'value');
     await harness(page, 'connect', solidB, 'field', viewerB, 'value');
@@ -171,10 +172,12 @@ test.describe('Selective viewer invalidation', () => {
     await harness(page, 'connect', solidA, 'field', viewerA, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    const state = await harness(page, 'getState');
+    const state = (await harness(page, 'getState')) as { connectionCount: number };
     expect(state.connectionCount).toBe(2);
 
-    const resultA = await harness(page, 'getViewerResult', viewerA);
+    const resultA = (await harness(page, 'getViewerResult', viewerA)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(resultA).not.toBeNull();
   });
 
@@ -182,10 +185,10 @@ test.describe('Selective viewer invalidation', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidA = await harness(page, 'addNode', 'solid_color', { x: 120, y: 160 });
-    const viewerA = await harness(page, 'addNode', 'viewer', { x: 360, y: 160 });
-    const solidB = await harness(page, 'addNode', 'solid_color', { x: 120, y: 360 });
-    const viewerB = await harness(page, 'addNode', 'viewer', { x: 360, y: 360 });
+    const solidA = (await harness(page, 'addNode', 'solid_color', { x: 120, y: 160 })) as string;
+    const viewerA = (await harness(page, 'addNode', 'viewer', { x: 360, y: 160 })) as string;
+    const solidB = (await harness(page, 'addNode', 'solid_color', { x: 120, y: 360 })) as string;
+    const viewerB = (await harness(page, 'addNode', 'viewer', { x: 360, y: 360 })) as string;
 
     await harness(page, 'connect', solidA, 'field', viewerA, 'value');
     await harness(page, 'connect', solidB, 'field', viewerB, 'value');
@@ -194,11 +197,15 @@ test.describe('Selective viewer invalidation', () => {
     await harness(page, 'setCurrentFrame', 12);
     await harness(page, 'waitForRenderIdle');
 
-    const state = await harness(page, 'getState');
+    const state = (await harness(page, 'getState')) as { currentFrame: number };
     expect(state.currentFrame).toBe(12);
 
-    const resultA = await harness(page, 'getViewerResult', viewerA);
-    const resultB = await harness(page, 'getViewerResult', viewerB);
+    const resultA = (await harness(page, 'getViewerResult', viewerA)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
+    const resultB = (await harness(page, 'getViewerResult', viewerB)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(resultA).not.toBeNull();
     expect(resultB).not.toBeNull();
   });
@@ -209,9 +216,9 @@ test.describe('Render suspension via editTransaction', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 120, y: 220 });
-    const bcId = await harness(page, 'addNode', 'brightness_contrast', { x: 340, y: 220 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 560, y: 220 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 120, y: 220 })) as string;
+    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 340, y: 220 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 560, y: 220 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
@@ -222,11 +229,13 @@ test.describe('Render suspension via editTransaction', () => {
       { action: 'setParam', args: [bcId, 'contrast', { type: 'float', value: -0.2 }] },
     ]);
 
-    const stateAfter = await harness(page, 'getState');
+    const stateAfter = (await harness(page, 'getState')) as { dirty: boolean };
     expect(stateAfter.dirty).toBe(true);
 
     await harness(page, 'waitForRenderIdle');
-    const result = await harness(page, 'getViewerResult', viewerId);
+    const result = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean; width: number; height: number;
+    } | null;
     expect(result).not.toBeNull();
   });
 
@@ -234,8 +243,8 @@ test.describe('Render suspension via editTransaction', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    const solidId = await harness(page, 'addNode', 'solid_color', { x: 120, y: 260 });
-    const viewerId = await harness(page, 'addNode', 'viewer', { x: 360, y: 260 });
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 120, y: 260 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 360, y: 260 })) as string;
 
     await harness(page, 'connect', solidId, 'field', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
@@ -246,7 +255,9 @@ test.describe('Render suspension via editTransaction', () => {
       { action: 'setParam', args: [solidId, 'scale_y', { type: 'float', value: 0.75 }] },
     ]);
 
-    const state = await harness(page, 'getState');
+    const state = (await harness(page, 'getState')) as {
+      connectionCount: number; selectedNodeIds: string[]; dirty: boolean;
+    };
     expect(state.connectionCount).toBe(1);
     expect(state.selectedNodeIds).toEqual([solidId, viewerId]);
     expect(state.dirty).toBe(true);

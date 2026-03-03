@@ -175,7 +175,7 @@ export const DslEditor: React.FC = () => {
             [/"/, 'string', '@string'],
 
             // Array brackets
-            [/[\[\]]/, 'delimiter.bracket'],
+            [/\[|\]/, 'delimiter.bracket'],
 
             // Remaining delimiters: = ( ) , .
             [/[=(),.]/, 'delimiter'],
@@ -188,7 +188,7 @@ export const DslEditor: React.FC = () => {
           ],
 
           string: [
-            [/[^\\"]+/, 'string'],
+            [/[^"\\]+/, 'string'],
             [/\\./, 'string.escape'],
             [/"/, 'string', '@pop'],
           ],

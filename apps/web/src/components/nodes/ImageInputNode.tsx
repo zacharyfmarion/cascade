@@ -26,12 +26,13 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
     const pending = pendingImageFiles.get(props.id);
     if (pending) {
       pendingImageFiles.delete(props.id);
-      setFileName(pending.name || 'Pasted image');
-      const url = URL.createObjectURL(pending);
-      setThumbnail(url);
+      Promise.resolve().then(() => {
+        setFileName(pending.name || 'Pasted image');
+        const url = URL.createObjectURL(pending);
+        setThumbnail(url);
+      });
       return;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.id]);
 
   // Recover thumbnail from engine for embedded images (e.g. after undo/redo)

@@ -187,6 +187,99 @@ const ParamControl: React.FC<{
   );
 };
 
+const GroupNameEditor: React.FC<{
+  nodeId: string;
+  spec: NodeSpec;
+  enterGroup: (nodeId: string) => void;
+  renameGroup: (nodeId: string, name: string) => void;
+}> = ({ nodeId, spec, enterGroup, renameGroup }) => {
+  const [groupName, setGroupName] = useState(spec.display_name);
+  const renameTimerRef = useRef<number | null>(null);
+
+  const commitGroupName = useCallback((nextName: string) => {
+    if (nextName === spec.display_name) return;
+    renameGroup(nodeId, nextName);
+  }, [nodeId, renameGroup, spec.display_name]);
+
+  const scheduleGroupRename = useCallback((nextName: string) => {
+    if (renameTimerRef.current) {
+      window.clearTimeout(renameTimerRef.current);
+    }
+    renameTimerRef.current = window.setTimeout(() => {
+      renameTimerRef.current = null;
+      commitGroupName(nextName);
+    }, 500);
+  }, [commitGroupName]);
+
+  useEffect(() => () => {
+    if (renameTimerRef.current) {
+      window.clearTimeout(renameTimerRef.current);
+      renameTimerRef.current = null;
+    }
+  }, []);
+
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      <div style={{ marginBottom: '8px' }}>
+        <label style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+          fontSize: '0.8rem',
+        }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Name</span>
+          <input
+            type="text"
+            value={groupName}
+            onChange={(e) => {
+              const nextName = e.target.value;
+              setGroupName(nextName);
+              scheduleGroupRename(nextName);
+            }}
+            onBlur={(e) => {
+              if (renameTimerRef.current) {
+                window.clearTimeout(renameTimerRef.current);
+                renameTimerRef.current = null;
+              }
+              commitGroupName(e.target.value);
+              e.currentTarget.style.borderColor = 'var(--border-default)';
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+            style={{
+              background: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-default)',
+              borderRadius: '3px',
+              padding: '6px 8px',
+              fontSize: '0.85rem',
+              width: '100%',
+              outline: 'none',
+            }}
+          />
+        </label>
+      </div>
+      <button
+        type="button"
+        onClick={() => enterGroup(nodeId)}
+        style={{
+          width: '100%',
+          padding: '8px 12px',
+          background: 'var(--node-header-group)',
+          color: 'var(--text-primary)',
+          border: 'none',
+          borderRadius: 4,
+          cursor: 'pointer',
+          fontSize: '0.85rem',
+          fontWeight: 600,
+          fontFamily: 'inherit',
+        }}
+      >
+        Edit Group
+      </button>
+    </div>
+  );
+};
+
 export const Inspector: React.FC = () => {
   const selectedNodeIds = useGraphStore(s => s.selectedNodeIds);
   const nodes = useGraphStore(s => s.nodes);
@@ -211,37 +304,14 @@ export const Inspector: React.FC = () => {
   const isGroupIO = selectedNode?.typeId === 'group_input' || selectedNode?.typeId === 'group_output';
   const isInsideGroup = editingStack.length > 1;
 
-  const [groupName, setGroupName] = useState('');
-  const renameTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (renameTimerRef.current) {
-      window.clearTimeout(renameTimerRef.current);
-      renameTimerRef.current = null;
-    }
-    if (isGroupNode && spec) {
-      setGroupName(spec.display_name);
-    } else {
-      setGroupName('');
-    }
-  }, [isGroupNode, spec]);
-
-  const commitGroupName = (nextName: string) => {
-    if (!selectedNode || !spec || !isGroupNode) return;
-    if (nextName === spec.display_name) return;
-    renameGroup(selectedNode.id, nextName);
-  };
-
-  const scheduleGroupRename = (nextName: string) => {
-    if (!selectedNode || !spec || !isGroupNode) return;
-    if (renameTimerRef.current) {
-      window.clearTimeout(renameTimerRef.current);
-    }
-    renameTimerRef.current = window.setTimeout(() => {
-      renameTimerRef.current = null;
-      commitGroupName(nextName);
-    }, 500);
-  };
+  const groupIoPortsKey = useMemo(() => {
+    if (!selectedNode || !spec || !isGroupIO) return 'none';
+    const ports = selectedNode.typeId === 'group_input' ? spec.outputs : spec.inputs;
+    return ports.map((port, idx) => {
+      const defaultValue = port.default ? JSON.stringify(port.default) : '';
+      return `${idx}:${port.name}:${port.label}:${port.ty}:${port.min ?? ''}:${port.max ?? ''}:${port.step ?? ''}:${defaultValue}`;
+    }).join('|');
+  }, [isGroupIO, selectedNode, spec]);
 
   if (selectedNode && selectedNode.typeId.startsWith('gpu_script')) {
     return <ScriptNodeEditor nodeId={selectedNode.id} typeId={selectedNode.typeId} />;
@@ -356,69 +426,19 @@ export const Inspector: React.FC = () => {
         </div>
 
         {isGroupNode && (
-          <div style={{ marginBottom: '16px' }}>
-            <div style={{ marginBottom: '8px' }}>
-              <label style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-                fontSize: '0.8rem',
-              }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Name</span>
-                <input
-                  type="text"
-                  value={groupName}
-                  onChange={(e) => {
-                    const nextName = e.target.value;
-                    setGroupName(nextName);
-                    scheduleGroupRename(nextName);
-                  }}
-                  onBlur={(e) => {
-                    if (renameTimerRef.current) {
-                      window.clearTimeout(renameTimerRef.current);
-                      renameTimerRef.current = null;
-                    }
-                    commitGroupName(e.target.value);
-                    e.currentTarget.style.borderColor = 'var(--border-default)';
-                  }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
-                  style={{
-                    background: 'var(--bg-primary)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '3px',
-                    padding: '6px 8px',
-                    fontSize: '0.85rem',
-                    width: '100%',
-                    outline: 'none',
-                  }}
-                />
-              </label>
-            </div>
-            <button
-              type="button"
-              onClick={() => enterGroup(selectedNode.id)}
-              style={{
-                width: '100%',
-                padding: '8px 12px',
-                background: 'var(--node-header-group)',
-                color: 'var(--text-primary)',
-                border: 'none',
-                borderRadius: 4,
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                fontFamily: 'inherit',
-              }}
-            >
-              Edit Group
-            </button>
-          </div>
+          <GroupNameEditor
+            key={`${selectedNode.id}:${spec.display_name}`}
+            nodeId={selectedNode.id}
+            spec={spec}
+            enterGroup={enterGroup}
+            renameGroup={renameGroup}
+          />
         )}
 
         {isGroupIO && isInsideGroup && (
           <div style={{ marginBottom: '16px' }}>
             <GroupIOEditor
+              key={`${selectedNode.id}:${groupIoPortsKey}`}
               nodeId={selectedNode.id}
               isInput={selectedNode.typeId === 'group_input'}
               spec={spec}
@@ -714,7 +734,7 @@ const GroupIOEditor: React.FC<{
   const ports = useMemo(() => (isInput ? spec.outputs : spec.inputs).filter(p => !p.name.startsWith('__add_')), [isInput, spec.outputs, spec.inputs]);
   const [editablePorts, setEditablePorts] = useState<EditablePort[]>(() => (
     ports.map((p, i) => ({
-      id: `${nodeId}_${i}`,
+      id: `${nodeId}_${i}_${p.name}`,
       name: p.name,
       label: p.label,
       ty: p.ty,
@@ -724,19 +744,6 @@ const GroupIOEditor: React.FC<{
       step: p.step,
     }))
   ));
-
-  useEffect(() => {
-    setEditablePorts(ports.map((p, i) => ({
-      id: `${nodeId}_${i}_${p.name}`,
-      name: p.name,
-      label: p.label,
-      ty: p.ty,
-      default: getDefaultValue(p),
-      min: p.min,
-      max: p.max,
-      step: p.step,
-    })));
-  }, [nodeId, ports]);
 
   const commitPorts = useCallback((nextPorts?: EditablePort[]) => {
     const targetPorts = nextPorts ?? editablePorts;

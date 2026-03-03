@@ -102,7 +102,7 @@ const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = 
         lineHeight: 1,
         padding: '2px',
       }}
-      onMouseEnter={e => { e.currentTarget.style.color = '#ef4444'; }}
+      onMouseEnter={e => { e.currentTarget.style.color = 'var(--status-error-bright)'; }}
       onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
     >
       ×
@@ -462,7 +462,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
         <span>GPU Script</span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {state.compileStatus === 'success' && <span style={{ color: 'var(--accent-primary)', fontSize: '0.7rem', fontWeight: 600 }}>Compiled</span>}
-            {state.compileStatus === 'error' && <span style={{ color: '#ef4444', fontSize: '0.7rem', fontWeight: 600 }}>Error</span>}
+            {state.compileStatus === 'error' && <span style={{ color: 'var(--status-error-bright)', fontSize: '0.7rem', fontWeight: 600 }}>Error</span>}
             {state.compileStatus === 'compiling' && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Compiling...</span>}
         </div>
       </div>
@@ -735,8 +735,8 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
           style={{
             width: '100%',
             minHeight: '250px',
-            background: '#0d1117',
-            color: '#e6edf3',
+            background: 'var(--code-bg)',
+            color: 'var(--code-text)',
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
             fontSize: '0.85rem',
             border: '1px solid var(--border-default)',
@@ -756,7 +756,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
             disabled={state.compileStatus === 'compiling'}
             style={{
               background: 'var(--accent-primary)',
-              color: 'white',
+              color: 'var(--text-inverse)',
               border: 'none',
               borderRadius: '4px',
               padding: '10px 16px',
@@ -765,7 +765,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
               cursor: state.compileStatus === 'compiling' ? 'not-allowed' : 'pointer',
               opacity: state.compileStatus === 'compiling' ? 0.7 : 1,
               transition: 'background 0.2s',
-              boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+              boxShadow: 'var(--shadow-sm)'
             }}
           >
             {state.compileStatus === 'compiling' ? 'Compiling...' : 'Compile Shader'}
@@ -773,11 +773,11 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
           
           {state.compileError && (
             <div style={{ 
-                color: '#ef4444', 
+                color: 'var(--status-error-bright)',
                 fontSize: '0.85rem', 
                 whiteSpace: 'pre-wrap', 
-                background: 'rgba(239, 68, 68, 0.1)', 
-                border: '1px solid rgba(239, 68, 68, 0.2)',
+                background: 'var(--status-error-subtle-bg)',
+                border: '1px solid var(--status-error-subtle-border)',
                 padding: '12px', 
                 borderRadius: '4px',
                 fontFamily: 'monospace'
@@ -857,7 +857,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
             </button>
           </div>
           {aiError && (
-            <div style={{ marginTop: '8px', color: '#ef4444', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
+            <div style={{ marginTop: '8px', color: 'var(--status-error-bright)', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
               {aiError}
             </div>
           )}

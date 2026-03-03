@@ -30,6 +30,10 @@ type DocumentEnvelope = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
+const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+
+const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
+
 const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && 'compositor' in value && 'graph' in value;
 
 const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) ? value.graph : value;
@@ -53,6 +57,30 @@ const createDocumentEnvelope = (graph: unknown) => ({
 
 let engine: Engine | null = null;
 let initPromise: Promise<void> | null = null;
+
+type WasmEngineGroupNode = {
+  id: string;
+  typeId: string;
+  position: [number, number] | { x: number; y: number };
+  params?: Record<string, ParamValue>;
+  input_defaults?: Record<string, ParamValue>;
+};
+
+type WasmEngineGroupConnection = {
+  fromNode: string;
+  fromPort: string;
+  toNode: string;
+  toPort: string;
+};
+
+type WasmEngineGroupInternalGraph = {
+  groupDefId: string;
+  name: string;
+  nodes?: WasmEngineGroupNode[];
+  connections?: WasmEngineGroupConnection[];
+  inputs?: PortSpec[];
+  outputs?: PortSpec[];
+};
 
 export async function initWasmEngine(): Promise<void> {
   if (engine) return;
@@ -113,6 +141,60 @@ export class WasmEngine implements EngineBridge {
   private getEngine(): Engine {
     if (!engine) throw new Error('WASM engine not initialized');
     return engine;
+  }
+
+  private getEngineWithBindings(): Engine & {
+    set_muted: (nodeId: string, muted: boolean) => void;
+    load_palette_data: (nodeId: string, data: Uint8Array) => [number, number, number, number][];
+    load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => void;
+    set_sequence_info: (nodeId: string, frameCount: bigint, firstFrame: bigint, lastFrame: bigint) => void;
+    batch_clear: (nodeId: string) => void;
+    batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
+    get_batch_info: (exportNodeId: string) => { count: number; filenames: Iterable<string> };
+    get_ai_node_image_data?: (nodeId: string) => Uint8Array;
+    set_ai_node_image_data?: (nodeId: string, data: Uint8Array) => void;
+    create_group_from_nodes?: (nodeIds: string[], name: string) => CreateGroupResult;
+    ungroup_node?: (groupNodeId: string) => unknown;
+    get_group_internal_graph?: (groupNodeId: string) => unknown;
+    update_group_interface?: (groupDefId: string, inputs: PortSpec[], outputs: PortSpec[]) => NodeSpec;
+    rename_group?: (groupDefId: string, newName: string) => NodeSpec;
+    set_ai_api_key?: (provider: string, key: string) => void;
+    is_ai_configured?: () => boolean;
+    run_ai_node?: (nodeId: string) => Promise<void> | void;
+    get_node_execution_state?: (nodeId: string) => { status?: string; isStale?: boolean; error?: string };
+    get_color_management_info?: () => ColorManagementInfo;
+    get_views_for_display?: (display: string) => string[];
+    set_display_view?: (display: string, view: string) => void;
+    set_project_format?: (width: number, height: number) => void;
+    export_group_as_package?: (groupDefId: string) => unknown;
+    import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+  } {
+    return this.getEngine() as Engine & {
+      set_muted: (nodeId: string, muted: boolean) => void;
+      load_palette_data: (nodeId: string, data: Uint8Array) => [number, number, number, number][];
+      load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => void;
+      set_sequence_info: (nodeId: string, frameCount: bigint, firstFrame: bigint, lastFrame: bigint) => void;
+      batch_clear: (nodeId: string) => void;
+      batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
+      get_batch_info: (exportNodeId: string) => { count: number; filenames: Iterable<string> };
+      get_ai_node_image_data?: (nodeId: string) => Uint8Array;
+      set_ai_node_image_data?: (nodeId: string, data: Uint8Array) => void;
+      create_group_from_nodes?: (nodeIds: string[], name: string) => CreateGroupResult;
+      ungroup_node?: (groupNodeId: string) => unknown;
+      get_group_internal_graph?: (groupNodeId: string) => unknown;
+      update_group_interface?: (groupDefId: string, inputs: PortSpec[], outputs: PortSpec[]) => NodeSpec;
+      rename_group?: (groupDefId: string, newName: string) => NodeSpec;
+      set_ai_api_key?: (provider: string, key: string) => void;
+      is_ai_configured?: () => boolean;
+      run_ai_node?: (nodeId: string) => Promise<void> | void;
+      get_node_execution_state?: (nodeId: string) => { status?: string; isStale?: boolean; error?: string };
+      get_color_management_info?: () => ColorManagementInfo;
+      get_views_for_display?: (display: string) => string[];
+      set_display_view?: (display: string, view: string) => void;
+      set_project_format?: (width: number, height: number) => void;
+      export_group_as_package?: (groupDefId: string) => unknown;
+      import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+    };
   }
 
   /**
@@ -184,7 +266,7 @@ export class WasmEngine implements EngineBridge {
 
   setMuted(nodeId: string, muted: boolean): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).set_muted(nodeId, muted);
+      this.getEngineWithBindings().set_muted(nodeId, muted);
     });
   }
 
@@ -196,20 +278,19 @@ export class WasmEngine implements EngineBridge {
 
   loadPaletteData(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> {
     return this.scheduler.enqueue(() => {
-      const result = (this.getEngine() as any).load_palette_data(nodeId, data);
-      return result as [number, number, number, number][];
+      return this.getEngineWithBindings().load_palette_data(nodeId, data);
     });
   }
 
   loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).load_sequence_frame_data(nodeId, BigInt(frame), data);
+      this.getEngineWithBindings().load_sequence_frame_data(nodeId, BigInt(frame), data);
     });
   }
 
   setSequenceInfo(nodeId: string, info: { frame_count: number; first_frame: number; last_frame: number }): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).set_sequence_info(
+      this.getEngineWithBindings().set_sequence_info(
         nodeId,
         BigInt(info.frame_count),
         BigInt(info.first_frame),
@@ -221,21 +302,21 @@ export class WasmEngine implements EngineBridge {
 
   batchClear(nodeId: string): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).batch_clear(nodeId);
+      this.getEngineWithBindings().batch_clear(nodeId);
     });
   }
 
   batchAddImage(nodeId: string, filename: string, data: Uint8Array): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).batch_add_image(nodeId, filename, data);
+      this.getEngineWithBindings().batch_add_image(nodeId, filename, data);
     });
   }
 
   getBatchInfo(exportNodeId: string): Promise<{ count: number; filenames: string[] }> {
     return this.scheduler.enqueue(() => {
-      const result = (this.getEngine() as any).get_batch_info(exportNodeId);
-      const count = result.count as number;
-      const filenames = Array.from(result.filenames as string[]);
+      const result: { count: number; filenames: Iterable<string> } = this.getEngineWithBindings().get_batch_info(exportNodeId);
+      const count = result.count;
+      const filenames = Array.from(result.filenames, name => String(name));
       return { count, filenames };
     });
   }
@@ -361,7 +442,7 @@ export class WasmEngine implements EngineBridge {
             }
           } else if (node.type_id.startsWith('ai_')) {
             try {
-              const aiData = (eng as any).get_ai_node_image_data(node.id) as Uint8Array;
+              const aiData = this.getEngineWithBindings().get_ai_node_image_data?.(node.id);
               if (aiData && aiData.length > 0) {
                 let binary = '';
                 for (let i = 0; i < aiData.length; i++) {
@@ -406,7 +487,7 @@ export class WasmEngine implements EngineBridge {
             if (assetRef.type === 'image') {
               eng.load_image_data(nodeId, bytes);
             } else if (assetRef.type === 'ai_result') {
-              (eng as any).set_ai_node_image_data(nodeId, bytes);
+              this.getEngineWithBindings().set_ai_node_image_data?.(nodeId, bytes);
             }
           } catch (e) {
             console.warn(`Failed to load embedded asset for node ${nodeId}:`, e);
@@ -436,7 +517,7 @@ export class WasmEngine implements EngineBridge {
 
   createGroupFromNodes(nodeIds: string[], name: string): Promise<CreateGroupResult> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
+      const eng = this.getEngineWithBindings();
       if (typeof eng.create_group_from_nodes !== 'function') {
         throw new Error('Group creation not yet supported in WASM engine');
       }
@@ -446,57 +527,77 @@ export class WasmEngine implements EngineBridge {
 
   ungroupNode(groupNodeId: string): Promise<UngroupResult> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
+      const eng = this.getEngineWithBindings();
       if (typeof eng.ungroup_node !== 'function') {
         throw new Error('Ungrouping not yet supported in WASM engine');
       }
-      const raw = eng.ungroup_node(groupNodeId) as any;
+      const raw = eng.ungroup_node(groupNodeId);
+      const rawRecord = asRecord(raw);
+      const restoredRaw = Array.isArray(rawRecord.restoredNodes) ? rawRecord.restoredNodes : [];
       return {
-        removedGroupNodeId: raw.removedGroupNodeId,
-        restoredNodes: (raw.restoredNodes ?? []).map((n: any) => ({
-          id: n.id,
-          typeId: n.typeId,
-          position: Array.isArray(n.position) ? { x: n.position[0], y: n.position[1] } : n.position,
-          params: n.params,
-          inputDefaults: n.input_defaults ?? {},
-        })),
+        removedGroupNodeId: String(rawRecord.removedGroupNodeId ?? ''),
+        restoredNodes: restoredRaw.map((nodeEntry: unknown) => {
+          const nodeRecord = asRecord(nodeEntry) as WasmEngineGroupNode;
+          const position = Array.isArray(nodeRecord.position)
+            ? { x: nodeRecord.position[0], y: nodeRecord.position[1] }
+            : nodeRecord.position ?? { x: 0, y: 0 };
+          return {
+            id: String(nodeRecord.id ?? ''),
+            typeId: String(nodeRecord.typeId ?? ''),
+            position,
+            params: asParamValueRecord(nodeRecord.params),
+            inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
+          };
+        }),
       };
     });
   }
 
   getGroupInternalGraph(groupNodeId: string): Promise<GroupInternalGraph> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
+      const eng = this.getEngineWithBindings();
       if (typeof eng.get_group_internal_graph !== 'function') {
         throw new Error('Group inspection not yet supported in WASM engine');
       }
-      const raw = eng.get_group_internal_graph(groupNodeId) as any;
+      const raw = eng.get_group_internal_graph(groupNodeId);
+      const rawRecord = asRecord(raw) as WasmEngineGroupInternalGraph;
+      const rawNodes = Array.isArray(rawRecord.nodes) ? rawRecord.nodes : [];
+      const rawConnections = Array.isArray(rawRecord.connections) ? rawRecord.connections : [];
       return {
-        groupDefId: raw.groupDefId,
-        name: raw.name,
-        nodes: (raw.nodes ?? []).map((n: any) => ({
-          id: n.id,
-          typeId: n.typeId,
-          position: Array.isArray(n.position) ? { x: n.position[0], y: n.position[1] } : n.position,
-          params: n.params,
-          inputDefaults: n.input_defaults ?? {},
-        })),
-        connections: (raw.connections ?? []).map((c: any) => ({
-          id: crypto.randomUUID(),
-          fromNode: c.fromNode,
-          fromPort: c.fromPort,
-          toNode: c.toNode,
-          toPort: c.toPort,
-        })),
-        inputs: raw.inputs,
-        outputs: raw.outputs,
+        groupDefId: String(rawRecord.groupDefId ?? ''),
+        name: String(rawRecord.name ?? ''),
+        nodes: rawNodes.map((nodeEntry) => {
+          const nodeRecord = asRecord(nodeEntry) as WasmEngineGroupNode;
+          const position = Array.isArray(nodeRecord.position)
+            ? { x: nodeRecord.position[0], y: nodeRecord.position[1] }
+            : nodeRecord.position ?? { x: 0, y: 0 };
+          return {
+            id: String(nodeRecord.id ?? ''),
+            typeId: String(nodeRecord.typeId ?? ''),
+            position,
+            params: asParamValueRecord(nodeRecord.params),
+            inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
+          };
+        }),
+        connections: rawConnections.map((connEntry: unknown) => {
+          const connRecord = asRecord(connEntry) as WasmEngineGroupConnection;
+          return {
+            id: crypto.randomUUID(),
+            fromNode: String(connRecord.fromNode ?? ''),
+            fromPort: String(connRecord.fromPort ?? ''),
+            toNode: String(connRecord.toNode ?? ''),
+            toPort: String(connRecord.toPort ?? ''),
+          };
+        }),
+        inputs: rawRecord.inputs ?? [],
+        outputs: rawRecord.outputs ?? [],
       };
     });
   }
 
   updateGroupInterface(groupDefId: string, inputs: PortSpec[], outputs: PortSpec[]): Promise<NodeSpec> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
+      const eng = this.getEngineWithBindings();
       if (typeof eng.update_group_interface !== 'function') {
         throw new Error('Group interface update not yet supported in WASM engine');
       }
@@ -506,7 +607,7 @@ export class WasmEngine implements EngineBridge {
 
   renameGroup(groupDefId: string, newName: string): Promise<NodeSpec> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
+      const eng = this.getEngineWithBindings();
       if (typeof eng.rename_group !== 'function') {
         throw new Error('Group rename not yet supported in WASM engine');
       }
@@ -528,26 +629,30 @@ export class WasmEngine implements EngineBridge {
 
   setAiApiKey(provider: string, key: string): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).set_ai_api_key(provider, key);
+      this.getEngineWithBindings().set_ai_api_key?.(provider, key);
     });
   }
 
   isAiConfigured(): Promise<boolean> {
     return this.scheduler.enqueue(() =>
-      (this.getEngine() as any).is_ai_configured() as boolean
+      this.getEngineWithBindings().is_ai_configured?.() ?? false
     );
   }
 
   runAiNode(nodeId: string): Promise<void> {
     return this.scheduler.enqueue(async () => {
-      await (this.getEngine() as any).run_ai_node(nodeId);
+      const eng = this.getEngineWithBindings();
+      if (!eng.run_ai_node) {
+        throw new Error('AI node execution not supported in WASM engine');
+      }
+      await eng.run_ai_node(nodeId);
     });
   }
 
   getNodeExecutionState(nodeId: string): { status: string; isStale: boolean; error: string } {
     // This reads lightweight cached state — no engine mutation, safe without scheduling.
     // Keeping it synchronous so polling UIs don't add microtask latency.
-    const result = (this.getEngine() as any).get_node_execution_state(nodeId);
+    const result = this.getEngineWithBindings().get_node_execution_state?.(nodeId) ?? {};
     return {
       status: result.status ?? 'idle',
       isStale: result.isStale ?? false,
@@ -557,28 +662,28 @@ export class WasmEngine implements EngineBridge {
 
   getColorManagementInfo(): Promise<ColorManagementInfo> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
-      return eng.get_color_management_info() as ColorManagementInfo;
+      const eng = this.getEngineWithBindings();
+      return eng.get_color_management_info?.() as ColorManagementInfo;
     });
   }
 
   getViewsForDisplay(display: string): Promise<string[]> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
-      return eng.get_views_for_display(display) as string[];
+      const eng = this.getEngineWithBindings();
+      return eng.get_views_for_display?.(display) ?? [];
     });
   }
 
   setDisplayView(display: string, view: string): Promise<void> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
-      eng.set_display_view(display, view);
+      const eng = this.getEngineWithBindings();
+      eng.set_display_view?.(display, view);
     });
   }
 
   setProjectFormat(width: number, height: number): Promise<void> {
     return this.scheduler.enqueue(() => {
-      (this.getEngine() as any).set_project_format(width, height);
+      this.getEngineWithBindings().set_project_format?.(width, height);
     });
   }
 
@@ -590,16 +695,16 @@ export class WasmEngine implements EngineBridge {
 
   exportGroupAsPackage(groupDefId: string): Promise<unknown> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
-      return eng.export_group_as_package(groupDefId);
+      const eng = this.getEngineWithBindings();
+      return eng.export_group_as_package?.(groupDefId);
     });
   }
 
   importCustomNodes(json: string): Promise<NodeSpec[]> {
     return this.scheduler.enqueue(() => {
-      const eng = this.getEngine() as any;
+      const eng = this.getEngineWithBindings();
       const pkg = JSON.parse(json);
-      return eng.import_custom_nodes(pkg) as NodeSpec[];
+      return eng.import_custom_nodes?.(pkg) ?? [];
     });
   }
 

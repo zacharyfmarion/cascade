@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 
 /* ───────────────────────────────────────────────────────────────
  *  Shared UI primitives for all node components.
@@ -144,6 +144,7 @@ export const NodeTextArea: React.FC<NodeTextAreaProps> = ({
 
   useEffect(() => {
     if (document.activeElement !== textareaRef.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Sync external value when not editing.
       setLocalValue(value);
     }
   }, [value]);

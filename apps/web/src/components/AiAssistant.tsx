@@ -14,14 +14,23 @@ interface AiAssistantProps {
   onToggle: () => void;
 }
 
-const toToolAction = (part: { toolCallId: string; state: string; input?: unknown; output?: unknown; errorText?: string }): ToolAction => ({
-  toolCallId: part.toolCallId,
-  toolName: getToolName(part as any),
-  state: part.state,
-  input: part.input as Record<string, unknown> | undefined,
-  output: 'output' in part ? part.output : undefined,
-  errorText: 'errorText' in part ? (part.errorText as string) : undefined,
-});
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+type ToolUiPart = Parameters<typeof getToolName>[0];
+
+const toToolAction = (part: ToolUiPart): ToolAction => {
+  const input = 'input' in part && isRecord(part.input) ? part.input : undefined;
+  const output = 'output' in part ? part.output : undefined;
+  const errorText = 'errorText' in part && typeof part.errorText === 'string' ? part.errorText : undefined;
+  return {
+    toolCallId: part.toolCallId,
+    toolName: getToolName(part),
+    state: part.state,
+    input,
+    output,
+    errorText,
+  };
+};
 
 export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) => {
   const apiKey = useSettingsStore(s => s.anthropicApiKey);
@@ -326,10 +335,15 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
                 color: 'var(--text-secondary)',
                 maxWidth: '95%',
               }}>
-                {(msg.parts ?? []).map((part, i) => {
+                {(msg.parts ?? []).map((part) => {
+                  const partKey = part.type === 'text'
+                    ? `${msg.id}-text-${part.text ?? ''}`
+                    : isToolUIPart(part)
+                      ? part.toolCallId
+                      : `${msg.id}-${part.type}`;
                   if (part.type === 'text' && part.text) {
                     return (
-                      <div key={`text-${i}`} className="ai-markdown" style={{
+                      <div key={partKey} className="ai-markdown" style={{
                         wordBreak: 'break-word',
                         lineHeight: 1.5,
                       }}>
@@ -338,7 +352,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
                     );
                   }
                   if (isToolUIPart(part)) {
-                    return <AiActionItem key={part.toolCallId} action={toToolAction(part)} />;
+                    return <AiActionItem key={partKey} action={toToolAction(part)} />;
                   }
                   return null;
                 })}

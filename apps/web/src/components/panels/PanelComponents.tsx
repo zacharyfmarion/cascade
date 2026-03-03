@@ -38,6 +38,7 @@ const ViewerPanel: React.FC<IDockviewPanelProps> = () => <Viewer />;
 const TimelinePanel: React.FC<IDockviewPanelProps> = () => <Timeline />;
 const DslEditorPanel: React.FC<IDockviewPanelProps> = () => <DslEditor />;
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const panelComponents: Record<string, React.FC<IDockviewPanelProps>> = {
   'node-canvas': NodeCanvasPanel,
   'node-library': NodeLibraryPanel,
@@ -53,6 +54,7 @@ export interface PanelTypeInfo {
   icon: string;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const PANEL_TYPES: PanelTypeInfo[] = [
   { id: 'node-canvas', label: 'Node Editor', icon: '⬡' },
   { id: 'dsl-editor', label: 'DSL', icon: '{ }' },
@@ -212,6 +214,7 @@ export const EditorTab: React.FC<IDockviewPanelHeaderProps> = (props) => {
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const tabComponents: Record<string, React.FC<IDockviewPanelHeaderProps>> = {
   'editor-tab': EditorTab,
 };

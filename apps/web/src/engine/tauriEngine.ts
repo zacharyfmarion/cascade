@@ -9,6 +9,10 @@ type DocumentEnvelope = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
+const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
+
+const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
+
 const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && 'compositor' in value && 'graph' in value;
 
 const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) ? value.graph : value;
@@ -230,41 +234,65 @@ export class TauriEngine implements EngineBridge {
 
   async ungroupNode(groupNodeId: string): Promise<UngroupResult> {
     const json = await invoke<string>('ungroup_node', { groupNodeId });
-    const raw = JSON.parse(json);
+    const raw = JSON.parse(json) as unknown;
+    const rawRecord = asRecord(raw);
+    const restoredRaw = Array.isArray(rawRecord.restoredNodes) ? rawRecord.restoredNodes : [];
     return {
-      removedGroupNodeId: raw.removedGroupNodeId,
-      restoredNodes: (raw.restoredNodes ?? []).map((n: any) => ({
-        id: n.id,
-        typeId: n.typeId,
-        position: { x: n.position[0], y: n.position[1] },
-        params: n.params,
-        inputDefaults: n.input_defaults ?? {},
-      })),
+      removedGroupNodeId: String(rawRecord.removedGroupNodeId ?? ''),
+      restoredNodes: restoredRaw.map((nodeEntry: unknown) => {
+        const nodeRecord = asRecord(nodeEntry);
+        const position = Array.isArray(nodeRecord.position)
+          ? { x: Number(nodeRecord.position[0]), y: Number(nodeRecord.position[1]) }
+          : isRecord(nodeRecord.position)
+            ? { x: Number(nodeRecord.position.x), y: Number(nodeRecord.position.y) }
+            : { x: 0, y: 0 };
+        return {
+          id: String(nodeRecord.id ?? ''),
+          typeId: String(nodeRecord.typeId ?? ''),
+          position,
+          params: asParamValueRecord(nodeRecord.params),
+          inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
+        };
+      }),
     };
   }
 
   async getGroupInternalGraph(groupNodeId: string): Promise<GroupInternalGraph> {
     const json = await invoke<string>('get_group_internal_graph', { groupNodeId });
-    const raw = JSON.parse(json);
+    const raw = JSON.parse(json) as unknown;
+    const rawRecord = asRecord(raw);
+    const rawNodes = Array.isArray(rawRecord.nodes) ? rawRecord.nodes : [];
+    const rawConnections = Array.isArray(rawRecord.connections) ? rawRecord.connections : [];
     return {
-      groupDefId: raw.groupDefId,
-      name: raw.name,
-      nodes: (raw.nodes ?? []).map((n: any) => ({
-        id: n.id,
-        typeId: n.typeId,
-        position: { x: n.position[0], y: n.position[1] },
-        params: n.params,
-        inputDefaults: n.input_defaults ?? {},
-      })),
-      connections: (raw.connections ?? []).map((c: any) => ({
-        id: c.id ?? crypto.randomUUID(),
-        fromNode: c.fromNode,
-        fromPort: c.fromPort,
-        toNode: c.toNode,
-        toPort: c.toPort,
-      })),
-      inputs: raw.inputs,
-      outputs: raw.outputs,
+      groupDefId: String(rawRecord.groupDefId ?? ''),
+      name: String(rawRecord.name ?? ''),
+      nodes: rawNodes.map((nodeEntry: unknown) => {
+        const nodeRecord = asRecord(nodeEntry);
+        const position = Array.isArray(nodeRecord.position)
+          ? { x: Number(nodeRecord.position[0]), y: Number(nodeRecord.position[1]) }
+          : isRecord(nodeRecord.position)
+            ? { x: Number(nodeRecord.position.x), y: Number(nodeRecord.position.y) }
+            : { x: 0, y: 0 };
+        return {
+          id: String(nodeRecord.id ?? ''),
+          typeId: String(nodeRecord.typeId ?? ''),
+          position,
+          params: asParamValueRecord(nodeRecord.params),
+          inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
+        };
+      }),
+      connections: rawConnections.map((connEntry: unknown) => {
+        const connRecord = asRecord(connEntry);
+        return {
+          id: String(connRecord.id ?? crypto.randomUUID()),
+          fromNode: String(connRecord.fromNode ?? ''),
+          fromPort: String(connRecord.fromPort ?? ''),
+          toNode: String(connRecord.toNode ?? ''),
+          toPort: String(connRecord.toPort ?? ''),
+        };
+      }),
+      inputs: Array.isArray(rawRecord.inputs) ? rawRecord.inputs as PortSpec[] : [],
+      outputs: Array.isArray(rawRecord.outputs) ? rawRecord.outputs as PortSpec[] : [],
     };
   }
 

@@ -14,8 +14,9 @@ interface BaseNodeProps {
   data: {
     label: string;
     spec: NodeSpec;
+    params?: Record<string, ParamValue>;
     inputDefaults?: Record<string, ParamValue>;
-    [key: string]: any;
+    [key: string]: unknown;
   };
   selected?: boolean;
   children?: React.ReactNode;
@@ -54,6 +55,7 @@ const InlineInputControl: React.FC<{
           position: 'relative',
           width: '14px',
           height: '14px',
+          // eslint-disable-next-line compositor-theme/no-hardcoded-colors
           backgroundColor: `rgba(${sr}, ${sg}, ${sb}, ${a})`,
           border: '1px solid var(--border-default)',
           borderRadius: '2px',
@@ -138,6 +140,7 @@ const InlineInputControl: React.FC<{
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const getPortColor = (type: string) => {
    switch (type) {
      case 'Image': return 'var(--port-image)';
@@ -221,9 +224,10 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
         maxWidth: maxWidth ?? '220px',
       }}
     >
-      <div
+      <button
+        type="button"
         className="base-node__header"
-        style={{ background: getHeaderBackground(spec.category) }}
+        style={{ background: getHeaderBackground(spec.category), border: 'none' }}
         onDoubleClick={onHeaderDoubleClick}
       >
         {headerIcon && <span className="base-node__icon">{headerIcon}</span>}
@@ -238,7 +242,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
           </div>
         )}
         {headerExtra}
-      </div>
+      </button>
 
       <div className="base-node__body">
         {spec.inputs.map((input: PortSpec) => {

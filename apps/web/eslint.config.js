@@ -32,6 +32,12 @@ export default defineConfig([
     rules: {
       'compositor-theme/no-hardcoded-colors': 'error',
       'no-empty': ['error', { allowEmptyCatch: false }],
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
     },
   },
+
 ])

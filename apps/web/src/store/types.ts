@@ -95,11 +95,11 @@ const CONNECTABLE_TYPES: ValueType[] = ['Float', 'Int', 'Bool', 'Color', 'String
 export const isConnectableParam = (p: ParamSpec): boolean =>
   p.promotable && CONNECTABLE_TYPES.includes(p.ty) && CONNECTABLE_HINTS.includes(p.ui_hint.type);
 
-export const createParamValue = (type: ValueType | string, value: any): ParamValue => {
+export const createParamValue = (type: ValueType | string, value: unknown): ParamValue => {
   if (type === 'Float') return { Float: Number(value) };
   if (type === 'Int') return { Int: Math.round(Number(value)) };
   if (type === 'Bool') return { Bool: Boolean(value) };
-  if (type === 'Color') return { Color: value };
+  if (type === 'Color') return { Color: value as [number, number, number, number] };
   return { String: String(value) };
 };
 

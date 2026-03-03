@@ -27,6 +27,7 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
     const sg = floatToByte(linearToSrgbChannel(g));
     const sb = floatToByte(linearToSrgbChannel(b));
     return {
+      // eslint-disable-next-line compositor-theme/no-hardcoded-colors
       backgroundColor: `rgba(${sr}, ${sg}, ${sb}, ${a})`,
     };
   }, [r, g, b, a]);

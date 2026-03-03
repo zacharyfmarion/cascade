@@ -66,10 +66,12 @@ const ThemeCard = ({ theme, isSelected, onClick }: { theme: CompositorTheme; isS
   const [isHovered, setIsHovered] = useState(false);
   
   return (
-    <div
+    <button
+      type="button"
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
+      aria-pressed={isSelected}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -82,6 +84,7 @@ const ThemeCard = ({ theme, isSelected, onClick }: { theme: CompositorTheme; isS
         boxShadow: isSelected ? '0 0 0 1px var(--accent-primary)' : isHovered ? '0 2px 4px var(--shadow-overlay)' : 'none',
         transform: isHovered ? 'translateY(-1px)' : 'none',
         opacity: isHovered ? 1 : 0.9,
+        textAlign: 'left',
       }}
     >
       <div style={{ 
@@ -103,7 +106,7 @@ const ThemeCard = ({ theme, isSelected, onClick }: { theme: CompositorTheme; isS
          <div style={{ flex: 1, background: theme.colors['status.danger'] }} />
          <div style={{ flex: 1, background: theme.colors['status.success'] }} />
       </div>
-    </div>
+    </button>
   );
 };
 
@@ -692,20 +695,17 @@ const TAB_COMPONENTS: Record<Tab, React.FC> = {
   ai: AiTab,
 };
 
-export const SettingsModal: React.FC = () => {
-  const isOpen = useSettingsStore(s => s.isSettingsOpen);
-  const initialTab = useSettingsStore(s => s.settingsInitialTab);
-  const closeSettings = useSettingsStore(s => s.closeSettings);
-  const [activeTab, setActiveTab] = useState<Tab>('project');
+const resolveInitialTab = (initialTab: string | null): Tab => {
+  if (initialTab && TAB_LABELS.some(t => t.key === initialTab)) {
+    return initialTab as Tab;
+  }
+  return 'project';
+};
+
+const SettingsModalContent: React.FC<{ initialTab: Tab; closeSettings: () => void }> = ({ initialTab, closeSettings }) => {
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab);
 
   useEffect(() => {
-    if (isOpen && initialTab && TAB_LABELS.some(t => t.key === initialTab)) {
-      setActiveTab(initialTab as Tab);
-    }
-  }, [isOpen, initialTab]);
-
-  useEffect(() => {
-    if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -715,9 +715,7 @@ export const SettingsModal: React.FC = () => {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [isOpen, closeSettings]);
-
-  if (!isOpen) return null;
+  }, [closeSettings]);
 
   const ActiveTabComponent = TAB_COMPONENTS[activeTab];
 
@@ -733,7 +731,7 @@ export const SettingsModal: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(0, 0, 0, 0.5)',
+        background: 'var(--overlay-dim)',
         backdropFilter: 'blur(4px)',
       }}
       onClick={closeSettings}
@@ -853,5 +851,23 @@ export const SettingsModal: React.FC = () => {
         </div>
       </div>
     </div>
+  );
+};
+
+export const SettingsModal: React.FC = () => {
+  const isOpen = useSettingsStore(s => s.isSettingsOpen);
+  const initialTab = useSettingsStore(s => s.settingsInitialTab);
+  const closeSettings = useSettingsStore(s => s.closeSettings);
+
+  if (!isOpen) return null;
+
+  const resolvedInitialTab = resolveInitialTab(initialTab);
+
+  return (
+    <SettingsModalContent
+      key={resolvedInitialTab}
+      initialTab={resolvedInitialTab}
+      closeSettings={closeSettings}
+    />
   );
 };

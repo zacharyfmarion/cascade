@@ -481,7 +481,8 @@ describe('graphStore AI node operations', () => {
   it('runAiNode is a no-op when engine lacks runAiNode', async () => {
     const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
     const originalRunAiNode = mockEngine.runAiNode;
-    delete (mockEngine as any).runAiNode;
+    const mutableEngine = mockEngine as { runAiNode?: typeof mockEngine.runAiNode };
+    delete mutableEngine.runAiNode;
     await useGraphStore.getState().runAiNode(id);
     expect(useGraphStore.getState().aiNodeStatuses[id]).toBeUndefined();
     mockEngine.runAiNode = originalRunAiNode;

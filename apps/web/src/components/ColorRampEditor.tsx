@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { linearToHex, hexToLinear, linearToSrgbByte } from './nodes/colorUtils';
 
 export interface ColorStop {
@@ -41,18 +41,27 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
 
-  const safeStops = stops.length >= 2 ? stops : [
-    { position: 0, color: [0, 0, 0, 1] },
-    { position: 1, color: [1, 1, 1, 1] }
-  ] as ColorStop[];
+  const safeStops = useMemo(() => (
+    stops.length >= 2
+      ? stops
+      : [
+        { position: 0, color: [0, 0, 0, 1] },
+        { position: 1, color: [1, 1, 1, 1] }
+      ] as ColorStop[]
+  ), [stops]);
 
-  const sortedStopsForGradient = [...safeStops].sort((a, b) => a.position - b.position);
-  const gradientCSS = `linear-gradient(to right, ${
-    sortedStopsForGradient.map(s => {
-      const [r, g, b, a] = s.color;
-      return `rgba(${linearToSrgbByte(r)}, ${linearToSrgbByte(g)}, ${linearToSrgbByte(b)}, ${a}) ${s.position * 100}%`;
-    }).join(', ')
-  })`;
+  const sortedStopsForGradient = useMemo(
+    () => [...safeStops].sort((a, b) => a.position - b.position),
+    [safeStops]
+  );
+  const gradientCSS = useMemo(() => (
+    `linear-gradient(to right, ${
+      sortedStopsForGradient.map(s => {
+        const [r, g, b, a] = s.color;
+        return `rgba(${linearToSrgbByte(r)}, ${linearToSrgbByte(g)}, ${linearToSrgbByte(b)}, ${a}) ${s.position * 100}%`;
+      }).join(', ')
+    })`
+  ), [sortedStopsForGradient]);
 
   const handleMouseDown = (e: React.MouseEvent, index: number) => {
     e.stopPropagation();
@@ -60,7 +69,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
     setDraggingIndex(index);
   };
 
-  const handleBarClick = (e: React.MouseEvent) => {
+  const handleBarClick = useCallback((e: React.MouseEvent) => {
     if (barRef.current) {
       const rect = barRef.current.getBoundingClientRect();
       const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -72,7 +81,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
       onChange(newStops);
       setSelectedIndex(newStops.length - 1);
     }
-  };
+  }, [onChange, safeStops]);
 
   const updateStopPosition = useCallback((index: number, newPos: number) => {
     const updated = [...safeStops];
@@ -105,15 +114,15 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
     };
   }, [draggingIndex, updateStopPosition]);
 
-  const handleDelete = () => {
+  const handleDelete = useCallback(() => {
     if (selectedIndex !== null && safeStops.length > 2) {
       const newStops = safeStops.filter((_, i) => i !== selectedIndex);
       onChange(newStops);
       setSelectedIndex(null);
     }
-  };
+  }, [onChange, safeStops, selectedIndex]);
 
-  const handleColorChange = (hex: string) => {
+  const handleColorChange = useCallback((hex: string) => {
     if (selectedIndex !== null) {
       const updated = [...safeStops];
       const oldAlpha = updated[selectedIndex].color[3];
@@ -123,7 +132,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
       };
       onChange(updated);
     }
-  };
+  }, [onChange, safeStops, selectedIndex]);
 
   const selectedStop = selectedIndex !== null ? safeStops[selectedIndex] : null;
 
@@ -157,7 +166,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
       }}>
         {safeStops.map((stop, i) => (
           <div
-            key={i}
+            key={`${stop.position}-${stop.color.join('-')}-${i}`}
             onMouseDown={(e) => handleMouseDown(e, i)}
             role="slider"
             aria-valuenow={stop.position}
@@ -174,7 +183,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
               borderRadius: '50%',
               cursor: 'grab',
               zIndex: selectedIndex === i ? 10 : 1,
-              boxShadow: '0 2px 4px rgba(0,0,0,0.5)',
+              boxShadow: 'var(--shadow-md)',
               outline: 'none'
             }}
           />
@@ -199,6 +208,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
             borderRadius: '3px',
             overflow: 'hidden',
             border: '1px solid var(--border-default)',
+            // eslint-disable-next-line compositor-theme/no-hardcoded-colors
             background: `rgba(${linearToSrgbByte(selectedStop.color[0])}, ${linearToSrgbByte(selectedStop.color[1])}, ${linearToSrgbByte(selectedStop.color[2])}, 1)`
           }}>
             <input

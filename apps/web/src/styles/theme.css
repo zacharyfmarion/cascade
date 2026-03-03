@@ -912,6 +912,21 @@ body {
 /* Shared node-control tokens */
 :root {
   --node-label-font-size: 0.72rem;
+  
+  /* Added for lint fix */
+  --code-bg: #0d1117;
+  --code-text: #e6edf3;
+  --status-error-bright: #ef4444;
+  --status-success-bright: #4caf50;
+  --status-error-subtle-bg: rgba(239, 68, 68, 0.1);
+  --status-error-subtle-border: rgba(239, 68, 68, 0.2);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 2px 4px rgba(0,0,0,0.5);
+  --overlay-dim: rgba(0, 0, 0, 0.5);
+  --overlay-label: rgba(0, 0, 0, 0.45);
+  --text-inverse: #ffffff;
+}
+  --node-label-font-size: 0.72rem;
 }
 
 /* Timing colors */
