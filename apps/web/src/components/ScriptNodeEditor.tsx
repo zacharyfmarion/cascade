@@ -177,35 +177,6 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) 
   />
 );
 
-const AddButton: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    style={{
-      fontSize: '0.75rem',
-      background: 'transparent',
-      border: '1px dashed var(--border-default)',
-      color: 'var(--text-secondary)',
-      borderRadius: '4px',
-      padding: '6px 12px',
-      cursor: 'pointer',
-      width: '100%',
-      transition: 'all 0.2s',
-      textAlign: 'center'
-    }}
-    onMouseEnter={e => {
-      e.currentTarget.style.borderColor = 'var(--accent-primary)';
-      e.currentTarget.style.color = 'var(--accent-primary)';
-    }}
-    onMouseLeave={e => {
-      e.currentTarget.style.borderColor = 'var(--border-default)';
-      e.currentTarget.style.color = 'var(--text-secondary)';
-    }}
-  >
-    {children}
-  </button>
-);
-
 const SYSTEM_PROMPT = `You are a GLSL compute shader expert. You generate GPU kernel code for an image compositor.
 
 ## Architecture

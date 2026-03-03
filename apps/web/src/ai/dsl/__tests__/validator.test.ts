@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { levenshteinDistance, validateAst } from '../validator';
 import type { DslAst, DslConnection, DslNode, DslParamValue } from '../types';
-import type { NodeSpec } from '../../../store/types';
 import { mockSpecs } from './helpers';
 
 function makeNode(

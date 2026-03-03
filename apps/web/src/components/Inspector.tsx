@@ -564,8 +564,8 @@ const Label: React.FC<{ children: React.ReactNode; title?: string }> = ({ childr
   </div>
 );
 
-const InputGroup: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+const InputGroup: React.FC<{ children: React.ReactNode; style?: React.CSSProperties }> = ({ children, style }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, ...style }}>
     {children}
   </div>
 );

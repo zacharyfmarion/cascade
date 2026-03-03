@@ -1025,7 +1025,7 @@ describe('Error recovery contracts', () => {
 describe('Project lifecycle contracts', () => {
   it('newProject clears nodes, connections, renderResults, selectedNodeIds', async () => {
     // Build a graph with state
-    const { viewer1, bright } = await buildTwoBranchGraph();
+    const { bright } = await buildTwoBranchGraph();
     const s = useGraphStore.getState();
     s.selectNode(bright);
     await flushPromises(5);

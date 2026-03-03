@@ -62,6 +62,9 @@ export const PANEL_TYPES: PanelTypeInfo[] = [
   { id: 'timeline', label: 'Timeline', icon: '▶' },
 ];
 
+// Dockview passes `group` at runtime but IDockviewPanelHeaderProps doesn't declare it.
+interface DockviewGroup { api: { id: string } }
+
 export const EditorTab: React.FC<IDockviewPanelHeaderProps> = (props) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -71,13 +74,14 @@ export const EditorTab: React.FC<IDockviewPanelHeaderProps> = (props) => {
     ?? PANEL_TYPES.find(t => panelId.startsWith(t.id));
   const icon = currentType?.icon ?? '□';
 
+  const group = (props as IDockviewPanelHeaderProps & { group: DockviewGroup }).group;
+
   const handleTypeChange = useCallback((newTypeId: string) => {
     setMenuOpen(false);
     const newType = PANEL_TYPES.find(t => t.id === newTypeId);
     if (!newType) return;
 
     const containerApi = props.containerApi;
-    const group = props.group;
     const oldId = props.api.id;
 
     const panel = containerApi.getPanel(oldId);
@@ -90,7 +94,7 @@ export const EditorTab: React.FC<IDockviewPanelHeaderProps> = (props) => {
       title: newType.label,
       position: { referenceGroup: group.api.id },
     });
-  }, [props.api, props.containerApi, props.group]);
+  }, [props.api, props.containerApi, group]);
 
   React.useEffect(() => {
     if (!menuOpen) return;
