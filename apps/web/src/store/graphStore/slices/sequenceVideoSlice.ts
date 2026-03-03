@@ -4,7 +4,7 @@ import type { ParamValue } from '../../types';
 import type { SequenceInfo, VideoInfo } from '../../../engine/bridge';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { makeEngineError } from '../../../engine/engineError';
-import { getEngine, kernel } from '../kernel';
+import { getEngine, isSequenceInfo, kernel } from '../kernel';
 import { useSettingsStore } from '../../settingsStore';
 
 export interface SequenceVideoSliceState {
@@ -33,6 +33,7 @@ export interface SequenceVideoSliceActions {
   goToEnd: () => void;
   setFps: (fps: number) => void;
   setLoopPlayback: (loop: boolean) => void;
+  recomputeSequenceState: () => void;
 }
 
 export type SequenceVideoSlice = SequenceVideoSliceState & SequenceVideoSliceActions;
@@ -43,9 +44,6 @@ export const createSequenceVideoSlice: StateCreator<
   [],
   SequenceVideoSlice
 > = (set, get) => {
-  const isSequenceInfo = (info: SequenceInfo | VideoInfo): info is SequenceInfo => (
-    'first_frame' in info && 'last_frame' in info
-  );
 
   const recomputeSequenceState = () => {
     const { nodes, sequenceInfoMap } = get();
@@ -85,6 +83,8 @@ export const createSequenceVideoSlice: StateCreator<
     fps: useSettingsStore.getState().defaultFps,
     loopPlayback: useSettingsStore.getState().loopPlayback,
     playbackFps: null,
+
+    recomputeSequenceState,
 
     setCurrentFrame: (frame) => {
       set({ currentFrame: frame });

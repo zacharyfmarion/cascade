@@ -136,6 +136,7 @@ export interface GraphState {
   goToEnd: () => void;
   setFps: (fps: number) => void;
   setLoopPlayback: (loop: boolean) => void;
+  recomputeSequenceState: () => void;
   pushSequenceFrames: (frame: number) => Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
   triggerAllViewers: () => void;
@@ -384,39 +385,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       });
       await kernel.renderLock;
     };
-
-    const isSequenceInfo = (info: SequenceInfo | VideoInfo): info is SequenceInfo => (
-      'first_frame' in info && 'last_frame' in info
-    );
-
-    const refreshSequenceState = () => {
-      const { nodes, sequenceInfoMap } = get();
-      let hasSeq = false;
-      for (const [, node] of nodes) {
-        if (node.typeId === 'load_image_sequence' || node.typeId === 'load_video') {
-          hasSeq = true;
-          break;
-        }
-      }
-
-      let maxEnd = 0;
-      let minStart = Infinity;
-      for (const [, info] of sequenceInfoMap) {
-        if (info.frame_count > 0 && isSequenceInfo(info)) {
-          minStart = Math.min(minStart, info.first_frame);
-          maxEnd = Math.max(maxEnd, info.last_frame);
-        }
-      }
-
-      if (minStart === Infinity) minStart = 0;
-
-      set({
-        hasSequenceNodes: hasSeq,
-        sequenceLength: maxEnd,
-        sequenceStart: minStart,
-      });
-    };
-
     const collectImageData = async (): Promise<Map<string, Uint8Array>> => {
       const eng = getEngine();
       const imgData = new Map<string, Uint8Array>();
@@ -488,7 +456,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         sequenceInfoMap: new Map(snapshot.sequenceInfoMap),
       });
 
-      refreshSequenceState();
+      get().recomputeSequenceState();
 
       for (const [nodeId, node] of snapshot.nodes) {
         if (node.typeId !== 'load_image_sequence') continue;
@@ -608,7 +576,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 
         set({ nodes: newNodes });
         if (actualTypeId === 'load_image_sequence') {
-          refreshSequenceState();
+          get().recomputeSequenceState();
         }
         return result.id;
       },
@@ -662,7 +630,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 
         if (removedNode?.typeId === 'load_image_sequence') {
           sequenceFrameManager.clear(id);
-          refreshSequenceState();
+          get().recomputeSequenceState();
         }
         
         // Trigger viewers affected by the removed node

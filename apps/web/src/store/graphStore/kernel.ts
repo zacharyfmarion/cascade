@@ -229,3 +229,8 @@ export interface UndoSnapshot {
   /** Sequence metadata per LoadImageSequence node id */
   sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
 }
+
+/** Type guard to distinguish SequenceInfo from VideoInfo */
+export const isSequenceInfo = (info: SequenceInfo | VideoInfo): info is SequenceInfo => (
+  'first_frame' in info && 'last_frame' in info
+);
