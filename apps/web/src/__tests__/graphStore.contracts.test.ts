@@ -754,6 +754,31 @@ describe('Selection state contracts', () => {
   });
 });
 
+describe('AI configuration contracts', () => {
+  it('setAiApiKey enables AI configuration', async () => {
+    const s = useGraphStore.getState();
+    await s.setAiApiKey('replicate', 'test-key');
+    await flushPromises(2);
+    const configured = await s.isAiConfigured();
+    expect(configured).toBe(true);
+  });
+});
+
+describe('Asset loading contracts', () => {
+  it('loadImageFile triggers viewer render', async () => {
+    const s = useGraphStore.getState();
+    const img = await s.addNode('load_image', { x: 0, y: 0 });
+    await s.addNode('viewer', { x: 200, y: 0 });
+
+    mockEngine._clearRenderCalls();
+    const file = new File([new Uint8Array([1, 2, 3])], 'image.png');
+    s.loadImageFile(img, file);
+    await flushPromises(5);
+
+    expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
+  });
+});
+
 describe('Full undo/redo chain contracts', () => {
   it('addNode → connect → setParam → undo×3 → redo×3 roundtrip', async () => {
     const s = useGraphStore.getState();
@@ -1245,4 +1270,3 @@ describe('Project lifecycle contracts', () => {
     expect(s.nodes.size).toBe(nodesArr.length);
   });
 });
-
