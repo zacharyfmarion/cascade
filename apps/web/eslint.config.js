@@ -39,5 +39,13 @@ export default defineConfig([
       }],
     },
   },
+  // Prevent store.ts from growing back into a monolith.
+  // New actions/state belong in slice files under graphStore/slices/.
+  {
+    files: ['src/store/graphStore/store.ts'],
+    rules: {
+      'max-lines': ['error', { max: 300, skipBlankLines: true, skipComments: true }],
+    },
+  },
 
 ])

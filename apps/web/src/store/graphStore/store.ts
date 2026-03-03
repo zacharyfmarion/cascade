@@ -1,3 +1,16 @@
+// ---------------------------------------------------------------------------
+// store.ts — Composition shell only. Do NOT add logic here.
+//
+// All store actions and state belong in slice files under ./slices/.
+// This file should only contain:
+//   1. The GraphState interface
+//   2. The CoreSlice (initEngine only)
+//   3. The useGraphStore composition (slice spreads)
+//
+// To add a new store action: create or extend a slice in ./slices/.
+// An ESLint max-lines rule enforces this — CI will fail if this file grows.
+// ---------------------------------------------------------------------------
+
 import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { devtools } from 'zustand/middleware';
