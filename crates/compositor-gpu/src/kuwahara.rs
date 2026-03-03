@@ -952,7 +952,7 @@ fn align_to(value: u32, alignment: u32) -> u32 {
 fn box_radii_for_gaussian(sigma: f32, n: usize) -> Vec<usize> {
     let w_ideal = ((12.0 * sigma * sigma / n as f32) + 1.0).sqrt();
     let mut wl = w_ideal.floor() as usize;
-    if wl % 2 == 0 {
+    if wl.is_multiple_of(2) {
         wl = wl.saturating_sub(1);
     }
     let wu = wl + 2;

@@ -1498,23 +1498,24 @@ fn compute_perspective_inverse(dst: &[[f32; 2]; 4], src: &[[f32; 2]; 4]) -> [f32
             return [0.0; 8]; // degenerate
         }
 
-        for j in col..9 {
-            a[col][j] /= pivot;
+        for item in a[col].iter_mut().skip(col) {
+            *item /= pivot;
         }
         for row in 0..8 {
             if row == col {
                 continue;
             }
             let factor = a[row][col];
-            for j in col..9 {
-                a[row][j] -= factor * a[col][j];
+            let col_row = a[col];
+            for (j, item) in a[row].iter_mut().enumerate().skip(col) {
+                *item -= factor * col_row[j];
             }
         }
     }
 
     let mut h = [0.0f32; 8];
-    for i in 0..8 {
-        h[i] = a[i][8] as f32;
+    for (i, val) in h.iter_mut().enumerate() {
+        *val = a[i][8] as f32;
     }
     h
 }

@@ -2820,13 +2820,20 @@ return pixelated;
     fn test_list_node_types_includes_groups() {
         let engine = Engine::new();
         let specs = engine.list_node_types();
+        // GPU kernel groups (pixelate, color_range) require a GPU adapter.
+        // On CI or headless environments without a GPU, these groups won't be
+        // registered, so we only assert they exist when GPU init succeeded.
         let has_pixelate = specs.iter().any(|s| s.id == "group::pixelate");
         let has_color_range = specs.iter().any(|s| s.id == "group::color_range");
-        assert!(has_pixelate, "Pixelate group should appear in node types");
-        assert!(
-            has_color_range,
-            "Color Range group should appear in node types"
-        );
+        if engine.gpu_context().is_some() {
+            assert!(has_pixelate, "Pixelate group should appear in node types");
+            assert!(
+                has_color_range,
+                "Color Range group should appear in node types"
+            );
+        } else {
+            println!("GPU not available, skipping GPU kernel group assertions");
+        }
     }
 
     #[test]
