@@ -173,7 +173,7 @@ export interface GroupInternalGraph {
 export interface EditingContext {
   id: string;
   label: string;
-  groupNodeId?: string;
+  groupNodeId?: string | null;
   groupDefId?: string;
   savedNodes?: Map<string, NodeInstance>;
   savedConnections?: Connection[];
