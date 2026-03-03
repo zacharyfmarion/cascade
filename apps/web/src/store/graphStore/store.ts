@@ -41,6 +41,10 @@ import type { FramesSlice } from './slices/framesSlice';
 import { createFramesSlice } from './slices/framesSlice';
 import type { SelectionSlice } from './slices/selectionSlice';
 import { createSelectionSlice } from './slices/selectionSlice';
+import type { BatchExportSlice } from './slices/batchExportSlice';
+import { createBatchExportSlice } from './slices/batchExportSlice';
+import type { SequenceVideoSlice } from './slices/sequenceVideoSlice';
+import { createSequenceVideoSlice } from './slices/sequenceVideoSlice';
 
 export { ADD_INPUT_PORT, ADD_OUTPUT_PORT, getEngine } from './kernel';
 
@@ -66,7 +70,7 @@ export interface GraphState {
   hasSequenceNodes: boolean;
   sequenceLength: number;
   sequenceStart: number;
-  sequenceInfoMap: Map<string, SequenceInfo>;
+  sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
 
   isPlaying: boolean;
   fps: number;
@@ -132,6 +136,9 @@ export interface GraphState {
   goToEnd: () => void;
   setFps: (fps: number) => void;
   setLoopPlayback: (loop: boolean) => void;
+  pushSequenceFrames: (frame: number) => Promise<void>;
+  renderAllViewersAsync: () => Promise<void>;
+  triggerAllViewers: () => void;
 
   editingStack: EditingContext[];
   enterGroup: (groupNodeId: string) => Promise<void>;
@@ -169,7 +176,10 @@ export interface GraphState {
   typesCompatible: (fromType: string, toType: string) => boolean;
 }
 
-type CoreSlice = Omit<GraphState, keyof FramesSlice | keyof SelectionSlice>;
+type CoreSlice = Omit<
+  GraphState,
+  keyof FramesSlice | keyof SelectionSlice | keyof BatchExportSlice | keyof SequenceVideoSlice
+>;
 
 const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [], CoreSlice> = (set, get) => {
     const triggerAllViewers = () => {
@@ -345,7 +355,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       }
     };
 
-    const renderAllViewersAsync = () => {
+    const renderAllViewersAsync = async (): Promise<void> => {
       kernel.renderLock = kernel.renderLock.then(async () => {
         const { nodes } = get();
         const frame = get().currentFrame;
@@ -372,9 +382,14 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         }
         get().refreshAiNodeStale();
       });
+      await kernel.renderLock;
     };
 
-    const recomputeSequenceState = () => {
+    const isSequenceInfo = (info: SequenceInfo | VideoInfo): info is SequenceInfo => (
+      'first_frame' in info && 'last_frame' in info
+    );
+
+    const refreshSequenceState = () => {
       const { nodes, sequenceInfoMap } = get();
       let hasSeq = false;
       for (const [, node] of nodes) {
@@ -387,7 +402,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       let maxEnd = 0;
       let minStart = Infinity;
       for (const [, info] of sequenceInfoMap) {
-        if (info.frame_count > 0) {
+        if (info.frame_count > 0 && isSequenceInfo(info)) {
           minStart = Math.min(minStart, info.first_frame);
           maxEnd = Math.max(maxEnd, info.last_frame);
         }
@@ -473,7 +488,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         sequenceInfoMap: new Map(snapshot.sequenceInfoMap),
       });
 
-      recomputeSequenceState();
+      refreshSequenceState();
 
       for (const [nodeId, node] of snapshot.nodes) {
         if (node.typeId !== 'load_image_sequence') continue;
@@ -507,21 +522,9 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       lastError: null,
       canUndo: false,
       canRedo: false,
-      currentFrame: 0,
-      renderProgress: null,
-      isRendering: false,
       previewScale: 1,
       dirty: false,
       fitViewRequestId: 0,
-      hasSequenceNodes: false,
-      sequenceLength: 0,
-      sequenceStart: 0,
-      sequenceInfoMap: new Map(),
-
-      isPlaying: false,
-      fps: useSettingsStore.getState().defaultFps,
-      loopPlayback: useSettingsStore.getState().loopPlayback,
-      playbackFps: null,
       editingStack: [{ id: 'root', label: 'Root' }],
 
       nodeTimings: new Map(),
@@ -605,7 +608,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 
         set({ nodes: newNodes });
         if (actualTypeId === 'load_image_sequence') {
-          recomputeSequenceState();
+          refreshSequenceState();
         }
         return result.id;
       },
@@ -659,7 +662,7 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 
         if (removedNode?.typeId === 'load_image_sequence') {
           sequenceFrameManager.clear(id);
-          recomputeSequenceState();
+          refreshSequenceState();
         }
         
         // Trigger viewers affected by the removed node
@@ -1109,35 +1112,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         });
       },
 
-      loadVideoFile: async (nodeId, path) => {
-        const eng = getEngine();
-        if (!eng.loadVideoFile) return null;
-        try {
-          const info = await eng.loadVideoFile(nodeId, path);
-
-          const seqInfo: SequenceInfo = {
-            frame_count: info.frame_count,
-            first_frame: 0,
-            last_frame: info.frame_count > 0 ? info.frame_count - 1 : 0,
-          };
-          const newInfoMap = new Map(get().sequenceInfoMap);
-          newInfoMap.set(nodeId, seqInfo);
-          set({ sequenceInfoMap: newInfoMap, dirty: true });
-          recomputeSequenceState();
-
-          const { currentFrame, sequenceStart, sequenceLength } = get();
-          if (info.frame_count > 0 && (currentFrame < sequenceStart || currentFrame > sequenceLength)) {
-            set({ currentFrame: sequenceStart });
-          }
-
-          triggerAllViewers();
-          return info;
-        } catch (e) {
-          console.error('loadVideoFile failed:', e);
-          return null;
-        }
-      },
-
       getImageData: async (nodeId) => {
         const eng = getEngine();
         if (eng.getImageData) {
@@ -1162,33 +1136,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
           triggerAllViewers();
         }).catch(e => {
           console.error('loadPaletteFile failed:', e);
-        });
-      },
-
-      exportImage: (nodeId) => {
-        const node = get().nodes.get(nodeId);
-        if (!node) return;
-        const frame = get().currentFrame;
-
-        const formatParam = node.params['format'];
-        const formatIdx = formatParam && 'Int' in formatParam ? formatParam.Int : 0;
-        const extension = formatIdx === 1 ? 'jpg' : 'png';
-        const mimeType = formatIdx === 1 ? 'image/jpeg' : 'image/png';
-
-        getEngine().exportImage(nodeId, frame).then(bytes => {
-          const buffer = bytes.buffer instanceof ArrayBuffer
-            ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-            : Uint8Array.from(bytes).buffer;
-          const blob = new Blob([buffer], { type: mimeType });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `export.${extension}`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }).catch(e => {
-          console.error('exportImage failed:', e);
-          set({ lastError: parseEngineError(e) });
         });
       },
 
@@ -1222,61 +1169,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         });
       },
 
-      setCurrentFrame: (frame) => {
-        set({ currentFrame: frame });
-        renderAllViewersAsync();
-      },
-
-      setSequenceDirectory: async (nodeId, directory) => {
-        const eng = getEngine();
-        if (!eng.setSequenceDirectory) {
-          set({ lastError: makeEngineError('Image sequences are only available in the desktop app') });
-          return;
-        }
-        const info = await eng.setSequenceDirectory(nodeId, directory);
-        const newInfoMap = new Map(get().sequenceInfoMap);
-        newInfoMap.set(nodeId, info);
-        set({ sequenceInfoMap: newInfoMap });
-        recomputeSequenceState();
-
-        const { currentFrame, sequenceStart, sequenceLength } = get();
-        if (info.frame_count > 0 && (currentFrame < sequenceStart || currentFrame > sequenceLength)) {
-          set({ currentFrame: sequenceStart });
-        }
-
-        triggerAllViewers();
-      },
-
-      setSequenceFiles: async (nodeId, files) => {
-        const eng = getEngine();
-        const { info, pattern } = sequenceFrameManager.setFiles(nodeId, files);
-
-        if (eng.setSequenceInfo) {
-          await eng.setSequenceInfo(nodeId, info);
-        }
-
-        await get().setParam(nodeId, 'pattern', { String: pattern } as ParamValue);
-
-        if (info.frame_count > 0) {
-          const frameData = await sequenceFrameManager.getFrameData(nodeId, info.first_frame);
-          if (frameData && eng.loadSequenceFrameData) {
-            await eng.loadSequenceFrameData(nodeId, info.first_frame, frameData);
-          }
-        }
-
-        const newInfoMap = new Map(get().sequenceInfoMap);
-        newInfoMap.set(nodeId, info);
-        set({ sequenceInfoMap: newInfoMap });
-        recomputeSequenceState();
-
-        const { currentFrame, sequenceStart, sequenceLength } = get();
-        if (info.frame_count > 0 && (currentFrame < sequenceStart || currentFrame > sequenceLength)) {
-          set({ currentFrame: sequenceStart });
-        }
-
-        triggerAllViewers();
-      },
-
 
       loadBatchFiles: async (nodeId, files) => {
         const eng = getEngine();
@@ -1291,318 +1183,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         set({ dirty: true });
         triggerAllViewers();
       },
-      renderBatch: async (nodeId) => {
-        const eng = getEngine();
-        const node = get().nodes.get(nodeId);
-        if (!node) return;
-        const formatIdx = node.params['format'] && 'Int' in node.params['format']
-          ? node.params['format'].Int : 0;
-        const ext = formatIdx === 1 ? 'jpg' : 'png';
-        if (!eng.getBatchInfo) {
-          set({ lastError: makeEngineError('Batch info not supported') });
-          return;
-        }
-        let totalFrames = 0;
-        let filenames: string[] = [];
-        try {
-          const info = await eng.getBatchInfo(nodeId);
-          totalFrames = info.count;
-          filenames = info.filenames;
-        } catch (e) {
-          set({ lastError: parseEngineError(e) });
-          return;
-        }
-        if (totalFrames <= 0) {
-          set({ lastError: makeEngineError('No images in batch') });
-          return;
-        }
-
-        const padding = Math.max(4, String(totalFrames).length);
-        kernel.webRenderCancelled = false;
-        set({
-          isRendering: true,
-          lastError: null,
-          renderProgress: {
-            job_id: 'web-batch',
-            current_frame: 0,
-            total_frames: totalFrames,
-            completed: false,
-            error: null,
-          },
-        });
-
-        try {
-          const JSZip = (await import('jszip')).default;
-          const zip = new JSZip();
-          let renderedCount = 0;
-          const usedNames = new Map<string, number>();
-
-          for (let frame = 0; frame < totalFrames; frame++) {
-            if (kernel.webRenderCancelled) break;
-            const bytes = await eng.exportImage(nodeId, frame);
-            let baseName = filenames[frame]
-              ?? String(frame).padStart(padding, '0');
-            const originalName = baseName;
-            const count = usedNames.get(originalName) ?? 0;
-            if (count > 0) {
-              baseName = `${originalName}_${count}`;
-            }
-            usedNames.set(originalName, count + 1);
-
-            zip.file(`${baseName}.${ext}`, bytes);
-            renderedCount++;
-            set({
-              renderProgress: {
-                job_id: 'web-batch',
-                current_frame: renderedCount,
-                total_frames: totalFrames,
-                completed: false,
-                error: null,
-              },
-            });
-          }
-          if (!kernel.webRenderCancelled) {
-            const blob = await zip.generateAsync({ type: 'blob' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'batch.zip';
-            a.click();
-            URL.revokeObjectURL(url);
-          }
-
-          set({
-            isRendering: false,
-            renderProgress: {
-              job_id: 'web-batch',
-              current_frame: renderedCount,
-              total_frames: totalFrames,
-              completed: true,
-              error: kernel.webRenderCancelled ? 'Cancelled' : null,
-            },
-          });
-        } catch (e) {
-          const error = parseEngineError(e);
-          set({
-            isRendering: false,
-            lastError: error,
-            renderProgress: {
-              job_id: 'web-batch',
-              current_frame: 0,
-              total_frames: totalFrames,
-              completed: true,
-              error: error.message,
-            },
-          });
-        }
-      },
-      renderSequence: async (nodeId) => {
-        const eng = getEngine();
-
-        if (eng.renderSequence) {
-          set({ isRendering: true, renderProgress: null, lastError: null });
-          try {
-            await eng.renderSequence(nodeId);
-          } catch (e) {
-            const error = parseEngineError(e);
-            console.error('[renderSequence] start failed:', error.message);
-            set({
-              isRendering: false,
-              lastError: error,
-              renderProgress: {
-                job_id: '',
-                current_frame: 0,
-                total_frames: 0,
-                completed: true,
-                error: error.message,
-              },
-            });
-            return;
-          }
-
-          if (!eng.getJobProgress) {
-            set({ isRendering: false });
-            return;
-          }
-
-          const pollInterval = setInterval(async () => {
-            try {
-              const progress = await eng.getJobProgress!();
-              if (!progress) return;
-              set({ renderProgress: progress });
-              if (progress.completed) {
-                clearInterval(pollInterval);
-                set({
-                  isRendering: false,
-                  lastError: progress.error ? makeEngineError(progress.error) : null,
-                });
-              }
-            } catch (e) { clearInterval(pollInterval); set({ isRendering: false, lastError: parseEngineError(e) }); }
-          }, 250);
-          return;
-        }
-
-        const node = get().nodes.get(nodeId);
-        if (!node) return;
-
-        const { hasSequenceNodes, sequenceStart, sequenceLength } = get();
-
-        let startFrame = node.params['start_frame'] && 'Int' in node.params['start_frame']
-          ? node.params['start_frame'].Int : 0;
-        let endFrame = node.params['end_frame'] && 'Int' in node.params['end_frame']
-          ? node.params['end_frame'].Int : 100;
-
-        // Use detected sequence range when available — the node params may not
-        // have been synced yet due to the async useEffect in the component.
-        if (hasSequenceNodes && sequenceLength > 0) {
-          startFrame = sequenceStart;
-          endFrame = sequenceLength;
-        }
-
-        const step = node.params['step'] && 'Int' in node.params['step']
-          ? node.params['step'].Int : 1;
-        const formatIdx = node.params['format'] && 'Int' in node.params['format']
-          ? node.params['format'].Int : 0;
-
-        if (step <= 0 || startFrame > endFrame) {
-          set({ lastError: makeEngineError('Invalid frame range') });
-          return;
-        }
-
-        const totalFrames = Math.floor((endFrame - startFrame) / step) + 1;
-        const ext = formatIdx === 1 ? 'jpg' : 'png';
-        const padding = Math.max(4, String(endFrame).length);
-
-        kernel.webRenderCancelled = false;
-        set({
-          isRendering: true,
-          lastError: null,
-          renderProgress: {
-            job_id: 'web',
-            current_frame: 0,
-            total_frames: totalFrames,
-            completed: false,
-            error: null,
-          },
-        });
-
-        try {
-          const JSZip = (await import('jszip')).default;
-          const zip = new JSZip();
-          let renderedCount = 0;
-
-          for (let frame = startFrame; frame <= endFrame; frame += step) {
-            if (kernel.webRenderCancelled) break;
-
-            await pushSequenceFrames(frame);
-            const bytes = await eng.exportImage(nodeId, frame);
-
-            const frameStr = String(frame).padStart(padding, '0');
-            zip.file(`${frameStr}.${ext}`, bytes);
-
-            renderedCount++;
-            set({
-              renderProgress: {
-                job_id: 'web',
-                current_frame: renderedCount,
-                total_frames: totalFrames,
-                completed: false,
-                error: null,
-              },
-            });
-          }
-
-          if (!kernel.webRenderCancelled) {
-            const blob = await zip.generateAsync({ type: 'blob' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `sequence.zip`;
-            a.click();
-            URL.revokeObjectURL(url);
-          }
-
-          set({
-            isRendering: false,
-            renderProgress: {
-              job_id: 'web',
-              current_frame: renderedCount,
-              total_frames: totalFrames,
-              completed: true,
-              error: kernel.webRenderCancelled ? 'Cancelled' : null,
-            },
-          });
-        } catch (e) {
-          const error = parseEngineError(e);
-          set({
-            isRendering: false,
-            lastError: error,
-            renderProgress: {
-              job_id: 'web',
-              current_frame: 0,
-              total_frames: totalFrames,
-              completed: true,
-              error: error.message,
-            },
-          });
-        }
-      },
-
-      renderVideo: async (nodeId) => {
-        const eng = getEngine();
-        if (!eng.renderVideo) {
-          set({ lastError: makeEngineError('Video rendering is only available in the desktop app') });
-          return;
-        }
-        set({ isRendering: true, renderProgress: null, lastError: null });
-        try {
-          await eng.renderVideo(nodeId);
-        } catch (e) {
-          const error = parseEngineError(e);
-          set({
-            isRendering: false,
-            lastError: error,
-            renderProgress: {
-              job_id: '',
-              current_frame: 0,
-              total_frames: 0,
-              completed: true,
-              error: error.message,
-            },
-          });
-          return;
-        }
-
-        if (!eng.getJobProgress) {
-          set({ isRendering: false });
-          return;
-        }
-
-        const pollInterval = setInterval(async () => {
-          try {
-            const progress = await eng.getJobProgress!();
-            if (!progress) return;
-            set({ renderProgress: progress });
-            if (progress.completed) {
-              clearInterval(pollInterval);
-              set({
-                isRendering: false,
-                lastError: progress.error ? makeEngineError(progress.error) : null,
-              });
-            }
-          } catch (e) { clearInterval(pollInterval); set({ isRendering: false, lastError: parseEngineError(e) }); }
-        }, 250);
-      },
-
-      cancelRender: async () => {
-        const eng = getEngine();
-        if (eng.cancelJob) {
-          await eng.cancelJob();
-        }
-        kernel.webRenderCancelled = true;
-        set({ isRendering: false });
-      },
-
       newProject: async () => {
         const eng = getEngine();
         const emptyGraph = { nodes: [], connections: [] };
@@ -1694,130 +1274,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         return spec;
       },
 
-      play: () => {
-        if (get().isPlaying) return;
-        const { currentFrame, sequenceLength, sequenceStart } = get();
-        const end = sequenceLength || 999;
-        const startFrame = currentFrame >= end ? sequenceStart : currentFrame;
-        set({ isPlaying: true, currentFrame: startFrame, playbackFps: null });
-        kernel.playbackAborted = false;
-
-        const loop = async () => {
-          let prevFrameStart: number | null = null;
-          const fpsWindow: number[] = [];
-          const FPS_WINDOW_SIZE = 20;
-
-          while (!kernel.playbackAborted) {
-            const frameStart = performance.now();
-            const { fps, sequenceLength: seqLen, loopPlayback, sequenceStart: seqStart } = get();
-            const endFrame = seqLen || 999;
-            const interval = 1000 / fps;
-
-            if (prevFrameStart !== null) {
-              const frameDelta = frameStart - prevFrameStart;
-              fpsWindow.push(1000 / frameDelta);
-              if (fpsWindow.length > FPS_WINDOW_SIZE) fpsWindow.shift();
-            }
-            prevFrameStart = frameStart;
-
-            renderAllViewersAsync();
-            await kernel.renderLock;
-
-            if (kernel.playbackAborted) break;
-
-            if (fpsWindow.length > 0) {
-              const avgFps = fpsWindow.reduce((a, b) => a + b, 0) / fpsWindow.length;
-              set({ playbackFps: avgFps });
-            }
-
-            const { currentFrame: cur } = get();
-            const next = cur + 1;
-
-            if (next > endFrame) {
-              if (loopPlayback) {
-                set({ currentFrame: seqStart });
-              } else {
-                get().pause();
-                return;
-              }
-            } else {
-              set({ currentFrame: next });
-            }
-
-            const renderTime = performance.now() - frameStart;
-            const remaining = interval - renderTime;
-            if (remaining > 0) {
-              await new Promise<void>(resolve => {
-                kernel.playbackTimeoutId = setTimeout(resolve, remaining);
-              });
-            }
-          }
-        };
-
-        loop();
-      },
-
-      pause: () => {
-        kernel.playbackAborted = true;
-        if (kernel.playbackTimeoutId !== null) {
-          clearTimeout(kernel.playbackTimeoutId);
-          kernel.playbackTimeoutId = null;
-        }
-        set({ isPlaying: false, playbackFps: null });
-      },
-
-      togglePlayback: () => {
-        if (get().isPlaying) {
-          get().pause();
-        } else {
-          get().play();
-        }
-      },
-
-      stepForward: () => {
-        if (get().isPlaying) get().pause();
-        const { currentFrame, sequenceLength } = get();
-        const end = sequenceLength || 999;
-        if (currentFrame < end) {
-          set({ currentFrame: currentFrame + 1 });
-          triggerAllViewers();
-        }
-      },
-
-      stepBackward: () => {
-        if (get().isPlaying) get().pause();
-        const { currentFrame, sequenceStart } = get();
-        if (currentFrame > sequenceStart) {
-          set({ currentFrame: currentFrame - 1 });
-          triggerAllViewers();
-        }
-      },
-
-      goToStart: () => {
-        if (get().isPlaying) get().pause();
-        set({ currentFrame: get().sequenceStart });
-        triggerAllViewers();
-      },
-
-      goToEnd: () => {
-        if (get().isPlaying) get().pause();
-        const end = get().sequenceLength || 999;
-        set({ currentFrame: end });
-        triggerAllViewers();
-      },
-
-      setFps: (fps) => {
-        set({ fps });
-        if (get().isPlaying) {
-          get().pause();
-          get().play();
-        }
-      },
-
-      setLoopPlayback: (loop_) => {
-        set({ loopPlayback: loop_ });
-      },
-
       undo: () => {
         const snapshot = kernel.undoStack.pop();
         if (!snapshot) return;
@@ -1837,6 +1293,9 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       },
 
       pushUndo,
+      pushSequenceFrames,
+      renderAllViewersAsync,
+      triggerAllViewers,
 
       isInsideGroup: () => {
         return get().editingStack.length > 1;
@@ -2567,6 +2026,8 @@ export const useGraphStore = create<GraphState>()(
     ...createCoreSlice(...args),
     ...createFramesSlice(...args),
     ...createSelectionSlice(...args),
+    ...createBatchExportSlice(...args),
+    ...createSequenceVideoSlice(...args),
   }))
 );
 

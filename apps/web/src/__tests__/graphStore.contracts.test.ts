@@ -66,6 +66,7 @@ const createInitialState = () => ({
   isPlaying: false,
   fps: useSettingsStore.getState().defaultFps,
   loopPlayback: useSettingsStore.getState().loopPlayback,
+  playbackFps: null as number | null,
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
@@ -169,6 +170,15 @@ describe('Rendering contracts', () => {
     await flushPromises(5);
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
+  });
+
+  it('cancelRender clears isRendering', async () => {
+    const s = useGraphStore.getState();
+    useGraphStore.setState({ isRendering: true });
+
+    await s.cancelRender();
+
+    expect(useGraphStore.getState().isRendering).toBe(false);
   });
 });
 
@@ -533,6 +543,26 @@ describe('Playback rendering contracts', () => {
 
     expect(mockEngine._renderCalls).toContain(viewer1);
     expect(mockEngine._renderCalls).toContain(viewer2);
+  });
+});
+
+describe('Sequence state contracts', () => {
+  it('setSequenceFiles recomputes sequence range and presence', async () => {
+    const s = useGraphStore.getState();
+    const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+    const files = [
+      new File([new Uint8Array([1])], 'frame_0001.png'),
+      new File([new Uint8Array([2])], 'frame_0005.png'),
+      new File([new Uint8Array([3])], 'frame_0010.png'),
+    ];
+
+    await s.setSequenceFiles(seqNode, files);
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(state.hasSequenceNodes).toBe(true);
+    expect(state.sequenceStart).toBe(1);
+    expect(state.sequenceLength).toBe(10);
   });
 });
 

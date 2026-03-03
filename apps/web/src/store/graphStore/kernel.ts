@@ -10,7 +10,7 @@ import type {
   Frame,
 } from '../types';
 import { isPixelResult } from '../types';
-import type { EngineBridge, SequenceInfo } from '../../engine/bridge';
+import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
 
 export const DEFAULT_FRAME_COLOR = 'purple';
 
@@ -227,5 +227,5 @@ export interface UndoSnapshot {
   /** Compressed original image bytes per LoadImage node id */
   imageData: Map<string, Uint8Array>;
   /** Sequence metadata per LoadImageSequence node id */
-  sequenceInfoMap: Map<string, SequenceInfo>;
+  sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
 }

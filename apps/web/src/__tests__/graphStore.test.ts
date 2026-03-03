@@ -44,6 +44,7 @@ const createInitialState = () => ({
   isPlaying: false,
   fps: useSettingsStore.getState().defaultFps,
   loopPlayback: useSettingsStore.getState().loopPlayback,
+  playbackFps: null as number | null,
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
