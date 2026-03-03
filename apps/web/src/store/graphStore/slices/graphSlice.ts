@@ -12,7 +12,6 @@ export interface GraphSliceState {
   nodeSpecs: NodeSpec[];
   engineReady: boolean;
   lastError: EngineError | null;
-  nodeErrors: Map<string, EngineError>;
   editingStack: EditingContext[];
   fitViewRequestId: number;
   previewScale: number;
@@ -60,7 +59,6 @@ export const createGraphSlice: StateCreator<
     nodeSpecs: [],
     engineReady: false,
     lastError: null,
-    nodeErrors: new Map(),
     previewScale: 1,
     fitViewRequestId: 0,
     editingStack: [{ id: 'root', label: 'Root', groupNodeId: null }],
