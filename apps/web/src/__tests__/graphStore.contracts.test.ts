@@ -1174,4 +1174,75 @@ describe('Project lifecycle contracts', () => {
     expect(mockEngine._renderCalls).toContain(viewer);
     expect(useGraphStore.getState().nodes.size).toBe(2);
   });
+
+  it('newProject clears undo stacks', async () => {
+    // Build graph and make some changes to populate undo
+    await buildTwoBranchGraph();
+    await flushPromises(5);
+
+    const s1 = useGraphStore.getState();
+    expect(s1.canUndo).toBe(true);
+
+    // Clear everything
+    await useGraphStore.getState().newProject();
+    await flushPromises(5);
+
+    const s2 = useGraphStore.getState();
+    expect(s2.canUndo).toBe(false);
+    expect(s2.canRedo).toBe(false);
+  });
+
+  it('loadProject restores graph and clears undo', async () => {
+    // Build a graph and push undo history
+    await buildTwoBranchGraph();
+    await flushPromises(5);
+
+    expect(useGraphStore.getState().canUndo).toBe(true);
+
+    // Build serializable graph data from current store state
+    const state = useGraphStore.getState();
+    const nodesArr = Array.from(state.nodes.values()).map((n) => ({
+      id: n.id,
+      type_id: n.typeId,
+      position: [n.position.x, n.position.y],
+      params: Object.fromEntries(
+        Object.entries(n.params).map(([k, v]) => [k, v])
+      ),
+    }));
+    const connsArr = state.connections.map((c) => ({
+      from_node: c.fromNode,
+      from_port: c.fromPort,
+      to_node: c.toNode,
+      to_port: c.toPort,
+    }));
+    const graphData = { nodes: nodesArr, connections: connsArr };
+
+    // Clear and verify it's clean
+    await useGraphStore.getState().newProject();
+    await flushPromises(5);
+    expect(useGraphStore.getState().nodes.size).toBe(0);
+
+    // Create a mock File using the correct document envelope format
+    const envelope = { compositor: '1.0', graph: graphData, frames: [] };
+    const blob = new Blob([JSON.stringify(envelope)], {
+      type: 'application/json',
+    });
+    const file = new File([blob], 'test.compositor', {
+      type: 'application/json',
+    });
+
+    // Load the project
+    await useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const s = useGraphStore.getState();
+    // Undo should be cleared after load
+    expect(s.canUndo).toBe(false);
+    expect(s.canRedo).toBe(false);
+    // Dirty flag should be clean after load
+    expect(s.dirty).toBe(false);
+    // Graph should be restored (nodes were rebuilt from serialized data)
+    expect(s.nodes.size).toBe(nodesArr.length);
+  });
 });
+

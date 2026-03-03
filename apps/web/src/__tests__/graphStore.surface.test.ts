@@ -98,6 +98,7 @@ const EXPECTED_KEYS: string[] = [
   'play',
   'pushUndo',
   'pushSequenceFrames',
+  'recomputeSequenceState',
   'redo',
   'refreshAiNodeStale',
   'removeFrame',

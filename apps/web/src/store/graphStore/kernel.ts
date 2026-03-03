@@ -181,6 +181,40 @@ export const extractFrames = (value: unknown): Frame[] => {
   return Array.isArray(record.frames) ? record.frames as Frame[] : [];
 };
 
+export const normalizeParamValue = (value: ParamValue): ParamValue => {
+  if ('CurvePoints' in value) {
+    const pts = value.CurvePoints;
+    if (!Array.isArray(pts) || pts.length < 2) {
+      return { CurvePoints: [{ x: 0, y: 0 }, { x: 1, y: 1 }] };
+    }
+    return {
+      CurvePoints: pts.map(p => ({
+        x: Math.max(0, Math.min(1, Number(p.x) || 0)),
+        y: Math.max(0, Math.min(1, Number(p.y) || 0)),
+      })),
+    };
+  }
+  if ('ColorRamp' in value) {
+    const stops = value.ColorRamp;
+    if (!Array.isArray(stops) || stops.length < 2) {
+      return { ColorRamp: [
+        { position: 0, color: [0, 0, 0, 1] },
+        { position: 1, color: [1, 1, 1, 1] },
+      ]};
+    }
+    return {
+      ColorRamp: stops.map(s => ({
+        position: Math.max(0, Math.min(1, Number(s.position) || 0)),
+        color: (Array.isArray(s.color) && s.color.length === 4
+          ? s.color.map(c => Math.max(0, Math.min(1, Number(c) || 0)))
+          : [0, 0, 0, 1]
+        ) as [number, number, number, number],
+      })),
+    };
+  }
+  return value;
+};
+
 export const createDocumentEnvelope = (graph: unknown) => ({
   compositor: {
     format_version: '1.1.0',
@@ -229,3 +263,8 @@ export interface UndoSnapshot {
   /** Sequence metadata per LoadImageSequence node id */
   sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
 }
+
+/** Type guard to distinguish SequenceInfo from VideoInfo */
+export const isSequenceInfo = (info: SequenceInfo | VideoInfo): info is SequenceInfo => (
+  'first_frame' in info && 'last_frame' in info
+);
