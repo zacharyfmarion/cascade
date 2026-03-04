@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Comprehensive guide to all testing layers, conventions, and commands in the Compositor repository. Use when writing, running, or debugging tests.
+description: Comprehensive guide to all testing layers, conventions, and commands in the Cascade repository. Use when writing, running, or debugging tests.
 ---
 
 ## Overview
@@ -8,25 +8,25 @@ description: Comprehensive guide to all testing layers, conventions, and command
 | Layer | Framework | Location | Command |
 |-------|-----------|----------|---------|
 | Rust unit tests | `#[cfg(test)]` | Inline in each crate | `cargo test --workspace` |
-| Rust integration tests | `#[test]` | `crates/compositor-core/tests/` | `cargo test --workspace` |
-| Rust benchmarks | Criterion | `crates/compositor-nodes-std/benches/` | `cargo bench --package compositor-nodes-std` |
+| Rust integration tests | `#[test]` | `crates/cascade-core/tests/` | `cargo test --workspace` |
+| Rust benchmarks | Criterion | `crates/cascade-nodes-std/benches/` | `cargo bench --package cascade-nodes-std` |
 | Frontend unit/contract tests | Vitest | `apps/web/src/__tests__/` | `cd apps/web && npx vitest run` |
 | Frontend E2E tests | Playwright | `apps/web/e2e/` | `cd apps/web && npx playwright test` |
 
 ## Rust unit tests
 
-Inline `#[cfg(test)]` modules in each crate source file. Every node implementation in `compositor-nodes-std` should have associated unit tests.
+Inline `#[cfg(test)]` modules in each crate source file. Every node implementation in `cascade-nodes-std` should have associated unit tests.
 
 ```bash
 cargo test --workspace                           # Run all
-cargo test -p compositor-core                    # Single crate
-cargo test -p compositor-nodes-std -- blur       # Filter by name
+cargo test -p cascade-core                    # Single crate
+cargo test -p cascade-nodes-std -- blur       # Filter by name
 ```
 
 ### Key conventions
 
 - Tests live alongside the code they test, inside `#[cfg(test)] mod tests { ... }`.
-- Image constructors return `Result` — use `?` in tests (annotate with `-> Result<(), CompositorError>`).
+- Image constructors return `Result` — use `?` in tests (annotate with `-> Result<(), CascadeError>`).
 - GPU tests must gracefully skip when `GpuContext::new()` fails (no GPU in CI). Use a guard like `let Some(gpu) = GpuContext::new() else { return; };`.
 - Never use `unwrap()` in test setup for image construction — propagate errors.
 
@@ -35,14 +35,14 @@ cargo test -p compositor-nodes-std -- blur       # Filter by name
 1. Output correctness (e.g., identity passthrough, known mathematical result)
 2. Edge cases (zero-size image, single pixel, max dimensions)
 3. Parameter boundary values
-4. Error conditions (invalid inputs should return `CompositorError`, not panic)
+4. Error conditions (invalid inputs should return `CascadeError`, not panic)
 
 ## Rust integration tests
 
 Full pipeline tests that create an engine, add nodes, connect them, and evaluate.
 
 ```
-crates/compositor-core/tests/basic.rs
+crates/cascade-core/tests/basic.rs
 ```
 
 These test the graph→evaluator→node pipeline end to end. Add integration tests when:
@@ -55,12 +55,12 @@ These test the graph→evaluator→node pipeline end to end. Add integration tes
 Criterion benchmarks for performance-critical node operations.
 
 ```
-crates/compositor-nodes-std/benches/node_benchmarks.rs
+crates/cascade-nodes-std/benches/node_benchmarks.rs
 ```
 
 ```bash
-cargo bench --package compositor-nodes-std       # Run all benchmarks
-cargo bench --package compositor-nodes-std -- blur  # Single benchmark
+cargo bench --package cascade-nodes-std       # Run all benchmarks
+cargo bench --package cascade-nodes-std -- blur  # Single benchmark
 ```
 
 Existing benchmarks cover: blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion. Add benchmarks for any new image processing operation that processes pixels.
@@ -212,4 +212,4 @@ GitHub Actions runs all tests on push to `main` and PRs:
 | Frontend Lint & Typecheck | `npx tsc -b --noEmit` + `yarn lint` |
 | E2E Tests (Playwright) | Builds WASM, installs Chromium, runs all Playwright specs |
 
-Crates requiring system libraries (`compositor-ocio-sys`, `compositor-ocio`, `compositor-tauri`) are excluded from CI workspace commands since their dependencies (glib, OpenColorIO, webkit2gtk) aren't available on the runner.
+Crates requiring system libraries (`cascade-ocio-sys`, `cascade-ocio`, `cascade-tauri`) are excluded from CI workspace commands since their dependencies (glib, OpenColorIO, webkit2gtk) aren't available on the runner.

@@ -201,6 +201,7 @@ mod tests {
         let format = Format::hd();
         let eval_ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -282,6 +283,7 @@ mod tests {
         let format = Format::hd();
         let eval_ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -342,6 +344,7 @@ mod tests {
         let format = Format::hd();
         let eval_ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,

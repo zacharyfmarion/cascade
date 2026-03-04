@@ -1138,6 +1138,7 @@ impl Engine {
         // The JS event loop is free to call other engine methods during this await.
         let ctx = cascade_core::node::EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &merged_params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,

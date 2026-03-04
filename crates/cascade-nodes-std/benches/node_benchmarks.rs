@@ -48,6 +48,7 @@ fn make_context<'a>(
     static FORMAT: OnceLock<Format> = OnceLock::new();
     EvalContext {
         inputs,
+        extra_inputs: HashMap::new(),
         params,
         frame_time: FrameTime { frame: 0 },
         color_management: COLOR_MANAGEMENT.get_or_init(BuiltinColorManagement::new),

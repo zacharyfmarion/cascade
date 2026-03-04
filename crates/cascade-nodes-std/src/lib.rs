@@ -16,6 +16,7 @@ pub mod matte;
 pub mod output;
 pub mod palette;
 pub mod script;
+pub mod time_ops;
 pub mod transform;
 pub mod utility;
 
@@ -48,6 +49,7 @@ pub use matte::{
 pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
+pub use time_ops::{FrameBlend, FrameHold, TimeOffset};
 pub use transform::{CornerPin, Crop, Flip, Resize, Rotate, STMap, Transform2D, Translate};
 pub use utility::{Dot, ImageInfo, ImageMath, MapRange, MathNode, ProjectInfo};
 
@@ -120,6 +122,10 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("transform_2d", || Arc::new(Transform2D::new()));
     registry.register("corner_pin", || Arc::new(CornerPin::new()));
     registry.register("st_map", || Arc::new(STMap::new()));
+
+    registry.register("time_offset", || Arc::new(TimeOffset::new()));
+    registry.register("frame_hold", || Arc::new(FrameHold::new()));
+    registry.register("frame_blend", || Arc::new(FrameBlend::new()));
 
     // Generator
     registry.register("solid_color", || Arc::new(SolidColor::new()));
@@ -197,6 +203,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -219,6 +226,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -646,6 +654,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -945,6 +954,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -1913,6 +1923,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &HashMap::new(),
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -1981,6 +1992,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &HashMap::new(),
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -2002,6 +2014,7 @@ mod tests {
         comb_inputs.insert("alpha".to_string(), alpha);
         let ctx2 = EvalContext {
             inputs: comb_inputs,
+            extra_inputs: HashMap::new(),
             params: &HashMap::new(),
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -2502,6 +2515,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -2549,6 +2563,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -2582,6 +2597,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -3399,6 +3415,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs: HashMap::new(),
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -3440,6 +3457,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs: HashMap::new(),
+            extra_inputs: HashMap::new(),
             params: &uv_params,
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,
@@ -3485,6 +3503,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs: HashMap::new(),
+            extra_inputs: HashMap::new(),
             params: &params,
             frame_time: FrameTime { frame: 42 },
             color_management: &cm,
@@ -3533,6 +3552,7 @@ mod tests {
         let format = Format::hd();
         let ctx = EvalContext {
             inputs,
+            extra_inputs: HashMap::new(),
             params: &HashMap::new(),
             frame_time: FrameTime { frame: 0 },
             color_management: &cm,

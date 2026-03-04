@@ -22,6 +22,7 @@ pub enum ImageOrField<'a> {
 
 pub struct EvalContext<'a> {
     pub inputs: HashMap<String, Value>,
+    pub extra_inputs: HashMap<(String, u64), Value>,
     pub params: &'a HashMap<String, ParamValue>,
     pub frame_time: FrameTime,
     pub color_management: &'a dyn ColorManagement,
@@ -76,6 +77,19 @@ impl<'a> EvalContext<'a> {
             .get(name)
             .and_then(|v| v.as_string())
             .ok_or_else(|| CascadeError::MissingInput(name.to_string()))
+    }
+
+    pub fn get_input_at_frame(&self, input_name: &str, frame: u64) -> Option<&Value> {
+        self.extra_inputs.get(&(input_name.to_string(), frame))
+    }
+
+    pub fn get_input_image_at_frame(&self, input_name: &str, frame: u64) -> Option<&Image> {
+        self.extra_inputs
+            .get(&(input_name.to_string(), frame))
+            .and_then(|v| match v {
+                Value::Image(img) => Some(img),
+                _ => None,
+            })
     }
 
     pub fn get_param_float(&self, key: &str) -> Result<f64, CascadeError> {
@@ -141,6 +155,14 @@ pub trait Node: Send + Sync + Any {
     fn spec(&self) -> NodeSpec;
 
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a>;
+
+    fn requested_frames(
+        &self,
+        _current_frame: FrameTime,
+        _params: &HashMap<String, ParamValue>,
+    ) -> Vec<(String, FrameTime)> {
+        Vec::new()
+    }
 
     fn as_any(&self) -> &dyn Any;
 

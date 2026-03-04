@@ -3,9 +3,13 @@ use cascade_core::eval::Evaluator;
 use cascade_core::graph::Graph;
 use cascade_core::node::{EvalContext, Node, NodeRegistry};
 use cascade_core::types::{
-    Format, FrameTime, ParamDefault, ParamSpec, ParamValue, PortSpec, UiHint, Value, ValueType,
+    Format, FrameTime, Image, ParamDefault, ParamSpec, ParamValue, PortSpec, UiHint, Value,
+    ValueType,
 };
-use cascade_nodes_std::{register_standard_nodes, BrightnessContrast, LoadImage, Viewer};
+use cascade_nodes_std::{
+    register_standard_nodes, BrightnessContrast, FrameBlend, FrameHold, LoadImage, TimeOffset,
+    Viewer,
+};
 use image::codecs::png::PngEncoder;
 use image::ColorType;
 use image::ImageEncoder;
@@ -131,8 +135,207 @@ fn dirty_propagates_downstream() {
     assert!(graph.is_dirty(viewer_id));
 }
 
+#[test]
+fn test_time_offset_pipeline() {
+    let mut registry = NodeRegistry::new();
+    register_standard_nodes(&mut registry);
+    registry.register("frame_source", || Arc::new(FrameAwareSource::new()));
+
+    let mut graph = Graph::new();
+    let source_id = graph.add_node("frame_source");
+    let offset_id = graph.add_node("time_offset");
+    let viewer_id = graph.add_node("viewer");
+
+    graph
+        .connect(&registry, source_id, "output", offset_id, "input")
+        .unwrap();
+    graph
+        .connect(&registry, offset_id, "output", viewer_id, "value")
+        .unwrap();
+    graph.set_param(offset_id, "offset", ParamValue::Int(3));
+
+    let mut nodes: HashMap<_, Arc<dyn Node>> = HashMap::new();
+    nodes.insert(source_id, Arc::new(FrameAwareSource::new()));
+    nodes.insert(offset_id, Arc::new(TimeOffset::new()));
+    nodes.insert(viewer_id, Arc::new(Viewer::new()));
+
+    let mut evaluator = Evaluator::new();
+    let cm = BuiltinColorManagement::new();
+    let result = block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        viewer_id,
+        "display",
+        FrameTime { frame: 10 },
+        &cm,
+        None,
+        &Format::hd(),
+        &HashMap::new(),
+    ))
+    .unwrap();
+
+    let image = match result.value {
+        Value::Image(img) => img,
+        _ => panic!("Expected image"),
+    };
+    let px = image.get_pixel_f32(0, 0);
+    assert!((px[0] - 0.07).abs() < 0.001, "expected frame 7 red");
+}
+
+#[test]
+fn test_frame_hold_pipeline() {
+    let mut registry = NodeRegistry::new();
+    register_standard_nodes(&mut registry);
+    registry.register("frame_source", || Arc::new(FrameAwareSource::new()));
+
+    let mut graph = Graph::new();
+    let source_id = graph.add_node("frame_source");
+    let hold_id = graph.add_node("frame_hold");
+    let viewer_id = graph.add_node("viewer");
+
+    graph
+        .connect(&registry, source_id, "output", hold_id, "input")
+        .unwrap();
+    graph
+        .connect(&registry, hold_id, "output", viewer_id, "value")
+        .unwrap();
+    graph.set_param(hold_id, "frame", ParamValue::Int(5));
+
+    let mut nodes: HashMap<_, Arc<dyn Node>> = HashMap::new();
+    nodes.insert(source_id, Arc::new(FrameAwareSource::new()));
+    nodes.insert(hold_id, Arc::new(FrameHold::new()));
+    nodes.insert(viewer_id, Arc::new(Viewer::new()));
+
+    let mut evaluator = Evaluator::new();
+    let cm = BuiltinColorManagement::new();
+    let result = block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        viewer_id,
+        "display",
+        FrameTime { frame: 20 },
+        &cm,
+        None,
+        &Format::hd(),
+        &HashMap::new(),
+    ))
+    .unwrap();
+
+    let image = match result.value {
+        Value::Image(img) => img,
+        _ => panic!("Expected image"),
+    };
+    let px = image.get_pixel_f32(0, 0);
+    assert!((px[0] - 0.05).abs() < 0.001, "expected frame 5 red");
+}
+
+#[test]
+fn test_frame_blend_pipeline() {
+    let mut registry = NodeRegistry::new();
+    register_standard_nodes(&mut registry);
+    registry.register("frame_source", || Arc::new(FrameAwareSource::new()));
+
+    let mut graph = Graph::new();
+    let source_id = graph.add_node("frame_source");
+    let blend_id = graph.add_node("frame_blend");
+    let viewer_id = graph.add_node("viewer");
+
+    graph
+        .connect(&registry, source_id, "output", blend_id, "input")
+        .unwrap();
+    graph
+        .connect(&registry, blend_id, "output", viewer_id, "value")
+        .unwrap();
+    graph.set_param(blend_id, "blend", ParamValue::Float(0.5));
+
+    let mut nodes: HashMap<_, Arc<dyn Node>> = HashMap::new();
+    nodes.insert(source_id, Arc::new(FrameAwareSource::new()));
+    nodes.insert(blend_id, Arc::new(FrameBlend::new()));
+    nodes.insert(viewer_id, Arc::new(Viewer::new()));
+
+    let mut evaluator = Evaluator::new();
+    let cm = BuiltinColorManagement::new();
+    let result = block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        viewer_id,
+        "display",
+        FrameTime { frame: 10 },
+        &cm,
+        None,
+        &Format::hd(),
+        &HashMap::new(),
+    ))
+    .unwrap();
+
+    let image = match result.value {
+        Value::Image(img) => img,
+        _ => panic!("Expected image"),
+    };
+    let px = image.get_pixel_f32(0, 0);
+    assert!((px[0] - 0.105).abs() < 0.001, "expected blended red");
+}
+
 struct CounterNode {
     count: Mutex<u32>,
+}
+
+struct FrameAwareSource;
+
+impl FrameAwareSource {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for FrameAwareSource {
+    fn spec(&self) -> cascade_core::types::NodeSpec {
+        cascade_core::types::NodeSpec {
+            id: "frame_source".to_string(),
+            display_name: "Frame Source".to_string(),
+            category: "Input".to_string(),
+            description: "Frame-aware test source".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "output".to_string(),
+                label: "Output".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<HashMap<String, Value>, cascade_core::error::CascadeError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let intensity = (ctx.frame_time.frame as f32) * 0.01;
+            let data = vec![intensity, 0.0, 0.0, 1.0];
+            let image = Image::from_f32_data(1, 1, data)?;
+            let mut outputs = HashMap::new();
+            outputs.insert("output".to_string(), Value::Image(image));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 fn make_png_bytes() -> Vec<u8> {
