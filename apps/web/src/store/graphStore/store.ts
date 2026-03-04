@@ -60,6 +60,11 @@ import type { RenderSlice } from './slices/renderSlice';
 import { createRenderSlice } from './slices/renderSlice';
 import type { LiveParamsSlice } from './slices/liveParamsSlice';
 import { createLiveParamsSlice } from './slices/liveParamsSlice';
+import type { ToastSlice, Toast, ToastKind } from './slices/toastSlice';
+
+import { createToastSlice } from './slices/toastSlice';
+
+
 
 export { ADD_INPUT_PORT, ADD_OUTPUT_PORT, getEngine } from './kernel';
 
@@ -193,7 +198,13 @@ export interface GraphState {
   flushRender: () => Promise<Map<string, EngineError>>;
   validateEdits: (editsJson: string) => EditValidationError[];
   typesCompatible: (fromType: string, toType: string) => boolean;
+
+  toasts: Toast[];
+  pushToast: (kind: ToastKind, title: string, message?: string) => void;
+  dismissToast: (id: string) => void;
+  clearToasts: () => void;
 }
+
 
 type CoreSlice = Omit<
   GraphState,
@@ -209,7 +220,9 @@ type CoreSlice = Omit<
   | keyof UndoSlice
   | keyof RenderSlice
   | keyof LiveParamsSlice
+  | keyof ToastSlice
 >;
+
 
 const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [], CoreSlice> = (set, get) => {
     return {
@@ -256,8 +269,10 @@ export const useGraphStore = create<GraphState>()(
     ...createRenderSlice(...args),
     ...createLiveParamsSlice(...args),
     ...createGraphSlice(...args),
+    ...createToastSlice(...args),
   }))
 );
+
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   const debugWindow = window as Window & { __cascadeStore?: typeof useGraphStore };

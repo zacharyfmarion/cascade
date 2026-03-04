@@ -7,7 +7,9 @@ import { SettingsModal } from './components/SettingsModal';
 import { AboutModal } from './components/AboutModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { MenuBar } from './components/MenuBar';
+import { ToastHost } from './components/ui/ToastHost';
 import { useGraphStore } from './store/graphStore';
+
 import { useSettingsStore } from './store/settingsStore';
 import { useLayoutStore, applyDefaultLayout } from './store/layoutStore';
 import { useTauriMenuListener } from './menus/menuListener';
@@ -168,8 +170,10 @@ function App() {
       <SettingsModal />
       <ShortcutsModal />
       <AboutModal />
+      <ToastHost />
     </>
   );
 }
+
 
 export default App;

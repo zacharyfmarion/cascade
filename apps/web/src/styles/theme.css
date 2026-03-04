@@ -939,6 +939,14 @@ body {
   --channel-g: #60c060;
   --channel-b: #6080e0;
   --channel-a: #b0b0b0;
+  
+  /* Toast Accents */
+  --toast-info-accent: #3b82f6;
+  --toast-success-accent: #22c55e;
+  --toast-warning-accent: #eab308;
+  --toast-error-accent: #ef4444;
+  }
+
   }
 
 /* ── Viewer Toolbar ──────────────────────────────────────────── */
