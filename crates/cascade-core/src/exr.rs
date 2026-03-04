@@ -5,6 +5,7 @@
 //! [`ExrMetadata`] drives dynamic output port generation on the LoadImage node.
 
 use crate::error::CascadeError;
+use crate::types::{Image, MAX_IMAGE_DIM};
 use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
@@ -370,6 +371,100 @@ fn find_primary_layer(layers: &[ExrLayerDescriptor]) -> Option<String> {
     }
 
     None
+}
+
+/// Decode a specific EXR layer from raw bytes, returning an RGBA Image.
+/// Uses the layer's channel_set mapping to produce f32 RGBA pixel data.
+pub fn decode_exr_layer(bytes: &[u8], metadata: &ExrMetadata, port_name: &str) -> Result<Image, CascadeError> {
+    use exr::prelude::*;
+
+    // Find the layer descriptor
+    let descriptor = metadata.layers.iter()
+        .find(|l| l.port_name == port_name)
+        .ok_or_else(|| CascadeError::ExrDecode(format!("Layer port '{}' not found in metadata", port_name)))?;
+
+    // Read the full image with all layers and channels
+    let exr_image = read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .all_channels()
+        .all_layers()
+        .all_attributes()
+        .from_buffered(std::io::Cursor::new(bytes))
+        .map_err(|e| CascadeError::ExrDecode(e.to_string()))?;
+
+    // Find matching layer in decoded data
+    let layer = exr_image.layer_data.iter().find(|l| {
+        let name = l.attributes.layer_name.as_ref()
+            .map(|n| n.to_string())
+            .unwrap_or_default();
+        // Match by original layer name
+        name == descriptor.layer_name
+    }).ok_or_else(|| CascadeError::ExrDecode(format!(
+        "Layer '{}' not found in EXR data", descriptor.layer_name
+    )))?;
+
+    let size = layer.size;
+    let width = size.0 as u32;
+    let height = size.1 as u32;
+
+    if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+        return Err(CascadeError::ExrLayerTooLarge {
+            layer_name: descriptor.layer_name.clone(),
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        });
+    }
+
+    let pixel_count = (width as usize) * (height as usize);
+    let mut data = vec![0.0f32; pixel_count * 4];
+
+    // Build channel name to index map
+    let channels = &layer.channel_data.list;
+
+    // Helper: find channel data as f32 values
+    let get_channel_f32 = |name: &str| -> Option<Vec<f32>> {
+        channels.iter().find(|c| c.name.to_string() == name).map(|c| {
+            c.sample_data.values_as_f32().collect::<Vec<f32>>()
+        })
+    };
+
+    // Map channels to RGBA based on the channel set
+    let r_data = descriptor.channel_set.r.as_ref().and_then(|n| get_channel_f32(n));
+    let g_data = descriptor.channel_set.g.as_ref().and_then(|n| get_channel_f32(n));
+    let b_data = descriptor.channel_set.b.as_ref().and_then(|n| get_channel_f32(n));
+    let a_data = descriptor.channel_set.a.as_ref().and_then(|n| get_channel_f32(n));
+
+    match descriptor.kind {
+        ExrLayerKind::Rgba => {
+            // Multi-channel layer: map channels to RGBA
+            for i in 0..pixel_count {
+                data[i * 4] = r_data.as_ref().map_or(0.0, |d| d[i]);
+                data[i * 4 + 1] = g_data.as_ref().map_or(0.0, |d| d[i]);
+                data[i * 4 + 2] = b_data.as_ref().map_or(0.0, |d| d[i]);
+                data[i * 4 + 3] = a_data.as_ref().map_or(1.0, |d| d[i]);
+            }
+        }
+        ExrLayerKind::Mask => {
+            // Single-channel layer: replicate to RGB, A=1.0
+            let ch_data = r_data.as_ref()
+                .or(g_data.as_ref())
+                .or(b_data.as_ref())
+                .ok_or_else(|| CascadeError::ExrDecode(format!(
+                    "No channel data found for mask layer '{}'", descriptor.layer_name
+                )))?;
+            for i in 0..pixel_count {
+                let v = ch_data[i];
+                data[i * 4] = v;
+                data[i * 4 + 1] = v;
+                data[i * 4 + 2] = v;
+                data[i * 4 + 3] = 1.0;
+            }
+        }
+    }
+
+    crate::types::Image::from_f32_data(width, height, data)
 }
 
 // ---------------------------------------------------------------------------
