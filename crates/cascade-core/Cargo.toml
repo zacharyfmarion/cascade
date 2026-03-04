@@ -15,6 +15,7 @@ smallvec = "1"
 glam = "0.29"
 rayon = "1"
 uuid = { version = "1", features = ["v4"] }
+exr = "1.74"
 
 [dev-dependencies]
 cascade-nodes-std = { path = "../cascade-nodes-std" }

@@ -34,4 +34,14 @@ pub enum CascadeError {
     },
     #[error("{0}")]
     Other(String),
+    #[error("EXR metadata parse error: {0}")]
+    ExrMetadata(String),
+    #[error("EXR decode error: {0}")]
+    ExrDecode(String),
+    #[error("Unsupported EXR layer '{layer_name}': {reason}")]
+    ExrUnsupportedLayer { layer_name: String, reason: String },
+    #[error("No usable primary RGBA layer found in EXR file")]
+    ExrNoUsablePrimaryLayer,
+    #[error("EXR layer '{layer_name}' too large: {width}x{height} exceeds max {max}")]
+    ExrLayerTooLarge { layer_name: String, width: u32, height: u32, max: u32 },
 }

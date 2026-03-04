@@ -2,6 +2,7 @@ pub mod ai;
 pub mod color;
 pub mod error;
 pub mod eval;
+pub mod exr;
 pub mod graph;
 pub mod group;
 pub mod node;
