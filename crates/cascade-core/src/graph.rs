@@ -1,8 +1,9 @@
 use crate::error::CascadeError;
-use crate::node::NodeRegistry;
-use crate::types::{ParamValue, ValueType};
+use crate::node::{Node, NodeRegistry};
+use crate::types::{NodeSpec, ParamValue, ValueType};
 use slotmap::{new_key_type, SlotMap};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 new_key_type! {
     pub struct NodeId;
@@ -28,6 +29,15 @@ pub struct Connection {
     pub to_port: String,
 }
 
+/// Record of a connection that was pruned due to port disappearance (e.g. EXR layer change).
+#[derive(Clone, Debug)]
+pub struct PrunedConnection {
+    pub from_node: NodeId,
+    pub from_port: String,
+    pub to_node: NodeId,
+    pub to_port: String,
+}
+
 #[derive(Clone)]
 pub struct Graph {
     pub nodes: SlotMap<NodeId, NodeInstance>,
@@ -45,6 +55,45 @@ pub fn types_compatible(from: &ValueType, to: &ValueType) -> bool {
             && (*to == ValueType::Image || *to == ValueType::Mask))
         || (*from == ValueType::Int && *to == ValueType::Float)
         || (*from == ValueType::Float && *to == ValueType::Int)
+}
+
+/// Provides a node's current spec. For static nodes, this returns the registry
+/// spec. For dynamic nodes (e.g. LoadImage with EXR layers), this returns the
+/// instance-specific spec with runtime output ports.
+pub trait SpecProvider {
+    fn get_node_spec(&self, node_id: NodeId, type_id: &str) -> Option<NodeSpec>;
+}
+
+/// Registry-only spec provider — returns the type-level spec (no instance awareness).
+/// This is the default for graphs without dynamic port support.
+impl SpecProvider for NodeRegistry {
+    fn get_node_spec(&self, _node_id: NodeId, type_id: &str) -> Option<NodeSpec> {
+        self.get_spec(type_id).cloned()
+    }
+}
+
+impl SpecProvider for Arc<NodeRegistry> {
+    fn get_node_spec(&self, _node_id: NodeId, type_id: &str) -> Option<NodeSpec> {
+        self.get_spec(type_id).cloned()
+    }
+}
+
+/// Spec provider that checks node instances first (for dynamic ports),
+/// then falls back to the registry for static nodes.
+pub struct InstanceAwareSpecProvider<'a> {
+    pub registry: &'a NodeRegistry,
+    pub instances: &'a HashMap<NodeId, Arc<dyn Node>>,
+}
+
+impl<'a> SpecProvider for InstanceAwareSpecProvider<'a> {
+    fn get_node_spec(&self, node_id: NodeId, type_id: &str) -> Option<NodeSpec> {
+        // Instance spec takes priority (may have dynamic ports)
+        if let Some(node) = self.instances.get(&node_id) {
+            return Some(node.spec());
+        }
+        // Fall back to registry for nodes not in the instances map
+        self.registry.get_spec(type_id).cloned()
+    }
 }
 
 impl Graph {
@@ -84,34 +133,52 @@ impl Graph {
         self.dirty_nodes.remove(&node_id);
     }
 
-    pub fn prune_connections_for_node(&mut self, node_id: NodeId, registry: &NodeRegistry) {
+    pub fn prune_connections_for_node(
+        &mut self,
+        node_id: NodeId,
+        spec_provider: &dyn SpecProvider,
+    ) -> Vec<PrunedConnection> {
         let node = match self.nodes.get(node_id) {
             Some(n) => n,
-            None => return,
+            None => return Vec::new(),
         };
-        let spec = match registry.get_spec(&node.type_id) {
-            Some(s) => s.clone(),
-            None => return,
+        let spec = match spec_provider.get_node_spec(node_id, &node.type_id) {
+            Some(s) => s,
+            None => return Vec::new(),
         };
 
         let all_inputs = spec.all_inputs();
         let input_names: HashSet<&str> = all_inputs.iter().map(|p| p.name.as_str()).collect();
         let output_names: HashSet<&str> = spec.outputs.iter().map(|p| p.name.as_str()).collect();
 
+        let mut pruned = Vec::new();
         self.retain_connections(|c| {
             if c.to_node == node_id && !input_names.contains(c.to_port.as_str()) {
+                pruned.push(PrunedConnection {
+                    from_node: c.from_node,
+                    from_port: c.from_port.clone(),
+                    to_node: c.to_node,
+                    to_port: c.to_port.clone(),
+                });
                 return false;
             }
             if c.from_node == node_id && !output_names.contains(c.from_port.as_str()) {
+                pruned.push(PrunedConnection {
+                    from_node: c.from_node,
+                    from_port: c.from_port.clone(),
+                    to_node: c.to_node,
+                    to_port: c.to_port.clone(),
+                });
                 return false;
             }
             true
         });
+        pruned
     }
 
     pub fn connect(
         &mut self,
-        registry: &NodeRegistry,
+        spec_provider: &dyn SpecProvider,
         from_node: NodeId,
         from_port: &str,
         to_node: NodeId,
@@ -126,10 +193,10 @@ impl Graph {
             .get(to_node)
             .ok_or(CascadeError::NodeNotFound(to_node))?;
 
-        let from_spec = registry.get_spec(&from_instance.type_id).ok_or_else(|| {
+        let from_spec = spec_provider.get_node_spec(from_node, &from_instance.type_id).ok_or_else(|| {
             CascadeError::InvalidConnection(format!("Unknown node type: {}", from_instance.type_id))
         })?;
-        let to_spec = registry.get_spec(&to_instance.type_id).ok_or_else(|| {
+        let to_spec = spec_provider.get_node_spec(to_node, &to_instance.type_id).ok_or_else(|| {
             CascadeError::InvalidConnection(format!("Unknown node type: {}", to_instance.type_id))
         })?;
 
@@ -364,9 +431,9 @@ impl Graph {
         self.inputs.len()
     }
 
-    pub fn retain_connections<F>(&mut self, predicate: F)
+    pub fn retain_connections<F>(&mut self, mut predicate: F)
     where
-        F: Fn(&Connection) -> bool,
+        F: FnMut(&Connection) -> bool,
     {
         self.inputs
             .retain(|(to_node, to_port), (from_node, from_port)| {
