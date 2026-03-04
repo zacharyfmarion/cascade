@@ -64,6 +64,7 @@ export interface ThemeTokens {
   'node.header.group': string;
   'node.header.groupInput': string;
   'node.header.groupOutput': string;
+  'node.header.text': string;
 
   // ── Interactive / slider ─────────────────────────────────────
   'slider.fill': string;
@@ -179,6 +180,7 @@ export const THEME_TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
   'node.header.group',
   'node.header.groupInput',
   'node.header.groupOutput',
+  'node.header.text',
 
   'slider.fill',
   'slider.fillHover',

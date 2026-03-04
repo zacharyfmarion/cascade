@@ -40,6 +40,7 @@
     "node.header.group": "rgba(30, 102, 245, 0.15)",
     "node.header.groupInput": "rgba(64, 160, 43, 0.15)",
     "node.header.groupOutput": "rgba(210, 15, 57, 0.15)",
+    "node.header.text": "#1a1a1a",
     "slider.fill": "rgba(136, 57, 239, 0.2)",
     "slider.fillHover": "rgba(136, 57, 239, 0.35)",
     "slider.bg": "rgba(0, 0, 0, 0.06)",

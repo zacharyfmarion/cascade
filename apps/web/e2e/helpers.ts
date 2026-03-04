@@ -37,6 +37,7 @@ export interface CascadeTestHarness {
   togglePlayback(): Promise<void>;
   setFps(fps: number): Promise<void>;
   setLoopPlayback(loopPlayback: boolean): Promise<void>;
+  loadImageFile(nodeId: string, data: number[], fileName?: string): Promise<void>;
 }
 
 export interface HarnessWindow extends Window {

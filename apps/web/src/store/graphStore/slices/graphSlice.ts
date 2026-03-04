@@ -5,6 +5,7 @@ import { parseEngineError } from '../../../engine/engineError';
 import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs } from '../kernel';
+import { pendingImageFiles } from '../../../components/nodes/pendingImageFiles';
 
 export interface GraphSliceState {
   nodes: Map<string, NodeInstance>;
@@ -63,7 +64,7 @@ export const createGraphSlice: StateCreator<
     fitViewRequestId: 0,
     editingStack: [{ id: 'root', label: 'Root', groupNodeId: null }],
 
-    addNode: async (typeId, position) => {
+    addNode: async (typeId, position, initialFile?: File) => {
       await get().pushUndo();
       tagUiOrigin();
 
@@ -111,6 +112,9 @@ export const createGraphSlice: StateCreator<
         muted: false,
       });
 
+      if (initialFile) {
+        pendingImageFiles.set(result.id, initialFile);
+      }
       set({ nodes: newNodes });
       if (actualTypeId === 'load_image_sequence') {
         get().recomputeSequenceState();

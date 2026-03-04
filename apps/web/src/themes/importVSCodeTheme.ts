@@ -143,6 +143,7 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CascadeTheme {
     'node.header.group': hexToRgba(accent, 0.22),
     'node.header.groupInput': hexToRgba(colors['terminal.ansiGreen'] ?? (isDark ? '#4ca04c' : '#859900'), 0.22),
     'node.header.groupOutput': hexToRgba(colors['terminal.ansiRed'] ?? danger, 0.22),
+    'node.header.text': isDark ? '#ffffff' : '#1a1a1a',
 
     'slider.fill': hexToRgba(accent, 0.3),
     'slider.fillHover': hexToRgba(accent, 0.45),

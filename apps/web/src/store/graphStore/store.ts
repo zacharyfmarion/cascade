@@ -99,7 +99,7 @@ export interface GraphState {
   refreshAiNodeStale: () => void;
 
   initEngine: () => Promise<void>;
-  addNode: (typeId: string, position: { x: number; y: number }) => Promise<string>;
+  addNode: (typeId: string, position: { x: number; y: number }, initialFile?: File) => Promise<string>;
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;

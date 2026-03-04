@@ -105,6 +105,9 @@ export interface CascadeTestHarness {
 
   // --- Transactions ---
   editTransaction(mutations: Array<{ action: string; args: unknown[] }>): void;
+
+  // --- Image loading ---
+  loadImageFile(nodeId: string, data: number[], fileName?: string): Promise<void>;
 }
 
 function createTestHarness(): CascadeTestHarness {
@@ -360,6 +363,15 @@ function createTestHarness(): CascadeTestHarness {
     // --- Export ---
     async exportImage(nodeId: string): Promise<void> {
       await useGraphStore.getState().exportImage(nodeId);
+    },
+
+    // --- Image loading ---
+    async loadImageFile(nodeId: string, data: number[], fileName?: string): Promise<void> {
+      const bytes = new Uint8Array(data);
+      const file = new File([bytes], fileName ?? 'test.png', { type: 'image/png' });
+      useGraphStore.getState().loadImageFile(nodeId, file);
+      // loadImageFile reads the file async — wait for it to settle
+      await new Promise(resolve => setTimeout(resolve, 200));
     },
   };
 }
