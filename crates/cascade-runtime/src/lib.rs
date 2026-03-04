@@ -1516,7 +1516,8 @@ impl Engine {
             .as_any()
             .downcast_ref::<InputLoadImage>()
             .ok_or_else(|| CascadeError::Other("Node is not LoadImage".to_string()))?;
-        load_node.set_image_data(data)
+        let _removed = load_node.set_image_data(data)?;
+        Ok(())
     }
 
     pub fn get_image_data(&self, node_id: &str) -> Result<Vec<u8>, CascadeError> {

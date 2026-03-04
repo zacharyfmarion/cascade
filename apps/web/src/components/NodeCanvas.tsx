@@ -93,6 +93,7 @@ export const NodeCanvas: React.FC = () => {
   const framesStore = useGraphStore(s => s.frames);
   const connectionsStore = useGraphStore(s => s.connections);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
+  const nodeSpecsById = useGraphStore(s => s.nodeSpecsById);
   const { screenToFlowPosition, getNodes, getEdges, fitView } = useReactFlow();
 
   const nodeTypes = useMemo((): NodeTypes => {
@@ -308,12 +309,12 @@ export const NodeCanvas: React.FC = () => {
     (fromNode: string, fromPort: string): string => {
       const node = nodesStore.get(fromNode);
       if (!node) return DEFAULT_EDGE_COLOR;
-      const spec = nodeSpecs.find(s => s.id === node.typeId);
+      const spec = nodeSpecsById.get(fromNode) ?? nodeSpecs.find(s => s.id === node.typeId);
       if (!spec) return DEFAULT_EDGE_COLOR;
       const output = spec.outputs.find(o => o.name === fromPort);
       return output ? (PORT_COLORS[output.ty] ?? DEFAULT_EDGE_COLOR) : DEFAULT_EDGE_COLOR;
     },
-    [nodesStore, nodeSpecs]
+    [nodesStore, nodeSpecs, nodeSpecsById]
   );
 
   // Derive flow nodes synchronously from store (no useEffect delay).
@@ -322,7 +323,7 @@ export const NodeCanvas: React.FC = () => {
   // rapid Zustand updates (e.g. 60fps param drags with GPU nodes).
   const derivedNodes = useMemo((): FlowNode[] => {
     const nextNodes: FlowNode[] = Array.from(nodesStore.values()).map(node => {
-      const spec = nodeSpecs.find(s => s.id === node.typeId);
+      const spec = nodeSpecsById.get(node.id) ?? nodeSpecs.find(s => s.id === node.typeId);
       return {
         id: node.id,
         type: node.typeId,
@@ -361,7 +362,7 @@ export const NodeCanvas: React.FC = () => {
       });
     }
     return nextNodes;
-  }, [nodesStore, nodeSpecs, framesStore, selectionState]);
+  }, [nodesStore, nodeSpecs, nodeSpecsById, framesStore, selectionState]);
   // Synchronous state reset: when store-derived nodes change, push to
   // React state immediately (during render, not after paint).  React
   // supports this pattern — it discards the stale render and restarts

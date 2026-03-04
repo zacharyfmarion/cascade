@@ -29,6 +29,7 @@ import type {
   TransactionOrigin,
 } from '../types';
 import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
+import type { NodeInterfaceChange } from '../../engine/bridge';
 import type { EngineError } from '../../engine/engineError';
 import { useSettingsStore } from '../settingsStore';
 import {
@@ -75,6 +76,7 @@ export interface GraphState {
   frames: Map<string, Frame>;
   selectedFrameId: string | null;
   nodeSpecs: NodeSpec[];
+  nodeSpecsById: Map<string, NodeSpec>;
   engineReady: boolean;
   renderResults: Map<string, ViewerResult>;
   lastError: EngineError | null;
@@ -174,6 +176,7 @@ export interface GraphState {
   isInsideGroup: () => boolean;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
   importCustomNodes: (json: string) => Promise<void>;
+  applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
   setAiApiKey: (provider: string, key: string) => Promise<void>;
   isAiConfigured: () => Promise<boolean>;

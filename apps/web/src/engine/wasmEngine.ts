@@ -1,5 +1,5 @@
 import init, { Engine, needs_migration_json, migrate_document_json } from '../wasm-pkg/cascade_wasm';
-import type { EngineBridge, AddNodeResult, ColorManagementInfo, EditValidationError } from './bridge';
+import type { EngineBridge, AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
 
@@ -146,7 +146,7 @@ export class WasmEngine implements EngineBridge {
   private getEngineWithBindings(): Engine & {
     set_muted: (nodeId: string, muted: boolean) => void;
     load_palette_data: (nodeId: string, data: Uint8Array) => [number, number, number, number][];
-    load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => void;
+    load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => NodeInterfaceChange;
     set_sequence_info: (nodeId: string, frameCount: bigint, firstFrame: bigint, lastFrame: bigint) => void;
     batch_clear: (nodeId: string) => void;
     batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
@@ -172,7 +172,7 @@ export class WasmEngine implements EngineBridge {
     return this.getEngine() as Engine & {
       set_muted: (nodeId: string, muted: boolean) => void;
       load_palette_data: (nodeId: string, data: Uint8Array) => [number, number, number, number][];
-      load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => void;
+    load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => NodeInterfaceChange;
       set_sequence_info: (nodeId: string, frameCount: bigint, firstFrame: bigint, lastFrame: bigint) => void;
       batch_clear: (nodeId: string) => void;
       batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
@@ -270,9 +270,9 @@ export class WasmEngine implements EngineBridge {
     });
   }
 
-  loadImageData(nodeId: string, data: Uint8Array): Promise<void> {
+  loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> {
     return this.scheduler.enqueue(() => {
-      this.getEngine().load_image_data(nodeId, data);
+      return this.getEngine().load_image_data(nodeId, data) as unknown as NodeInterfaceChange;
     });
   }
 
@@ -282,9 +282,9 @@ export class WasmEngine implements EngineBridge {
     });
   }
 
-  loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<void> {
+  loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange> {
     return this.scheduler.enqueue(() => {
-      this.getEngineWithBindings().load_sequence_frame_data(nodeId, BigInt(frame), data);
+      return this.getEngineWithBindings().load_sequence_frame_data(nodeId, BigInt(frame), data);
     });
   }
 
@@ -684,6 +684,12 @@ export class WasmEngine implements EngineBridge {
   setProjectFormat(width: number, height: number): Promise<void> {
     return this.scheduler.enqueue(() => {
       this.getEngineWithBindings().set_project_format?.(width, height);
+    });
+  }
+
+  getNodeSpec(nodeId: string): Promise<NodeSpec> {
+    return this.scheduler.enqueue(() => {
+      return this.getEngine().get_node_spec(nodeId) as unknown as NodeSpec;
     });
   }
 

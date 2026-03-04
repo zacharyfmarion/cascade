@@ -85,7 +85,7 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.exr"
         onChange={onFileSelect}
         style={{ display: 'none' }}
       />

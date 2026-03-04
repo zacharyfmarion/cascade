@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { Connection, EditingContext, NodeInstance, NodeSpec, ParamValue, PortSpec } from '../../types';
+import type { NodeInterfaceChange } from '../../../engine/bridge';
 import { parseEngineError } from '../../../engine/engineError';
 import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
@@ -11,6 +12,7 @@ export interface GraphSliceState {
   nodes: Map<string, NodeInstance>;
   connections: Connection[];
   nodeSpecs: NodeSpec[];
+  nodeSpecsById: Map<string, NodeSpec>;
   engineReady: boolean;
   lastError: EngineError | null;
   editingStack: EditingContext[];
@@ -36,6 +38,7 @@ export interface GraphSliceActions {
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
   importCustomNodes: (json: string) => Promise<void>;
+  applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
 }
@@ -58,6 +61,7 @@ export const createGraphSlice: StateCreator<
     nodes: new Map(),
     connections: [],
     nodeSpecs: [],
+    nodeSpecsById: new Map(),
     engineReady: false,
     lastError: null,
     previewScale: 1,
@@ -813,5 +817,33 @@ export const createGraphSlice: StateCreator<
         nodeSpecs: withGroupIOSpecs(specs, internalGraph),
       });
     },
+
+    applyNodeInterfaceChange: (nodeId, change) => {
+      // Update per-instance spec
+      const newSpecsById = new Map(get().nodeSpecsById);
+      newSpecsById.set(nodeId, change.newSpec);
+      
+      // Remove connections that were pruned by the engine
+      let newConnections = get().connections;
+      if (change.prunedConnections.length > 0) {
+        const pruneSet = new Set(
+          change.prunedConnections.map(pc => `${pc.fromNode}:${pc.fromPort}->${pc.toNode}:${pc.toPort}`)
+        );
+        newConnections = newConnections.filter(c =>
+          !pruneSet.has(`${c.fromNode}:${c.fromPort}->${c.toNode}:${c.toPort}`)
+        );
+        
+        // Toast for each pruned connection
+        for (const pc of change.prunedConnections) {
+          get().pushToast('info', 'Connection removed', `Port "${pc.fromPort}" no longer exists`);
+        }
+      }
+      
+      set({
+        nodeSpecsById: newSpecsById,
+        connections: newConnections,
+      });
+    },
+
   };
 };

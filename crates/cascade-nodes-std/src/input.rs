@@ -419,7 +419,20 @@ impl LoadImageSequence {
         Ok(())
     }
 
-    pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<(), CascadeError> {
+    pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<Vec<String>, CascadeError> {
+        // Collect old output port names before update
+        let old_ports: Vec<String> = {
+            let guard = self.exr_metadata.lock()
+                .map_err(|_| CascadeError::Other("Metadata mutex poisoned".to_string()))?;
+            match &*guard {
+                Some(metadata) => metadata.layers.iter()
+                    .filter(|l| metadata.primary_layer_port.as_ref() != Some(&l.port_name))
+                    .map(|l| l.port_name.clone())
+                    .collect(),
+                None => vec![],
+            }
+        };
+
         let outputs = if exr::is_exr(bytes) {
             self.decode_frame_exr(bytes)?
         } else {
@@ -432,7 +445,25 @@ impl LoadImageSequence {
         let mut cache = self.frame_cache.lock()
             .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
         cache.insert(frame, outputs);
-        Ok(())
+
+        // Collect new output port names after update
+        let new_ports: Vec<String> = {
+            let guard = self.exr_metadata.lock()
+                .map_err(|_| CascadeError::Other("Metadata mutex poisoned".to_string()))?;
+            match &*guard {
+                Some(metadata) => metadata.layers.iter()
+                    .filter(|l| metadata.primary_layer_port.as_ref() != Some(&l.port_name))
+                    .map(|l| l.port_name.clone())
+                    .collect(),
+                None => vec![],
+            }
+        };
+
+        // Return ports that existed before but don't exist now
+        let removed = old_ports.into_iter()
+            .filter(|p| !new_ports.contains(p))
+            .collect();
+        Ok(removed)
     }
 
     pub fn set_directory(&self, dir: &str) -> Result<SequenceInfo, CascadeError> {

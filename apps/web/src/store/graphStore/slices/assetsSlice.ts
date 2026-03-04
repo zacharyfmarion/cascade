@@ -23,7 +23,8 @@ export const createAssetsSlice: StateCreator<
   loadImageFile: (nodeId, file) => {
     file.arrayBuffer().then(async buffer => {
       const data = new Uint8Array(buffer);
-      await getEngine().loadImageData(nodeId, data);
+      const change = await getEngine().loadImageData(nodeId, data);
+      get().applyNodeInterfaceChange(nodeId, change);
       set({ dirty: true });
       get().triggerAllViewers();
     }).catch(e => {

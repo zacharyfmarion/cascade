@@ -289,9 +289,7 @@ impl Evaluator {
                 // fall back to project_format when no Image inputs exist.
                 let ref_domain: Option<(Format, crate::types::RectI)> =
                     inputs.values().find_map(|v| match v {
-                        Value::Image(img) | Value::Mask(img) => {
-                            Some((img.format.clone(), img.data_window))
-                        }
+                        Value::Image(img) => Some((img.format.clone(), img.data_window)),
                         _ => None,
                     });
                 let (raster_format, raster_dw) = ref_domain
@@ -303,11 +301,7 @@ impl Evaluator {
                         if let Some(Value::Field(field)) = inputs.get(&port.name) {
                             let rasterized =
                                 field.rasterize_to_domain(raster_format.clone(), raster_dw)?;
-                            let converted = if port.ty == ValueType::Mask {
-                                Value::Mask(rasterized)
-                            } else {
-                                Value::Image(rasterized)
-                            };
+                            let converted = Value::Image(rasterized);
                             inputs.insert(port.name.clone(), converted);
                         }
                     }
@@ -387,7 +381,7 @@ impl Evaluator {
                                 let (raster_fmt, raster_dw) = inputs
                                     .values()
                                     .find_map(|v| match v {
-                                        Value::Image(img) | Value::Mask(img) => {
+                                        Value::Image(img) => {
                                             Some((img.format.clone(), img.data_window))
                                         }
                                         _ => None,
@@ -397,11 +391,7 @@ impl Evaluator {
                                     });
                                 let rasterized =
                                     field.rasterize_to_domain(raster_fmt, raster_dw)?;
-                                if ps.ty == ValueType::Mask {
-                                    Value::Mask(rasterized)
-                                } else {
-                                    Value::Image(rasterized)
-                                }
+                                Value::Image(rasterized)
                             } else {
                                 value
                             }
@@ -517,6 +507,217 @@ impl Evaluator {
         }
         order.push(node_id);
         Ok(())
+    }
+
+    /// Evaluate all upstream dependencies of `target_node_id` so their outputs
+    /// are cached, but do NOT evaluate the target node itself.
+    /// This is used by the WASM bridge's `run_ai_node` to ensure promoted-param
+    /// connections (e.g. Text → AI Generate Image "prompt") are resolved before
+    /// the AI node reads them from the cache.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn evaluate_upstream(
+        &mut self,
+        graph: &mut Graph,
+        registry: &NodeRegistry,
+        node_instances: &HashMap<NodeId, Arc<dyn Node>>,
+        target_node_id: NodeId,
+        frame_time: FrameTime,
+        color_management: &dyn ColorManagement,
+        ai_provider: Option<&dyn crate::ai::AiProvider>,
+        project_format: &Format,
+        ai_node_cache: &HashMap<NodeId, HashMap<String, Value>>,
+    ) -> Result<(), CascadeError> {
+        let mut cache = std::mem::take(&mut self.cache);
+        let mut access_counter = self.access_counter;
+        let mut total_bytes = self.total_bytes;
+
+        let result = async {
+            let mut visited = HashSet::new();
+            let mut order = Vec::new();
+            self.visit_postorder(graph, registry, target_node_id, &mut visited, &mut order)?;
+
+            for node_id in order {
+                // Skip the target node — we only want its upstream deps cached.
+                if node_id == target_node_id {
+                    continue;
+                }
+
+                let instance = graph
+                    .nodes
+                    .get(node_id)
+                    .ok_or(CascadeError::NodeNotFound(node_id))?;
+                let spec = registry
+                    .get_spec(&instance.type_id)
+                    .ok_or_else(|| CascadeError::InvalidConnection(instance.type_id.clone()))?;
+
+                let upstream_hash =
+                    self.compute_upstream_hash(&cache, graph, node_id, spec, frame_time)?;
+                let pf_hash = {
+                    let mut h = AHasher::default();
+                    project_format.hash(&mut h);
+                    h.finish()
+                };
+                let key = CacheKey {
+                    frame_time,
+                    param_revision: instance.param_revision,
+                    upstream_hash,
+                    project_format_hash: pf_hash,
+                };
+
+                let cache_hit = !graph.is_dirty(node_id)
+                    && spec.outputs.iter().all(|port| {
+                        cache
+                            .get(&(node_id, port.name.clone()))
+                            .map(|entry| entry.key == key)
+                            .unwrap_or(false)
+                    });
+
+                if cache_hit {
+                    access_counter = access_counter.saturating_add(1);
+                    let access = access_counter;
+                    for port in spec.outputs.iter() {
+                        if let Some(entry) = cache.get_mut(&(node_id, port.name.clone())) {
+                            entry.last_access = access;
+                        }
+                    }
+                    self.hit_count += 1;
+                    continue;
+                }
+                self.miss_count += 1;
+
+                let node = node_instances
+                    .get(&node_id)
+                    .ok_or(CascadeError::NodeNotFound(node_id))?;
+
+                let mut inputs = HashMap::new();
+                for input in spec.all_inputs().iter() {
+                    if let Some((up_node, up_port)) = graph.get_upstream(node_id, &input.name) {
+                        let value = cache
+                            .get(&(up_node, up_port.clone()))
+                            .map(|entry| entry.value.clone())
+                            .ok_or_else(|| {
+                                CascadeError::MissingInput(format!(
+                                    "{}.{}",
+                                    up_node.data().as_ffi(),
+                                    up_port
+                                ))
+                            })?;
+                        inputs.insert(input.name.clone(), value);
+                    } else if let Some(param_val) = instance.input_defaults.get(&input.name) {
+                        inputs.insert(input.name.clone(), Self::param_value_to_value(param_val));
+                    } else if let Some(spec_default) = &input.default {
+                        inputs.insert(
+                            input.name.clone(),
+                            Self::param_default_to_value(spec_default),
+                        );
+                    }
+                }
+
+                // Muted nodes pass data through without processing
+                if instance.muted {
+                    for output in spec.outputs.iter() {
+                        let pass_value = spec
+                            .inputs
+                            .iter()
+                            .find(|inp| inp.ty == output.ty)
+                            .and_then(|inp| inputs.get(&inp.name))
+                            .cloned()
+                            .unwrap_or(Value::None);
+                        let byte_size = pass_value.estimate_bytes();
+                        access_counter = access_counter.saturating_add(1);
+                        let access = access_counter;
+                        if let Some(old) = cache.insert(
+                            (node_id, output.name.clone()),
+                            CacheEntry {
+                                key: key.clone(),
+                                value: pass_value,
+                                byte_size,
+                                last_access: access,
+                            },
+                        ) {
+                            total_bytes = total_bytes.saturating_sub(old.byte_size);
+                        }
+                        total_bytes = total_bytes.saturating_add(byte_size);
+                    }
+                    graph.clear_dirty(node_id);
+                    continue;
+                }
+
+                let mut merged_params = Self::merge_params(instance, spec);
+                Self::apply_promoted_params(
+                    &mut merged_params,
+                    spec,
+                    instance,
+                    graph,
+                    node_id,
+                    |nid, port| {
+                        cache
+                            .get(&(nid, port.to_string()))
+                            .map(|entry| entry.value.clone())
+                    },
+                );
+
+                let ctx = EvalContext {
+                    inputs,
+                    extra_inputs: HashMap::new(),
+                    params: &merged_params,
+                    frame_time,
+                    color_management,
+                    ai_provider,
+                    project_format,
+                    ai_cached_outputs: {
+                        static EMPTY: std::sync::LazyLock<HashMap<String, Value>> =
+                            std::sync::LazyLock::new(HashMap::new);
+                        Some(ai_node_cache.get(&node_id).unwrap_or(&EMPTY))
+                    },
+                };
+                let outputs = node
+                    .evaluate(&ctx)
+                    .await
+                    .map_err(|e| CascadeError::EvalFailed {
+                        node_id: instance.uuid.clone(),
+                        node_type: instance.type_id.clone(),
+                        source: Box::new(e),
+                    })?;
+                for output in spec.outputs.iter() {
+                    let value = outputs.get(&output.name).cloned().unwrap_or(Value::None);
+                    let byte_size = value.estimate_bytes();
+                    access_counter = access_counter.saturating_add(1);
+                    let access = access_counter;
+                    if let Some(old) = cache.insert(
+                        (node_id, output.name.clone()),
+                        CacheEntry {
+                            key: key.clone(),
+                            value,
+                            byte_size,
+                            last_access: access,
+                        },
+                    ) {
+                        total_bytes = total_bytes.saturating_sub(old.byte_size);
+                    }
+                    total_bytes = total_bytes.saturating_add(byte_size);
+                }
+
+                graph.clear_dirty(node_id);
+            }
+
+            if !self.in_eval_scope {
+                evict_cache_if_needed(
+                    &mut cache,
+                    &mut total_bytes,
+                    self.max_bytes,
+                    &mut self.eviction_count,
+                );
+            }
+            Ok(())
+        }
+        .await;
+
+        self.cache = cache;
+        self.access_counter = access_counter;
+        self.total_bytes = total_bytes;
+
+        result
     }
 
     fn compute_upstream_hash(
@@ -730,7 +931,7 @@ fn eval_node_output_at(
     }
 
     let ref_domain: Option<(Format, crate::types::RectI)> = inputs.values().find_map(|v| match v {
-        Value::Image(img) | Value::Mask(img) => Some((img.format.clone(), img.data_window)),
+        Value::Image(img) => Some((img.format.clone(), img.data_window)),
         _ => None,
     });
     let (raster_format, raster_dw) =
@@ -741,11 +942,7 @@ fn eval_node_output_at(
         if matches!(port.ty, ValueType::Image | ValueType::Mask) {
             if let Some(Value::Field(field)) = inputs.get(&port.name) {
                 let rasterized = field.rasterize_to_domain(raster_format.clone(), raster_dw)?;
-                let converted = if port.ty == ValueType::Mask {
-                    Value::Mask(rasterized)
-                } else {
-                    Value::Image(rasterized)
-                };
+                let converted = Value::Image(rasterized);
                 inputs.insert(port.name.clone(), converted);
             }
         }

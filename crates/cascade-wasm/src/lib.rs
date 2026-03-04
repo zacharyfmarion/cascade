@@ -9,7 +9,7 @@ use cascade_core::ai::AiProvider;
 use cascade_core::color::{BuiltinColorManagement, ColorManagement};
 use cascade_core::error::CascadeError;
 use cascade_core::eval::{CacheKey, Evaluator};
-use cascade_core::graph::{Graph, NodeId};
+use cascade_core::graph::{Graph, InstanceAwareSpecProvider, NodeId};
 use cascade_core::group::{
     GroupDefinition, InternalConnection, InternalNode, NodePackage, SerializableInternalGraph,
 };
@@ -495,7 +495,7 @@ impl Engine {
         Ok(())
     }
 
-    pub fn load_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<(), JsValue> {
+    pub fn load_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<JsValue, JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
         let node = self
             .nodes
@@ -505,9 +505,30 @@ impl Engine {
             .as_any()
             .downcast_ref::<LoadImage>()
             .ok_or_else(|| JsValue::from_str("Node is not LoadImage"))?;
-        load_node.set_image_data(data).map_err(to_js_error)?;
+        let removed_ports = load_node.set_image_data(data).map_err(to_js_error)?;
         self.graph.mark_dirty(id);
-        Ok(())
+
+        let new_spec = node.spec();
+        let spec_provider = InstanceAwareSpecProvider {
+            registry: &self.registry,
+            instances: &self.nodes,
+        };
+        let pruned = self.graph.prune_connections_for_node(id, &spec_provider);
+        let pruned_wasm: Vec<PrunedConnectionWasm> = pruned.into_iter().map(|pc| {
+            PrunedConnectionWasm {
+                from_node: format_node_id(&self.graph, pc.from_node),
+                from_port: pc.from_port,
+                to_node: format_node_id(&self.graph, pc.to_node),
+                to_port: pc.to_port,
+            }
+        }).collect();
+
+        let change = NodeInterfaceChangeWasm {
+            new_spec,
+            removed_output_ports: removed_ports,
+            pruned_connections: pruned_wasm,
+        };
+        serde_wasm_bindgen::to_value(&change).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn get_image_data(&self, node_id: &str) -> Result<Vec<u8>, JsValue> {
@@ -584,7 +605,7 @@ impl Engine {
         node_id: &str,
         frame: u64,
         data: &[u8],
-    ) -> Result<(), JsValue> {
+    ) -> Result<JsValue, JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
         let node = self
             .nodes
@@ -594,7 +615,29 @@ impl Engine {
             .as_any()
             .downcast_ref::<LoadImageSequence>()
             .ok_or_else(|| JsValue::from_str("Node is not LoadImageSequence"))?;
-        seq_node.set_frame_data(frame, data).map_err(to_js_error)
+        let removed_ports = seq_node.set_frame_data(frame, data).map_err(to_js_error)?;
+
+        let new_spec = node.spec();
+        let spec_provider = InstanceAwareSpecProvider {
+            registry: &self.registry,
+            instances: &self.nodes,
+        };
+        let pruned = self.graph.prune_connections_for_node(id, &spec_provider);
+        let pruned_wasm: Vec<PrunedConnectionWasm> = pruned.into_iter().map(|pc| {
+            PrunedConnectionWasm {
+                from_node: format_node_id(&self.graph, pc.from_node),
+                from_port: pc.from_port,
+                to_node: format_node_id(&self.graph, pc.to_node),
+                to_port: pc.to_port,
+            }
+        }).collect();
+
+        let change = NodeInterfaceChangeWasm {
+            new_spec,
+            removed_output_ports: removed_ports,
+            pruned_connections: pruned_wasm,
+        };
+        serde_wasm_bindgen::to_value(&change).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn batch_clear(&mut self, node_id: &str) -> Result<(), JsValue> {
@@ -770,20 +813,6 @@ impl Engine {
                     pixels,
                 }
             }
-            Value::Mask(ref image) => {
-                let pixels = Viewer::image_to_rgba8_with_display(
-                    image,
-                    cm,
-                    &self.active_display,
-                    &self.active_view,
-                );
-                ViewerResultWasm::Pixels {
-                    value_type: "mask".to_string(),
-                    width: image.width,
-                    height: image.height,
-                    pixels,
-                }
-            }
             Value::Float(v) => ViewerResultWasm::Float {
                 value_type: "float".to_string(),
                 value: v,
@@ -835,6 +864,9 @@ impl Engine {
                     pixels,
                 }
             }
+            Value::Bytes(_) => ViewerResultWasm::None {
+                value_type: "bytes".to_string(),
+            },
             Value::None => ViewerResultWasm::None {
                 value_type: "none".to_string(),
             },
@@ -1091,6 +1123,25 @@ impl Engine {
         // This borrow is short and synchronous — it completes before any .await,
         // so the RefCell is released before JS can call other engine methods.
         let nid = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+
+        // Phase 0: Evaluate all upstream dependencies so their outputs are cached.
+        // Without this, promoted-param connections (e.g. Text → prompt) would be
+        // silently skipped because the upstream node was never evaluated.
+        self.evaluator
+            .evaluate_upstream(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                nid,
+                FrameTime { frame: 0 },
+                &self.color_management,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+                &self.ai_node_cache,
+            )
+            .await
+            .map_err(to_js_error)?;
+
         let state = self
             .node_exec_state
             .entry(nid)
@@ -2059,6 +2110,17 @@ impl Engine {
         Ok(spec)
     }
 
+    /// Get the current per-instance NodeSpec for a node (reflects dynamic EXR ports).
+    pub fn get_node_spec(&self, node_id: &str) -> Result<JsValue, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| to_js_error(CascadeError::NodeNotFound(id)))?;
+        let spec = node.spec();
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     pub fn validate_edits(&self, edits_json: &str) -> Result<JsValue, JsValue> {
         let edits: Vec<EditOp> = serde_json::from_str(edits_json)
             .map_err(|e| to_js_error(CascadeError::Other(format!("Invalid edits JSON: {e}"))))?;
@@ -2348,6 +2410,23 @@ struct RenderDimensions {
     height: u32,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrunedConnectionWasm {
+    from_node: String,
+    from_port: String,
+    to_node: String,
+    to_port: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NodeInterfaceChangeWasm {
+    new_spec: NodeSpec,
+    removed_output_ports: Vec<String>,
+    pruned_connections: Vec<PrunedConnectionWasm>,
+}
+
 fn format_node_id(graph: &Graph, id: NodeId) -> String {
     graph
         .nodes
@@ -2535,6 +2614,12 @@ impl EngineErrorDto {
             CascadeError::InvalidImageData { .. } => ("INVALID_IMAGE_DATA", "eval"),
             CascadeError::ImageTooLarge { .. } => ("IMAGE_TOO_LARGE", "io"),
             CascadeError::EvalFailed { .. } => unreachable!(),
+            CascadeError::ExrMetadata(_)
+            | CascadeError::ExrDecode(_)
+            | CascadeError::ExrUnsupportedLayer { .. }
+            | CascadeError::ExrNoUsablePrimaryLayer
+            | CascadeError::ExrLayerTooLarge { .. } => ("EXR_ERROR", "io"),
+            CascadeError::ValueNotBytes { .. } => ("TYPE_MISMATCH", "eval"),
             CascadeError::Other(_) => ("OTHER", "eval"),
         };
         Self {

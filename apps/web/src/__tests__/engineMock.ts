@@ -1,4 +1,4 @@
-import type { EngineBridge, AddNodeResult } from '../engine/bridge';
+import type { EngineBridge, AddNodeResult, NodeInterfaceChange } from '../engine/bridge';
 import type { NodeSpec, ParamValue, ViewerResult } from '../store/types';
 
 const NODE_SPECS: NodeSpec[] = [
@@ -190,8 +190,14 @@ export function createMockEngine(): EngineBridge & {
 
     setMuted: () => {},
 
-    loadImageData: (nodeId: string, data: Uint8Array) => {
+    loadImageData: (nodeId: string, data: Uint8Array): NodeInterfaceChange => {
       imageDataStore.set(nodeId, data);
+      const spec = NODE_SPECS.find(s => s.id === 'load_image');
+      return {
+        newSpec: spec ?? NODE_SPECS[0],
+        removedOutputPorts: [],
+        prunedConnections: [],
+      };
     },
 
     getImageData: (nodeId: string): Uint8Array | null => {

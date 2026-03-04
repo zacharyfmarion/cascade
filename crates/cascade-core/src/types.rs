@@ -586,6 +586,8 @@ pub enum ValueType {
     /// Wildcard type: compatible with any other type. Used by the Viewer node
     /// to accept any value for inspection.
     Any,
+    /// Opaque binary data (e.g. encoded EXR bytes for export).
+    Bytes,
 }
 
 #[derive(Debug, Clone)]
@@ -598,6 +600,7 @@ pub enum Value {
     Field(Field),
     String(String),
     None,
+    Bytes(Arc<Vec<u8>>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -623,16 +626,16 @@ impl Value {
             Value::Field(_) => ValueType::Field,
             Value::String(_) => ValueType::String,
             Value::None => ValueType::Float,
+            Value::Bytes(_) => ValueType::Bytes,
         }
     }
 
     /// Estimate heap memory used by this value in bytes.
     pub fn estimate_bytes(&self) -> usize {
         match self {
-            Value::Image(img) => {
-                img.data.capacity() * std::mem::size_of::<f32>()
-            }
+            Value::Image(img) => img.data.capacity() * std::mem::size_of::<f32>(),
             Value::String(s) => s.capacity(),
+            Value::Bytes(b) => b.capacity(),
             _ => 0,
         }
     }
@@ -684,6 +687,13 @@ impl Value {
     pub fn as_string(&self) -> Option<&str> {
         match self {
             Value::String(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match self {
+            Value::Bytes(b) => Some(b.as_slice()),
             _ => None,
         }
     }

@@ -124,7 +124,8 @@ export const createSequenceVideoSlice: StateCreator<
       if (info.frame_count > 0) {
         const frameData = await sequenceFrameManager.getFrameData(nodeId, info.first_frame);
         if (frameData && eng.loadSequenceFrameData) {
-          await eng.loadSequenceFrameData(nodeId, info.first_frame, frameData);
+          const change = await eng.loadSequenceFrameData(nodeId, info.first_frame, frameData);
+          get().applyNodeInterfaceChange(nodeId, change);
         }
       }
 

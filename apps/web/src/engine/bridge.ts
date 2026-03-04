@@ -68,6 +68,19 @@ export interface EditValidationError {
   message: string;
 }
 
+export interface PrunedConnection {
+  fromNode: string;
+  fromPort: string;
+  toNode: string;
+  toPort: string;
+}
+
+export interface NodeInterfaceChange {
+  newSpec: NodeSpec;
+  removedOutputPorts: string[];
+  prunedConnections: PrunedConnection[];
+}
+
 export interface EngineBridge {
   listNodeTypes(): Promise<NodeSpec[]> | NodeSpec[];
   addNode(typeId: string, x: number, y: number): Promise<AddNodeResult> | AddNodeResult;
@@ -83,7 +96,7 @@ export interface EngineBridge {
   registerGpuKernel?(manifestJson: string): Promise<NodeSpec> | NodeSpec;
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;
   setDslHandle?(nodeId: string, handle: string): Promise<void> | void;
-  loadImageData(nodeId: string, data: Uint8Array): Promise<void> | void;
+  loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   loadPaletteData?(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> | [number, number, number, number][];
   renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> | ViewerResult | null;
   exportGraph(): Promise<unknown> | unknown;
@@ -101,7 +114,7 @@ export interface EngineBridge {
   setSequenceDirectory?(nodeId: string, directory: string): Promise<SequenceInfo>;
   getSequenceInfo?(nodeId: string, pattern: string): Promise<SequenceInfo>;
   loadVideoFile?(nodeId: string, path: string): Promise<VideoInfo>;
-  loadSequenceFrameData?(nodeId: string, frame: number, data: Uint8Array): Promise<void> | void;
+  loadSequenceFrameData?(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   setSequenceInfo?(nodeId: string, info: SequenceInfo): Promise<void> | void;
   batchClear?(nodeId: string): Promise<void> | void;
   batchAddImage?(nodeId: string, filename: string, data: Uint8Array): Promise<void> | void;
@@ -130,4 +143,5 @@ export interface EngineBridge {
   typesCompatible?(fromType: string, toType: string): boolean | Promise<boolean>;
   migrateDocument?(jsonStr: string): string;
   needsMigration?(jsonStr: string): boolean;
+  getNodeSpec?(nodeId: string): Promise<NodeSpec> | NodeSpec;
   }

@@ -1,10 +1,11 @@
 use cascade_core::color::BuiltinColorManagement;
+use cascade_core::error::CascadeError;
 use cascade_core::eval::Evaluator;
-use cascade_core::graph::Graph;
+use cascade_core::graph::{Graph, NodeId};
 use cascade_core::node::{EvalContext, Node, NodeRegistry};
 use cascade_core::types::{
-    Format, FrameTime, Image, ParamDefault, ParamSpec, ParamValue, PortSpec, UiHint, Value,
-    ValueType,
+    Format, FrameTime, Image, NodeSpec, ParamDefault, ParamSpec, ParamValue, PortSpec, UiHint,
+    Value, ValueType,
 };
 use cascade_nodes_std::{
     register_standard_nodes, BrightnessContrast, FrameBlend, FrameHold, LoadImage, TimeOffset,
@@ -414,4 +415,281 @@ impl Node for CounterNode {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+}
+
+/// A test node with a promotable string param, simulating the AI Generate Image
+/// node's `prompt` input. Records the prompt value it receives during evaluation.
+struct PromotableStringNode {
+    received_prompt: Arc<Mutex<String>>,
+}
+
+impl PromotableStringNode {
+    fn new(received_prompt: Arc<Mutex<String>>) -> Self {
+        Self { received_prompt }
+    }
+}
+
+impl Node for PromotableStringNode {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "promotable_string_test".to_string(),
+            display_name: "Promotable String Test".to_string(),
+            category: "Test".to_string(),
+            description: "".to_string(),
+            inputs: vec![],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                default: None,
+                min: None,
+                max: None,
+                step: None,
+                ui_hint: None,
+            }],
+            params: vec![ParamSpec {
+                key: "prompt".to_string(),
+                label: "Prompt".to_string(),
+                ty: ValueType::String,
+                default: ParamDefault::String("".to_string()),
+                ui_hint: UiHint::TextArea,
+                min: None,
+                max: None,
+                step: None,
+                promotable: true,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        ctx: &'a EvalContext<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<HashMap<String, Value>, CascadeError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let prompt = ctx.get_param_string("prompt").unwrap_or("").to_string();
+            *self.received_prompt.lock().unwrap() = prompt;
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::None);
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+#[test]
+fn promoted_string_param_receives_connected_text_value() {
+    let mut registry = NodeRegistry::new();
+    register_standard_nodes(&mut registry);
+
+    let received_prompt = Arc::new(Mutex::new(String::new()));
+    let _test_node = PromotableStringNode::new(received_prompt.clone());
+    let received_1 = received_prompt.clone();
+    registry.register("promotable_string_test", move || {
+        Arc::new(PromotableStringNode::new(received_1.clone())) as Arc<dyn Node>
+    });
+
+    let mut graph = Graph::new();
+    let text_id = graph.add_node("text_area");
+    let consumer_id = graph.add_node("promotable_string_test");
+    let viewer_id = graph.add_node("viewer");
+
+    // Set the text value
+    graph.nodes.get_mut(text_id).unwrap().params.insert(
+        "text".to_string(),
+        ParamValue::String("hello from text node".to_string()),
+    );
+
+    // Connect Text output → consumer's promoted "prompt" param
+    graph
+        .connect(&registry, text_id, "text", consumer_id, "prompt")
+        .expect("connection text -> prompt should succeed");
+
+    // Connect consumer output → viewer input
+    graph
+        .connect(&registry, consumer_id, "image", viewer_id, "value")
+        .expect("connection consumer -> viewer should succeed");
+
+    let mut nodes: HashMap<NodeId, Arc<dyn Node>> = HashMap::new();
+    for (nid, inst) in graph.nodes.iter() {
+        if inst.type_id == "promotable_string_test" {
+            nodes.insert(
+                nid,
+                Arc::new(PromotableStringNode::new(received_prompt.clone())),
+            );
+        } else {
+            nodes.insert(nid, registry.create(&inst.type_id).unwrap());
+        }
+    }
+
+    let mut evaluator = Evaluator::new();
+    let cm = BuiltinColorManagement::new();
+    let pf = Format::default();
+    let ai_cache: HashMap<NodeId, HashMap<String, Value>> = HashMap::new();
+
+    pollster::block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        viewer_id,
+        "display",
+        FrameTime { frame: 0 },
+        &cm,
+        None,
+        &pf,
+        &ai_cache,
+    ))
+    .expect("evaluation should succeed");
+
+    let prompt = received_prompt.lock().unwrap().clone();
+    assert_eq!(
+        prompt, "hello from text node",
+        "promoted string param should receive text node's output value"
+    );
+}
+
+#[test]
+fn evaluate_upstream_caches_upstream_outputs_for_target_node() {
+    let mut registry = NodeRegistry::new();
+    register_standard_nodes(&mut registry);
+
+    let received_prompt = Arc::new(Mutex::new(String::new()));
+    let _test_node = PromotableStringNode::new(received_prompt.clone());
+    let received_1 = received_prompt.clone();
+    registry.register("promotable_string_test", move || {
+        Arc::new(PromotableStringNode::new(received_1.clone())) as Arc<dyn Node>
+    });
+
+    let mut graph = Graph::new();
+    let text_id = graph.add_node("text_area");
+    let consumer_id = graph.add_node("promotable_string_test");
+
+    graph.nodes.get_mut(text_id).unwrap().params.insert(
+        "text".to_string(),
+        ParamValue::String("upstream cached value".to_string()),
+    );
+
+    // Connect Text output → consumer's promoted "prompt" param
+    graph
+        .connect(&registry, text_id, "text", consumer_id, "prompt")
+        .expect("connection text -> prompt should succeed");
+
+    let mut nodes: HashMap<NodeId, Arc<dyn Node>> = HashMap::new();
+    for (nid, inst) in graph.nodes.iter() {
+        if inst.type_id == "promotable_string_test" {
+            nodes.insert(
+                nid,
+                Arc::new(PromotableStringNode::new(received_prompt.clone())),
+            );
+        } else {
+            nodes.insert(nid, registry.create(&inst.type_id).unwrap());
+        }
+    }
+
+    let mut evaluator = Evaluator::new();
+    let cm = BuiltinColorManagement::new();
+    let pf = Format::default();
+    let ai_cache: HashMap<NodeId, HashMap<String, Value>> = HashMap::new();
+
+    // Before evaluate_upstream, the cache should be empty
+    assert!(
+        evaluator.get_cached(text_id, "text").is_none(),
+        "text node output should not be cached initially"
+    );
+
+    // evaluate_upstream should cache the text node's output without evaluating the consumer
+    pollster::block_on(evaluator.evaluate_upstream(
+        &mut graph,
+        &registry,
+        &nodes,
+        consumer_id,
+        FrameTime { frame: 0 },
+        &cm,
+        None,
+        &pf,
+        &ai_cache,
+    ))
+    .expect("evaluate_upstream should succeed");
+
+    // After evaluate_upstream, the text node's output should be cached
+    let cached = evaluator
+        .get_cached(text_id, "text")
+        .expect("text node output should be cached after evaluate_upstream");
+    match cached {
+        Value::String(s) => assert_eq!(s, "upstream cached value"),
+        other => panic!("expected Value::String, got {:?}", other),
+    }
+
+    // The consumer (target) should NOT have been evaluated
+    let prompt = received_prompt.lock().unwrap().clone();
+    assert_eq!(
+        prompt, "",
+        "target node should not be evaluated by evaluate_upstream"
+    );
+}
+
+#[test]
+fn promoted_string_param_empty_when_not_connected() {
+    let mut registry = NodeRegistry::new();
+    register_standard_nodes(&mut registry);
+
+    let received_prompt = Arc::new(Mutex::new(String::from("sentinel")));
+    let _test_node = PromotableStringNode::new(received_prompt.clone());
+    let received_1 = received_prompt.clone();
+    registry.register("promotable_string_test", move || {
+        Arc::new(PromotableStringNode::new(received_1.clone())) as Arc<dyn Node>
+    });
+
+    let mut graph = Graph::new();
+    let consumer_id = graph.add_node("promotable_string_test");
+    let viewer_id = graph.add_node("viewer");
+
+    // No text node connected — prompt should fall back to default (empty string)
+    graph
+        .connect(&registry, consumer_id, "image", viewer_id, "value")
+        .expect("connection consumer -> viewer should succeed");
+
+    let mut nodes: HashMap<NodeId, Arc<dyn Node>> = HashMap::new();
+    for (nid, inst) in graph.nodes.iter() {
+        if inst.type_id == "promotable_string_test" {
+            nodes.insert(
+                nid,
+                Arc::new(PromotableStringNode::new(received_prompt.clone())),
+            );
+        } else {
+            nodes.insert(nid, registry.create(&inst.type_id).unwrap());
+        }
+    }
+
+    let mut evaluator = Evaluator::new();
+    let cm = BuiltinColorManagement::new();
+    let pf = Format::default();
+    let ai_cache: HashMap<NodeId, HashMap<String, Value>> = HashMap::new();
+
+    pollster::block_on(evaluator.evaluate(
+        &mut graph,
+        &registry,
+        &nodes,
+        viewer_id,
+        "display",
+        FrameTime { frame: 0 },
+        &cm,
+        None,
+        &pf,
+        &ai_cache,
+    ))
+    .expect("evaluation should succeed");
+
+    let prompt = received_prompt.lock().unwrap().clone();
+    assert_eq!(
+        prompt, "",
+        "unconnected promoted string param should be empty (default)"
+    );
 }

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo } from './bridge';
+import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
 
 type DocumentEnvelope = {
@@ -127,10 +127,11 @@ export class TauriEngine implements EngineBridge {
     return JSON.parse(json) as NodeSpec;
   }
 
-  async loadImageData(nodeId: string, data: Uint8Array): Promise<void> {
-    await invoke('load_image_data', data, {
+  async loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> {
+    const json = await invoke<string>('load_image_data', data, {
       headers: { 'x-node-id': nodeId },
     });
+    return JSON.parse(json) as NodeInterfaceChange;
   }
 
   async getImageData(nodeId: string): Promise<Uint8Array | null> {

@@ -1,5 +1,5 @@
 import type { NodeSpec, ParamValue, ViewerResult, NodeInstance, Connection } from '../store/types';
-import type { EngineBridge, AddNodeResult } from './bridge';
+import type { EngineBridge, AddNodeResult, NodeInterfaceChange } from './bridge';
 
 const NODE_SPECS: NodeSpec[] = [
   {
@@ -420,8 +420,13 @@ export class MockEngine implements EngineBridge {
     // No-op in mock engine
   }
 
-  loadImageData(nodeId: string, _data: Uint8Array): void {
-    console.log(`Loading image data for node ${nodeId}`);
+  loadImageData(_nodeId: string, _data: Uint8Array): NodeInterfaceChange {
+    const spec = NODE_SPECS.find(n => n.id === 'load_image');
+    return {
+      newSpec: spec ?? NODE_SPECS[0],
+      removedOutputPorts: [],
+      prunedConnections: [],
+    };
   }
 
   renderViewer(viewerNodeId: string, _frame: number): ViewerResult | null {
