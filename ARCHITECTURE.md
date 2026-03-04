@@ -149,14 +149,18 @@ pub trait Node: Send + Sync + Any {
 ### Layout
 Three-column layout: NodeLibrary (240px) | NodeCanvas (flex) | Inspector + Viewer (280px)
 
-### State Management (Zustand — graphStore.ts)
-- Single store is the source of truth for UI state
+### State Management (Zustand — graphStore/)
+- Single Zustand store composed from 12 focused slice files via `StateCreator` spread
+- `store.ts`: composition shell (~250 lines) — `initEngine` + slice spreads. ESLint `max-lines` rule prevents regression.
+- `kernel.ts`: shared mutable state (engine instance, render lock, undo stacks, render generations) — avoids ES module reassignment issues
+- Slices in `store/graphStore/slices/`: graphSlice, renderSlice, undoSlice, liveParamsSlice, framesSlice, selectionSlice, projectSlice, batchExportSlice, sequenceVideoSlice, assetsSlice, colorSlice, aiSlice
 - All mutations sync to WASM engine first, then update local state
+- Cross-slice calls use `get().actionName()` pattern
 - `nodes: Map<string, NodeInstance>` — mirrors WASM graph
 - `connections: Connection[]` — with client-generated UUIDs
 - `renderResults: Map<string, RenderResult>` — cached viewer outputs
-- `triggerAllViewers()`: called after connect/disconnect/setParam/loadImage — re-renders every viewer node
-- Dev mode: `window.__cascadeStore` exposed for Playwright testing
+- `triggerAffectedViewers(changedNodeIds)`: selective re-render after mutations (falls back to `triggerAllViewers()`)
+- Dev mode: `window.__compositorStore` exposed for Playwright testing
 
 ### Type System (types.ts)
 - TypeScript types mirror Rust types exactly: NodeSpec, ParamSpec, ParamValue, etc.
