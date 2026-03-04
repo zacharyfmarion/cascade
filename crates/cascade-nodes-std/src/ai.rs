@@ -646,9 +646,7 @@ impl Node for AiInpaint {
                 .output
                 .first_url()
                 .ok_or_else(|| {
-                    CascadeError::Other(
-                        "Inpainting model did not return an output URL".to_string(),
-                    )
+                    CascadeError::Other("Inpainting model did not return an output URL".to_string())
                 })?
                 .to_string();
             let image_bytes = ai.fetch_url(&output_url).await?;

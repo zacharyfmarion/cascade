@@ -35,8 +35,8 @@ impl LoadImage {
     }
 
     pub fn set_image_data(&self, bytes: &[u8]) -> Result<(), CascadeError> {
-        let decoded = image::load_from_memory(bytes)
-            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+        let decoded =
+            image::load_from_memory(bytes).map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
         if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
@@ -199,8 +199,8 @@ impl LoadImageSequence {
     }
 
     pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<(), CascadeError> {
-        let decoded = image::load_from_memory(bytes)
-            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+        let decoded =
+            image::load_from_memory(bytes).map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
         if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
@@ -810,9 +810,10 @@ impl Node for LoadImageBatch {
             let image = self.decode_frame(frame)?;
 
             let stem = {
-                let entries = self.entries.lock().map_err(|_| {
-                    CascadeError::Other("Batch entries mutex poisoned".to_string())
-                })?;
+                let entries = self
+                    .entries
+                    .lock()
+                    .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
                 let (stem, _) = entries.get(frame).ok_or_else(|| {
                     CascadeError::MissingInput("Batch index out of range".to_string())
                 })?;

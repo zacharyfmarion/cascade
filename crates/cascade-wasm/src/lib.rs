@@ -1818,9 +1818,7 @@ impl Engine {
         updated.explicit_inputs = Some(inputs);
         updated.explicit_outputs = Some(outputs);
 
-        let spec = self
-            .register_group(updated)
-            .map_err(CascadeError::Other)?;
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
 
         let def_arc = self
             .group_definitions
@@ -1856,9 +1854,7 @@ impl Engine {
             .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
         let mut updated = (*existing.as_ref()).clone();
         updated.name = new_name.to_string();
-        let spec = self
-            .register_group(updated)
-            .map_err(CascadeError::Other)?;
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
 
         let def_arc = self
             .group_definitions
@@ -1901,9 +1897,7 @@ impl Engine {
             .nodes
             .iter()
             .find(|node| node.id == from_node)
-            .ok_or_else(|| {
-                CascadeError::Other(format!("Internal node not found: {from_node}"))
-            })?;
+            .ok_or_else(|| CascadeError::Other(format!("Internal node not found: {from_node}")))?;
         let to_internal = updated
             .internal_graph
             .nodes
@@ -1923,8 +1917,8 @@ impl Engine {
             to_port: to_port.to_string(),
         });
 
-        let interface = GroupNode::derive_interface(&updated, &self.registry)
-            .map_err(CascadeError::Other)?;
+        let interface =
+            GroupNode::derive_interface(&updated, &self.registry).map_err(CascadeError::Other)?;
 
         let from_port_spec = if from_node == gi_id {
             interface
@@ -1995,9 +1989,7 @@ impl Engine {
             });
         }
 
-        let spec = self
-            .register_group(updated)
-            .map_err(CascadeError::Other)?;
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
 
         let def_arc = self
             .group_definitions
@@ -2040,9 +2032,7 @@ impl Engine {
             .connections
             .retain(|conn| !(conn.to_node == to_node && conn.to_port == to_port));
 
-        let spec = self
-            .register_group(updated)
-            .map_err(CascadeError::Other)?;
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
 
         let def_arc = self
             .group_definitions

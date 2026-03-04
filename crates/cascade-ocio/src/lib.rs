@@ -49,7 +49,7 @@ impl OcioColorManagement {
         }
 
         let working = Self::resolve_role_static(config, "scene_linear")
-            .unwrap_or_else(|| ColorSpaceId::default_working());
+            .unwrap_or_else(ColorSpaceId::default_working);
 
         Ok(Self {
             config,
@@ -72,7 +72,7 @@ impl OcioColorManagement {
         }
 
         let working = Self::resolve_role_static(config, "scene_linear")
-            .unwrap_or_else(|| ColorSpaceId::default_working());
+            .unwrap_or_else(ColorSpaceId::default_working);
 
         Ok(Self {
             config,
