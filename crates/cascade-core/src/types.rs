@@ -591,7 +591,6 @@ pub enum ValueType {
 #[derive(Debug, Clone)]
 pub enum Value {
     Image(Image),
-    Mask(Image),
     Float(f32),
     Int(i32),
     Bool(bool),
@@ -617,7 +616,6 @@ impl Value {
     pub fn value_type(&self) -> ValueType {
         match self {
             Value::Image(_) => ValueType::Image,
-            Value::Mask(_) => ValueType::Mask,
             Value::Float(_) => ValueType::Float,
             Value::Int(_) => ValueType::Int,
             Value::Bool(_) => ValueType::Bool,
@@ -631,7 +629,7 @@ impl Value {
     /// Estimate heap memory used by this value in bytes.
     pub fn estimate_bytes(&self) -> usize {
         match self {
-            Value::Image(img) | Value::Mask(img) => {
+            Value::Image(img) => {
                 img.data.capacity() * std::mem::size_of::<f32>()
             }
             Value::String(s) => s.capacity(),
@@ -959,5 +957,42 @@ mod tests {
             }
             other => panic!("Expected ImageTooLarge, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_image_mask_type_compatibility() {
+        use crate::graph::types_compatible;
+
+        // Image and Mask are bidirectionally compatible (raster group)
+        assert!(types_compatible(&ValueType::Image, &ValueType::Mask));
+        assert!(types_compatible(&ValueType::Mask, &ValueType::Image));
+        assert!(types_compatible(&ValueType::Image, &ValueType::Image));
+        assert!(types_compatible(&ValueType::Mask, &ValueType::Mask));
+
+        // Field → Image and Field → Mask still work
+        assert!(types_compatible(&ValueType::Field, &ValueType::Image));
+        assert!(types_compatible(&ValueType::Field, &ValueType::Mask));
+
+        // Non-raster types are NOT compatible with Image/Mask
+        assert!(!types_compatible(&ValueType::Float, &ValueType::Image));
+        assert!(!types_compatible(&ValueType::Image, &ValueType::Float));
+        assert!(!types_compatible(&ValueType::Bool, &ValueType::Mask));
+        assert!(!types_compatible(&ValueType::String, &ValueType::Image));
+    }
+
+    #[test]
+    fn test_as_image_returns_some_for_image_value() {
+        let img = Image::new(2, 2);
+        let val = Value::Image(img);
+        assert!(val.as_image().is_some());
+        assert_eq!(val.as_image().unwrap().width, 2);
+    }
+
+    #[test]
+    fn test_as_image_returns_none_for_non_image_values() {
+        assert!(Value::Float(1.0).as_image().is_none());
+        assert!(Value::Int(1).as_image().is_none());
+        assert!(Value::Bool(true).as_image().is_none());
+        assert!(Value::None.as_image().is_none());
     }
 }

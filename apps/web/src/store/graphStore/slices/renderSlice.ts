@@ -242,6 +242,7 @@ export const createRenderSlice: StateCreator<
       // Fallback if engine doesn't support typesCompatible
       return fromType === toType
         || (fromType === 'Field' && (toType === 'Image' || toType === 'Mask'))
+        || ((fromType === 'Image' || fromType === 'Mask') && (toType === 'Image' || toType === 'Mask'))
         || (fromType === 'Int' && toType === 'Float')
         || (fromType === 'Float' && toType === 'Int');
     },

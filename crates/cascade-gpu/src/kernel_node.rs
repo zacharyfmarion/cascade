@@ -201,7 +201,7 @@ impl GpuKernelNode {
         for name in optional_inputs {
             let has_value = matches!(
                 ctx.inputs.get(name),
-                Some(Value::Image(_)) | Some(Value::Mask(_))
+                Some(Value::Image(_))
             );
             let value: i32 = if has_value { 1 } else { 0 };
             bytes.extend_from_slice(&value.to_le_bytes());
@@ -537,7 +537,7 @@ fn collect_image_inputs<'a>(
             ValueType::Image | ValueType::Mask => {
                 let value = ctx.inputs.get(&port.name);
                 match value {
-                    Some(Value::Image(image)) | Some(Value::Mask(image)) => {
+                    Some(Value::Image(image)) => {
                         out.push(Some(image));
                     }
                     Some(Value::None) | None => {

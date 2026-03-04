@@ -41,6 +41,8 @@ pub fn types_compatible(from: &ValueType, to: &ValueType) -> bool {
         || *to == ValueType::Any
         || *from == ValueType::Any
         || (*from == ValueType::Field && (*to == ValueType::Image || *to == ValueType::Mask))
+        || ((*from == ValueType::Image || *from == ValueType::Mask)
+            && (*to == ValueType::Image || *to == ValueType::Mask))
         || (*from == ValueType::Int && *to == ValueType::Float)
         || (*from == ValueType::Float && *to == ValueType::Int)
 }
