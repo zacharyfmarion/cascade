@@ -3,7 +3,7 @@ import { useChat } from '@ai-sdk/react';
 import { isToolUIPart, getToolName } from 'ai';
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
-import { createCompositorTransport } from '../ai/transport';
+import { createCascadeTransport } from '../ai/transport';
 import { captureViewerThumbnail } from '../ai/viewerSnapshot';
 import { AiActionItem } from './AiActionFeed';
 import type { ToolAction } from './AiActionFeed';
@@ -42,7 +42,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
 
   const transport = useMemo(() => {
     if (!apiKey) return null;
-    return createCompositorTransport(apiKey, model, nodeSpecs);
+  return createCascadeTransport(apiKey, model, nodeSpecs);
   }, [apiKey, model, nodeSpecs]);
 
   const { messages, sendMessage, status, stop, error } = useChat({

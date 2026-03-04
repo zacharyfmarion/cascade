@@ -50,7 +50,7 @@ function Toolbar() {
   return (
     <div className="toolbar">
       {isTauriApp ? (
-        <span className="toolbar__title">Compositor</span>
+        <span className="toolbar__title">Cascade</span>
       ) : (
         <MenuBar />
       )}
@@ -114,7 +114,7 @@ function App() {
         loaded = true;
       } catch (e) {
         console.error('Failed to load saved layout', e);
-        localStorage.removeItem('compositor-layout');
+        localStorage.removeItem('cascade-layout');
       }
     }
 
@@ -147,7 +147,7 @@ function App() {
           color: 'var(--text-secondary)',
         }}
       >
-        Loading compositor engine...
+        Loading Cascade engine...
       </div>
     );
   }
@@ -161,7 +161,7 @@ function App() {
           tabComponents={tabComponents}
           defaultTabComponent={EditorTab}
           onReady={onReady}
-          className="dockview-theme-compositor"
+          className="dockview-theme-cascade"
           disableFloatingGroups={true}
         />
       </div>

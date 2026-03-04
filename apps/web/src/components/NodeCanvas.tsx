@@ -86,7 +86,6 @@ import { CanvasContextMenu } from './CanvasContextMenu';
 import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 import { shortcutDispatcher } from '../shortcuts/dispatcher';
-import { pendingImageFiles } from './nodes/pendingImageFiles';
 import type { ParamValue } from '../store/types';
 
 export const NodeCanvas: React.FC = () => {
@@ -780,8 +779,7 @@ export const NodeCanvas: React.FC = () => {
               y: event.clientY,
             });
             try {
-              const newId = await addNode('load_image', position);
-              pendingImageFiles.set(newId, imageFiles[i]);
+              const newId = await addNode('load_image', position, imageFiles[i]);
               loadImageFile(newId, imageFiles[i]);
             } catch (e) {
               console.error('[Drop] image addNode failed:', e);
@@ -1032,8 +1030,7 @@ export const NodeCanvas: React.FC = () => {
           y: window.innerHeight / 2,
         });
         try {
-          const newId = await storeAddNode('load_image', position);
-          pendingImageFiles.set(newId, file);
+          const newId = await storeAddNode('load_image', position, file);
           storeLoadImageFile(newId, file);
         } catch (e) {
           console.error('[Paste] image addNode failed:', e);

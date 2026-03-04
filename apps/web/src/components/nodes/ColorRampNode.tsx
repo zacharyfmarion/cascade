@@ -337,7 +337,7 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
               <div
                 className="node-color-swatch__preview"
                 style={{
-                  // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+  // eslint-disable-next-line cascade-theme/no-hardcoded-colors
                   background: `rgba(${linearToSrgbByte(selectedStop.color[0])},${linearToSrgbByte(selectedStop.color[1])},${linearToSrgbByte(selectedStop.color[2])},1)`,
                 }}
               />

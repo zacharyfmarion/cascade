@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-export interface CompositorTestHarness {
+export interface CascadeTestHarness {
   waitForEngine(): Promise<void>;
   addNode(type: string, position?: { x: number; y: number }): Promise<string>;
   connect(from: string, fromPort: string, to: string, toPort: string): Promise<void>;
@@ -37,28 +37,29 @@ export interface CompositorTestHarness {
   togglePlayback(): Promise<void>;
   setFps(fps: number): Promise<void>;
   setLoopPlayback(loopPlayback: boolean): Promise<void>;
+  loadImageFile(nodeId: string, data: number[], fileName?: string): Promise<void>;
 }
 
 export interface HarnessWindow extends Window {
-  __compositorTest: CompositorTestHarness;
+  __cascadeTest: CascadeTestHarness;
 }
 
 export async function waitForApp(page: Page): Promise<void> {
   await page.waitForSelector('[data-testid="app-ready"]', { timeout: 30_000 });
-  await page.waitForFunction(() => !!(window as unknown as HarnessWindow).__compositorTest, {
+  await page.waitForFunction(() => !!(window as unknown as HarnessWindow).__cascadeTest, {
     timeout: 10_000,
   });
-  await page.evaluate(() => (window as unknown as HarnessWindow).__compositorTest.waitForEngine());
+  await page.evaluate(() => (window as unknown as HarnessWindow).__cascadeTest.waitForEngine());
 }
 
 export async function harness(
   page: Page,
-  method: keyof CompositorTestHarness,
+  method: keyof CascadeTestHarness,
   ...args: unknown[]
 ): Promise<unknown> {
   return page.evaluate(
     ({ method, args }) => {
-      const h = (window as unknown as HarnessWindow).__compositorTest;
+      const h = (window as unknown as HarnessWindow).__cascadeTest;
       const fn = h[method];
       if (typeof fn !== 'function') throw new Error(`Harness method ${String(method)} not found`);
       return fn.apply(h, args);

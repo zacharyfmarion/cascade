@@ -602,6 +602,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  color: var(--text-secondary);
 }
 
 .base-node__icon {

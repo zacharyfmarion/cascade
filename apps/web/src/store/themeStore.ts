@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import type { CompositorTheme } from '../themes/types';
+import type { CascadeTheme } from '../themes/types';
 import { PRESET_THEMES, DEFAULT_THEME, applyTheme, importVSCodeTheme } from '../themes/index';
 
-const STORAGE_KEY = 'compositor-theme';
+const STORAGE_KEY = 'cascade-theme';
 
 function loadSavedThemeName(): string | null {
   try {
@@ -21,7 +21,7 @@ function saveThemeName(name: string): void {
   }
 }
 
-function resolveInitialTheme(): CompositorTheme {
+function resolveInitialTheme(): CascadeTheme {
   const savedName = loadSavedThemeName();
   if (savedName) {
     const match = PRESET_THEMES.find(t => t.name === savedName);
@@ -31,13 +31,13 @@ function resolveInitialTheme(): CompositorTheme {
 }
 
 interface ThemeState {
-  currentTheme: CompositorTheme;
-  presetThemes: CompositorTheme[];
-  customThemes: CompositorTheme[];
+  currentTheme: CascadeTheme;
+  presetThemes: CascadeTheme[];
+  customThemes: CascadeTheme[];
 
-  setTheme: (theme: CompositorTheme) => void;
+  setTheme: (theme: CascadeTheme) => void;
   setThemeByName: (name: string) => void;
-  importVSCodeThemeJson: (json: string) => CompositorTheme;
+  importVSCodeThemeJson: (json: string) => CascadeTheme;
 }
 
 export const useThemeStore = create<ThemeState>()(
@@ -51,7 +51,7 @@ export const useThemeStore = create<ThemeState>()(
         presetThemes: PRESET_THEMES,
         customThemes: [],
 
-        setTheme: (theme: CompositorTheme) => {
+        setTheme: (theme: CascadeTheme) => {
           applyTheme(theme);
           saveThemeName(theme.name);
           set({ currentTheme: theme });
@@ -66,7 +66,7 @@ export const useThemeStore = create<ThemeState>()(
           }
         },
 
-        importVSCodeThemeJson: (json: string): CompositorTheme => {
+        importVSCodeThemeJson: (json: string): CascadeTheme => {
           const parsed = JSON.parse(json);
           const theme = importVSCodeTheme(parsed);
 

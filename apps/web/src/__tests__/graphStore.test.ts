@@ -379,7 +379,7 @@ describe('graphStore group editing state', () => {
 describe('graphStore helper behaviors', () => {
   it('extractGraphData handles document envelope format', async () => {
     const doc = {
-      compositor: { format_version: '1.0.0' },
+    cascade: { format_version: '1.0.0' },
       graph: {
         nodes: [
           { id: 'n1', type_id: 'brightness_contrast', position: [1, 2], params: { brightness: { Float: 0.25 } } },
@@ -387,7 +387,7 @@ describe('graphStore helper behaviors', () => {
         connections: [],
       },
     };
-    const file = new File([JSON.stringify(doc)], 'project.compositor', { type: 'application/json' });
+  const file = new File([JSON.stringify(doc)], 'project.casc', { type: 'application/json' });
     useGraphStore.getState().loadProject(file);
     await flushPromises(2);
     const node = useGraphStore.getState().nodes.get('n1');
@@ -402,7 +402,7 @@ describe('graphStore helper behaviors', () => {
       ],
       connections: [],
     };
-    const file = new File([JSON.stringify(graph)], 'project.compositor', { type: 'application/json' });
+  const file = new File([JSON.stringify(graph)], 'project.casc', { type: 'application/json' });
     useGraphStore.getState().loadProject(file);
     await flushPromises(2);
     const node = useGraphStore.getState().nodes.get('n2');

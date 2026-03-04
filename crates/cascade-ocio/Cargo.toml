@@ -1,0 +1,9 @@
+[package]
+name = "cascade-ocio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cascade-core = { path = "../cascade-core" }
+cascade-ocio-sys = { path = "../cascade-ocio-sys" }
+rayon = "1"

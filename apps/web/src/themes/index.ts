@@ -1,6 +1,5 @@
-import type { CompositorTheme } from './types';
+import type { CascadeTheme } from './types';
 
-import compositorDark from './presets/compositor-dark.json';
 import solarizedDark from './presets/solarized-dark.json';
 import solarizedLight from './presets/solarized-light.json';
 import monokai from './presets/monokai.json';
@@ -25,36 +24,35 @@ import shadesOfPurple from './presets/shades-of-purple.json';
 import cobalt2 from './presets/cobalt2.json';
 import horizon from './presets/horizon.json';
 
-export const PRESET_THEMES: CompositorTheme[] = [
-  compositorDark as CompositorTheme,
-  dracula as CompositorTheme,
-  monokai as CompositorTheme,
-  oneDark as CompositorTheme,
-  nord as CompositorTheme,
-  tokyoNight as CompositorTheme,
-  catppuccinMocha as CompositorTheme,
-  catppuccinLatte as CompositorTheme,
-  rosePine as CompositorTheme,
-  gruvboxDark as CompositorTheme,
-  gruvboxLight as CompositorTheme,
-  palenight as CompositorTheme,
-  ayuDark as CompositorTheme,
-  nightOwl as CompositorTheme,
-  synthwave84 as CompositorTheme,
-  everforestDark as CompositorTheme,
-  cobalt2 as CompositorTheme,
-  horizon as CompositorTheme,
-  shadesOfPurple as CompositorTheme,
-  solarizedDark as CompositorTheme,
-  solarizedLight as CompositorTheme,
-  githubDark as CompositorTheme,
-  githubLight as CompositorTheme,
-  atomOneLight as CompositorTheme,
+export const PRESET_THEMES: CascadeTheme[] = [
+  solarizedDark as CascadeTheme,
+  solarizedLight as CascadeTheme,
+  monokai as CascadeTheme,
+  dracula as CascadeTheme,
+  oneDark as CascadeTheme,
+  nord as CascadeTheme,
+  tokyoNight as CascadeTheme,
+  catppuccinMocha as CascadeTheme,
+  catppuccinLatte as CascadeTheme,
+  rosePine as CascadeTheme,
+  gruvboxDark as CascadeTheme,
+  gruvboxLight as CascadeTheme,
+  palenight as CascadeTheme,
+  ayuDark as CascadeTheme,
+  nightOwl as CascadeTheme,
+  synthwave84 as CascadeTheme,
+  everforestDark as CascadeTheme,
+  cobalt2 as CascadeTheme,
+  horizon as CascadeTheme,
+  shadesOfPurple as CascadeTheme,
+  githubDark as CascadeTheme,
+  githubLight as CascadeTheme,
+  atomOneLight as CascadeTheme,
 ];
 
-export const DEFAULT_THEME = compositorDark as CompositorTheme;
+export const DEFAULT_THEME = solarizedDark as CascadeTheme;
 
 export { applyTheme } from './applyTheme';
 export { importVSCodeTheme } from './importVSCodeTheme';
-export type { CompositorTheme, ThemeTokens, SyntaxColors } from './types';
+export type { CascadeTheme, ThemeTokens, SyntaxColors } from './types';
 export { tokenToCssVar, THEME_TOKEN_KEYS } from './types';

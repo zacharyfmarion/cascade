@@ -9,7 +9,7 @@ import path from 'path';
 
 function wasmHotRebuild(): PluginOption {
   const cratesDir = path.resolve(__dirname, '../../crates');
-  const wasmCrate = path.resolve(cratesDir, 'compositor-wasm');
+const wasmCrate = path.resolve(cratesDir, 'cascade-wasm');
   const outDir = path.resolve(__dirname, 'src/wasm-pkg');
 
   let building = false;

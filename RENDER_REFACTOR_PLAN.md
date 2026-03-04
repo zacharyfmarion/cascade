@@ -19,26 +19,26 @@ Main Engine (interactive)          Background Render
 
 ## Implementation Plan
 
-### Layer 1: Core Types (`compositor-core`)
+### Layer 1: Core Types (`cascade-core`)
 
-**`crates/compositor-core/src/graph.rs`**
+**`crates/cascade-core/src/graph.rs`**
 - Derive `Clone` on `Graph`, `NodeInstance`, `Connection`
 
-**`crates/compositor-core/src/eval.rs`**
+**`crates/cascade-core/src/eval.rs`**
 - Change `evaluate()` signature: `node_instances: &HashMap<NodeId, Arc<dyn Node>>`
 
-**`crates/compositor-core/src/node.rs`**
+**`crates/cascade-core/src/node.rs`**
 - `NodeRegistry.factories`: `Arc<dyn Fn() -> Arc<dyn Node> + Send + Sync>`
 - `NodeRegistry.create()` returns `Option<Arc<dyn Node>>`
 
-### Layer 2: Node Implementations (`compositor-nodes-std`)
+### Layer 2: Node Implementations (`cascade-nodes-std`)
 
-**`crates/compositor-nodes-std/src/lib.rs`**
+**`crates/cascade-nodes-std/src/lib.rs`**
 - All factory closures return `Arc<dyn Node>` instead of `Box<dyn Node>`
 
-### Layer 3: Runtime Engine (`compositor-runtime`)
+### Layer 3: Runtime Engine (`cascade-runtime`)
 
-**`crates/compositor-runtime/src/lib.rs`**
+**`crates/cascade-runtime/src/lib.rs`**
 
 Engine struct:
 ```rust
@@ -62,10 +62,10 @@ pub struct Engine {
 7. Wrap frame loop in `catch_unwind` for panic safety
 8. Use `Ordering::Release` when setting `completed`, `Ordering::Acquire` when reading
 
-### Layer 4: GPU Nodes (`compositor-gpu`)
+### Layer 4: GPU Nodes (`cascade-gpu`)
 - `register_gpu_nodes` — factories return `Arc<dyn Node>`
 
-### Layer 5: Group Nodes (`compositor-nodes-std/src/group.rs`)
+### Layer 5: Group Nodes (`cascade-nodes-std/src/group.rs`)
 - `GroupNodeState.internal_nodes`: `HashMap<NodeId, Arc<dyn Node>>`
 - Internal evaluator calls updated
 
@@ -85,7 +85,7 @@ pub struct Engine {
 - `LoadImageSequenceNode.tsx`: disable directory picker when `isRendering`
 - Show toast if user tries to load image during render
 
-### Layer 9: WASM Engine (`compositor-wasm`)
+### Layer 9: WASM Engine (`cascade-wasm`)
 - Same `Box<dyn Node>` → `Arc<dyn Node>` for compilation
 
 ## Error Handling

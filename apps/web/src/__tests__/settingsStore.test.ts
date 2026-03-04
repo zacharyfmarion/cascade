@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS = {
   loopPlayback: true,
 };
 
-const STORAGE_KEY = 'compositor-settings';
+const STORAGE_KEY = 'cascade-settings';
 
 const getSavedSettings = () => {
   const saved = localStorage.getItem(STORAGE_KEY);

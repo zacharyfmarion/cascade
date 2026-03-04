@@ -2,7 +2,7 @@
 
 ## Problem
 
-Every image in the compositor is a bare `(width, height, Vec<f32>)` buffer. There's no concept of where that image lives in a shared coordinate space, what the intended output resolution is, or how to composite two images of different sizes. This blocks all real compositing workflows.
+Every image in the processor is a bare `(width, height, Vec<f32>)` buffer. There's no concept of where that image lives in a shared coordinate space, what the intended output resolution is, or how to composite two images of different sizes. This blocks all real compositing workflows.
 
 ## Design Principles
 
@@ -16,7 +16,7 @@ Every image in the compositor is a bare `(width, height, Vec<f32>)` buffer. Ther
 
 ## New Types
 
-### Geometry primitives (`compositor-core/src/types.rs`)
+### Geometry primitives (`cascade-core/src/types.rs`)
 
 ```rust
 /// Integer 2D point in pixel index space.
@@ -366,15 +366,15 @@ Legal. `RectI` uses `i32`. A translated image might have `data_window.min.x = -1
 
 `RectI::area()` should be checked:
 ```rust
-pub fn area_checked(&self) -> Result<usize, CompositorError> {
+pub fn area_checked(&self) -> Result<usize, CascadeError> {
     let w = self.width().max(0) as u64;
     let h = self.height().max(0) as u64;
     let pixels = w.checked_mul(h)
-        .ok_or(CompositorError::Other("Data window too large".into()))?;
+        .ok_or(CascadeError::Other("Data window too large".into()))?;
     let bytes = pixels.checked_mul(4)
-        .ok_or(CompositorError::Other("Data window too large".into()))?;
+        .ok_or(CascadeError::Other("Data window too large".into()))?;
     usize::try_from(bytes)
-        .map_err(|_| CompositorError::Other("Data window too large".into()))
+        .map_err(|_| CascadeError::Other("Data window too large".into()))
 }
 ```
 

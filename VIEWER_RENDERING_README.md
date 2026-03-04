@@ -1,6 +1,6 @@
 # Viewer Rendering System - Complete Documentation
 
-This directory contains comprehensive analysis of how the Compositor viewer rendering system works end-to-end.
+This directory contains comprehensive analysis of how the Cascade viewer rendering system works end-to-end.
 
 ## Documents
 
@@ -278,10 +278,10 @@ Not directly. Renders are queued in `renderLock` promise chain. The generation c
 
 ## References
 
-- **Main Graph Engine:** `crates/compositor-core/src/lib.rs`
-- **Render Evaluation:** `crates/compositor-core/src/evaluator.rs`
-- **Viewer Node Spec:** `crates/compositor-nodes-std/src/output.rs` → Viewer node definition
-- **WASM Bridge:** `crates/compositor-wasm/src/lib.rs`
+- **Main Graph Engine:** `crates/cascade-core/src/lib.rs`
+- **Render Evaluation:** `crates/cascade-core/src/evaluator.rs`
+- **Viewer Node Spec:** `crates/cascade-nodes-std/src/output.rs` → Viewer node definition
+- **WASM Bridge:** `crates/cascade-wasm/src/lib.rs`
 - **Tauri Backend:** `apps/tauri/src-tauri/src/engine.rs`
 
 ---

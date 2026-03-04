@@ -1,7 +1,7 @@
 mod menu;
 
-use compositor_runtime::{
-    migrations, AssetReference, CompositorDocument, Engine, NodeSpec, PortSpec, RenderResult,
+use cascade_runtime::{
+    migrations, AssetReference, CascadeDocument, Engine, NodeSpec, PortSpec, RenderResult,
     SerializableGraph,
 };
 use std::sync::Mutex;
@@ -78,7 +78,7 @@ fn set_param(
     value: serde_json::Value,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let param_value: compositor_runtime::ParamValue =
+    let param_value: cascade_runtime::ParamValue =
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     s.engine
         .set_param(&node_id, &key, param_value)
@@ -93,7 +93,7 @@ fn set_input_default(
     value: serde_json::Value,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let param_value: compositor_runtime::ParamValue =
+    let param_value: cascade_runtime::ParamValue =
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     s.engine
         .set_input_default(&node_id, &port_name, param_value)
@@ -191,7 +191,7 @@ fn set_param_and_render(
 ) -> Result<Response, String> {
     let t0 = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let param_value: compositor_runtime::ParamValue =
+    let param_value: cascade_runtime::ParamValue =
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     let results = s
         .engine
@@ -288,7 +288,7 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         migrations::migrate_document(&mut doc_value).map_err(|e| e.to_string())?;
 
         // Deserialize the migrated document
-        let document: CompositorDocument =
+        let document: CascadeDocument =
             serde_json::from_value(doc_value).map_err(|e| e.to_string())?;
 
         let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
@@ -681,9 +681,9 @@ pub fn run() {
     #[cfg(feature = "ocio")]
     {
         match engine.load_ocio_from_env() {
-            Ok(()) => eprintln!("[compositor] Loaded OCIO config from $OCIO"),
+            Ok(()) => eprintln!("[cascade] Loaded OCIO config from $OCIO"),
             Err(e) => {
-                eprintln!("[compositor] OCIO not loaded ({e}), using builtin color management")
+                eprintln!("[cascade] OCIO not loaded ({e}), using builtin color management")
             }
         }
     }

@@ -35,20 +35,20 @@ The key insight: the Rust engine already validates everything when you call `gra
 
 ### Phase 1: Add `validate_edits()` to the WASM bridge
 
-Add a new function to `compositor-wasm`:
+Add a new function to `cascade-wasm`:
 
 ```rust
 /// Validate a batch of proposed graph edits without committing them.
 /// Returns a list of structured errors, each tagged with the operation index.
 pub fn validate_edits(&self, edits_json: &str) -> Result<JsValue, JsValue> {
     let edits: Vec<EditOp> = serde_json::from_str(edits_json)
-        .map_err(|e| to_engine_error(CompositorError::Other(e.to_string())))?;
+        .map_err(|e| to_engine_error(CascadeError::Other(e.to_string())))?;
 
     let errors = self.validate_edits_internal(&edits)
         .map_err(to_engine_error)?;
 
     serde_wasm_bindgen::to_value(&errors)
-        .map_err(|e| to_engine_error(CompositorError::Other(e.to_string())))
+        .map_err(|e| to_engine_error(CascadeError::Other(e.to_string())))
 }
 ```
 
@@ -109,7 +109,7 @@ Note: `op_id` is a simple index that TypeScript assigns to each operation. TypeS
 ### Phase 3: Implement validation via graph clone
 
 ```rust
-fn validate_edits_internal(&self, edits: &[EditOp]) -> Result<Vec<EditValidationError>, CompositorError> {
+fn validate_edits_internal(&self, edits: &[EditOp]) -> Result<Vec<EditValidationError>, CascadeError> {
     // Clone the graph for dry-run validation
     let mut shadow = self.graph.clone();
     // Track temp node IDs from AddNode operations
@@ -140,7 +140,7 @@ fn validate_edits_internal(&self, edits: &[EditOp]) -> Result<Vec<EditValidation
                         if let Err(e) = shadow.connect(&self.registry, fid, from_port, tid, to_port) {
                             errors.push(EditValidationError {
                                 op_id: *op_id,
-                                kind: compositor_error_to_edit_kind(&e),
+                                kind: cascade_error_to_edit_kind(&e),
                                 message: e.to_string(),
                             });
                         }
@@ -235,9 +235,9 @@ const applyResult = await applyMutations(mutations, handleMap, nodeSpecs, { orig
 
 ## Migration plan
 
-### Step 1: Rust side (compositor-core + compositor-wasm)
-1. Add `EditOp`, `EditValidationError`, `EditErrorKind` types to `compositor-core` (or a new `compositor-core::validation` module)
-2. Add `validate_edits_internal()` to `Engine` in `compositor-wasm`
+### Step 1: Rust side (cascade-core + cascade-wasm)
+1. Add `EditOp`, `EditValidationError`, `EditErrorKind` types to `cascade-core` (or a new `cascade-core::validation` module)
+2. Add `validate_edits_internal()` to `Engine` in `cascade-wasm`
 3. Expose `validate_edits()` via `#[wasm_bindgen]`
 4. Add unit tests: Int→Float connect should pass, Image→Float should fail, cycle should fail
 
@@ -257,7 +257,7 @@ const applyResult = await applyMutations(mutations, handleMap, nodeSpecs, { orig
 
 - **Not moving the parser to Rust** — The DSL is a UI-layer concept. The parser feeds Monaco directly, and Rust doesn't need to know about handles, line numbers, or DSL syntax. Moving it would slow iteration on DSL features.
 - **Not moving param validation to Rust** — Param type checking and range validation are cheap, stable, and benefit from TS-side formatting. They can move later if needed, but they're low divergence risk.
-- **Not creating a separate "validator graph"** — We clone the real graph for each validation. For compositor-scale graphs (10s–100s of nodes), this is negligible. Only revisit if profiling shows a problem.
+- **Not creating a separate "validator graph"** — We clone the real graph for each validation. For Cascade-scale graphs (10s–100s of nodes), this is negligible. Only revisit if profiling shows a problem.
 
 ## Effort estimate
 

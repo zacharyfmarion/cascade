@@ -6,7 +6,7 @@ Design and implementation plan for introducing a store-level edit transaction AP
 
 ## 1. Problem Statement
 
-The compositor has three independent editors that mutate the graph:
+The processor has three independent editors that mutate the graph:
 
 1. **Direct UI** — React Flow node interactions, Inspector panel param changes
 2. **DSL Editor** — Monaco-based text editing of the graph DSL
@@ -557,7 +557,7 @@ If `awaitRender: true` and the render takes a long time (e.g., large graph, slow
 
 ### 6.2 Multiple Viewers
 
-The compositor supports multiple viewer nodes. `flushRender()` renders ALL viewers and collects errors from each. An eval error might be viewer-specific (e.g., one viewer path fails while another succeeds). The diagnostics should include which viewer the error came from, but for v1, we can treat all eval errors as global.
+The processor supports multiple viewer nodes. `flushRender()` renders ALL viewers and collects errors from each. An eval error might be viewer-specific (e.g., one viewer path fails while another succeeds). The diagnostics should include which viewer the error came from, but for v1, we can treat all eval errors as global.
 
 ### 6.3 Canonicalization Churn
 

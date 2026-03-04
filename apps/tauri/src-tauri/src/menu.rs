@@ -61,7 +61,7 @@ pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&view_reset)
         .build()?;
 
-    let help_about = MenuItemBuilder::with_id("help.about", "About Compositor").build(app)?;
+    let help_about = MenuItemBuilder::with_id("help.about", "About Cascade").build(app)?;
 
     let help_menu = SubmenuBuilder::new(app, "Help").item(&help_about).build()?;
 

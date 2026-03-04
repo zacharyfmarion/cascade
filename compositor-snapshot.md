@@ -1,6 +1,6 @@
 - generic [ref=e4]:
   - generic [ref=e5]:
-    - generic [ref=e6]: Compositor
+    - generic [ref=e6]: Cascade
     - generic [ref=e7]:
       - button "Undo" [ref=e8] [cursor=pointer]
       - button "Redo" [disabled] [ref=e9]

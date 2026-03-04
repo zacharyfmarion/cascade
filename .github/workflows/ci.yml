@@ -10,7 +10,7 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
   # Crates requiring system libraries (glib, OpenColorIO, webkit2gtk) not available on CI
-  WORKSPACE_EXCLUDES: --exclude compositor-ocio-sys --exclude compositor-ocio --exclude compositor-tauri
+  WORKSPACE_EXCLUDES: --exclude cascade-ocio-sys --exclude cascade-ocio --exclude cascade-tauri
 
 jobs:
   rust-check:
@@ -50,7 +50,7 @@ jobs:
       - name: Check for error swallowing patterns
         run: |
           # WASM bridge: no unwrap_or(JsValue::NULL)
-          if grep -n 'unwrap_or(JsValue::NULL)' crates/compositor-wasm/src/lib.rs; then
+          if grep -n 'unwrap_or(JsValue::NULL)' crates/cascade-wasm/src/lib.rs; then
             echo '::error::Found unwrap_or(JsValue::NULL) in WASM bridge — use .map_err(to_js_error)? instead'
             exit 1
           fi
@@ -77,6 +77,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -86,6 +95,9 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --immutable
+
+      - name: Build WASM package
+        run: yarn build:wasm
 
       - name: Typecheck
         run: npx tsc -b --noEmit

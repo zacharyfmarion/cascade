@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DockviewApi } from 'dockview';
 import { useLayoutStore } from '../store/layoutStore';
 
-const STORAGE_KEY = 'compositor-layout';
-const VERSION_KEY = 'compositor-layout-version';
+const STORAGE_KEY = 'cascade-layout';
+const VERSION_KEY = 'cascade-layout-version';
 /** Must match LAYOUT_VERSION in layoutStore.ts */
 const CURRENT_VERSION = '2';
 

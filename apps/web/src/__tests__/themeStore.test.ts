@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_THEME, PRESET_THEMES } from '../themes';
 import { useThemeStore } from '../store/themeStore';
 
-const STORAGE_KEY = 'compositor-theme';
+const STORAGE_KEY = 'cascade-theme';
 
 beforeEach(() => {
   localStorage.clear();

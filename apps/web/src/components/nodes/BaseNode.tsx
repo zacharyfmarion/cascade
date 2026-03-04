@@ -55,7 +55,7 @@ const InlineInputControl: React.FC<{
           position: 'relative',
           width: '14px',
           height: '14px',
-          // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+  // eslint-disable-next-line cascade-theme/no-hardcoded-colors
           backgroundColor: `rgba(${sr}, ${sg}, ${sb}, ${a})`,
           border: '1px solid var(--border-default)',
           borderRadius: '2px',

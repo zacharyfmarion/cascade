@@ -119,8 +119,8 @@ export const createProjectSlice: StateCreator<
       if (isTauri() && eng.saveProject) {
         import('@tauri-apps/plugin-dialog').then(({ save }) => {
           save({
-            filters: [{ name: 'Compositor Project', extensions: ['compositor'] }],
-            defaultPath: 'project.compositor',
+            filters: [{ name: 'Cascade Project', extensions: ['casc'] }],
+            defaultPath: 'project.casc',
           }).then(async path => {
             if (path) {
               await eng.saveProject?.(path);
@@ -146,7 +146,7 @@ export const createProjectSlice: StateCreator<
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = 'project.compositor';
+        link.download = 'project.casc';
         link.click();
         URL.revokeObjectURL(url);
         set({ dirty: false });
@@ -162,7 +162,7 @@ export const createProjectSlice: StateCreator<
 
       import('@tauri-apps/plugin-dialog').then(({ open }) => {
         open({
-          filters: [{ name: 'Compositor Project', extensions: ['compositor'] }],
+          filters: [{ name: 'Cascade Project', extensions: ['casc'] }],
           multiple: false,
         }).then(async path => {
           if (typeof path === 'string') {

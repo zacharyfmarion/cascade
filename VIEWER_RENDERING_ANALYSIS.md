@@ -467,7 +467,7 @@ editTransaction: async (options, mutate) => {
 
 **Error Path:**
 ```
-Engine render throws CompositorError
+Engine render throws CascadeError
   ↓
 catch(e) in triggerRender / setParamLive
   ↓

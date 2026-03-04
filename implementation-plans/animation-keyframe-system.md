@@ -1,14 +1,14 @@
 # Animation & Keyframe System
 
-Design document for adding Blender/Nuke-style keyframe animation to Compositor.
+Design document for adding Blender/Nuke-style keyframe animation to Cascade.
 
 ---
 
 ## 1. Product Scope
 
-### What "animation" means for a compositor
+### What "animation" means for a processor
 
-A compositor is not a 3D package. Animation here means **animating effect parameters over time to match footage**:
+A processor is not a 3D package. Animation here means **animating effect parameters over time to match footage**:
 
 - Ramp a blur radius over 30 frames as a shot goes out of focus
 - Animate color correction lift/gain to match a lighting change across a scene
@@ -51,7 +51,7 @@ The codebase is already partially animation-ready:
 | String | ❌ No | Not meaningful to interpolate. |
 | ColorPalette | ❌ No | Collection type, no clear interpolation semantics. |
 
-Float + Int + Bool + Color covers ~98% of real compositor animation needs.
+Float + Int + Bool + Color covers ~98% of real processor animation needs.
 
 ---
 
@@ -71,7 +71,7 @@ Animation data will be stored as a field on the `Engine` struct and serialized a
 
 ### 3.2 Core types
 
-New file: `crates/compositor-core/src/animation.rs`
+New file: `crates/cascade-core/src/animation.rs`
 
 ```rust
 use crate::graph::NodeId;
@@ -920,7 +920,7 @@ These are exposed in the Settings modal under a new "Animation" section:
 ### Phase 1: Core (MVP) — Target: ~1-2 weeks
 
 **Rust:**
-1. Add `animation.rs` module to `compositor-core` with `FCurve`, `Keyframe`, `AnimationData` types
+1. Add `animation.rs` module to `cascade-core` with `FCurve`, `Keyframe`, `AnimationData` types
 2. Add `resolve_animation()` to evaluator
 3. Update `Evaluator::evaluate()` to accept and use `AnimationData`
 4. Unit tests for FCurve evaluation (linear, constant, edge cases)
@@ -977,13 +977,13 @@ These are exposed in the Settings modal under a new "Animation" section:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Animation model | Per-param FCurves (Nuke-style) | Compositor doesn't need action stacking. Simplicity wins. |
-| Animatable types | Float, Int, Bool, Color | Covers 98% of compositor animation needs. |
+| Animation model | Per-param FCurves (Nuke-style) | Cascade doesn't need action stacking. Simplicity wins. |
+| Animatable types | Float, Int, Bool, Color | Covers 98% of processor animation needs. |
 | Data location | Centralized `AnimationData` on Engine | Keeps NodeInstance lean. Easy to query/serialize. |
 | Evaluation strategy | Evaluator resolves before `node.evaluate()` | Nodes stay animation-unaware. Clean separation. |
 | Cache impact | None — `frame_time` already in cache key | Existing design is animation-ready. |
 | Priority: connected vs animated | Connection wins over animation | Matches Nuke's behavior. Same as current promotable override. |
-| Interpolation (MVP) | Linear + Constant only | Sufficient for most compositor work. Bezier is Phase 3. |
+| Interpolation (MVP) | Linear + Constant only | Sufficient for most processor work. Bezier is Phase 3. |
 | Auto-keying | On by default, togglable | Least-surprising for animated params. Matches industry standard. |
 | Panel type | Floating/dockable (dockview) | User can position freely. App already uses dockview. |
 | Timeline bar | Extended, not replaced | Keep compact scrubber, add keyframe tick marks. |

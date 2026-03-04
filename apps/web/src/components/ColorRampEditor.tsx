@@ -208,7 +208,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
             borderRadius: '3px',
             overflow: 'hidden',
             border: '1px solid var(--border-default)',
-            // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+  // eslint-disable-next-line cascade-theme/no-hardcoded-colors
             background: `rgba(${linearToSrgbByte(selectedStop.color[0])}, ${linearToSrgbByte(selectedStop.color[1])}, ${linearToSrgbByte(selectedStop.color[2])}, 1)`
           }}>
             <input

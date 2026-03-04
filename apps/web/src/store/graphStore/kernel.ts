@@ -165,8 +165,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 
 const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
-const isDocumentEnvelope = (value: unknown): value is { compositor: unknown; graph: unknown } => (
-  isRecord(value) && 'compositor' in value && 'graph' in value
+const isDocumentEnvelope = (value: unknown): value is { cascade: unknown; graph: unknown } => (
+  isRecord(value) && 'cascade' in value && 'graph' in value
 );
 
 export const extractGraphData = (value: unknown): SerializableGraphData => {
@@ -216,7 +216,7 @@ export const normalizeParamValue = (value: ParamValue): ParamValue => {
 };
 
 export const createDocumentEnvelope = (graph: unknown) => ({
-  compositor: {
+  cascade: {
     format_version: '1.1.0',
     app_version: '',
     created_at: '',

@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/compositor-core",
-    "crates/compositor-gpu",
-    "crates/compositor-nodes-std",
-    "crates/compositor-wasm",
-    "crates/compositor-runtime",
-    "crates/compositor-ocio-sys",
-    "crates/compositor-ocio",
+    "crates/cascade-core",
+    "crates/cascade-gpu",
+    "crates/cascade-nodes-std",
+    "crates/cascade-wasm",
+    "crates/cascade-runtime",
+    "crates/cascade-ocio-sys",
+    "crates/cascade-ocio",
     "apps/tauri/src-tauri",
 ]
 exclude = [
-    "crates/compositor-video",
+    "crates/cascade-video",
 ]
 
 # Optimize dependencies in dev builds so image/rayon/etc aren't unusably slow.
@@ -21,14 +21,14 @@ opt-level = 2
 
 # Optimize our own compute-heavy crates in dev builds so image processing
 # and the WASM bridge aren't unusably slow during development.
-[profile.dev.package.compositor-nodes-std]
+[profile.dev.package.cascade-nodes-std]
 opt-level = 2
 
-[profile.dev.package.compositor-core]
+[profile.dev.package.cascade-core]
 opt-level = 2
 
-[profile.dev.package.compositor-wasm]
+[profile.dev.package.cascade-wasm]
 opt-level = 2
 
-[profile.dev.package.compositor-video]
+[profile.dev.package.cascade-video]
 opt-level = 2

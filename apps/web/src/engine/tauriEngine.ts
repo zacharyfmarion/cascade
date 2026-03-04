@@ -3,7 +3,7 @@ import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo,
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
 
 type DocumentEnvelope = {
-  compositor: unknown;
+  cascade: unknown;
   graph: unknown;
 };
 
@@ -13,12 +13,12 @@ const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ?
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
 
-const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && 'compositor' in value && 'graph' in value;
+const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && 'cascade' in value && 'graph' in value;
 
 const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) ? value.graph : value;
 
 const createDocumentEnvelope = (graph: unknown) => ({
-  compositor: {
+  cascade: {
     format_version: '1.1.0',
     app_version: '',
     created_at: '',

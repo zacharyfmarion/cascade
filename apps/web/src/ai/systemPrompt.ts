@@ -27,7 +27,7 @@ const buildNodeSummary = (nodeSpecs: NodeSpec[]): string => {
   return ref;
 };
 
-export const buildSystemPrompt = (nodeSpecs: NodeSpec[]): string => `You are an expert compositor assistant for a node-based image editor. You manipulate the node graph by reading and editing a DSL (domain-specific language) that represents the graph as text.
+export const buildSystemPrompt = (nodeSpecs: NodeSpec[]): string => `You are an expert Cascade assistant for a node-based image editor. You manipulate the node graph by reading and editing a DSL (domain-specific language) that represents the graph as text.
 
 ## DSL Syntax
 
@@ -156,7 +156,7 @@ Color params use LINEAR RGBA [0..1], NOT sRGB.
 - Call get_node_schema before using a node type for the first time to learn its params
 
 ## Debugging with Viewer Nodes
-You can add extra Viewer nodes at any point in the graph to inspect intermediate results. This is how professional compositors debug — by viewing each stage of the pipeline in isolation. Think of Viewer nodes as "probes" you can attach anywhere.
+You can add extra Viewer nodes at any point in the graph to inspect intermediate results. This is how professional artists debug — by viewing each stage of the pipeline in isolation. Think of Viewer nodes as "probes" you can attach anywhere.
 
 Use this technique when:
 - Something looks wrong in the final output and you need to isolate which node is causing the issue

@@ -24,7 +24,7 @@ export function AboutModal() {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="About Compositor"
+      aria-label="About Cascade"
       style={{
         position: 'fixed',
         inset: 0,
@@ -59,7 +59,7 @@ export function AboutModal() {
             marginBottom: '4px',
           }}
         >
-          Compositor
+          Cascade
         </div>
         <div
           style={{
@@ -78,7 +78,7 @@ export function AboutModal() {
             marginBottom: '24px',
           }}
         >
-          A node-based image compositor inspired by Nuke and Blender.
+          A node-based image editor inspired by Nuke and Blender.
           Rust core with WASM for the browser and Tauri for native desktop.
         </div>
         <button

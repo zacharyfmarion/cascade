@@ -177,7 +177,7 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) 
   />
 );
 
-const SYSTEM_PROMPT = `You are a GLSL compute shader expert. You generate GPU kernel code for an image compositor.
+const SYSTEM_PROMPT = `You are a GLSL compute shader expert. You generate GPU kernel code for a Cascade image editor.
 
 ## Architecture
 The user's GLSL code becomes the body of this function:
@@ -311,7 +311,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
   const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
-    const storedKey = localStorage.getItem('compositor_anthropic_api_key');
+  const storedKey = localStorage.getItem('cascade_anthropic_api_key');
     if (storedKey) setApiKey(storedKey);
   }, []);
   
@@ -805,8 +805,8 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
                 onChange={e => {
                     const nextKey = e.target.value;
                     setApiKey(nextKey);
-                    if (nextKey) localStorage.setItem('compositor_anthropic_api_key', nextKey);
-                    else localStorage.removeItem('compositor_anthropic_api_key');
+    if (nextKey) localStorage.setItem('cascade_anthropic_api_key', nextKey);
+    else localStorage.removeItem('cascade_anthropic_api_key');
                 }}
                 placeholder="sk-ant-..."
                 />

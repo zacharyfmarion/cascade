@@ -1,4 +1,4 @@
-# Compositor Roadmap: Production-Grade Node Library
+# Cascade Roadmap: Production-Grade Node Library
 
 Gap analysis and prioritized plan for reaching moderately production-grade compositing capabilities.
 
@@ -109,7 +109,7 @@ For sequence/video work:
 
 ### 9. No Expression / Scripting for Params
 
-Production compositors link parameters with expressions ("blur sigma = distance × 0.5"). The `promotable` system allows connections but there's no expression language. The Math node only does basic operations.
+Production processors link parameters with expressions ("blur sigma = distance × 0.5"). The `promotable` system allows connections but there's no expression language. The Math node only does basic operations.
 
 ### 10. ~~Incomplete Channel Handling~~ ✅ DONE
 
@@ -163,7 +163,7 @@ Fixed: Off-by-one in sliding window subtraction index corrected. Premultiply/unp
 
 1. **Field abstraction is clever but limiting** — Fields compose well for generators and color ops but can't do spatial filters (blur, sharpen, dilate) since those need neighboring pixel access. Every filter node must rasterize first, creating an impedance mismatch.
 
-2. **No concept of "format" on connections** — the graph connects `Image` or `Field` values but carries no resolution metadata. A production compositor needs bounding box negotiation between nodes.
+2. **No concept of "format" on connections** — the graph connects `Image` or `Field` values but carries no resolution metadata. A production processor needs bounding box negotiation between nodes.
 
 3. **No multi-channel / AOV system** — `Value::Image` is always RGBA. No way to carry depth, motion vectors, normals, cryptomatte, or arbitrary passes through the graph. This blocks CG integration workflows.
 

@@ -1,19 +1,25 @@
 # Architecture
 
 ## 1. Overview
-- Node-based image compositor inspired by Nuke/Blender compositor
+- Node-based image processing application inspired by Nuke/Blender processor
 - Rust core compiled to WASM for browser, will also compile native for Tauri desktop
 - Goal: blazing-fast compositing with AI-powered nodes in the future
 
 ## 2. Project Structure
 ```
-compositor/
+cascade/
 ├── Cargo.toml                    # Workspace: 3 crates
 ├── .cargo/config.toml            # getrandom_backend="wasm_js" for WASM target
 ├── crates/
-│   ├── compositor-core/          # Graph, evaluator, node trait, types
-│   ├── compositor-nodes-std/     # 6 built-in nodes
-│   └── compositor-wasm/          # wasm-bindgen bridge
+│   ├── cascade-core/          # Graph, evaluator, node trait, types
+│   ├── cascade-nodes-std/     # 6 built-in nodes
+│   └── cascade-wasm/          # wasm-bindgen bridge
+├── Cargo.toml                    # Workspace: 3 crates
+├── .cargo/config.toml            # getrandom_backend="wasm_js" for WASM target
+├── crates/
+│   ├── cascade-core/          # Graph, evaluator, node trait, types
+│   ├── cascade-nodes-std/     # 6 built-in nodes
+│   └── cascade-wasm/          # wasm-bindgen bridge
 ├── apps/
 │   └── web/                      # React + Vite frontend
 │       ├── src/
@@ -62,7 +68,7 @@ compositor/
 ```rust
 pub trait Node: Send + Sync + Any {
     fn spec(&self) -> NodeSpec;
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CompositorError>;
+    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CascadeError>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
@@ -81,10 +87,10 @@ pub trait Node: Send + Sync + Any {
   - This is the self-describing metadata that drives the UI — nodes declare their own UI requirements
 
 ### Error Handling (error.rs)
-- `CompositorError` enum with thiserror derive
+- `CascadeError` enum with thiserror derive
 - Variants: NodeNotFound, MissingInput, MissingParam, TypeMismatch, CycleDetected, InvalidConnection, ImageDecode, PortNotFound, Other
 
-## 4. Standard Nodes (compositor-nodes-std)
+## 4. Standard Nodes (cascade-nodes-std)
 
 6 nodes registered via `register_standard_nodes()`:
 
@@ -104,7 +110,7 @@ pub trait Node: Send + Sync + Any {
 4. Register with `registry.register("my_node", || Box::new(MyNode::new()))`
 5. The frontend will automatically render it with appropriate controls based on the spec
 
-## 5. WASM Bridge (compositor-wasm)
+## 5. WASM Bridge (cascade-wasm)
 
 ### Architecture
 - `Engine` struct wraps Graph + NodeRegistry + HashMap<NodeId, Box<dyn Node>> + Evaluator
@@ -126,7 +132,7 @@ pub trait Node: Send + Sync + Any {
 - `export_graph() / import_graph(json)`: serialization for save/load
 
 ### WASM Build
-- Built with `wasm-pack build --target web --release` from `crates/compositor-wasm/`
+- Built with `wasm-pack build --target web --release` from `crates/cascade-wasm/`
 - Output goes to `apps/web/src/wasm-pkg/`
 - `.cargo/config.toml` sets `getrandom_backend="wasm_js"` for the wasm32 target
 - Production WASM binary: ~711KB raw, ~276KB gzipped
@@ -150,7 +156,7 @@ Three-column layout: NodeLibrary (240px) | NodeCanvas (flex) | Inspector + Viewe
 - `connections: Connection[]` — with client-generated UUIDs
 - `renderResults: Map<string, RenderResult>` — cached viewer outputs
 - `triggerAllViewers()`: called after connect/disconnect/setParam/loadImage — re-renders every viewer node
-- Dev mode: `window.__compositorStore` exposed for Playwright testing
+- Dev mode: `window.__cascadeStore` exposed for Playwright testing
 
 ### Type System (types.ts)
 - TypeScript types mirror Rust types exactly: NodeSpec, ParamSpec, ParamValue, etc.
@@ -215,8 +221,9 @@ User drops image file
 ## 8. Testing
 
 ### Rust Tests (25 total, 0 warnings)
-- `compositor-core/src/graph.rs`: 17 unit tests (add/remove, connect/disconnect, cycle detection, type mismatch, dirty propagation, param revision, get_upstream/downstream)
-- `compositor-core/src/eval.rs`: 5 unit tests (chain evaluation, cache hit/miss, param change invalidation, frame_time changes)
+- `cascade-core/src/graph.rs`: 17 unit tests (add/remove, connect/disconnect, cycle detection, type mismatch, dirty propagation, param revision, get_upstream/downstream)
+- `cascade-core/src/eval.rs`: 5 unit tests (chain evaluation, cache hit/miss, param change invalidation, frame_time changes)
+- `cascade-core/src/eval.rs`: 5 unit tests (chain evaluation, cache hit/miss, param change invalidation, frame_time changes)
 - `tests/basic.rs`: 3 integration tests (full pipeline through standard nodes)
 
 ### E2E Tests (Playwright)

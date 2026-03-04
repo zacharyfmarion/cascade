@@ -1,4 +1,4 @@
-# Compositor Architecture Review — February 22, 2026
+# Cascade Architecture Review — February 22, 2026
 
 *Synthesized from 4 parallel deep-exploration agents analyzing Rust crates, frontend, testing/CI, and GPU/WASM subsystems, plus Oracle deep architectural analysis and direct code review of core files.*
 
@@ -12,7 +12,7 @@ Credit where due — several foundational decisions are genuinely excellent:
 
 2. **Self-describing `NodeSpec` system.** Nodes declare their own inputs, outputs, params, and UI hints. Adding a new CPU node requires zero frontend changes. This is the single best architectural decision in the project — it scales beautifully.
 
-3. **Crate dependency graph is clean.** `compositor-core` has zero compositor dependencies. Everything flows downward. No circular deps. Optional features (OCIO, video) are properly gated behind Cargo feature flags. WASM builds don't pull desktop-only dependencies.
+3. **Crate dependency graph is clean.** `cascade-core` has zero Cascade dependencies. Everything flows downward. No circular deps. Optional features (OCIO, video) are properly gated behind Cargo feature flags. WASM builds don't pull desktop-only dependencies.
 
 4. **SlotMap for graph nodes.** O(1) lookup, stable IDs that survive deletions, cache-friendly. Better than arena or index-based alternatives.
 
@@ -52,7 +52,7 @@ Critical render control state lives in **module-scope variables** outside the st
 
 `Image::from_f32_data()` (types.rs:259), `Image::from_f32_data_with_space()` (types.rs:277), and `Image::new_with_domain()` (types.rs:298) all use `assert_eq!` on data length. This **panics in library code**, violating the project's own AGENTS.md rule.
 
-Any node that constructs an image with mismatched dimensions crashes the entire WASM instance — no recovery possible. These should return `Result<Image, CompositorError>`.
+Any node that constructs an image with mismatched dimensions crashes the entire WASM instance — no recovery possible. These should return `Result<Image, CascadeError>`.
 
 ### 4. `triggerAllViewers()` re-renders everything (HIGH)
 
@@ -85,13 +85,13 @@ Conversion between them loses precision (`f64 → f32`) and introduces ambiguity
 
 `evaluate()` takes **10 parameters**: graph, registry, node_instances, viewer_node_id, output_port, frame_time, color_management, ai_provider, project_format, ai_node_cache. And `EvalContext` has **7 fields** including AI-specific ones that only AI nodes use.
 
-This is "boundary contamination" — `compositor-core` is becoming a dumping ground for cross-cutting concerns. Each new feature adds another parameter. The `ai_cached_outputs` field is a special case that only AI nodes consume.
+This is "boundary contamination" — `cascade-core` is becoming a dumping ground for cross-cutting concerns. Each new feature adds another parameter. The `ai_cached_outputs` field is a special case that only AI nodes consume.
 
 **Fix:** Introduce an `EvalSession` struct that bundles these, and make `EvalContext` extensible via a type-keyed service locator (`TypeMap` pattern) instead of adding fields. Keep core focused on graph/eval mechanics and traits; push integrations (AI/OCIO) into higher layers.
 
 ### 8. GPU↔CPU round-trip on every node (MEDIUM)
 
-Connected GPU nodes go: CPU Image → upload to GPU texture → compute shader → readback to CPU → store in cache → next GPU node uploads again. The `compositor-gpu` crate has no mechanism to keep images on the GPU between connected GPU nodes. For a chain of 3 GPU nodes, that's 6 unnecessary transfers.
+Connected GPU nodes go: CPU Image → upload to GPU texture → compute shader → readback to CPU → store in cache → next GPU node uploads again. The `cascade-gpu` crate has no mechanism to keep images on the GPU between connected GPU nodes. For a chain of 3 GPU nodes, that's 6 unnecessary transfers.
 
 Pipeline caching exists (keyed on WGSL hash) but **no texture/buffer pooling**. Every kernel allocates and deallocates GPU buffers per evaluation.
 
@@ -124,9 +124,9 @@ JS receives NULL on serialization failures with no error message. These should p
 
 ## Notable / Nice-to-Fix Issues
 
-### 13. `CompositorError::Other(String)` catch-all (MEDIUM-LOW)
+### 13. `CascadeError::Other(String)` catch-all (MEDIUM-LOW)
 
-Only 9 error variants for an entire compositor engine. `Other(String)` is used as a dumping ground throughout `compositor-nodes-std`. Error context is lost at the WASM boundary — JS receives string messages, not structured errors.
+Only 9 error variants for an entire Cascade engine. `Other(String)` is used as a dumping ground throughout `cascade-nodes-std`. Error context is lost at the WASM boundary — JS receives string messages, not structured errors.
 
 ### 14. Image struct has redundant fields (LOW)
 
@@ -150,7 +150,7 @@ When nodes are deleted, `renderResults`, `nodeTimings`, `aiNodeStatuses`, and `a
 
 ### 19. `unwrap()` proliferation in library code (MEDIUM)
 
-Found 74+ `.unwrap()` calls in `eval.rs`, 44 in `compositor-nodes-std/lib.rs`, 30 in `compositor-runtime`. Many are in test code (acceptable) but some are in production paths — particularly Mutex locks and registry lookups.
+Found 74+ `.unwrap()` calls in `eval.rs`, 44 in `cascade-nodes-std/lib.rs`, 30 in `cascade-runtime`. Many are in test code (acceptable) but some are in production paths — particularly Mutex locks and registry lookups.
 
 ### 20. No GPU failure recovery (MEDIUM-LOW)
 
@@ -197,7 +197,7 @@ These are the moments when targeted fixes won't suffice and the bigger redesign 
 ## Trap Warnings
 
 - **Don't add tile processing before adding eviction** — tiles without eviction just leak in smaller chunks
-- **Don't let `compositor-core` absorb more integrations** (AI/OCIO/etc.) — it will become untestable and hard to evolve; keep core generic with traits
+- **Don't let `cascade-core` absorb more integrations** (AI/OCIO/etc.) — it will become untestable and hard to evolve; keep core generic with traits
 - **Don't let downcasting spread further** — every new "special node that needs mutation" increases coupling and makes serialization/versioning uglier
 
 ---

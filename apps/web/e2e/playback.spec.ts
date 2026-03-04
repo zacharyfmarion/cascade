@@ -18,23 +18,23 @@ test.describe('Playback and rendering', () => {
 
     // Start playback — togglePlayback sets isPlaying synchronously
     await page.evaluate(() => {
-      (window as unknown as HarnessWindow).__compositorTest.togglePlayback();
+      (window as unknown as HarnessWindow).__cascadeTest.togglePlayback();
     });
 
     // isPlaying should be true immediately (set() is synchronous in Zustand)
     const playingState = await page.evaluate(() => {
-      const h = (window as unknown as HarnessWindow).__compositorTest;
+      const h = (window as unknown as HarnessWindow).__cascadeTest;
       return h.getState();
     }) as { isPlaying: boolean };
     expect(playingState.isPlaying).toBe(true);
 
     // Stop playback
     await page.evaluate(() => {
-      (window as unknown as HarnessWindow).__compositorTest.togglePlayback();
+      (window as unknown as HarnessWindow).__cascadeTest.togglePlayback();
     });
 
     const stoppedState = await page.evaluate(() => {
-      const h = (window as unknown as HarnessWindow).__compositorTest;
+      const h = (window as unknown as HarnessWindow).__cascadeTest;
       return h.getState();
     }) as { isPlaying: boolean };
     expect(stoppedState.isPlaying).toBe(false);
@@ -52,7 +52,7 @@ test.describe('Playback and rendering', () => {
 
     // Start playback
     await page.evaluate(() => {
-      (window as unknown as HarnessWindow).__compositorTest.togglePlayback();
+      (window as unknown as HarnessWindow).__cascadeTest.togglePlayback();
     });
 
     // Wait for some frames to advance
@@ -60,11 +60,11 @@ test.describe('Playback and rendering', () => {
 
     // Stop playback so we can read state without WASM blocking
     await page.evaluate(() => {
-      (window as unknown as HarnessWindow).__compositorTest.togglePlayback();
+      (window as unknown as HarnessWindow).__cascadeTest.togglePlayback();
     });
 
     const after = await page.evaluate(() => {
-      const h = (window as unknown as HarnessWindow).__compositorTest;
+      const h = (window as unknown as HarnessWindow).__cascadeTest;
       return h.getState();
     }) as { isPlaying: boolean; currentFrame: number };
     expect(after.isPlaying).toBe(false);
@@ -79,13 +79,13 @@ test.describe('Playback and rendering', () => {
 
     // Start playback (no viewer, so no WASM render blocking)
     await page.evaluate(() => {
-      (window as unknown as HarnessWindow).__compositorTest.togglePlayback();
+      (window as unknown as HarnessWindow).__cascadeTest.togglePlayback();
     });
 
     // Set param during playback — should not crash or hang
     await page.evaluate(
       ({ bcId }) => {
-        const h = (window as unknown as HarnessWindow).__compositorTest;
+        const h = (window as unknown as HarnessWindow).__cascadeTest;
         h.setParam(bcId, 'brightness', { Float: 0.25 });
       },
       { bcId },
@@ -95,11 +95,11 @@ test.describe('Playback and rendering', () => {
 
     // Stop playback
     await page.evaluate(() => {
-      (window as unknown as HarnessWindow).__compositorTest.togglePlayback();
+      (window as unknown as HarnessWindow).__cascadeTest.togglePlayback();
     });
 
     const state = await page.evaluate(() => {
-      const h = (window as unknown as HarnessWindow).__compositorTest;
+      const h = (window as unknown as HarnessWindow).__cascadeTest;
       return h.getState();
     }) as { isPlaying: boolean };
     expect(state.isPlaying).toBe(false);
