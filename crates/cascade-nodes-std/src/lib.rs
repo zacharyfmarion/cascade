@@ -24,7 +24,7 @@ pub use ai::{
     decode_response_image, encode_image_png, AiDepthEstimate, AiGenerateImage, AiInpaint,
     AiRemoveBackground, AiUpscale,
 };
-pub use blend::{AlphaOver, Blend, Merge};
+pub use blend::{AlphaOver, Blend, KeyMix, Merge};
 pub use color::{
     BrightnessContrast, ColorRampNode, CombineHsva, HueSaturation, Invert, SeparateHsva,
 };
@@ -112,6 +112,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("blend", || Arc::new(Blend::new()));
     registry.register("alpha_over", || Arc::new(AlphaOver::new()));
     registry.register("merge", || Arc::new(Merge::new()));
+    registry.register("keymix", || Arc::new(KeyMix::new()));
 
     // Transform
     registry.register("resize", || Arc::new(Resize::new()));
@@ -3594,4 +3595,253 @@ mod tests {
         assert_eq!(dw_x, 100, "data window x offset");
         assert_eq!(dw_y, 100, "data window y offset");
     }
+    // ── KeyMix tests ──────────────────────────────────────────────────
+
+    fn eval_keymix(
+        a: Image,
+        b: Image,
+        mask: Option<Image>,
+        params: HashMap<String, ParamValue>,
+    ) -> Image {
+        let mut inputs = HashMap::new();
+        inputs.insert("a".to_string(), Value::Image(a));
+        inputs.insert("b".to_string(), Value::Image(b));
+        if let Some(m) = mask {
+            inputs.insert("mask".to_string(), Value::Image(m));
+        }
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            extra_inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+        };
+        let node = KeyMix::new();
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+        match result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            other => panic!("Expected Value::Image, got {:?}", other.value_type()),
+        }
+    }
+
+    fn keymix_default_params() -> HashMap<String, ParamValue> {
+        let mut params = HashMap::new();
+        params.insert("invert_mask".to_string(), ParamValue::Bool(false));
+        params.insert("mix".to_string(), ParamValue::Float(1.0));
+        params
+    }
+
+    #[test]
+    fn test_keymix_white_mask_selects_a() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [1.0, 0.0, 0.0, 1.0], "white mask should select A");
+    }
+
+    #[test]
+    fn test_keymix_black_mask_selects_b() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [0.0, 0.0, 0.0, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.0, 0.0, 1.0, 1.0], "black mask should select B");
+    }
+
+    #[test]
+    fn test_keymix_gray_mask_blends() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [0.5, 0.5, 0.5, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.5), "red channel should be 0.5, got {}", px[0]);
+        assert!(approx_eq(px[1], 0.0), "green channel should be 0.0, got {}", px[1]);
+        assert!(approx_eq(px[2], 0.5), "blue channel should be 0.5, got {}", px[2]);
+        assert!(approx_eq(px[3], 1.0), "alpha channel should be 1.0, got {}", px[3]);
+    }
+
+    #[test]
+    fn test_keymix_no_mask_selects_a() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, None, params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [1.0, 0.0, 0.0, 1.0], "no mask should select A");
+    }
+
+    #[test]
+    fn test_keymix_invert_mask() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+        let mut params = keymix_default_params();
+        params.insert("invert_mask".to_string(), ParamValue::Bool(true));
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.0, 0.0, 1.0, 1.0], "inverted white mask should select B");
+    }
+
+    #[test]
+    fn test_keymix_mix_zero_passthrough_b() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+        let mut params = keymix_default_params();
+        params.insert("mix".to_string(), ParamValue::Float(0.0));
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.0, 0.0, 1.0, 1.0], "mix=0 should passthrough B");
+    }
+
+    #[test]
+    fn test_keymix_mix_half() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+        let mut params = keymix_default_params();
+        params.insert("mix".to_string(), ParamValue::Float(0.5));
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert!(approx_eq(px[0], 0.5), "red should be 0.5, got {}", px[0]);
+        assert!(approx_eq(px[1], 0.0), "green should be 0.0, got {}", px[1]);
+        assert!(approx_eq(px[2], 0.5), "blue should be 0.5, got {}", px[2]);
+        assert!(approx_eq(px[3], 1.0), "alpha should be 1.0, got {}", px[3]);
+    }
+
+    #[test]
+    fn test_keymix_different_sizes() {
+        // Create A: 4x4 at (0,0)
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+
+        // Create B: 2x2 at (1,1) - offset image
+        let mut b_data = vec![0.0f32; 2 * 2 * 4];
+        for pixel in b_data.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+        }
+        let b_format = Format::hd();
+        let b_dw = RectI {
+            min: IVec2::new(1, 1),
+            max: IVec2::new(3, 3),
+        };
+        let b = Image::new_with_domain(b_format, b_dw, b_data, ColorSpaceId::default_working()).unwrap();
+
+        // Create 4x4 mask at (0,0)
+        let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+
+        let params = keymix_default_params();
+        let output = eval_keymix(a.clone(), b, Some(mask), params);
+
+        // At (0,0): A only, should be red
+        let px_00 = output.get_pixel_f32(0, 0);
+        assert_color_approx(px_00, [1.0, 0.0, 0.0, 1.0], "at (0,0) should be A");
+
+        // At (2,2): overlap region, white mask selects A
+        let px_22 = output.get_pixel_f32(2, 2);
+        assert_color_approx(px_22, [1.0, 0.0, 0.0, 1.0], "at (2,2) overlap should select A");
+    }
+
+    #[test]
+    fn test_keymix_alpha_blending() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 0.8]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 0.4]);
+        let mask = make_test_image(4, 4, [0.5, 0.5, 0.5, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        // Alpha: 0.8 * 0.5 + 0.4 * 0.5 = 0.4 + 0.2 = 0.6
+        assert!(approx_eq(px[3], 0.6), "alpha should be 0.6, got {}", px[3]);
+    }
+
+    #[test]
+    fn test_keymix_mask_uses_luminance() {
+        let a = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 0.0, 1.0]);
+        let mask = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        // Luma = 0.2126 * 1.0 + 0.7152 * 0.0 + 0.0722 * 0.0 = 0.2126
+        // white * 0.2126 + black * (1 - 0.2126) ≈ [0.2126, 0.2126, 0.2126, 1.0]
+        assert!(approx_eq(px[0], 0.2126), "red should be ~0.2126, got {}", px[0]);
+        assert!(approx_eq(px[1], 0.2126), "green should be ~0.2126, got {}", px[1]);
+        assert!(approx_eq(px[2], 0.2126), "blue should be ~0.2126, got {}", px[2]);
+    }
+
+    #[test]
+    fn test_keymix_format_propagation() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a.clone(), b, Some(mask), params);
+
+        assert_eq!(output.format, a.format, "output format should match A");
+        assert_eq!(output.color_space, a.color_space, "output color space should match A");
+    }
+
+    #[test]
+    fn test_keymix_single_pixel() {
+        let a = make_test_image(1, 1, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(1, 1, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(1, 1, [0.0, 0.0, 0.0, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.0, 0.0, 1.0, 1.0], "single pixel black mask should select B");
+    }
+
+    #[test]
+    fn test_keymix_transparent_inputs() {
+        let a = make_test_image(4, 4, [0.0, 0.0, 0.0, 0.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 0.0, 0.0]);
+        let mask = make_test_image(4, 4, [0.5, 0.5, 0.5, 1.0]);
+        let params = keymix_default_params();
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        assert_color_approx(px, [0.0, 0.0, 0.0, 0.0], "transparent inputs should stay transparent");
+    }
+
+    #[test]
+    fn test_keymix_invert_with_mix() {
+        let a = make_test_image(4, 4, [1.0, 0.0, 0.0, 1.0]);
+        let b = make_test_image(4, 4, [0.0, 0.0, 1.0, 1.0]);
+        let mask = make_test_image(4, 4, [0.0, 0.0, 0.0, 1.0]);
+        let mut params = keymix_default_params();
+        params.insert("invert_mask".to_string(), ParamValue::Bool(true));
+        params.insert("mix".to_string(), ParamValue::Float(0.5));
+        let output = eval_keymix(a, b, Some(mask), params);
+
+        let px = output.get_pixel_f32(0, 0);
+        // Black mask inverted = white, white * 0.5 mix = 0.5 effective
+        // red: 1.0 * 0.5 + 0.0 * 0.5 = 0.5, blue: 0.0 * 0.5 + 1.0 * 0.5 = 0.5
+        assert!(approx_eq(px[0], 0.5), "red should be 0.5, got {}", px[0]);
+        assert!(approx_eq(px[1], 0.0), "green should be 0.0, got {}", px[1]);
+        assert!(approx_eq(px[2], 0.5), "blue should be 0.5, got {}", px[2]);
+        assert!(approx_eq(px[3], 1.0), "alpha should be 1.0, got {}", px[3]);
+    }
+
 }

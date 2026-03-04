@@ -702,3 +702,153 @@ impl Node for Merge {
         self
     }
 }
+
+pub struct KeyMix;
+
+impl Default for KeyMix {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KeyMix {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for KeyMix {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "keymix".to_string(),
+            display_name: "KeyMix".to_string(),
+            category: "Composite".to_string(),
+            description: "Mix two images using a mask: A × mask + B × (1 − mask)".to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "a".to_string(),
+                    label: "A".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "b".to_string(),
+                    label: "B".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "mask".to_string(),
+                    label: "Mask".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "invert_mask".to_string(),
+                    label: "Invert Mask".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
+                    promotable: false,
+                },
+                ParamSpec {
+                    key: "mix".to_string(),
+                    label: "Mix".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::Float(1.0),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui_hint: UiHint::Slider,
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let a = ctx.get_input_image("a")?;
+            let b = ctx.get_input_image("b")?;
+            let mask_image = ctx.get_optional_input_image("mask");
+            let invert_mask = ctx.get_param_bool("invert_mask")?;
+            let mix = (ctx.get_param_float("mix")? as f32).clamp(0.0, 1.0);
+
+            let out_dw = a.data_window.union(b.data_window);
+            let out_dw = if let Some(mask) = mask_image {
+                out_dw.union(mask.data_window)
+            } else {
+                out_dw
+            };
+            let out_w = out_dw.width_u32() as usize;
+            let out_h = out_dw.height_u32() as usize;
+            let pixel_count = out_w * out_h;
+            let mut data = vec![0.0f32; pixel_count * 4];
+
+            let min_x = out_dw.min.x;
+            let min_y = out_dw.min.y;
+
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let lx = (i % out_w) as i32;
+                    let ly = (i / out_w) as i32;
+                    let gx = min_x + lx;
+                    let gy = min_y + ly;
+
+                    let [a_r, a_g, a_b, a_a] = a.get_rgba(gx, gy);
+                    let [b_r, b_g, b_b, b_a] = b.get_rgba(gx, gy);
+
+                    let mask_value = if let Some(mask) = mask_image {
+                        let [mr, mg, mb, _] = mask.get_rgba(gx, gy);
+                        let luma = 0.2126 * mr + 0.7152 * mg + 0.0722 * mb;
+                        luma.clamp(0.0, 1.0)
+                    } else {
+                        // No mask connected: treat as fully white (select A)
+                        1.0
+                    };
+
+                    let mask_value = if invert_mask {
+                        1.0 - mask_value
+                    } else {
+                        mask_value
+                    };
+
+                    // Apply mix parameter: interpolate between "no effect" (B passthrough)
+                    // and the full keymix result.
+                    let effective_mask = mask_value * mix;
+
+                    // KeyMix formula: A * mask + B * (1 - mask)
+                    out[0] = a_r * effective_mask + b_r * (1.0 - effective_mask);
+                    out[1] = a_g * effective_mask + b_g * (1.0 - effective_mask);
+                    out[2] = a_b * effective_mask + b_b * (1.0 - effective_mask);
+                    out[3] = a_a * effective_mask + b_a * (1.0 - effective_mask);
+                });
+
+            let output =
+                Image::new_with_domain(a.format.clone(), out_dw, data, a.color_space.clone())?;
+            let mut outputs = HashMap::new();
+            outputs.insert("image".to_string(), Value::Image(output));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
