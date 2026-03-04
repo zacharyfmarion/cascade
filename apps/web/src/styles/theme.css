@@ -926,7 +926,6 @@ body {
   --overlay-dim: rgba(0, 0, 0, 0.5);
   --overlay-label: rgba(0, 0, 0, 0.45);
   --text-inverse: #ffffff;
-}
   --node-label-font-size: 0.72rem;
 }
 
@@ -936,24 +935,32 @@ body {
   --timing-medium: #ff8f00;
   --timing-slow: #c62828;
   --node-mute-stripe: #c62828;
-}
+  --channel-r: #e06060;
+  --channel-g: #60c060;
+  --channel-b: #6080e0;
+  --channel-a: #b0b0b0;
+  }
 
 /* ── Viewer Toolbar ──────────────────────────────────────────── */
 .viewer-toolbar {
   position: absolute;
-  bottom: 20px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   height: 28px;
+  max-height: 28px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-default);
   border-radius: 6px;
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   padding: 0 4px;
   gap: 2px;
   z-index: 100;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .viewer-toolbar__btn {
@@ -1047,6 +1054,134 @@ body {
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
+
+/* ── Viewer Channel Buttons ───────────────────────────────────── */
+.viewer-toolbar__channel-btn {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  letter-spacing: -0.5px;
+  border-bottom: 2px solid transparent;
+  transition: color 0.1s, border-color 0.1s, background 0.1s;
+}
+
+.viewer-toolbar__channel-btn:hover {
+  background: var(--bg-surface);
+}
+
+.viewer-toolbar__channel-btn--r { border-bottom-color: var(--channel-r); }
+.viewer-toolbar__channel-btn--g { border-bottom-color: var(--channel-g); }
+.viewer-toolbar__channel-btn--b { border-bottom-color: var(--channel-b); }
+.viewer-toolbar__channel-btn--a { border-bottom-color: var(--channel-a); }
+
+.viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--r {
+  color: var(--channel-r);
+  background: var(--bg-surface);
+}
+.viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--g {
+  color: var(--channel-g);
+  background: var(--bg-surface);
+}
+.viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--b {
+  color: var(--channel-b);
+  background: var(--bg-surface);
+}
+.viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--a {
+  color: var(--channel-a);
+  background: var(--bg-surface);
+}
+
+/* ── Viewer Gain/Gamma Sliders ────────────────────────────────── */
+.viewer-toolbar__slider-group {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.viewer-toolbar__slider-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
+  min-width: 22px;
+}
+
+.viewer-toolbar__slider {
+  width: 50px;
+  height: 4px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--border-default);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.viewer-toolbar__slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+}
+
+.viewer-toolbar__slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  cursor: pointer;
+  border: none;
+}
+
+/* ── Viewer Pixel Inspector ──────────────────────────────────── */
+.viewer-pixel-inspector {
+  position: absolute;
+  bottom: 48px;
+  left: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 4px;
+  padding: 4px 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+}
+
+.viewer-pixel-inspector__coords {
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+
+.viewer-pixel-inspector__channel {
+  white-space: nowrap;
+}
+
+.viewer-pixel-inspector__channel--r { color: var(--channel-r); }
+.viewer-pixel-inspector__channel--g { color: var(--channel-g); }
+.viewer-pixel-inspector__channel--b { color: var(--channel-b); }
+.viewer-pixel-inspector__channel--a { color: var(--channel-a); }
 
 /* ── AI Assistant Markdown ────────────────────────────────────── */
 .ai-markdown {

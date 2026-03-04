@@ -91,6 +91,10 @@ export interface CascadeTestHarness {
   } | null;
   getNodeErrors(): Record<string, string>;
 
+  // --- Viewer display controls ---
+  getViewerDisplayState(): { channel: string | null; gain: number; gamma: number } | null;
+  getPixelInspectorValue(): { x: number; y: number; r: number; g: number; b: number; a: number } | null;
+
   // --- Rendering ---
   waitForRenderIdle(): Promise<void>;
 
@@ -373,6 +377,25 @@ function createTestHarness(): CascadeTestHarness {
       // loadImageFile reads the file async — wait for it to settle
       await new Promise(resolve => setTimeout(resolve, 200));
     },
+
+    // --- Viewer display controls ---
+    getViewerDisplayState(): { channel: string | null; gain: number; gamma: number } | null {
+      const viewer = document.querySelector('[data-testid="viewer-panel"]');
+      if (!viewer) return null;
+      const channel = viewer.getAttribute('data-viewer-channel') || null;
+      const gain = parseFloat(viewer.getAttribute('data-viewer-gain') ?? '1');
+      const gamma = parseFloat(viewer.getAttribute('data-viewer-gamma') ?? '1');
+      return { channel: channel || null, gain, gamma };
+    },
+
+    getPixelInspectorValue(): { x: number; y: number; r: number; g: number; b: number; a: number } | null {
+      const el = document.querySelector('[data-testid="pixel-inspector"]');
+      if (!el) return null;
+      const raw = el.getAttribute('data-pixel-info');
+      if (!raw) return null;
+      try { return JSON.parse(raw); } catch { return null; }
+    },
+
   };
 }
 

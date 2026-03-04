@@ -38,6 +38,8 @@ export interface CascadeTestHarness {
   setFps(fps: number): Promise<void>;
   setLoopPlayback(loopPlayback: boolean): Promise<void>;
   loadImageFile(nodeId: string, data: number[], fileName?: string): Promise<void>;
+  getViewerDisplayState(): Promise<{ channel: string | null; gain: number; gamma: number } | null>;
+  getPixelInspectorValue(): Promise<{ x: number; y: number; r: number; g: number; b: number; a: number } | null>;
 }
 
 export interface HarnessWindow extends Window {

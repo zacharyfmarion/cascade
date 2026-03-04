@@ -6,6 +6,91 @@ import { isPixelResult } from '../store/types';
 import type { ViewerResult } from '../store/types';
 import { ViewerToolbar } from './ViewerToolbar';
 
+/* ── Types ──────────────────────────────────────────────────── */
+export type ChannelMode = 'r' | 'g' | 'b' | 'a' | null;
+
+export interface ViewerDisplayState {
+  channel: ChannelMode;
+  gain: number;
+  gamma: number;
+}
+
+export interface PixelInfo {
+  x: number;
+  y: number;
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+}
+
+/* ── Viewer pixel transforms (display-only) ──────────────────── */
+
+/** sRGB u8 → linear float (inverse sRGB EOTF) */
+const srgbToLinear = (v: number): number => {
+  const s = v / 255;
+  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+};
+
+/**
+ * Apply display-only transforms to viewer pixels.
+ * Returns a NEW Uint8ClampedArray — never mutates the source.
+ */
+function applyViewerTransforms(
+  pixels: Uint8ClampedArray,
+  options: { channel: ChannelMode; gain: number; gamma: number },
+): Uint8ClampedArray {
+  const { channel, gain, gamma } = options;
+
+  // Fast path: no transforms needed
+  if (channel === null && gain === 1 && gamma === 1) return pixels;
+
+  const out = new Uint8ClampedArray(pixels.length);
+  const invGamma = 1.0 / gamma;
+
+  // Pre-compute LUT for gain + gamma (both operate on 0-255 sRGB values)
+  let lut: Uint8ClampedArray | null = null;
+  if (gain !== 1 || gamma !== 1) {
+    lut = new Uint8ClampedArray(256);
+    for (let i = 0; i < 256; i++) {
+      let v = i * gain;
+      if (v < 0) v = 0;
+      if (v > 255) v = 255;
+      if (gamma !== 1) {
+        v = 255 * Math.pow(v / 255, invGamma);
+      }
+      lut[i] = Math.round(v < 0 ? 0 : v > 255 ? 255 : v);
+    }
+  }
+
+  for (let i = 0; i < pixels.length; i += 4) {
+    let r = pixels[i];
+    let g = pixels[i + 1];
+    let b = pixels[i + 2];
+    const a = pixels[i + 3];
+
+    // Channel isolation
+    if (channel === 'r') { r = g = b = pixels[i]; }
+    else if (channel === 'g') { r = g = b = pixels[i + 1]; }
+    else if (channel === 'b') { r = g = b = pixels[i + 2]; }
+    else if (channel === 'a') { r = g = b = pixels[i + 3]; }
+
+    // Gain + gamma via LUT (RGB only, not alpha)
+    if (lut) {
+      r = lut[r];
+      g = lut[g];
+      b = lut[b];
+    }
+
+    out[i] = r;
+    out[i + 1] = g;
+    out[i + 2] = b;
+    out[i + 3] = channel === 'a' ? 255 : a;
+  }
+
+  return out;
+}
+
 /** Renders non-pixel value types (float, int, bool, color, string, none) */
 const ScalarViewer: React.FC<{ result: ViewerResult }> = ({ result }) => {
   const containerStyle: React.CSSProperties = {
@@ -134,6 +219,10 @@ export const Viewer: React.FC = () => {
 
   const [activeViewerId, setActiveViewerId] = useState<string | null>(null);
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [activeChannel, setActiveChannel] = useState<ChannelMode>(null);
+  const [gain, setGain] = useState(1);
+  const [gamma, setGamma] = useState(1);
+  const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -226,7 +315,14 @@ export const Viewer: React.FC = () => {
       imgData = new ImageData(activeResult.width, activeResult.height);
       imageDataRef.current = imgData;
     }
-    imgData.data.set(activeResult.pixels);
+
+    // Apply display-only transforms (channel isolation, gain, gamma)
+    const transformed = applyViewerTransforms(activeResult.pixels, {
+      channel: activeChannel,
+      gain,
+      gamma,
+    });
+    imgData.data.set(transformed);
     ctx.putImageData(imgData, 0, 0);
 
     canvas.style.width = `${logicalWidth}px`;
@@ -236,13 +332,24 @@ export const Viewer: React.FC = () => {
     if (dimsChanged) {
       setTimeout(() => transformRef.current?.centerView(computeFitScale(), 0), 0);
     }
-  }, [activeResult, computeFitScale]);
+  }, [activeResult, computeFitScale, activeChannel, gain, gamma]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Channel isolation shortcuts (no modifier keys)
+      if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        const key = e.key.toLowerCase();
+        if (key === 'r' || key === 'g' || key === 'b' || key === 'a') {
+          e.preventDefault();
+          const ch = key as ChannelMode;
+          setActiveChannel(prev => prev === ch ? null : ch);
+          return;
+        }
+      }
+
       if (!e.metaKey && !e.ctrlKey) return;
 
       switch (e.key) {
@@ -271,10 +378,57 @@ export const Viewer: React.FC = () => {
     return () => container.removeEventListener('keydown', handleKeyDown);
   }, [fitToView]);
 
+  // Pixel inspector: track mouse over canvas
+  const handleCanvasMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!activeResult || !isPixelResult(activeResult)) return;
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Get canvas bounding rect to convert screen → canvas coords
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const px = Math.floor((e.clientX - rect.left) * scaleX);
+      const py = Math.floor((e.clientY - rect.top) * scaleY);
+
+      // Check bounds
+      if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) {
+        setPixelInfo(null);
+        return;
+      }
+
+      // Read from ORIGINAL pixels (not display-transformed)
+      const idx = (py * canvas.width + px) * 4;
+      setPixelInfo({
+        x: Math.floor(px / (activeResult.previewScale ?? 1)),
+        y: Math.floor(py / (activeResult.previewScale ?? 1)),
+        r: activeResult.pixels[idx],
+        g: activeResult.pixels[idx + 1],
+        b: activeResult.pixels[idx + 2],
+        a: activeResult.pixels[idx + 3],
+      });
+    },
+    [activeResult],
+  );
+
+  const handleCanvasMouseLeave = useCallback(() => {
+    setPixelInfo(null);
+  }, []);
+
+  const handleResetDisplayControls = useCallback(() => {
+    setGain(1);
+    setGamma(1);
+  }, []);
+
   return (
-    <section 
+    <section
       data-testid="viewer-panel"
-      className="panel" 
+      data-viewer-channel={activeChannel ?? ''}
+      data-viewer-gain={gain}
+      data-viewer-gamma={gamma}
+      className="panel"
       aria-label="Viewer"
       style={{
         width: '100%',
@@ -299,7 +453,7 @@ export const Viewer: React.FC = () => {
         limitToBounds={false}
         onTransformed={(_ref, state) => setZoomPercent(Math.round(state.scale * 100))}
       >
-        {(utils) => (
+        {(_utils) => (
           <>
             <TransformComponent
               wrapperStyle={{ width: '100%', height: '100%' }}
@@ -317,7 +471,7 @@ export const Viewer: React.FC = () => {
               }}
             >
               {/* Pixel viewer (image/mask/field) */}
-              <div 
+              <div
                 className="viewer-checkerboard"
                 style={{
                     display: hasPixels ? 'flex' : 'none',
@@ -326,6 +480,8 @@ export const Viewer: React.FC = () => {
                     width: 'fit-content',
                     height: 'fit-content',
                 }}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseLeave={handleCanvasMouseLeave}
               >
                 <canvas
                   ref={canvasRef}
@@ -342,18 +498,25 @@ export const Viewer: React.FC = () => {
                 <ScalarViewer result={activeResult} />
               )}
             </TransformComponent>
-            
-            <ViewerToolbar 
-                zoomIn={() => utils.zoomIn(0.5)}
-                zoomOut={() => utils.zoomOut(0.5)}
-                fitToView={fitToView}
-                setActualPixels={() => utils.centerView(1)}
-                setZoomLevel={(scale) => utils.centerView(scale)}
-                zoomPercent={zoomPercent}
-            />
           </>
         )}
       </TransformWrapper>
+
+      <ViewerToolbar
+          zoomIn={() => transformRef.current?.zoomIn(0.5)}
+          zoomOut={() => transformRef.current?.zoomOut(0.5)}
+          fitToView={fitToView}
+          setActualPixels={() => transformRef.current?.centerView(1)}
+          setZoomLevel={(scale) => transformRef.current?.centerView(scale)}
+          zoomPercent={zoomPercent}
+          activeChannel={activeChannel}
+          onChannelChange={setActiveChannel}
+          gain={gain}
+          onGainChange={setGain}
+          gamma={gamma}
+          onGammaChange={setGamma}
+          onResetDisplayControls={handleResetDisplayControls}
+      />
       
       {dimensions && hasPixels && (
         <div style={{
@@ -420,6 +583,21 @@ export const Viewer: React.FC = () => {
           zIndex: 20,
         }}>
           {lastError.message}
+        </div>
+      )}
+
+      {/* Pixel Inspector overlay */}
+      {pixelInfo && (
+        <div
+          className="viewer-pixel-inspector"
+          data-testid="pixel-inspector"
+          data-pixel-info={JSON.stringify(pixelInfo)}
+        >
+          <span className="viewer-pixel-inspector__coords">[{pixelInfo.x}, {pixelInfo.y}]</span>
+          <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--r">R: {pixelInfo.r} ({srgbToLinear(pixelInfo.r).toFixed(3)})</span>
+          <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--g">G: {pixelInfo.g} ({srgbToLinear(pixelInfo.g).toFixed(3)})</span>
+          <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--b">B: {pixelInfo.b} ({srgbToLinear(pixelInfo.b).toFixed(3)})</span>
+          <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--a">A: {pixelInfo.a} ({(pixelInfo.a / 255).toFixed(3)})</span>
         </div>
       )}
     </section>
