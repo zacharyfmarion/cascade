@@ -125,16 +125,10 @@ impl Graph {
             .ok_or(CascadeError::NodeNotFound(to_node))?;
 
         let from_spec = registry.get_spec(&from_instance.type_id).ok_or_else(|| {
-            CascadeError::InvalidConnection(format!(
-                "Unknown node type: {}",
-                from_instance.type_id
-            ))
+            CascadeError::InvalidConnection(format!("Unknown node type: {}", from_instance.type_id))
         })?;
         let to_spec = registry.get_spec(&to_instance.type_id).ok_or_else(|| {
-            CascadeError::InvalidConnection(format!(
-                "Unknown node type: {}",
-                to_instance.type_id
-            ))
+            CascadeError::InvalidConnection(format!("Unknown node type: {}", to_instance.type_id))
         })?;
 
         let from_port_spec = from_spec
@@ -509,9 +503,8 @@ mod tests {
         fn evaluate<'a>(
             &'a self,
             _ctx: &'a EvalContext<'a>,
-        ) -> Pin<
-            Box<dyn Future<Output = Result<HashMap<String, Value>, CascadeError>> + Send + 'a>,
-        > {
+        ) -> Pin<Box<dyn Future<Output = Result<HashMap<String, Value>, CascadeError>> + Send + 'a>>
+        {
             Box::pin(async move { Ok(HashMap::new()) })
         }
 

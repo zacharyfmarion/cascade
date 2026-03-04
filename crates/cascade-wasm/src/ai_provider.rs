@@ -63,8 +63,8 @@ mod imp {
                     }),
                 )
             };
-            let body = serde_json::to_string(&payload)
-                .map_err(|e| CascadeError::Other(e.to_string()))?;
+            let body =
+                serde_json::to_string(&payload).map_err(|e| CascadeError::Other(e.to_string()))?;
 
             let init = RequestInit::new();
             init.set_method("POST");
@@ -90,13 +90,14 @@ mod imp {
 
             if !response.ok() {
                 let status = response.status();
-                let text = JsFuture::from(response.text().map_err(|_| {
-                    CascadeError::Other("Failed to read error body".to_string())
-                })?)
-                .await
-                .map_err(|_| CascadeError::Other("Failed to read error body".to_string()))?
-                .as_string()
-                .unwrap_or_default();
+                let text =
+                    JsFuture::from(response.text().map_err(|_| {
+                        CascadeError::Other("Failed to read error body".to_string())
+                    })?)
+                    .await
+                    .map_err(|_| CascadeError::Other("Failed to read error body".to_string()))?
+                    .as_string()
+                    .unwrap_or_default();
                 return Err(CascadeError::Other(format!(
                     "Replicate API error ({status}): {text}"
                 )));
@@ -109,9 +110,7 @@ mod imp {
                 .await
                 .map_err(|_| CascadeError::Other("Failed to read response body".to_string()))?
                 .as_string()
-                .ok_or_else(|| {
-                    CascadeError::Other("Response body is not a string".to_string())
-                })?;
+                .ok_or_else(|| CascadeError::Other("Response body is not a string".to_string()))?;
 
             let parsed: ReplicateResponse = serde_json::from_str(&json_text)
                 .map_err(|e| CascadeError::Other(format!("Failed to parse response: {e}")))?;
@@ -119,9 +118,7 @@ mod imp {
             match parsed.status.as_str() {
                 "succeeded" => {
                     let output = parsed.output.ok_or_else(|| {
-                        CascadeError::Other(
-                            "Prediction succeeded but output is null".to_string(),
-                        )
+                        CascadeError::Other("Prediction succeeded but output is null".to_string())
                     })?;
                     Ok(AiPredictionResult { output })
                 }

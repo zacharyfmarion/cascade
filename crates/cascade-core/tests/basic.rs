@@ -190,12 +190,8 @@ impl Node for CounterNode {
         _ctx: &'a EvalContext<'a>,
     ) -> Pin<
         Box<
-            dyn Future<
-                    Output = Result<
-                        HashMap<String, Value>,
-                        cascade_core::error::CascadeError,
-                    >,
-                > + Send
+            dyn Future<Output = Result<HashMap<String, Value>, cascade_core::error::CascadeError>>
+                + Send
                 + 'a,
         >,
     > {
