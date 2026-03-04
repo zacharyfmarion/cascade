@@ -530,12 +530,11 @@ impl Node for SaveExr {
 
 | Phase | Scope | Depends On |
 |---|---|---|
-| **Phase 0: Mask Type Cleanup** | Delete `Value::Mask`, fix `types_compatible()` for Image↔Mask, simplify all match arms, add regression tests | Nothing |
-| **Phase 1: Toast System** | `ToastSlice`, `ToastHost` component, CSS vars, `pushToast()` wired up | Nothing — frontend only |
-| **Phase 2: Per-Instance Spec Plumbing** | `SpecProvider` trait, `graph.rs` connect/prune changes, `outputs_signature_hash()`, evaluator changes, `get_node_spec()` WASM function, `nodeSpecsById` in Zustand, BaseNode reads instance spec | Phase 1 (for toast on prune) |
-| **Phase 3: EXR Metadata + Dynamic Outputs** | `exr` crate dependency, `exr.rs` module, `parse_exr_metadata()`, `LoadImage::set_image_data()` EXR detection path, `spec()` dynamic outputs, `set_load_image_data()` WASM returns `NodeInterfaceChangeWasm` | Phase 2 |
-| **Phase 4: Auto-Prune + Toast** | `applyNodeInterfaceChange()` in store, edge removal for disappeared ports, toast messages per broken connection. End-to-end: upload EXR → see dynamic ports → swap file → see ports change + toast | Phase 3 |
-| **Phase 5: EXR Pixel Decode** | `decode_exr_layer()`, lazy decode in `evaluate()`, `decode_cache`, channel-to-RGBA mapping, primary layer selection, memory budget check. End-to-end: connect layer port to viewer → see decoded pass | Phase 3 |
+| **Phase 0: Mask Type Cleanup** ✅ | Delete `Value::Mask`, fix `types_compatible()` for Image↔Mask, simplify all match arms, add regression tests | Nothing |
+| **Phase 1: Toast System** ✅ | `ToastSlice`, `ToastHost` component, CSS vars, `pushToast()` wired up | Nothing — frontend only |
+| **Phase 2: Per-Instance Spec Plumbing** ✅ | `SpecProvider` trait, `graph.rs` connect/prune changes, `PrunedConnection` return, `InstanceAwareSpecProvider`, `Arc<NodeRegistry>` impl | Phase 1 |
+| **Phase 3: EXR Metadata + Dynamic Outputs** ✅ | `exr` crate dependency, `exr.rs` module with core types + `parse_exr_metadata()`, new `CascadeError` variants, 12 unit tests | Phase 2 |
+| **Phase 4+5: LoadImage EXR Integration + Pixel Decode** ✅ | LoadImage EXR detection via magic bytes, `ParsedImage` enum, dynamic `spec()` outputs per layer, lazy `decode_exr_layer()` with per-port cache, channel-to-RGBA mapping, `set_image_data()` returns removed ports | Phase 3 |
 | **Phase 6: LoadImageSequence** | EXR detection in sequence loader, interface from first frame, per-frame decode, missing-layer fallback | Phase 5 |
 | **Phase 7: SaveExr + Bytes ValueType** | `ValueType::Bytes`, `Value::Bytes`, `SaveExr` node, `encode_multilayer_exr()`, WASM blob export, download trigger | Phase 5 |
 
