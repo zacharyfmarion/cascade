@@ -144,4 +144,5 @@ export interface EngineBridge {
   migrateDocument?(jsonStr: string): string;
   needsMigration?(jsonStr: string): boolean;
   getNodeSpec?(nodeId: string): Promise<NodeSpec> | NodeSpec;
+  evaluateBytesOutput?(nodeId: string, portName: string): Promise<Uint8Array> | Uint8Array;
   }

@@ -2121,6 +2121,42 @@ impl Engine {
         serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+
+    /// Evaluate a node graph up to the given node+port and return raw bytes.
+    /// Used for SaveExr → browser download flow.
+    pub async fn evaluate_bytes_output(
+        &mut self,
+        node_id: &str,
+        port_name: &str,
+    ) -> Result<Vec<u8>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+
+        let cm = &self.color_management;
+        let eval_result = self
+            .evaluator
+            .evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                id,
+                port_name,
+                FrameTime { frame: 0 },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+                &self.ai_node_cache,
+            )
+            .await
+            .map_err(to_js_error)?;
+
+        match &eval_result.value {
+            Value::Bytes(b) => Ok(b.as_ref().clone()),
+            other => Err(to_js_error(CascadeError::ValueNotBytes {
+                got: format!("{:?}", other.value_type()),
+            })),
+        }
+    }
+
     pub fn validate_edits(&self, edits_json: &str) -> Result<JsValue, JsValue> {
         let edits: Vec<EditOp> = serde_json::from_str(edits_json)
             .map_err(|e| to_js_error(CascadeError::Other(format!("Invalid edits JSON: {e}"))))?;

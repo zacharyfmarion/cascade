@@ -1,6 +1,8 @@
 use cascade_core::color::ColorManagement;
 use cascade_core::node::{EvalContext, Node, NodeFuture};
 use cascade_core::types::*;
+use cascade_core::exr::encode_multilayer_exr;
+use std::sync::Arc;
 use rayon::prelude::*;
 use std::any::Any;
 use std::collections::HashMap;
@@ -166,6 +168,98 @@ impl Node for ExportImage {
             let image = ctx.get_input_image("image")?;
             let mut outputs = HashMap::new();
             outputs.insert("display".to_string(), Value::Image(image.clone()));
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+
+/// Encodes one or more image inputs into an in-memory EXR file.
+pub struct SaveExr;
+
+impl Default for SaveExr {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SaveExr {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for SaveExr {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "save_exr".to_string(),
+            display_name: "Save EXR".to_string(),
+            category: "Output".to_string(),
+            description: "Encode image layers into an EXR file".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "exr_bytes".to_string(),
+                label: "EXR Bytes".to_string(),
+                ty: ValueType::Bytes,
+                ..Default::default()
+            }],
+            params: vec![ParamSpec {
+                key: "compression".to_string(),
+                label: "Compression".to_string(),
+                ty: ValueType::Int,
+                default: ParamDefault::Int(0),
+                min: Some(0.0),
+                max: Some(4.0),
+                step: Some(1.0),
+                ui_hint: UiHint::Dropdown(vec![
+                    "PIZ".to_string(),
+                    "ZIP".to_string(),
+                    "ZIPS".to_string(),
+                    "RLE".to_string(),
+                    "None".to_string(),
+                ]),
+                promotable: false,
+            }],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let image = ctx.get_input_image("image")?;
+
+            // Map the dropdown index to a compression name.
+            let comp_idx = ctx.get_param_int("compression").unwrap_or(0);
+            let compression = match comp_idx {
+                0 => "PIZ",
+                1 => "ZIP",
+                2 => "ZIPS",
+                3 => "RLE",
+                4 => "None",
+                _ => "PIZ",
+            };
+
+            // Single-layer encode: the unnamed primary layer.
+            let layers: Vec<(&str, &Image)> = vec![("", image)];
+            let bytes = encode_multilayer_exr(&layers, compression)?;
+
+            let mut outputs = HashMap::new();
+            outputs.insert(
+                "exr_bytes".to_string(),
+                Value::Bytes(Arc::new(bytes)),
+            );
             Ok(outputs)
         })
     }
@@ -520,5 +614,45 @@ impl Node for ExportImageBatch {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_save_exr_spec() {
+        let node = SaveExr::new();
+        let spec = node.spec();
+
+        assert_eq!(spec.id, "save_exr");
+
+        let input = spec
+            .inputs
+            .iter()
+            .find(|port| port.name == "image")
+            .expect("save_exr input missing");
+        assert_eq!(input.ty, ValueType::Image);
+
+        let output = spec
+            .outputs
+            .iter()
+            .find(|port| port.name == "exr_bytes")
+            .expect("save_exr output missing");
+        assert_eq!(output.ty, ValueType::Bytes);
+
+        let compression = spec
+            .params
+            .iter()
+            .find(|param| param.key == "compression")
+            .expect("save_exr compression param missing");
+
+        match &compression.ui_hint {
+            UiHint::Dropdown(options) => {
+                assert!(!options.is_empty());
+            }
+            _ => panic!("compression param should use dropdown"),
+        }
     }
 }

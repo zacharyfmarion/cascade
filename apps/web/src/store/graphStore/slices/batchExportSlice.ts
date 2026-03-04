@@ -11,6 +11,7 @@ export interface BatchExportSliceState {
 
 export interface BatchExportSliceActions {
   exportImage: (nodeId: string) => void;
+  exportExr: (nodeId: string) => void;
   renderBatch: (nodeId: string) => Promise<void>;
   renderSequence: (nodeId: string) => Promise<void>;
   renderVideo: (nodeId: string) => Promise<void>;
@@ -53,6 +54,32 @@ export const createBatchExportSlice: StateCreator<
       console.error('exportImage failed:', e);
       set({ lastError: parseEngineError(e) });
     });
+  },
+
+  exportExr: async (nodeId) => {
+    const eng = getEngine();
+    if (!eng.evaluateBytesOutput) {
+      console.warn('evaluateBytesOutput not supported by engine');
+      return;
+    }
+    try {
+      const bytes = await Promise.resolve(eng.evaluateBytesOutput(nodeId, 'exr_bytes'));
+      const buffer = bytes.buffer instanceof ArrayBuffer
+        ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+        : Uint8Array.from(bytes).buffer;
+      const blob = new Blob([buffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'export.exr';
+      a.click();
+      URL.revokeObjectURL(url);
+      get().pushToast('success', 'EXR Exported', 'File download started');
+    } catch (e: unknown) {
+      console.error('exportExr failed:', e);
+      set({ lastError: parseEngineError(e) });
+      get().pushToast('error', 'EXR Export Failed', String(e));
+    }
   },
 
   renderBatch: async (nodeId) => {

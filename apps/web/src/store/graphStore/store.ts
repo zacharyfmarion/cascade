@@ -136,6 +136,7 @@ export interface GraphState {
   loadProject: (file: File) => void;
   loadProjectFromPath?: () => void;
   exportImage: (nodeId: string) => void;
+  exportExr: (nodeId: string) => void;
   setCurrentFrame: (frame: number) => void;
   setSequenceDirectory: (nodeId: string, directory: string) => Promise<void>;
   setSequenceFiles: (nodeId: string, files: File[]) => Promise<void>;

@@ -693,6 +693,12 @@ export class WasmEngine implements EngineBridge {
     });
   }
 
+  async evaluateBytesOutput(nodeId: string, portName: string): Promise<Uint8Array> {
+    return this.scheduler.enqueue(() =>
+      this.getEngine().evaluate_bytes_output(nodeId, portName) as unknown as Uint8Array
+    );
+  }
+
   validateEdits(editsJson: string): Promise<EditValidationError[]> {
     return this.scheduler.enqueue(() =>
       this.getEngine().validate_edits(editsJson) as EditValidationError[]

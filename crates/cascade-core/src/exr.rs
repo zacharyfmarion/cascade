@@ -375,13 +375,21 @@ fn find_primary_layer(layers: &[ExrLayerDescriptor]) -> Option<String> {
 
 /// Decode a specific EXR layer from raw bytes, returning an RGBA Image.
 /// Uses the layer's channel_set mapping to produce f32 RGBA pixel data.
-pub fn decode_exr_layer(bytes: &[u8], metadata: &ExrMetadata, port_name: &str) -> Result<Image, CascadeError> {
+pub fn decode_exr_layer(
+    bytes: &[u8],
+    metadata: &ExrMetadata,
+    port_name: &str,
+) -> Result<Image, CascadeError> {
     use exr::prelude::*;
 
     // Find the layer descriptor
-    let descriptor = metadata.layers.iter()
+    let descriptor = metadata
+        .layers
+        .iter()
         .find(|l| l.port_name == port_name)
-        .ok_or_else(|| CascadeError::ExrDecode(format!("Layer port '{}' not found in metadata", port_name)))?;
+        .ok_or_else(|| {
+            CascadeError::ExrDecode(format!("Layer port '{}' not found in metadata", port_name))
+        })?;
 
     // Read the full image with all layers and channels
     let exr_image = read()
@@ -394,15 +402,25 @@ pub fn decode_exr_layer(bytes: &[u8], metadata: &ExrMetadata, port_name: &str) -
         .map_err(|e| CascadeError::ExrDecode(e.to_string()))?;
 
     // Find matching layer in decoded data
-    let layer = exr_image.layer_data.iter().find(|l| {
-        let name = l.attributes.layer_name.as_ref()
-            .map(|n| n.to_string())
-            .unwrap_or_default();
-        // Match by original layer name
-        name == descriptor.layer_name
-    }).ok_or_else(|| CascadeError::ExrDecode(format!(
-        "Layer '{}' not found in EXR data", descriptor.layer_name
-    )))?;
+    let layer = exr_image
+        .layer_data
+        .iter()
+        .find(|l| {
+            let name = l
+                .attributes
+                .layer_name
+                .as_ref()
+                .map(|n| n.to_string())
+                .unwrap_or_default();
+            // Match by original layer name
+            name == descriptor.layer_name
+        })
+        .ok_or_else(|| {
+            CascadeError::ExrDecode(format!(
+                "Layer '{}' not found in EXR data",
+                descriptor.layer_name
+            ))
+        })?;
 
     let size = layer.size;
     let width = size.0 as u32;
@@ -425,16 +443,33 @@ pub fn decode_exr_layer(bytes: &[u8], metadata: &ExrMetadata, port_name: &str) -
 
     // Helper: find channel data as f32 values
     let get_channel_f32 = |name: &str| -> Option<Vec<f32>> {
-        channels.iter().find(|c| c.name.to_string() == name).map(|c| {
-            c.sample_data.values_as_f32().collect::<Vec<f32>>()
-        })
+        channels
+            .iter()
+            .find(|c| c.name.to_string() == name)
+            .map(|c| c.sample_data.values_as_f32().collect::<Vec<f32>>())
     };
 
     // Map channels to RGBA based on the channel set
-    let r_data = descriptor.channel_set.r.as_ref().and_then(|n| get_channel_f32(n));
-    let g_data = descriptor.channel_set.g.as_ref().and_then(|n| get_channel_f32(n));
-    let b_data = descriptor.channel_set.b.as_ref().and_then(|n| get_channel_f32(n));
-    let a_data = descriptor.channel_set.a.as_ref().and_then(|n| get_channel_f32(n));
+    let r_data = descriptor
+        .channel_set
+        .r
+        .as_ref()
+        .and_then(|n| get_channel_f32(n));
+    let g_data = descriptor
+        .channel_set
+        .g
+        .as_ref()
+        .and_then(|n| get_channel_f32(n));
+    let b_data = descriptor
+        .channel_set
+        .b
+        .as_ref()
+        .and_then(|n| get_channel_f32(n));
+    let a_data = descriptor
+        .channel_set
+        .a
+        .as_ref()
+        .and_then(|n| get_channel_f32(n));
 
     match descriptor.kind {
         ExrLayerKind::Rgba => {
@@ -448,12 +483,16 @@ pub fn decode_exr_layer(bytes: &[u8], metadata: &ExrMetadata, port_name: &str) -
         }
         ExrLayerKind::Mask => {
             // Single-channel layer: replicate to RGB, A=1.0
-            let ch_data = r_data.as_ref()
+            let ch_data = r_data
+                .as_ref()
                 .or(g_data.as_ref())
                 .or(b_data.as_ref())
-                .ok_or_else(|| CascadeError::ExrDecode(format!(
-                    "No channel data found for mask layer '{}'", descriptor.layer_name
-                )))?;
+                .ok_or_else(|| {
+                    CascadeError::ExrDecode(format!(
+                        "No channel data found for mask layer '{}'",
+                        descriptor.layer_name
+                    ))
+                })?;
             for i in 0..pixel_count {
                 let v = ch_data[i];
                 data[i * 4] = v;
@@ -468,12 +507,144 @@ pub fn decode_exr_layer(bytes: &[u8], metadata: &ExrMetadata, port_name: &str) -
 }
 
 // ---------------------------------------------------------------------------
+// Encoding
+// ---------------------------------------------------------------------------
+
+/// Map a user-facing compression name to the `exr` crate's `Compression` enum.
+fn parse_compression(name: &str) -> exr::compression::Compression {
+    match name.to_ascii_uppercase().as_str() {
+        "PIZ" => exr::compression::Compression::PIZ,
+        "ZIP" => exr::compression::Compression::ZIP16,
+        "ZIPS" => exr::compression::Compression::ZIP1,
+        "RLE" => exr::compression::Compression::RLE,
+        "NONE" => exr::compression::Compression::Uncompressed,
+        _ => exr::compression::Compression::ZIP16, // safe default
+    }
+}
+
+/// Encode one or more named layers into an in-memory EXR file.
+///
+/// Each entry in `layers` is `(layer_name, image)`.  An empty layer name
+/// becomes the unnamed primary layer.  All images are written as RGBA f32.
+///
+/// Returns the raw EXR bytes suitable for writing to disk or sending to the
+/// frontend as `Value::Bytes`.
+pub fn encode_multilayer_exr(
+    layers: &[(&str, &Image)],
+    compression: &str,
+) -> Result<Vec<u8>, CascadeError> {
+    use exr::prelude::*;
+    use smallvec::SmallVec;
+
+    if layers.is_empty() {
+        return Err(CascadeError::Other("No layers to encode".to_string()));
+    }
+
+    let comp = parse_compression(compression);
+
+    // Build each layer using AnyChannels<FlatSamples> for uniform typing.
+    let mut exr_layers: SmallVec<[Layer<AnyChannels<FlatSamples>>; 2]> = SmallVec::new();
+
+    let is_multilayer = layers.len() > 1;
+    for &(name, image) in layers {
+        let w = image.width as usize;
+        let h = image.height as usize;
+        let pixel_count = w * h;
+        let data = &*image.data;
+
+        // Deinterleave interleaved RGBA → planar per-channel vecs.
+        let mut r_data = vec![0.0f32; pixel_count];
+        let mut g_data = vec![0.0f32; pixel_count];
+        let mut b_data = vec![0.0f32; pixel_count];
+        let mut a_data = vec![0.0f32; pixel_count];
+
+        for i in 0..pixel_count {
+            r_data[i] = data[i * 4];
+            g_data[i] = data[i * 4 + 1];
+            b_data[i] = data[i * 4 + 2];
+            a_data[i] = data[i * 4 + 3];
+        }
+
+        let mut channels = SmallVec::<[AnyChannel<FlatSamples>; 4]>::new();
+        for (ch_name, ch_data, quantize) in [
+            ("A", a_data, true),
+            ("B", b_data, false),
+            ("G", g_data, false),
+            ("R", r_data, false),
+        ] {
+            channels.push(AnyChannel {
+                name: Text::from(ch_name),
+                sample_data: FlatSamples::F32(ch_data),
+                quantize_linearly: quantize,
+                sampling: Vec2(1, 1),
+            });
+        }
+
+        let effective_name = if name.is_empty() && is_multilayer {
+            "image"
+        } else {
+            name
+        };
+        let layer_name = if effective_name.is_empty() {
+            None
+        } else {
+            Some(Text::from(effective_name))
+        };
+
+        let base_attributes = if effective_name.is_empty() {
+            LayerAttributes::default()
+        } else {
+            LayerAttributes::named(Text::from(effective_name))
+        };
+        let layer = Layer {
+            channel_data: AnyChannels { list: channels },
+            attributes: LayerAttributes {
+                layer_name,
+                ..base_attributes
+            },
+            size: Vec2(w, h),
+            encoding: Encoding {
+                compression: comp,
+                blocks: Blocks::ScanLines,
+                line_order: LineOrder::Increasing,
+            },
+        };
+        exr_layers.push(layer);
+    }
+
+    // Determine the display window from the first (primary) layer.
+    let first_size = exr_layers[0].size;
+    let display_window = IntegerBounds {
+        position: Vec2(0, 0),
+        size: first_size,
+    };
+
+    // Write to an in-memory buffer.
+    let mut buf: Vec<u8> = Vec::new();
+    let image = Image {
+        attributes: ImageAttributes::new(display_window),
+        layer_data: exr_layers,
+    };
+    image
+        .write()
+        .to_buffered(std::io::Cursor::new(&mut buf))
+        .map_err(|e| CascadeError::Other(format!("EXR encode failed: {e}")))?;
+
+    Ok(buf)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+
+    fn make_test_image(width: u32, height: u32, data: Vec<f32>) -> Result<Image, CascadeError> {
+        Image::from_f32_data(width, height, data)
+    }
 
     #[test]
     fn test_is_exr_magic_bytes() {
@@ -655,5 +826,92 @@ mod tests {
             raw_channel_names: vec!["R".into(), "G".into(), "B".into(), "A".into()],
         }];
         assert_eq!(find_primary_layer(&layers), Some("combined".into()));
+    }
+
+    #[test]
+    fn test_encode_single_layer() -> Result<(), CascadeError> {
+        let data = vec![0.0f32; 4 * 4 * 4];
+        let image = make_test_image(4, 4, data)?;
+        let layers: Vec<(&str, &Image)> = vec![("", &image)];
+        let bytes = encode_multilayer_exr(&layers, "PIZ")?;
+        assert!(is_exr(&bytes));
+        assert!(!bytes.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_decode_round_trip() -> Result<(), CascadeError> {
+        let mut data = Vec::with_capacity(4 * 4 * 4);
+        for y in 0..4 {
+            for x in 0..4 {
+                let base = (y * 4 + x) as f32 * 0.01;
+                data.extend([base, base + 0.1, base + 0.2, base + 0.3]);
+            }
+        }
+        let image = make_test_image(4, 4, data.clone())?;
+        let layers: Vec<(&str, &Image)> = vec![("", &image)];
+        let bytes = encode_multilayer_exr(&layers, "PIZ")?;
+        let metadata = parse_exr_metadata(&bytes)?;
+        let decoded = decode_exr_layer(&bytes, &metadata, "image")?;
+        assert_eq!(decoded.width, image.width);
+        assert_eq!(decoded.height, image.height);
+        let decoded_data = decoded.data.as_ref();
+        for (decoded_value, original_value) in decoded_data.iter().zip(data.iter()) {
+            assert!((decoded_value - original_value).abs() < 0.001);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_multilayer() -> Result<(), CascadeError> {
+        let image_a = make_test_image(4, 4, vec![0.25; 4 * 4 * 4])?;
+        let image_b = make_test_image(4, 4, vec![0.75; 4 * 4 * 4])?;
+        let layers: Vec<(&str, &Image)> = vec![("", &image_a), ("mask", &image_b)];
+        let bytes = encode_multilayer_exr(&layers, "ZIP")?;
+        assert!(is_exr(&bytes));
+        let metadata = parse_exr_metadata(&bytes)?;
+        assert_eq!(metadata.layers.len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_empty_layers_error() {
+        let result = encode_multilayer_exr(&[], "PIZ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_compression() -> Result<(), CascadeError> {
+        use exr::prelude::{read, ReadChannels, ReadLayers};
+
+        let image = make_test_image(4, 4, vec![0.5; 4 * 4 * 4])?;
+        let layers: Vec<(&str, &Image)> = vec![("", &image)];
+
+        let cases = [
+            ("PIZ", exr::compression::Compression::PIZ),
+            ("ZIP", exr::compression::Compression::ZIP16),
+            ("ZIPS", exr::compression::Compression::ZIP1),
+            ("RLE", exr::compression::Compression::RLE),
+            ("None", exr::compression::Compression::Uncompressed),
+        ];
+
+        for (name, expected) in cases {
+            let bytes = encode_multilayer_exr(&layers, name)?;
+            let exr_image = read()
+                .no_deep_data()
+                .largest_resolution_level()
+                .all_channels()
+                .all_layers()
+                .all_attributes()
+                .from_buffered(Cursor::new(&bytes))
+                .map_err(|e| CascadeError::Other(format!("Failed to read EXR data: {e}")))?;
+            let layer = exr_image
+                .layer_data
+                .first()
+                .ok_or_else(|| CascadeError::Other("Missing EXR layer".to_string()))?;
+            assert_eq!(layer.encoding.compression, expected);
+        }
+
+        Ok(())
     }
 }

@@ -51,6 +51,16 @@ export function AboutModal() {
         onClick={e => e.stopPropagation()}
         onKeyDown={e => e.stopPropagation()}
       >
+        <img
+          src="/favicon.png"
+          alt="Cascade icon"
+          style={{
+            width: 64,
+            height: 64,
+            marginBottom: '12px',
+            borderRadius: '12px',
+          }}
+        />
         <div
           style={{
             fontSize: '1.2rem',

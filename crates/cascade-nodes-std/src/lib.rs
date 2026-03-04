@@ -46,7 +46,7 @@ pub use matte::{
     ChromaKey, CombineRgba, CopyChannels, DifferenceMatte, EdgeBlur, ExtractChannel, LuminanceKey,
     MatteExpand, MatteShrink, Premultiply, SeparateRgba, SetAlpha, Unpremultiply,
 };
-pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, Viewer};
+pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, SaveExr, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use time_ops::{FrameBlend, FrameHold, TimeOffset};
@@ -172,6 +172,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("export_video", || Arc::new(ExportVideo::new()));
 
     registry.register("export_image_batch", || Arc::new(ExportImageBatch::new()));
+    registry.register("save_exr", || Arc::new(SaveExr::new()));
     registry.register("gpu_script", || {
         Arc::new(GpuScriptDraftNode::new("gpu_script"))
     });
