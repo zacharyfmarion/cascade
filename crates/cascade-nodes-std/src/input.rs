@@ -292,13 +292,77 @@ impl Node for LoadImage {
     }
 }
 
+/// Shared decoder for standard raster images (PNG, JPEG, BMP, WebP).
+/// Converts to f32 RGBA linear.
+fn decode_standard_image(bytes: &[u8]) -> Result<Image, CascadeError> {
+    let decoded = image::load_from_memory(bytes)
+        .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+        return Err(CascadeError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+    }
+    let raw = rgba.as_raw();
+    let lut = srgb_to_linear_lut();
+    let pixel_count = (width as usize) * (height as usize);
+    let mut data = vec![0.0f32; pixel_count * 4];
+    data.par_chunks_exact_mut(4).enumerate().for_each(|(i, out)| {
+        let idx = i * 4;
+        out[0] = lut[raw[idx] as usize];
+        out[1] = lut[raw[idx + 1] as usize];
+        out[2] = lut[raw[idx + 2] as usize];
+        out[3] = raw[idx + 3] as f32 / 255.0;
+    });
+    Image::from_f32_data(width, height, data)
+}
+
 const FRAME_CACHE_SIZE: usize = 32;
 
 pub struct LoadImageSequence {
     directory: Mutex<Option<String>>,
-    frame_cache: Mutex<FrameCache>,
+    frame_cache: Mutex<SeqFrameCache>,
+    /// EXR metadata from the first frame (sets the interface for all frames)
+    exr_metadata: Mutex<Option<ExrMetadata>>,
 }
 
+/// Cache that stores per-frame, per-port images for sequences.
+struct SeqFrameCache {
+    /// (frame_number, port_outputs) entries, LRU-ish eviction.
+    entries: Vec<(u64, HashMap<String, Image>)>,
+    max_size: usize,
+}
+
+impl SeqFrameCache {
+    fn new(max_size: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(max_size),
+            max_size,
+        }
+    }
+
+    fn get(&self, frame: u64) -> Option<&HashMap<String, Image>> {
+        self.entries
+            .iter()
+            .find(|(f, _)| *f == frame)
+            .map(|(_, outputs)| outputs)
+    }
+
+    fn insert(&mut self, frame: u64, outputs: HashMap<String, Image>) {
+        if self.entries.iter().any(|(f, _)| *f == frame) {
+            return;
+        }
+        if self.entries.len() >= self.max_size {
+            self.entries.remove(0);
+        }
+        self.entries.push((frame, outputs));
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+/// Simple single-image-per-frame cache used by LoadVideo and LoadImageBatch.
 struct FrameCache {
     entries: Vec<(u64, Image)>,
     max_size: usize,
@@ -313,10 +377,7 @@ impl FrameCache {
     }
 
     fn get(&self, frame: u64) -> Option<&Image> {
-        self.entries
-            .iter()
-            .find(|(f, _)| *f == frame)
-            .map(|(_, img)| img)
+        self.entries.iter().find(|(f, _)| *f == frame).map(|(_, img)| img)
     }
 
     fn insert(&mut self, frame: u64, image: Image) {
@@ -344,7 +405,8 @@ impl LoadImageSequence {
     pub fn new() -> Self {
         Self {
             directory: Mutex::new(None),
-            frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
+            frame_cache: Mutex::new(SeqFrameCache::new(FRAME_CACHE_SIZE)),
+            exr_metadata: Mutex::new(None),
         }
     }
 
@@ -358,36 +420,18 @@ impl LoadImageSequence {
     }
 
     pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<(), CascadeError> {
-        let decoded =
-            image::load_from_memory(bytes).map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
-        let rgba = decoded.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-            return Err(CascadeError::ImageTooLarge {
-                width,
-                height,
-                max: MAX_IMAGE_DIM,
-            });
-        }
-        let raw = rgba.as_raw();
-        let lut = srgb_to_linear_lut();
-        let pixel_count = (width as usize) * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                out[0] = lut[raw[idx] as usize];
-                out[1] = lut[raw[idx + 1] as usize];
-                out[2] = lut[raw[idx + 2] as usize];
-                out[3] = raw[idx + 3] as f32 / 255.0;
-            });
-        let image = Image::from_f32_data(width, height, data)?;
-        let mut cache = self
-            .frame_cache
-            .lock()
+        let outputs = if exr::is_exr(bytes) {
+            self.decode_frame_exr(bytes)?
+        } else {
+            let image = decode_standard_image(bytes)?;
+            let mut map = HashMap::new();
+            map.insert("image".to_string(), image);
+            map
+        };
+
+        let mut cache = self.frame_cache.lock()
             .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
-        cache.insert(frame, image);
+        cache.insert(frame, outputs);
         Ok(())
     }
 
@@ -455,7 +499,8 @@ impl LoadImageSequence {
         })
     }
 
-    fn load_frame(&self, dir: &str, pattern: &str, frame: u64) -> Result<Image, CascadeError> {
+    /// Load a single frame from disk. Detects EXR and returns all layer outputs.
+    fn load_frame(&self, dir: &str, pattern: &str, frame: u64) -> Result<HashMap<String, Image>, CascadeError> {
         let padding = parse_frame_padding(pattern);
         let normalized = normalize_pattern(pattern);
         let filename = normalized.replace("{frame}", &format_frame_number(frame, padding));
@@ -463,41 +508,94 @@ impl LoadImageSequence {
         let bytes = std::fs::read(&path).map_err(|e| {
             CascadeError::Other(format!("Failed to read frame {}: {}", path.display(), e))
         })?;
-        let decoded = image::load_from_memory(&bytes)
-            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
-        let rgba = decoded.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        let raw = rgba.as_raw();
-        let lut = srgb_to_linear_lut();
-        let pixel_count = (width as usize) * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                out[0] = lut[raw[idx] as usize];
-                out[1] = lut[raw[idx + 1] as usize];
-                out[2] = lut[raw[idx + 2] as usize];
-                out[3] = raw[idx + 3] as f32 / 255.0;
-            });
-        Image::from_f32_data(width, height, data)
+
+        if exr::is_exr(&bytes) {
+            self.decode_frame_exr(&bytes)
+        } else {
+            let image = decode_standard_image(&bytes)?;
+            let mut map = HashMap::new();
+            map.insert("image".to_string(), image);
+            Ok(map)
+        }
+    }
+
+    /// Decode an EXR frame, returning outputs per layer port.
+    /// On first EXR frame, captures metadata for dynamic output ports.
+    fn decode_frame_exr(&self, bytes: &[u8]) -> Result<HashMap<String, Image>, CascadeError> {
+        let metadata = exr::parse_exr_metadata(bytes)?;
+
+        // Capture metadata from first EXR frame for interface stability
+        {
+            let mut meta_guard = self.exr_metadata.lock()
+                .map_err(|_| CascadeError::Other("EXR metadata mutex poisoned".into()))?;
+            if meta_guard.is_none() {
+                *meta_guard = Some(metadata.clone());
+            }
+        }
+
+        let mut outputs = HashMap::new();
+
+        // Decode primary layer
+        if let Some(ref primary_port) = metadata.primary_layer_port {
+            let img = exr::decode_exr_layer(bytes, &metadata, primary_port)?;
+            outputs.insert("image".to_string(), img);
+        }
+
+        // Decode non-primary layers
+        for layer in &metadata.layers {
+            if Some(&layer.port_name) == metadata.primary_layer_port.as_ref() {
+                continue;
+            }
+            match exr::decode_exr_layer(bytes, &metadata, &layer.port_name) {
+                Ok(img) => { outputs.insert(layer.port_name.clone(), img); }
+                Err(_) => {
+                    // Missing layer in this frame — output black image
+                    let black = Image::new(metadata.primary_width, metadata.primary_height);
+                    outputs.insert(layer.port_name.clone(), black);
+                }
+            }
+        }
+
+        Ok(outputs)
     }
 }
 
 impl Node for LoadImageSequence {
     fn spec(&self) -> NodeSpec {
+        let mut outputs = vec![PortSpec {
+            name: "image".to_string(),
+            label: "Image".to_string(),
+            ty: ValueType::Image,
+            ..Default::default()
+        }];
+
+        // Add dynamic output ports from first EXR frame's metadata
+        if let Ok(guard) = self.exr_metadata.lock() {
+            if let Some(ref metadata) = *guard {
+                for layer in &metadata.layers {
+                    if Some(&layer.port_name) == metadata.primary_layer_port.as_ref() {
+                        continue;
+                    }
+                    outputs.push(PortSpec {
+                        name: layer.port_name.clone(),
+                        label: layer.label.clone(),
+                        ty: match layer.kind {
+                            ExrLayerKind::Rgba => ValueType::Image,
+                            ExrLayerKind::Mask => ValueType::Mask,
+                        },
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+
         NodeSpec {
             id: "load_image_sequence".to_string(),
             display_name: "Load Image Sequence".to_string(),
             category: "Input".to_string(),
             description: "Load an image sequence from a directory".to_string(),
             inputs: vec![],
-            outputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
-                ..Default::default()
-            }],
+            outputs,
             params: vec![
                 ParamSpec {
                     key: "directory".to_string(),
@@ -529,20 +627,19 @@ impl Node for LoadImageSequence {
         Box::pin(async move {
             let frame = ctx.frame_time.frame;
 
-            let mut cache = self
-                .frame_cache
-                .lock()
+            let mut cache = self.frame_cache.lock()
                 .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
 
-            if let Some(image) = cache.get(frame) {
+            // Check cache
+            if let Some(frame_outputs) = cache.get(frame) {
                 let mut outputs = HashMap::new();
-                outputs.insert("image".to_string(), Value::Image(image.clone()));
+                for (port, img) in frame_outputs {
+                    outputs.insert(port.clone(), Value::Image(img.clone()));
+                }
                 return Ok(outputs);
             }
 
-            let dir_guard = self
-                .directory
-                .lock()
+            let dir_guard = self.directory.lock()
                 .map_err(|_| CascadeError::Other("Directory mutex poisoned".to_string()))?;
 
             let dir = match dir_guard.as_ref() {
@@ -567,11 +664,13 @@ impl Node for LoadImageSequence {
                 pattern_param
             };
 
-            let image = self.load_frame(&dir, pattern, frame)?;
-            cache.insert(frame, image.clone());
-
+            let frame_images = self.load_frame(&dir, pattern, frame)?;
             let mut outputs = HashMap::new();
-            outputs.insert("image".to_string(), Value::Image(image));
+            for (port, img) in &frame_images {
+                outputs.insert(port.clone(), Value::Image(img.clone()));
+            }
+            cache.insert(frame, frame_images);
+
             Ok(outputs)
         })
     }
