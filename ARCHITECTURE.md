@@ -160,7 +160,7 @@ Three-column layout: NodeLibrary (240px) | NodeCanvas (flex) | Inspector + Viewe
 - `connections: Connection[]` — with client-generated UUIDs
 - `renderResults: Map<string, RenderResult>` — cached viewer outputs
 - `triggerAffectedViewers(changedNodeIds)`: selective re-render after mutations (falls back to `triggerAllViewers()`)
-- Dev mode: `window.__compositorStore` exposed for Playwright testing
+- Dev mode: `window.__cascadeStore` exposed for Playwright testing
 
 ### Type System (types.ts)
 - TypeScript types mirror Rust types exactly: NodeSpec, ParamSpec, ParamValue, etc.

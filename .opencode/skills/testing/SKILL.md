@@ -139,7 +139,7 @@ End-to-end tests that run against the real WASM engine in a browser. These verif
 
 ### Test harness
 
-The test harness (`apps/web/src/testing/testHarness.ts`) is installed on `window.__compositorTest` and provides programmatic access to store actions without UI interaction:
+The test harness (`apps/web/src/testing/testHarness.ts`) is installed on `window.__cascadeTest` and provides programmatic access to store actions without UI interaction:
 
 ```typescript
 // In a Playwright test:

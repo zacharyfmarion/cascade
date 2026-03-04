@@ -29,7 +29,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPORT_DIR="$PROJECT_ROOT/target/criterion"
-BENCH_PACKAGE="compositor-nodes-std"
+BENCH_PACKAGE="cascade-nodes-std"
 
 # Optional filter: only run benchmarks matching this pattern
 BENCH_FILTER="${BENCH_FILTER:-}"
