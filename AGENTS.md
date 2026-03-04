@@ -40,7 +40,7 @@ apps/
 
 ### Frontend (TypeScript/React)
 
-- **State management**: Single Zustand store (`graphStore.ts`) is the source of truth. All mutations sync to the engine first, then update local state.
+- **State management**: Single Zustand store composed from 12 slice files in `store/graphStore/slices/`. `store.ts` is a thin composition shell — new actions go in slice files, not `store.ts` (enforced by ESLint `max-lines`). Shared mutable state (engine, render lock, undo stacks) lives in `kernel.ts`. All mutations sync to the engine first, then update local state.
 - **Engine bridge**: `EngineBridge` interface abstracts over WASM and Tauri backends. `WasmEngine` is synchronous, `TauriEngine` is async IPC.
 - **Theming**: All colors use CSS custom properties defined in `src/styles/theme.css`. An ESLint rule (`no-hardcoded-colors`) enforces this — never use raw hex/rgb values in components.
 - **Node components**: Custom React Flow nodes live in `src/components/nodes/`. `BaseNode` is the shared wrapper. UI controls are driven by `NodeSpec` metadata from Rust.

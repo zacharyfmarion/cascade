@@ -98,15 +98,25 @@ Items that prevent the app from degrading under real workloads. These unlock 4K 
 
 Items that make the frontend testable, maintainable, and performant. Can run in parallel with Phase 2.
 
-### 3.1 Split the monolithic store
-Break `graphStore.ts` (~2,800 lines) into focused stores:
-- [ ] `graphStructureStore` — nodes, connections, positions, selections
-- [ ] `renderStore` — renderResults, nodeTimings, render lock/suspend state
-- [ ] `playbackStore` — currentFrame, fps, loopMode, playback state
-- [ ] `undoStore` — undo/redo stacks, snapshot capture/restore
-- [ ] Keep `settingsStore`, `themeStore`, `layoutStore` as-is (already well-scoped)
-- [ ] Move module-scope render control variables (`renderLock`, `renderSuspendCount`, `preCommitSnapshot`) into Zustand state so they're visible in DevTools and captured in undo
-
+### 3.1 Split the monolithic store ✅
+Broke `graphStore.ts` (~2,900 lines) into 12 focused Zustand slices composed via `StateCreator` spread:
+- [x] Extract shared mutable state into `kernel.ts` (engine, renderLock, undoStack, etc.)
+- [x] `framesSlice` — frame CRUD, playback controls
+- [x] `selectionSlice` — node/frame selection
+- [x] `batchExportSlice` — batch/sequence export rendering
+- [x] `sequenceVideoSlice` — sequence/video state management
+- [x] `projectSlice` — new/save/load project
+- [x] `assetsSlice` — image/palette file loading
+- [x] `colorSlice` — OCIO color management
+- [x] `aiSlice` — AI node configuration and execution
+- [x] `graphSlice` — graph CRUD, groups, node management
+- [x] `undoSlice` — undo/redo stacks, snapshot capture/restore
+- [x] `renderSlice` — render pipeline, editTransaction, viewer invalidation
+- [x] `liveParamsSlice` — live parameter editing with RAF coalescing
+- [x] `store.ts` reduced to 252-line composition shell (`initEngine` + slice spreads)
+- [x] ESLint `max-lines` rule (300 lines) on `store.ts` to prevent regression
+- [x] Public surface test snapshots all store keys against an allowlist
+- [x] 365 tests passing, zero consumer file changes across all 44 importing files
 ### 3.2 Fix live parameter race conditions
 - [ ] Await `exportGraph()` in `setParamLive()` before storing the snapshot, or use a synchronous snapshot mechanism
 - [ ] Add a gesture lock to prevent overlapping `setParamLive`/`setParamCommit` sequences
@@ -225,3 +235,4 @@ These are engineering guardrails that apply at all times, regardless of what pha
 - **No empty catch blocks** in frontend code — every catch must log, set error state, or re-throw
 - **No `unwrap_or(JsValue::NULL)`** in WASM bridge code — errors must propagate to JS
 - **No returning `null` to signal errors** from EngineBridge methods — throw `EngineError` instead
+- **No adding logic directly to `store.ts`** — it's a composition shell; new actions go in slice files (enforced by ESLint `max-lines` rule)
