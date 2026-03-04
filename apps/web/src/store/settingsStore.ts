@@ -59,7 +59,7 @@ interface SettingsState {
   setProjectFormat: (width: number, height: number) => void;
 }
 
-const STORAGE_KEY = 'compositor-settings';
+const STORAGE_KEY = 'cascade-settings';
 
 const DEFAULT_SETTINGS = {
   snapToGrid: true,

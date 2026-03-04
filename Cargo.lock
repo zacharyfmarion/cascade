@@ -384,6 +384,148 @@ dependencies = [
 ]
 
 [[package]]
+name = "cascade-core"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "cascade-nodes-std",
+ "glam",
+ "half",
+ "image",
+ "pollster",
+ "rayon",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "thiserror 2.0.18",
+ "uuid",
+ "web-time",
+]
+
+[[package]]
+name = "cascade-gpu"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "bytemuck",
+ "cascade-core",
+ "flume",
+ "half",
+ "naga",
+ "pollster",
+ "serde",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "cascade-nodes-std"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "base64 0.22.1",
+ "cascade-core",
+ "criterion",
+ "half",
+ "image",
+ "pollster",
+ "rayon",
+ "regex",
+ "serde",
+]
+
+[[package]]
+name = "cascade-ocio"
+version = "0.1.0"
+dependencies = [
+ "cascade-core",
+ "cascade-ocio-sys",
+ "rayon",
+]
+
+[[package]]
+name = "cascade-ocio-sys"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
+name = "cascade-runtime"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cascade-core",
+ "cascade-gpu",
+ "cascade-nodes-std",
+ "cascade-ocio",
+ "cascade-video",
+ "clap",
+ "half",
+ "image",
+ "pollster",
+ "rayon",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "uuid",
+]
+
+[[package]]
+name = "cascade-tauri"
+version = "0.1.0"
+dependencies = [
+ "cascade-runtime",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "cascade-video"
+version = "0.1.0"
+dependencies = [
+ "block2",
+ "objc2",
+ "objc2-av-foundation",
+ "objc2-core-foundation",
+ "objc2-core-media",
+ "objc2-core-video",
+ "objc2-foundation",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "cascade-wasm"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "cascade-core",
+ "cascade-gpu",
+ "cascade-nodes-std",
+ "cascade-runtime",
+ "console_error_panic_hook",
+ "getrandom 0.3.4",
+ "image",
+ "js-sys",
+ "pollster",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "slotmap",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -541,148 +683,6 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
-]
-
-[[package]]
-name = "compositor-core"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "compositor-nodes-std",
- "glam",
- "half",
- "image",
- "pollster",
- "rayon",
- "serde",
- "serde_json",
- "slotmap",
- "smallvec",
- "thiserror 2.0.18",
- "uuid",
- "web-time",
-]
-
-[[package]]
-name = "compositor-gpu"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "bytemuck",
- "compositor-core",
- "flume",
- "half",
- "naga",
- "pollster",
- "serde",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
-name = "compositor-nodes-std"
-version = "0.1.0"
-dependencies = [
- "ab_glyph",
- "base64 0.22.1",
- "compositor-core",
- "criterion",
- "half",
- "image",
- "pollster",
- "rayon",
- "regex",
- "serde",
-]
-
-[[package]]
-name = "compositor-ocio"
-version = "0.1.0"
-dependencies = [
- "compositor-core",
- "compositor-ocio-sys",
- "rayon",
-]
-
-[[package]]
-name = "compositor-ocio-sys"
-version = "0.1.0"
-dependencies = [
- "cc",
- "pkg-config",
-]
-
-[[package]]
-name = "compositor-runtime"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "clap",
- "compositor-core",
- "compositor-gpu",
- "compositor-nodes-std",
- "compositor-ocio",
- "compositor-video",
- "half",
- "image",
- "pollster",
- "rayon",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "slotmap",
- "uuid",
-]
-
-[[package]]
-name = "compositor-tauri"
-version = "0.1.0"
-dependencies = [
- "compositor-runtime",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
-]
-
-[[package]]
-name = "compositor-video"
-version = "0.1.0"
-dependencies = [
- "block2",
- "objc2",
- "objc2-av-foundation",
- "objc2-core-foundation",
- "objc2-core-media",
- "objc2-core-video",
- "objc2-foundation",
- "rayon",
- "serde",
-]
-
-[[package]]
-name = "compositor-wasm"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "compositor-core",
- "compositor-gpu",
- "compositor-nodes-std",
- "compositor-runtime",
- "console_error_panic_hook",
- "getrandom 0.3.4",
- "image",
- "js-sys",
- "pollster",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "slotmap",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
 ]
 
 [[package]]

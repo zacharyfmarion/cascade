@@ -1,6 +1,6 @@
 # Error Handling Plan
 
-Comprehensive strategy for error handling across the compositor stack: Rust core → WASM/Tauri bridge → React frontend → user-facing UI.
+Comprehensive strategy for error handling across the Cascade stack: Rust core → WASM/Tauri bridge → React frontend → user-facing UI.
 
 Based on the [architecture review](./architecture-review-2-22-26.md) and error flow audit (Feb 23 2026).
 
@@ -58,14 +58,14 @@ Infrastructure for error display exists (`lastError` state + Viewer.tsx red bar)
 
 ### 2.1 Rust: Wrap evaluation errors with node context
 
-The evaluator should wrap `CompositorError` with the node that caused it:
+The evaluator should wrap `CascadeError` with the node that caused it:
 
 ```rust
-// In compositor-core/src/eval.rs, around the evaluate() call
+// In cascade-core/src/eval.rs, around the evaluate() call
 struct EvalError {
     node_id: NodeId,
     node_type: String,
-    source: CompositorError,
+    source: CascadeError,
 }
 ```
 
@@ -180,12 +180,12 @@ When node A fails and downstream nodes B, C, D also fail:
 
 ## 4. Enforcement Strategy
 
-### 4.1 Rust: Clippy lints for compositor-wasm
+### 4.1 Rust: Clippy lints for cascade-wasm
 
-Add to `crates/compositor-wasm/Cargo.toml` or a crate-level attribute:
+Add to `crates/cascade-wasm/Cargo.toml` or a crate-level attribute:
 
 ```rust
-// In crates/compositor-wasm/src/lib.rs (top of file)
+// In crates/cascade-wasm/src/lib.rs (top of file)
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::panic)]
@@ -193,7 +193,7 @@ Add to `crates/compositor-wasm/Cargo.toml` or a crate-level attribute:
 
 This makes it a compile error to use `unwrap()`, `expect()`, or `panic!()` in the WASM bridge. Tests are exempt (`#[cfg(test)]` modules can `#[allow(...)]`).
 
-Consider expanding to all library crates over time (compositor-core, compositor-nodes-std, compositor-gpu).
+Consider expanding to all library crates over time (cascade-core, cascade-nodes-std, cascade-gpu).
 
 ### 4.2 TypeScript: ESLint rules
 
@@ -220,7 +220,7 @@ Add a CI step that greps for known swallowing patterns:
 - name: Check for error swallowing patterns
   run: |
     # WASM bridge: no unwrap_or(JsValue::NULL) except explicitly annotated
-    ! grep -n 'unwrap_or(JsValue::NULL)' crates/compositor-wasm/src/lib.rs || exit 1
+    ! grep -n 'unwrap_or(JsValue::NULL)' crates/cascade-wasm/src/lib.rs || exit 1
     
     # WASM bridge: no bare .expect() or .unwrap() in non-test code
     # (Clippy deny handles this, but belt-and-suspenders)
@@ -245,7 +245,7 @@ Add to the AGENTS.md file (see section 6 for exact text):
 
 The smallest change that makes errors visible to users. No new types, no per-node attribution yet.
 
-1. **WASM bridge** (`crates/compositor-wasm/src/lib.rs`):
+1. **WASM bridge** (`crates/cascade-wasm/src/lib.rs`):
    - Replace all 7 `unwrap_or(JsValue::NULL)` with `.map_err(to_js_error)?`
    - Replace 2 `.expect()` calls with `.map_err(to_js_error)?`
    - All functions already return `Result<_, JsValue>`, so this is mostly mechanical
@@ -275,7 +275,7 @@ Add proper typing and the EngineError contract.
 
 Add node context to errors so the UI can show which node failed.
 
-1. **Add `EvalError` wrapper** in `compositor-core/src/eval.rs` that captures `(node_id, node_type, source)`
+1. **Add `EvalError` wrapper** in `cascade-core/src/eval.rs` that captures `(node_id, node_type, source)`
 2. **Serialize node info** through the WASM bridge as part of `EngineErrorDto`
 3. **Add `nodeErrors: Record<NodeId, EngineError>` to store**
 4. **Add error badge component** to `BaseNode` — shows red indicator when `nodeErrors[nodeId]` exists
@@ -284,7 +284,7 @@ Add node context to errors so the UI can show which node failed.
 
 ### Phase D: Enforcement (1 day, can run in parallel)
 
-1. **Add Clippy denies** to compositor-wasm crate
+1. **Add Clippy denies** to cascade-wasm crate
 2. **Add ESLint rules** for empty catch blocks
 3. **Add CI grep checks** for swallowing patterns
 4. **Update AGENTS.md** with error handling rules
@@ -298,7 +298,7 @@ The following rules should be added to AGENTS.md under the existing "Key archite
 
 ### Rust section addition:
 
-> - **Error propagation (WASM bridge)**: All functions in `compositor-wasm` must return `Result<_, JsValue>` and use `map_err(to_engine_error)?` for error propagation. Never use `unwrap_or(JsValue::NULL)`, bare `.unwrap()`, or `.expect()` in production WASM bridge code. The crate enforces `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
+> - **Error propagation (WASM bridge)**: All functions in `cascade-wasm` must return `Result<_, JsValue>` and use `map_err(to_engine_error)?` for error propagation. Never use `unwrap_or(JsValue::NULL)`, bare `.unwrap()`, or `.expect()` in production WASM bridge code. The crate enforces `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
 
 ### Frontend section addition:
 
@@ -314,7 +314,7 @@ The following rules should be added to AGENTS.md under the existing "Key archite
 
 ## Appendix: Current Error Audit
 
-### WASM Bridge Patterns (compositor-wasm/src/lib.rs)
+### WASM Bridge Patterns (cascade-wasm/src/lib.rs)
 
 **33 GOOD sites**: Use `.map_err(to_js_error)?` — errors propagate as JS exceptions
 

@@ -1,5 +1,5 @@
 [package]
-name = "compositor-tauri"
+name = "cascade-tauri"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-compositor-runtime = { path = "../../../crates/compositor-runtime" }
+cascade-runtime = { path = "../../../crates/cascade-runtime" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
@@ -16,5 +16,5 @@ serde_json = "1"
 [features]
 default = ["custom-protocol", "video", "ocio"]
 custom-protocol = ["tauri/custom-protocol"]
-video = ["compositor-runtime/video"]
-ocio = ["compositor-runtime/ocio"]
+video = ["cascade-runtime/video"]
+ocio = ["cascade-runtime/ocio"]

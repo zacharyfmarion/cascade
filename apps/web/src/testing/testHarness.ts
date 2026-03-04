@@ -1,5 +1,5 @@
 /**
- * E2E Test Harness — exposes store actions via window.__compositorTest
+ * E2E Test Harness — exposes store actions via window.__cascadeTest
  * for Playwright integration tests.
  *
  * This module is ONLY loaded in development/test mode.
@@ -9,7 +9,7 @@
 import { useGraphStore, getEngine } from '../store/graphStore';
 import type { ParamValue } from '../store/types';
 
-export interface CompositorTestHarness {
+export interface CascadeTestHarness {
   /** Wait for the WASM engine to be fully initialized */
   waitForEngine(): Promise<void>;
 
@@ -107,7 +107,7 @@ export interface CompositorTestHarness {
   editTransaction(mutations: Array<{ action: string; args: unknown[] }>): void;
 }
 
-function createTestHarness(): CompositorTestHarness {
+function createTestHarness(): CascadeTestHarness {
   return {
     waitForEngine(): Promise<void> {
       return new Promise((resolve) => {
@@ -371,6 +371,6 @@ function createTestHarness(): CompositorTestHarness {
 export function installTestHarness(): void {
   if (typeof window !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).__compositorTest = createTestHarness();
+    (window as any).__cascadeTest = createTestHarness();
   }
 }

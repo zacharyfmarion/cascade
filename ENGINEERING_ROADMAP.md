@@ -1,6 +1,6 @@
 # Engineering Roadmap
 
-Prioritized plan for strengthening the compositor's engineering foundations. Runs alongside the [Product Roadmap](./PRODUCT_ROADMAP.md) — these items make feature work safer, faster, and more sustainable.
+Prioritized plan for strengthening Cascade's engineering foundations. Runs alongside the [Product Roadmap](./PRODUCT_ROADMAP.md) — these items make feature work safer, faster, and more sustainable.
 
 Based on the [architecture review of Feb 22 2026](./reviews/architecture-review-2-22-26.md).
 
@@ -11,7 +11,7 @@ Based on the [architecture review of Feb 22 2026](./reviews/architecture-review-
 1. **Safety before features.** Panics in library code and unbounded allocations are live bugs. Fix them first.
 2. **Measure before optimizing.** Add benchmarks and profiling before rewriting hot paths.
 3. **Incremental over big-bang.** Each item should be landable independently without blocking feature work.
-4. **Don't let core rot.** `compositor-core` stays focused on graph/eval mechanics. Cross-cutting concerns (AI, OCIO) live in higher layers.
+4. **Don't let core rot.** `cascade-core` stays focused on graph/eval mechanics. Cross-cutting concerns (AI, OCIO) live in higher layers.
 
 ---
 
@@ -20,25 +20,29 @@ Based on the [architecture review of Feb 22 2026](./reviews/architecture-review-
 Items that prevent crashes, data loss, or silent corruption. These should be done before any new feature work.
 
 ### 1.1 Remove panics from library code ✅
-- [x] Replace `assert_eq!` in `Image::from_f32_data()`, `Image::from_f32_data_with_space()`, and `Image::new_with_domain()` (types.rs) with `Result<Image, CompositorError>` returns
-- [x] Add new `CompositorError::InvalidImageData` and `ImageTooLarge` variants for dimension/data length mismatches
-- [x] Propagate `Result` through all call sites across compositor-core, compositor-gpu, compositor-nodes-std, and compositor-runtime
+- [x] Replace `assert_eq!` in `Image::from_f32_data()`, `Image::from_f32_data_with_space()`, and `Image::new_with_domain()` (types.rs) with `Result<Image, CascadeError>` returns
+- [x] Add new `CascadeError::InvalidImageData` and `ImageTooLarge` variants for dimension/data length mismatches
+- [x] Propagate `Result` through all call sites across cascade-core, cascade-gpu, cascade-nodes-std, and cascade-runtime
+- [x] Add new `CascadeError::InvalidImageData` and `ImageTooLarge` variants for dimension/data length mismatches
+- [x] Propagate `Result` through all call sites across cascade-core, cascade-gpu, cascade-nodes-std, and cascade-runtime
 - [ ] Replace `panic!("Expected Value::...")` patterns in node test helpers with typed assertions
 
 ### 1.2 Add image dimension limits ✅
-- [x] Define `const MAX_IMAGE_DIM: u32 = 16384` in `compositor-core`
+- [x] Define `const MAX_IMAGE_DIM: u32 = 16384` in `cascade-core`
 - [x] Validate dimensions in `Image` constructors, `LoadImage` decode path, GPU `read_texture_to_image()`, and AI `decode_response_image()` boundary
 - [x] Add overflow checks before `Vec::with_capacity((width * height * 4) as usize)` in `kernel_node.rs` and `kuwahara.rs`
-- [x] Return `CompositorError::ImageTooLarge` instead of OOM-crashing
+- [x] Return `CascadeError::ImageTooLarge` instead of OOM-crashing
 
 ### 1.3 Fix WASM bridge + full-stack error handling ✅
 
 See the [error handling plan](./reviews/error-handling-plan.md) for the comprehensive strategy.
 
 **Phase A — MVP (stop swallowing errors): ✅**
-- [x] Replace all 7 `unwrap_or(JsValue::NULL)` in `compositor-wasm/src/lib.rs` with `.map_err(to_engine_error)?`
+- [x] Replace all 7 `unwrap_or(JsValue::NULL)` in `cascade-wasm/src/lib.rs` with `.map_err(to_engine_error)?`
 - [x] Replace 2 `.expect()` panics in WASM bridge with `.map_err(to_engine_error)?`
-- [x] Add `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` to compositor-wasm crate
+- [x] Add `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` to cascade-wasm crate
+- [x] Replace 2 `.expect()` panics in WASM bridge with `.map_err(to_engine_error)?`
+- [x] Add `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]` to cascade-wasm crate
 - [x] Remove error-swallowing try-catch in `WasmEngine.renderViewer()` — let errors propagate
 - [x] Wire render errors to `lastError` in graphStore so they appear in the Viewer error bar
 
@@ -49,7 +53,7 @@ See the [error handling plan](./reviews/error-handling-plan.md) for the comprehe
 - [x] Add `parseEngineError()` utility to normalize WASM/Tauri errors into `EngineError`
 
 **Phase C — Per-node error attribution: ✅**
-- [x] Add `EvalError` wrapper in evaluator that captures `(node_id, node_type, source: CompositorError)`
+- [x] Add `EvalError` wrapper in evaluator that captures `(node_id, node_type, source: CascadeError)`
 - [x] Add `nodeErrors: Record<NodeId, EngineError>` to store
 - [x] Add error badge to `BaseNode` component for nodes with errors
 - [x] Show "Blocked by upstream" derived state on downstream nodes
@@ -139,14 +143,16 @@ Larger refactors that improve the long-term health of the Rust core. Each item i
 - [ ] Remove `as_any()` and `as_any_mut()` from the Node trait
 - [ ] Migrate `LoadImage` image data, `GroupNode` internal state, and AI cached outputs to ResourceStore
 
-### 4.4 Expand CompositorError taxonomy
+### 4.4 Expand CascadeError taxonomy
 - [ ] Add variants: `ImageTooLarge`, `GpuDeviceLost`, `GpuShaderCompilation`, `FormatMismatch`, `UnsupportedOperation`, `ResourceNotFound`
-- [ ] Replace uses of `CompositorError::Other(String)` with specific variants where possible
+- [ ] Replace uses of `CascadeError::Other(String)` with specific variants where possible
+- [ ] Add variants: `ImageTooLarge`, `GpuDeviceLost`, `GpuShaderCompilation`, `FormatMismatch`, `UnsupportedOperation`, `ResourceNotFound`
+- [ ] Replace uses of `CascadeError::Other(String)` with specific variants where possible
 - [ ] Ensure errors round-trip across WASM/IPC with stable error codes
 
 ### 4.5 Format propagation validation
 - [ ] Require nodes to declare output Format rules in `NodeSpec` (e.g., "inherits input A", "uses project format", "custom")
-- [ ] Validate format consistency at evaluation boundaries — mismatches become `CompositorError::FormatMismatch`
+- [ ] Validate format consistency at evaluation boundaries — mismatches become `CascadeError::FormatMismatch`
 - [ ] Auto-rasterization of Field→Image should respect declared format rules, not silently pick a fallback
 
 ---
@@ -158,7 +164,7 @@ Items that can be done incrementally alongside any other phase.
 ### 5.1 Rust error path testing
 - [ ] Add integration tests for error scenarios: missing inputs, type mismatches, cycle detection, invalid connections, oversized images
 - [ ] Add evaluator tests that exercise cache invalidation, dirty propagation, and muted node pass-through
-- [ ] Target: every `CompositorError` variant has at least one test that triggers it
+- [ ] Target: every `CascadeError` variant has at least one test that triggers it
 
 ### 5.2 Frontend component tests
 - [ ] Set up vitest + React Testing Library for component tests
@@ -215,7 +221,7 @@ These are engineering guardrails that apply at all times, regardless of what pha
 - **No new `as_any()` downcast sites** — use `ResourceStore` or a trait instead
 - **No hardcoded colors** in frontend components (enforced by ESLint rule)
 - **No tile processing before cache eviction** — tiles without eviction leak in smaller chunks
-- **Don't let `compositor-core` absorb more integrations** — keep it focused on graph/eval mechanics
+- **Don't let `cascade-core` absorb more integrations** — keep it focused on graph/eval mechanics
 - **No empty catch blocks** in frontend code — every catch must log, set error state, or re-throw
 - **No `unwrap_or(JsValue::NULL)`** in WASM bridge code — errors must propagate to JS
 - **No returning `null` to signal errors** from EngineBridge methods — throw `EngineError` instead

@@ -23,14 +23,14 @@ export default defineConfig([
       globals: globals.browser,
     },
     plugins: {
-      'compositor-theme': {
+      'cascade-theme': {
         rules: {
           'no-hardcoded-colors': noHardcodedColors,
         },
       },
     },
     rules: {
-      'compositor-theme/no-hardcoded-colors': 'error',
+      'cascade-theme/no-hardcoded-colors': 'error',
       'no-empty': ['error', { allowEmptyCatch: false }],
       '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',

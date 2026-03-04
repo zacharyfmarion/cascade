@@ -1,7 +1,7 @@
-import type { CompositorTheme } from './types';
+import type { CascadeTheme } from './types';
 import { tokenToCssVar, THEME_TOKEN_KEYS } from './types';
 
-export function applyTheme(theme: CompositorTheme): void {
+export function applyTheme(theme: CascadeTheme): void {
   const root = document.documentElement;
 
   for (const token of THEME_TOKEN_KEYS) {

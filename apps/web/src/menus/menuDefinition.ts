@@ -89,7 +89,7 @@ export function getMenuBarDef(): MenuDef[] {
       items: [
         { type: 'action', id: 'help.shortcuts', label: 'Keyboard Shortcuts', shortcut: '?' },
         { type: 'separator' },
-        { type: 'action', id: 'help.about', label: 'About Compositor' },
+  { type: 'action', id: 'help.about', label: 'About Cascade' },
       ],
     },
   ];

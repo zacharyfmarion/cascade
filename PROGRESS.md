@@ -3,7 +3,7 @@
 ## Completed
 
 ### Rust Backend
-- [x] Cargo workspace with 6 crates (compositor-core, compositor-nodes-std, compositor-gpu, compositor-wasm, compositor-runtime, compositor-tauri)
+- [x] Cargo workspace with 6 crates (cascade-core, cascade-nodes-std, cascade-gpu, cascade-wasm, cascade-runtime, cascade-tauri)
 - [x] Image type with f32 RGBA linear color space (`Arc<Vec<f32>>` for cheap cloning)
 - [x] sRGB <-> linear color space conversion (correct gamma transfer functions)
 - [x] DAG graph with SlotMap-based NodeId, cycle detection, type-safe connections, dirty propagation
@@ -12,13 +12,13 @@
 - [x] NodeRegistry with factory pattern for node instantiation
 - [x] 34 standard nodes across 8 categories (see below)
 - [x] Image decoding: PNG, JPEG, BMP, WebP via `image` crate
-- [x] Error handling with thiserror-derived CompositorError enum
+- [x] Error handling with thiserror-derived CascadeError enum
 - [x] 35 passing tests (22 unit + 3 integration + 7 GPU + 3 script compile flow), 0 warnings
 - [x] Rayon parallelism for all per-pixel node processing
 - [x] Parallel sRGB→u8 conversion with 4096-entry LUT
 - [x] Parallel sRGB u8→linear f32 with 256-entry LUT in LoadImage
 
-### GPU Compute Shader System (`compositor-gpu` crate)
+### GPU Compute Shader System (`cascade-gpu` crate)
 - [x] `GpuContext`: wgpu device/queue initialization with `HighPerformance` + `TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`
 - [x] GLSL compute shader template with `process(vec4 color, vec2 uv, ivec2 pixel)` user function
 - [x] Naga GLSL→WGSL transpilation pipeline
@@ -63,7 +63,7 @@
 | GPU | Pixelate+Dither (built-in), user/AI-defined via JSON manifests |
 
 ### Tauri Desktop App
-- [x] Full Tauri v2 app with compositor-runtime native backend
+- [x] Full Tauri v2 app with cascade-runtime native backend
 - [x] 14 IPC commands including batched `set_param_and_render`, `register_gpu_kernel`, and `compile_script_node`
 - [x] Binary response protocol for render results
 - [x] Timing instrumentation (`[perf]` eprintln)
@@ -140,6 +140,7 @@
 ### Documentation
 - [x] ARCHITECTURE.md — full 9-section architecture document
 - [x] PROGRESS.md — this file
+- [x] PROGRESS.md — this file
 
 ---
 
@@ -165,7 +166,7 @@
 
 #### GPU Acceleration
 - [x] ~~WGSL shader nodes for per-pixel operations~~ — GLSL compute kernels via naga transpile
-- [x] ~~`compositor-gpu` crate~~ — Full GPU compute pipeline with wgpu
+- [x] ~~`cascade-gpu` crate~~ — Full GPU compute pipeline with wgpu
 - [ ] More GPU kernel nodes (bloom, vignette, chromatic aberration, film grain, color LUT)
 - [ ] Keep images on GPU between connected GPU nodes (eliminate CPU round-trips)
 - [ ] wgpu native viewport for 60fps 4K rendering in Tauri
@@ -209,7 +210,7 @@
 | Slider interaction model | Pointer capture + live/commit split | Pointer events prevent node drag; `setParamLive` throttles renders, `setParamCommit` pushes one undo snapshot |
 | React Flow state sync | `useState` + `useEffect` from store, `applyNodeChanges`/`applyEdgeChanges` for selection | Preserves React Flow's internal selection state while keeping our store as source of truth for graph data |
 | Enum param UI | UiHint::Dropdown(Vec&lt;String&gt;) | Human-readable labels mapped to integer indices; no magic numbers in UI |
-| Desktop app | Tauri v2 + compositor-runtime | Native Rust performance with web frontend; batched IPC for slider responsiveness |
+| Desktop app | Tauri v2 + cascade-runtime | Native Rust performance with web frontend; batched IPC for slider responsiveness |
 | GPU kernel language | GLSL 450 (user writes) → naga → WGSL (wgpu executes) | AI training data is rich with GLSL; naga provides validated transpilation; wgpu runs everywhere |
 | GPU kernel format | JSON manifest + GLSL body | Declarative metadata (ports, params, UI hints) + imperative kernel; trivial for AI to generate |
 | Dynamic node types | `nodeTypes` built from `nodeSpecs` via useMemo | New GPU kernels auto-render without manual frontend registration |

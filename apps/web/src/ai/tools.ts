@@ -251,7 +251,7 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
 
 // ─── Exported tool definitions ───────────────────────────────────
 
-export const compositorTools = {
+export const cascadeTools = {
   read_graph: tool({
     description: 'Get the current graph as DSL text. Shows all nodes with non-default params and all connections.',
     inputSchema: readGraphSchema,
@@ -298,10 +298,10 @@ export const compositorTools = {
   }),
 };
 
-export type CompositorToolName = keyof typeof toolExecutors;
+export type CascadeToolName = keyof typeof toolExecutors;
 
-export async function executeCompositorTool(
-  toolName: CompositorToolName,
+export async function executeCascadeTool(
+  toolName: CascadeToolName,
   args: Record<string, unknown>,
 ): Promise<unknown> {
   const executor = toolExecutors[toolName] as (toolArgs: Record<string, unknown>) => Promise<unknown>;

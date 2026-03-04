@@ -114,7 +114,7 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                   width: '20px',
                   height: '20px',
                   padding: 0,
-                  // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+  // eslint-disable-next-line cascade-theme/no-hardcoded-colors
                   background: `rgba(${linearToSrgbByte(color[0])},${linearToSrgbByte(color[1])},${linearToSrgbByte(color[2])},1)`,
                   border: '1px solid var(--border-default)',
                   borderRadius: '2px',

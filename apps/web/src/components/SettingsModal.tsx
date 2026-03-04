@@ -3,7 +3,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useThemeStore } from '../store/themeStore';
 import { useLayoutStore } from '../store/layoutStore';
 import { useGraphStore } from '../store/graphStore';
-import type { CompositorTheme } from '../themes/types';
+import type { CascadeTheme } from '../themes/types';
 
 type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'color' | 'ai';
 
@@ -62,7 +62,7 @@ const rowStyle: React.CSSProperties = {
   padding: '6px 0',
 };
 
-const ThemeCard = ({ theme, isSelected, onClick }: { theme: CompositorTheme; isSelected: boolean; onClick: () => void }) => {
+const ThemeCard = ({ theme, isSelected, onClick }: { theme: CascadeTheme; isSelected: boolean; onClick: () => void }) => {
   const [isHovered, setIsHovered] = useState(false);
   
   return (
@@ -121,7 +121,7 @@ function AppearanceTab() {
 
   const allThemes = [...presetThemes, ...customThemes];
 
-  const themesByCategory = allThemes.reduce<Record<string, CompositorTheme[]>>((acc, theme) => {
+  const themesByCategory = allThemes.reduce<Record<string, CascadeTheme[]>>((acc, theme) => {
     const cat = theme.type === 'light' ? 'Light' : 'Dark';
     if (!acc[cat]) acc[cat] = [];
     acc[cat].push(theme);

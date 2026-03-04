@@ -58,7 +58,7 @@
   align-self: center;
 }
 
-.dockview-theme-compositor {
+.dockview-theme-cascade {
   --dv-paneview-header-border-color: var(--border-default);
   --dv-tabs-and-actions-container-background-color: var(--bg-primary);
   --dv-tabs-and-actions-container-height: 28px;
@@ -79,6 +79,6 @@
   --dv-drag-over-border-color: var(--accent-primary);
 }
 
-.dockview-theme-compositor .dv-tabs-and-actions-container {
+.dockview-theme-cascade .dv-tabs-and-actions-container {
   border-bottom: 1px solid var(--bg-secondary);
 }

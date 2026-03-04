@@ -1,5 +1,5 @@
 /**
- * Compositor Theme System
+ * Cascade Theme System
  *
  * All UI colors must come from theme tokens. Direct hex/rgb values are
  * banned in component code and enforced by the `no-hardcoded-colors` ESLint rule.
@@ -10,7 +10,7 @@
  *   3. Reference it in CSS/JSX as `var(--<token-with-dashes>)` e.g. `var(--bg-primary)`
  */
 
-/** Every token key a Compositor theme must define. */
+/** Every token key a Cascade theme must define. */
 export interface ThemeTokens {
   // ── Backgrounds ──────────────────────────────────────────────
   'bg.primary': string;
@@ -109,7 +109,7 @@ export interface SyntaxColors {
 }
 
 /** Full theme definition. */
-export interface CompositorTheme {
+export interface CascadeTheme {
   /** Human-readable name shown in the theme picker. */
   name: string;
   /** Light or dark — used for scrollbar/select styling. */

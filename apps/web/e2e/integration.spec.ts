@@ -1,7 +1,7 @@
 /**
  * Integration E2E Tests
  *
- * These tests use the window.__compositorTest harness to drive the app
+ * These tests use the window.__cascadeTest harness to drive the app
  * programmatically with the REAL WASM engine. They verify that the full
  * pipeline works: store → engine bridge → WASM → evaluator → render result.
  *
@@ -20,7 +20,7 @@ test.describe('Engine initialization', () => {
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 30_000 });
 
     // Verify engine is ready via harness
-    await page.waitForFunction(() => !!(window as unknown as HarnessWindow).__compositorTest, {
+    await page.waitForFunction(() => !!(window as unknown as HarnessWindow).__cascadeTest, {
       timeout: 10_000,
     });
     const state = (await harness(page, 'getState')) as {

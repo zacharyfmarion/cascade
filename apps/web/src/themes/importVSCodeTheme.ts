@@ -1,4 +1,4 @@
-import type { CompositorTheme, ThemeTokens, SyntaxColors } from './types';
+import type { CascadeTheme, ThemeTokens, SyntaxColors } from './types';
 
 interface VSCodeTokenColor {
   name?: string;
@@ -17,9 +17,9 @@ interface VSCodeThemeJson {
   [key: string]: unknown;
 }
 
-type TokenMapping = [vscodeKey: string, compositorToken: keyof ThemeTokens];
+type TokenMapping = [vscodeKey: string, cascadeToken: keyof ThemeTokens];
 
-const VSCODE_TO_COMPOSITOR: TokenMapping[] = [
+const VSCODE_TO_CASCADE: TokenMapping[] = [
   ['editor.background', 'bg.primary'],
   ['sideBar.background', 'bg.secondary'],
   ['editorGroupHeader.tabsBackground', 'bg.tertiary'],
@@ -73,7 +73,7 @@ function isValidHex(value: string): boolean {
   return /^#[0-9a-fA-F]{3,8}$/.test(value);
 }
 
-export function importVSCodeTheme(json: VSCodeThemeJson): CompositorTheme {
+export function importVSCodeTheme(json: VSCodeThemeJson): CascadeTheme {
   const colors = json.colors ?? {};
   const isDark = (json.type ?? 'dark') !== 'light';
   const name = json.name ?? 'Imported Theme';
@@ -86,10 +86,10 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CompositorTheme {
 
   const result: Partial<ThemeTokens> = {};
 
-  for (const [vscodeKey, compositorToken] of VSCODE_TO_COMPOSITOR) {
+  for (const [vscodeKey, cascadeToken] of VSCODE_TO_CASCADE) {
     const value = colors[vscodeKey];
-    if (value && isValidHex(value) && !(compositorToken in result)) {
-      result[compositorToken] = value;
+    if (value && isValidHex(value) && !(cascadeToken in result)) {
+      result[cascadeToken] = value;
     }
   }
 

@@ -16,8 +16,8 @@ import type { EngineError } from '../engine/engineError';
 const APPLY_DEBOUNCE_MS = 600;
 const MARKER_OWNER = 'dsl-editor';
 const EVAL_MARKER_OWNER = 'dsl-eval';
-const LANGUAGE_ID = 'compositor-dsl';
-const MONACO_THEME_ID = 'compositor-dsl';
+const LANGUAGE_ID = 'cascade-dsl';
+const MONACO_THEME_ID = 'cascade-dsl';
 
 const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   minimap: { enabled: false },
@@ -94,7 +94,7 @@ export const DslEditor: React.FC = () => {
 
   /**
    * Read CSS custom properties to build Monaco editor UI colors.
-   * These come from the compositor theme tokens applied to :root.
+   * These come from the cascade theme tokens applied to :root.
    */
   const buildEditorColors = useCallback((): Monaco.editor.IColors => {
     const style = getComputedStyle(document.documentElement);
@@ -112,7 +112,7 @@ export const DslEditor: React.FC = () => {
   }, []);
 
   /**
-   * Define (or redefine) the Monaco theme using the current compositor theme.
+   * Define (or redefine) the Monaco theme using the current cascade theme.
    */
   const defineMonacoTheme = useCallback(
     (monaco: typeof Monaco, syntaxColors: SyntaxColors, themeType: 'dark' | 'light') => {
@@ -196,7 +196,7 @@ export const DslEditor: React.FC = () => {
       });
     }
 
-    // Define initial theme from current compositor theme
+    // Define initial theme from current cascade theme
     const { syntaxColors, type: themeType } = useThemeStore.getState().currentTheme;
     defineMonacoTheme(monaco, syntaxColors, themeType);
   }, [defineMonacoTheme]);
@@ -388,7 +388,7 @@ export const DslEditor: React.FC = () => {
   );
 
   // ─── Theme change subscription ──────────────────────────────────────
-  // Re-define the Monaco theme whenever the compositor theme changes.
+  // Re-define the Monaco theme whenever the cascade theme changes.
   useEffect(() => {
     const unsubscribe = useThemeStore.subscribe((state) => {
       const monaco = monacoRef.current;

@@ -1,0 +1,31 @@
+[package]
+name = "cascade-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+ocio = ["cascade-ocio"]
+video = ["cascade-video"]
+
+[dependencies]
+cascade-core = { path = "../cascade-core" }
+cascade-nodes-std = { path = "../cascade-nodes-std" }
+cascade-gpu = { path = "../cascade-gpu" }
+cascade-ocio = { path = "../cascade-ocio", optional = true }
+cascade-video = { path = "../cascade-video", optional = true }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+half = { version = "2", features = ["std"] }
+slotmap = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+uuid = { version = "1", features = ["v4"] }
+rayon = "1"
+pollster = "0.4"
+reqwest = { version = "0.12", features = ["blocking", "json", "multipart"] }
+base64 = "0.22"
+
+[[bin]]
+name = "cascade-bench"
+path = "src/bin/bench.rs"

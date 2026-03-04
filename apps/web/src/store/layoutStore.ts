@@ -2,8 +2,8 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { DockviewApi, SerializedDockview } from 'dockview';
 
-const LAYOUT_STORAGE_KEY = 'compositor-layout';
-const LAYOUT_VERSION_KEY = 'compositor-layout-version';
+const LAYOUT_STORAGE_KEY = 'cascade-layout';
+const LAYOUT_VERSION_KEY = 'cascade-layout-version';
 /** Bump this when default layout changes to invalidate stale cached layouts. */
 const LAYOUT_VERSION = 2;
 

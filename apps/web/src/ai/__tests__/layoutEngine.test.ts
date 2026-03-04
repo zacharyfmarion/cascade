@@ -453,9 +453,9 @@ describe('compactVertically', () => {
   });
 });
 
-// ── Realistic compositor graph ──────────────────────────────────
+// ── Realistic Cascade graph ─────────────────────────────────────
 
-describe('layoutGraph: realistic compositor pipeline', () => {
+describe('layoutGraph: realistic Cascade pipeline', () => {
   // LoadImage → Blur → BrightnessContrast → Viewer
   //                  → Sharpen → Blend → Viewer
   //                                ↑

@@ -1248,11 +1248,11 @@ describe('Project lifecycle contracts', () => {
     expect(useGraphStore.getState().nodes.size).toBe(0);
 
     // Create a mock File using the correct document envelope format
-    const envelope = { compositor: '1.0', graph: graphData, frames: [] };
+  const envelope = { cascade: '1.0', graph: graphData, frames: [] };
     const blob = new Blob([JSON.stringify(envelope)], {
       type: 'application/json',
     });
-    const file = new File([blob], 'test.compositor', {
+  const file = new File([blob], 'test.casc', {
       type: 'application/json',
     });
 

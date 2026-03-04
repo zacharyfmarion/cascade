@@ -1,4 +1,4 @@
-# AI Assistant for Compositor
+# AI Assistant for Cascade
 
 Design document for adding an AI-powered assistant that can drive the node editor via natural language.
 
@@ -55,7 +55,7 @@ The AI assistant sits in the frontend as a floating chat panel. Users type natur
 ┌─────────────────────────────────────────────┐
 │  graphStore (Zustand)                       │
 │  ↕ EngineBridge (WASM / Tauri IPC)          │
-│  ↕ Rust Compositor Engine                   │
+│  ↕ Rust Cascade Engine                   
 └─────────────────────────────────────────────┘
 ```
 
@@ -210,7 +210,7 @@ function buildNodeReference(nodeSpecs: NodeSpec[]): string {
 
 ```typescript
 function buildSystemPrompt(nodeSpecs: NodeSpec[]): string {
-  return `You are an expert compositor assistant for a node-based image editor.
+  return `You are an expert processor assistant for a node-based image editor.
 
 ## What You Can Do
 - Inspect the current graph and rendered output
@@ -924,7 +924,7 @@ const { messages, sendMessage, addToolOutput, status, stop } = useChat({
   sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
 
   onToolCall: async ({ toolCall }) => {
-    const result = await executeCompositorTool(toolCall);
+    const result = await executeCascadeTool(toolCall);
     addToolOutput({
       tool: toolCall.toolName,
       toolCallId: toolCall.toolCallId,
@@ -937,7 +937,7 @@ const { messages, sendMessage, addToolOutput, status, stop } = useChat({
 ### Tool execution wrapper
 
 ```typescript
-async function executeCompositorTool(toolCall: ToolCall): Promise<unknown> {
+async function executeCascadeTool(toolCall: ToolCall): Promise<unknown> {
   const { toolName, args } = toolCall;
 
   // First tool call in a batch starts the undo group

@@ -58,7 +58,7 @@ const InlineScalar: React.FC<{ result: NonNullable<ReturnType<typeof useGraphSto
             height: 48,
             borderRadius: 6,
             border: '1px solid var(--border-primary)',
-            // eslint-disable-next-line compositor-theme/no-hardcoded-colors
+  // eslint-disable-next-line cascade-theme/no-hardcoded-colors
             background: `rgba(${toSRGB(r)}, ${toSRGB(g)}, ${toSRGB(b)}, ${a})`,
           }} />
         </div>

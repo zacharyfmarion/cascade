@@ -175,7 +175,7 @@ export function MenuBar() {
         id="menu-file-input"
         ref={fileInputRef}
         type="file"
-        accept=".json,.compositor"
+          accept=".json,.casc"
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />

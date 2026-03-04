@@ -1,7 +1,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { ToolLoopAgent, DirectChatTransport } from 'ai';
 import type { NodeSpec } from '../store/types';
-import { compositorTools } from './tools';
+import { cascadeTools } from './tools';
 import { buildSystemPrompt } from './systemPrompt';
 import { useGraphStore } from '../store/graphStore';
 
@@ -9,7 +9,7 @@ function isTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
-export function createCompositorTransport(
+export function createCascadeTransport(
   apiKey: string,
   model: string,
   nodeSpecs: NodeSpec[],
@@ -23,7 +23,7 @@ export function createCompositorTransport(
   const agent = new ToolLoopAgent({
     model: anthropic(model),
     instructions: buildSystemPrompt(nodeSpecs),
-    tools: compositorTools,
+    tools: cascadeTools,
     experimental_onStart: async () => {
       await useGraphStore.getState().beginAiAction();
     },

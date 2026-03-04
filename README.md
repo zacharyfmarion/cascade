@@ -1,19 +1,29 @@
-# Compositor
+# Cascade
 
-A node-based image compositor inspired by Nuke and Blender's compositor. Rust core compiled to WASM for the browser, with a Tauri desktop shell for native performance.
+A node-based image processing application inspired by Nuke and Blender's processor. Rust core compiled to WASM for the browser, with a Tauri desktop shell for native performance.
+
+A node-based image processor inspired by Nuke and Blender's processor. Rust core compiled to WASM for the browser, with a Tauri desktop shell for native performance.
 
 ## Architecture
 
 ```
-compositor/
+cascade/
 ├── crates/
-│   ├── compositor-core/          # Graph engine, evaluator, node trait, type system
-│   ├── compositor-nodes-std/     # 34 built-in CPU nodes + Criterion benchmarks
-│   ├── compositor-gpu/           # wgpu compute shader pipeline (GLSL → naga → WGSL)
-│   ├── compositor-ocio/          # OpenColorIO integration (display/view transforms)
-│   ├── compositor-ocio-sys/      # OpenColorIO C FFI bindings (auto-stubs if not installed)
-│   ├── compositor-wasm/          # wasm-bindgen bridge for browser
-│   └── compositor-runtime/       # Native runtime engine (used by Tauri + CLI bench)
+│   ├── cascade-core/          # Graph engine, evaluator, node trait, type system
+│   ├── cascade-nodes-std/     # 34 built-in CPU nodes + Criterion benchmarks
+│   ├── cascade-gpu/           # wgpu compute shader pipeline (GLSL → naga → WGSL)
+│   ├── cascade-ocio/          # OpenColorIO integration (display/view transforms)
+│   ├── cascade-ocio-sys/      # OpenColorIO C FFI bindings (auto-stubs if not installed)
+│   ├── cascade-wasm/          # wasm-bindgen bridge for browser
+│   └── cascade-runtime/       # Native runtime engine (used by Tauri + CLI bench)
+├── crates/
+│   ├── cascade-core/          # Graph engine, evaluator, node trait, type system
+│   ├── cascade-nodes-std/     # 34 built-in CPU nodes + Criterion benchmarks
+│   ├── cascade-gpu/           # wgpu compute shader pipeline (GLSL → naga → WGSL)
+│   ├── cascade-ocio/          # OpenColorIO integration (display/view transforms)
+│   ├── cascade-ocio-sys/      # OpenColorIO C FFI bindings (auto-stubs if not installed)
+│   ├── cascade-wasm/          # wasm-bindgen bridge for browser
+│   └── cascade-runtime/       # Native runtime engine (used by Tauri + CLI bench)
 ├── apps/
 │   ├── web/                      # React + Vite + @xyflow/react frontend
 │   └── tauri/                    # Tauri v2 desktop app
@@ -82,7 +92,7 @@ You can use any OCIO v2 config — ACES CG is a good default. Studio-specific co
 
 ```bash
 # Build the WASM bridge
-wasm-pack build crates/compositor-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
+wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
 
 # Install frontend dependencies and start dev server
 cd apps/web
@@ -125,11 +135,15 @@ npx tsc -b --noEmit
 ### Run benchmarks
 
 ```bash
-# Criterion benchmarks (compositor-nodes-std)
-cargo bench --package compositor-nodes-std
+# Criterion benchmarks (cascade-nodes-std)
+cargo bench --package cascade-nodes-std
 
-# CLI benchmark tool (compositor-runtime)
-cargo run --release --bin compositor-bench -- --input-dir <path-to-frames>
+# CLI benchmark tool (cascade-runtime)
+cargo run --release --bin cascade-bench -- --input-dir <path-to-frames>
+cargo bench --package cascade-nodes-std
+
+# CLI benchmark tool (cascade-runtime)
+cargo run --release --bin cascade-bench -- --input-dir <path-to-frames>
 ```
 
 ## CI

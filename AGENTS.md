@@ -4,17 +4,21 @@ Guidance for AI coding agents working in this repository.
 
 ## Project overview
 
-Compositor is a node-based image processing application. The Rust backend handles graph evaluation and image processing. The React frontend renders the node editor UI. They communicate via WASM (browser) or Tauri IPC (desktop).
+Cascade is a node-based image processing application. The Rust backend handles graph evaluation and image processing. The React frontend renders the node editor UI. They communicate via WASM (browser) or Tauri IPC (desktop).
 
 ## Repository layout
 
 ```
 crates/
-  compositor-core/       # Graph, evaluator, node trait, types, errors
-  compositor-nodes-std/  # All built-in CPU node implementations + benchmarks
-  compositor-gpu/        # wgpu compute shader pipeline (GLSL → WGSL via naga)
-  compositor-wasm/       # wasm-bindgen bridge exposing Engine to JS
-  compositor-runtime/    # Native runtime engine + CLI bench tool
+  cascade-core/       # Graph, evaluator, node trait, types, errors
+  cascade-nodes-std/  # All built-in CPU node implementations + benchmarks
+  cascade-gpu/        # wgpu compute shader pipeline (GLSL → WGSL via naga)
+  cascade-wasm/       # wasm-bindgen bridge exposing Engine to JS
+  cascade-runtime/    # Native runtime engine + CLI bench tool
+  │   ├── cascade-nodes-std/  # All built-in CPU node implementations + benchmarks
+  │   ├── cascade-gpu/        # wgpu compute shader pipeline (GLSL → WGSL via naga)
+  │   ├── cascade-wasm/       # wasm-bindgen bridge exposing Engine to JS
+  │   └── cascade-runtime/    # Native runtime engine + CLI bench tool
 apps/
   web/                   # React + Vite + @xyflow/react + Zustand
   tauri/                 # Tauri v2 desktop shell
@@ -25,14 +29,14 @@ apps/
 ### Rust
 
 - **Image format**: All pixel processing uses `f32` RGBA in linear color space. sRGB conversion happens only at load (input) and display (output) boundaries. Never process pixels in sRGB space. `f16` is used only at I/O boundaries (GPU upload/readback via `to_f16_bytes()`/`from_f16_data()`).
-- **Node trait**: Every node implements `compositor_core::node::Node`. The `spec()` method returns a `NodeSpec` declaring inputs, outputs, params, and UI hints. The `evaluate()` method receives an `EvalContext` and returns `HashMap<String, Value>`.
-- **Adding a new node**: Create the struct in `compositor-nodes-std`, implement `Node`, register it in `register_standard_nodes()` in `lib.rs`. The frontend auto-discovers it via `list_node_types()` — no frontend changes needed.
+- **Node trait**: Every node implements `cascade_core::node::Node`. The `spec()` method returns a `NodeSpec` declaring inputs, outputs, params, and UI hints. The `evaluate()` method receives an `EvalContext` and returns `HashMap<String, Value>`.
+- **Adding a new node**: Create the struct in `cascade-nodes-std`, implement `Node`, register it in `register_standard_nodes()` in `lib.rs`. The frontend auto-discovers it via `list_node_types()` — no frontend changes needed.
 - **Graph**: Uses `SlotMap` for stable node IDs. Connections are type-checked. Cycles are rejected via DFS. Dirty propagation flows downstream on param changes.
 - **Evaluator**: Pull-based from viewer nodes. Cached per-output with keys `(frame_time, param_revision, upstream_hash)`. Only recomputes dirty subgraphs.
 - **Parallelism**: All per-pixel operations use Rayon `par_chunks_exact_mut(4)` for SIMD-friendly parallel processing.
 - **Arc vs Box**: Node instances are `Arc<dyn Node>` (not `Box`) to enable cheap cloning for background renders.
-- **Error handling**: Use `CompositorError` from `compositor-core`. Don't use `unwrap()` or `panic!()` in library code. Image constructors (`from_f32_data`, `from_f32_data_with_space`, `new_with_domain`, `from_f16_data`) return `Result<Image, CompositorError>` — always propagate with `?` in production code.
-- **Error propagation (WASM bridge)**: All functions in `compositor-wasm` must return `Result<_, JsValue>` and use `map_err(to_engine_error)?` for error propagation. Never use `unwrap_or(JsValue::NULL)`, bare `.unwrap()`, or `.expect()` in production WASM bridge code. The crate enforces `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
+- **Error handling**: Use `CascadeError` from `cascade-core`. Don't use `unwrap()` or `panic!()` in library code. Image constructors (`from_f32_data`, `from_f32_data_with_space`, `new_with_domain`, `from_f16_data`) return `Result<Image, CascadeError>` — always propagate with `?` in production code.
+- **Error propagation (WASM bridge)**: All functions in `cascade-wasm` must return `Result<_, JsValue>` and use `map_err(to_engine_error)?` for error propagation. Never use `unwrap_or(JsValue::NULL)`, bare `.unwrap()`, or `.expect()` in production WASM bridge code. The crate enforces `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
 
 ### Frontend (TypeScript/React)
 
@@ -50,7 +54,7 @@ cargo check --workspace          # Type check all crates
 cargo test --workspace           # Run all tests
 cargo clippy --workspace         # Lint
 cargo fmt --all -- --check       # Format check
-cargo bench --package compositor-nodes-std  # Run Criterion benchmarks
+cargo bench --package cascade-nodes-std  # Run Criterion benchmarks
 
 # Frontend (from apps/web/)
 yarn install                     # Install deps
@@ -59,15 +63,17 @@ yarn lint                        # ESLint
 npx tsc -b --noEmit              # Typecheck
 
 # WASM bridge
-wasm-pack build crates/compositor-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
+wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
 ```
 
 ## Testing
 
 - **Rust unit tests**: Inline `#[cfg(test)]` modules in each crate. Run with `cargo test --workspace`.
-- **Integration tests**: `crates/compositor-core/tests/basic.rs` — full pipeline tests through standard nodes.
-- **GPU tests**: In `compositor-gpu/src/lib.rs`. Tests that need a GPU gracefully skip when `GpuContext::new()` fails (expected in CI).
-- **Benchmarks**: Criterion benchmarks in `crates/compositor-nodes-std/benches/node_benchmarks.rs`. Covers blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion.
+- **Integration tests**: `crates/cascade-core/tests/basic.rs` — full pipeline tests through standard nodes.
+- **GPU tests**: In `cascade-gpu/src/lib.rs`. Tests that need a GPU gracefully skip when `GpuContext::new()` fails (expected in CI).
+- **Benchmarks**: Criterion benchmarks in `crates/cascade-nodes-std/benches/node_benchmarks.rs`. Covers blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion.
+- **GPU tests**: In `cascade-gpu/src/lib.rs`. Tests that need a GPU gracefully skip when `GpuContext::new()` fails (expected in CI).
+- **Benchmarks**: Criterion benchmarks in `crates/cascade-nodes-std/benches/node_benchmarks.rs`. Covers blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion.
 - **Frontend linting**: ESLint with TypeScript, React Hooks, and custom `no-hardcoded-colors` rule.
 
 ## CI
@@ -78,9 +84,11 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 
 ### Adding a new CPU node
 
-1. Create struct in the appropriate file under `crates/compositor-nodes-std/src/` (e.g., `color_ops.rs` for color nodes, `filter_ops.rs` for filters)
+1. Create struct in the appropriate file under `crates/cascade-nodes-std/src/` (e.g., `color_ops.rs` for color nodes, `filter_ops.rs` for filters)
 2. Implement `Node` trait with `spec()` and `evaluate()`
-3. Add `pub use` in `crates/compositor-nodes-std/src/lib.rs`
+3. Add `pub use` in `crates/cascade-nodes-std/src/lib.rs`
+2. Implement `Node` trait with `spec()` and `evaluate()`
+3. Add `pub use` in `crates/cascade-nodes-std/src/lib.rs`
 4. Register in `register_standard_nodes()` with a unique string ID
 5. Add tests inline or in the crate's test module
 
