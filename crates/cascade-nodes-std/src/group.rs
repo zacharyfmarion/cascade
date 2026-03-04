@@ -386,10 +386,13 @@ impl Node for GroupNode {
                     .lock()
                     .map_err(|_| CascadeError::Other("Group state lock poisoned".to_string()))?;
 
-                let input_node = state
-                    .internal_nodes
-                    .get(&self.group_input_id)
-                    .ok_or_else(|| CascadeError::Other("Group input node not found".to_string()))?;
+                let input_node =
+                    state
+                        .internal_nodes
+                        .get(&self.group_input_id)
+                        .ok_or_else(|| {
+                            CascadeError::Other("Group input node not found".to_string())
+                        })?;
                 let group_input = input_node
                     .as_any()
                     .downcast_ref::<GroupInputNode>()

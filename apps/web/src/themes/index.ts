@@ -1,5 +1,6 @@
 import type { CascadeTheme } from './types';
 
+import cascadeDark from './presets/cascade-dark.json';
 import solarizedDark from './presets/solarized-dark.json';
 import solarizedLight from './presets/solarized-light.json';
 import monokai from './presets/monokai.json';
@@ -25,10 +26,9 @@ import cobalt2 from './presets/cobalt2.json';
 import horizon from './presets/horizon.json';
 
 export const PRESET_THEMES: CascadeTheme[] = [
-  solarizedDark as CascadeTheme,
-  solarizedLight as CascadeTheme,
-  monokai as CascadeTheme,
+  cascadeDark as CascadeTheme,
   dracula as CascadeTheme,
+  monokai as CascadeTheme,
   oneDark as CascadeTheme,
   nord as CascadeTheme,
   tokyoNight as CascadeTheme,
@@ -45,12 +45,14 @@ export const PRESET_THEMES: CascadeTheme[] = [
   cobalt2 as CascadeTheme,
   horizon as CascadeTheme,
   shadesOfPurple as CascadeTheme,
+  solarizedDark as CascadeTheme,
+  solarizedLight as CascadeTheme,
   githubDark as CascadeTheme,
   githubLight as CascadeTheme,
   atomOneLight as CascadeTheme,
 ];
 
-export const DEFAULT_THEME = solarizedDark as CascadeTheme;
+export const DEFAULT_THEME = cascadeDark as CascadeTheme;
 
 export { applyTheme } from './applyTheme';
 export { importVSCodeTheme } from './importVSCodeTheme';

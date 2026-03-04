@@ -130,7 +130,9 @@ fn parse_image_palette(bytes: &[u8]) -> Result<Vec<[f64; 4]>, CascadeError> {
     }
 
     if colors.is_empty() {
-        return Err(CascadeError::Other("Image contains no colors".to_string()));
+        return Err(CascadeError::Other(
+            "Image contains no colors".to_string(),
+        ));
     }
 
     colors.truncate(256);

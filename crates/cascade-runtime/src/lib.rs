@@ -22,7 +22,8 @@ use cascade_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use cascade_nodes_std::input::LoadImage as InputLoadImage;
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
-    register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
+    register_standard_nodes, srgb_to_linear_lut, GpuScriptDraftNode, GroupNode, LoadImageSequence,
+    LoadVideo, Viewer,
 };
 #[cfg(all(feature = "video", target_os = "macos"))]
 use cascade_nodes_std::{srgb_to_linear_lut, LoadVideo};
@@ -449,7 +450,10 @@ impl Engine {
                     }
                 },
                 Err(err) => {
-                    eprintln!("[cascade-runtime] Failed to read {}: {err}", path.display());
+                    eprintln!(
+                        "[cascade-runtime] Failed to read {}: {err}",
+                        path.display()
+                    );
                 }
             }
         }
@@ -576,7 +580,10 @@ impl Engine {
                     .registry
                     .get_spec(&to_instance.type_id)
                     .ok_or_else(|| {
-                        CascadeError::Other(format!("Unknown node type: {}", to_instance.type_id))
+                        CascadeError::Other(format!(
+                            "Unknown node type: {}",
+                            to_instance.type_id
+                        ))
                     })?;
                 let _input_port = to_spec
                     .all_inputs()
@@ -951,8 +958,8 @@ impl Engine {
             .group_definitions
             .get(&group_instance.type_id)
             .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
-        let interface =
-            GroupNode::derive_interface(group_def, &self.registry).map_err(CascadeError::Other)?;
+        let interface = GroupNode::derive_interface(group_def, &self.registry)
+            .map_err(CascadeError::Other)?;
 
         let mut nodes = Vec::new();
         for internal in &group_def.internal_graph.nodes {
@@ -1066,7 +1073,9 @@ impl Engine {
             .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
         let mut updated = (*existing.as_ref()).clone();
         updated.name = new_name.to_string();
-        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
+        let spec = self
+            .register_group(updated)
+            .map_err(CascadeError::Other)?;
 
         let def_arc = self
             .group_definitions
@@ -1109,7 +1118,9 @@ impl Engine {
             .nodes
             .iter()
             .find(|node| node.id == from_node)
-            .ok_or_else(|| CascadeError::Other(format!("Internal node not found: {from_node}")))?;
+            .ok_or_else(|| {
+                CascadeError::Other(format!("Internal node not found: {from_node}"))
+            })?;
         let to_internal = updated_def
             .internal_graph
             .nodes
@@ -1438,10 +1449,9 @@ impl Engine {
 
         let node_id = self.graph.add_node(&actual_type_id);
         self.graph.set_position(node_id, x, y);
-        let node = self
-            .registry
-            .create(&actual_type_id)
-            .ok_or_else(|| CascadeError::Other(format!("Unknown node type: {actual_type_id}")))?;
+        let node = self.registry.create(&actual_type_id).ok_or_else(|| {
+            CascadeError::Other(format!("Unknown node type: {actual_type_id}"))
+        })?;
         self.nodes.insert(node_id, node);
         let uuid = self.register_uuid_for_node(node_id);
         Ok((uuid, actual_type_id))
@@ -1583,8 +1593,9 @@ impl Engine {
             .downcast_ref::<LoadVideo>()
             .ok_or_else(|| CascadeError::Other("Node is not LoadVideo".to_string()))?;
 
-        let decoder =
-            Arc::new(cascade_video::VideoDecoder::new(path).map_err(CascadeError::Other)?);
+        let decoder = Arc::new(
+            cascade_video::VideoDecoder::new(path).map_err(|e| CascadeError::Other(e))?,
+        );
         let info = decoder.info().clone();
 
         let lut = srgb_to_linear_lut();
@@ -1593,7 +1604,7 @@ impl Engine {
             Box::new(move |frame_index: u64| {
                 let frame = decoder_ref
                     .decode_frame_linear(frame_index, lut)
-                    .map_err(CascadeError::Other)?
+                    .map_err(|e| CascadeError::Other(e))?
                     .ok_or_else(|| {
                         CascadeError::Other(format!("No frame at index {frame_index}"))
                     })?;
@@ -1838,7 +1849,11 @@ impl Engine {
 
         let output_dir = match instance.params.get("output_dir") {
             Some(ParamValue::String(s)) => s.clone(),
-            _ => return Err(CascadeError::Other("Output directory not set".to_string())),
+            _ => {
+                return Err(CascadeError::Other(
+                    "Output directory not set".to_string(),
+                ))
+            }
         };
 
         // Validate output directory exists and is writable before spawning
@@ -2362,6 +2377,9 @@ impl Engine {
         for conn in &data.connections {
             let from_id = id_map.get(&conn.from_node).copied().ok_or_else(|| {
                 CascadeError::Other("Invalid from_node in connection".to_string())
+            })?;
+            let to_id = id_map.get(&conn.to_node).copied().ok_or_else(|| {
+                CascadeError::Other("Invalid to_node in connection".to_string())
             })?;
             let to_id = id_map
                 .get(&conn.to_node)
