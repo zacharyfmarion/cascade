@@ -108,6 +108,45 @@ List all available node types grouped by category (compact). Returns names + one
 ### get_node_schema(node_type)
 Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. Call this before using a node type you haven't used before.
 
+### create_gpu_script(description)
+Generate a custom GPU Script node from a text description. Creates a draft GPU Script node, asks the GLSL generator for a manifest, compiles it, and returns the node id/handle plus success or compile errors.
+
+### get_gpu_script_manifest(node_id or node_handle)
+Fetch the compiled GPU Script manifest from __script_manifest for an existing GPU Script node. If missing, the node needs compilation.
+
+## GPU Script Nodes
+Use GPU Script nodes when the user wants a custom effect that doesn't map cleanly to existing nodes. GPU Scripts run a GLSL \`process()\` per pixel.
+
+### GLSL Process Signature
+\`\`\`glsl
+vec4 process(vec4 color, vec2 uv, ivec2 pixel)
+\`\`\`
+
+Available globals:
+- \`u_input\` : readonly image2D for the primary input (use \`imageLoad(u_input, pixel)\`)
+- Additional image inputs are bound as \`u_<name>\` (readonly image2D)
+- Params are exposed directly by name (float/int/bool only)
+- Helpers: \`float bayer8(int x, int y)\`, \`float luminance(vec4 c)\`
+
+### Manifest Fields
+\`\`\`
+{
+  id,
+  inputs: [{name, label, ty}],
+  outputs: [{name, label, ty}],
+  params: [{key, label, type, default, min, max, step}],
+  kernel: "GLSL body"
+}
+\`\`\`
+
+### When to use create_gpu_script
+- The user asks for a bespoke GPU effect (e.g., "VHS glitch", "chromatic aberration", "CRT scanlines")
+- The effect would be cumbersome with standard nodes
+
+### When to use get_gpu_script_manifest
+- The user asks to modify an existing GPU Script
+- You need to inspect or iterate on the GLSL kernel
+
 ## How To Work
 1. Call \`read_graph\` to see the current graph state
 2. Use \`edit_graph\` for targeted changes (preferred for most edits)

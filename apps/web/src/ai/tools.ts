@@ -1,6 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { useGraphStore } from '../store/graphStore';
+import { useSettingsStore } from '../store/settingsStore';
 import type { NodeSpec, ParamSpec } from '../store/types';
 import { serializeGraph } from './dsl/serializer';
 import { parseDsl } from './dsl/parser';
@@ -11,6 +12,7 @@ import { captureViewerThumbnail } from './viewerSnapshot';
 import { snakeToPascal, labelToSnake, pascalToSnake } from './dsl/types';
 import type { DslAst } from './dsl/types';
 import { getSharedHandleMap } from './dsl/instance';
+import { buildGpuScriptManifestFromGlsl, generateGlslKernel } from './gpuScript';
 
 export { resetSharedHandleMap as resetHandleMap } from './dsl/instance';
 
@@ -89,6 +91,17 @@ const getNodeSchemaSchema = z.object({
   node_type: z.string().describe('PascalCase node type name (e.g. "GaussianBlur", "BrightnessContrast")'),
 });
 
+const createGpuScriptSchema = z.object({
+  description: z.string().describe('Text description of the desired GPU effect.'),
+});
+
+const getGpuScriptManifestSchema = z.object({
+  node_id: z.string().optional().describe('Node ID for the GPU Script node.'),
+  node_handle: z.string().optional().describe('DSL handle for the GPU Script node.'),
+}).refine(value => Boolean(value.node_id || value.node_handle), {
+  message: 'Provide node_id or node_handle',
+});
+
 
 // ─── Tool type aliases ───────────────────────────────────────────
 type ReadGraphArgs = z.infer<typeof readGraphSchema>;
@@ -97,6 +110,8 @@ type WriteGraphArgs = z.infer<typeof writeGraphSchema>;
 type ViewCurrentImageArgs = z.infer<typeof viewCurrentImageSchema>;
 type ListNodeTypesArgs = z.infer<typeof listNodeTypesSchema>;
 type GetNodeSchemaArgs = z.infer<typeof getNodeSchemaSchema>;
+type CreateGpuScriptArgs = z.infer<typeof createGpuScriptSchema>;
+type GetGpuScriptManifestArgs = z.infer<typeof getGpuScriptManifestSchema>;
 
 // ─── Tool executors ──────────────────────────────────────────────
 
@@ -177,6 +192,101 @@ const toolExecutors = {
       inputs: spec.inputs.map(i => ({ name: i.name, type: i.ty })),
       outputs: spec.outputs.map(o => ({ name: o.name, type: o.ty })),
     };
+  },
+
+  create_gpu_script: async ({ description }: CreateGpuScriptArgs) => {
+    const apiKey = useSettingsStore.getState().anthropicApiKey;
+    if (!apiKey) {
+      return {
+        success: false,
+        error: 'Anthropic API key is not configured. Set it in Settings → AI Assistant.',
+      };
+    }
+
+    const store = useGraphStore.getState();
+    const nodeId = await store.addNode('gpu_script', { x: 0, y: 0 });
+    const node = store.nodes.get(nodeId);
+    const typeId = node?.typeId ?? 'gpu_script';
+
+    const manifest = await generateGlslKernel(description, apiKey);
+    const compiledManifest = buildGpuScriptManifestFromGlsl(typeId, manifest);
+    const manifestJson = JSON.stringify(compiledManifest);
+    const handleMap = getSharedHandleMap();
+    const handle = handleMap.getOrCreate(nodeId, typeId);
+    store.setDslHandle(nodeId, handle);
+
+    try {
+      await store.compileScriptNode(nodeId, manifestJson);
+      const nodes = useGraphStore.getState().nodes;
+      const current = nodes.get(nodeId);
+      if (current) {
+        const updated = new Map(nodes);
+        updated.set(nodeId, {
+          ...current,
+          params: { ...current.params, __script_manifest: { String: manifestJson } },
+        });
+        useGraphStore.setState({ nodes: updated });
+      }
+      return {
+        success: true,
+        node_id: nodeId,
+        handle,
+        manifest: compiledManifest,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        node_id: nodeId,
+        handle,
+        error: error instanceof Error ? error.message : String(error),
+        manifest: compiledManifest,
+      };
+    }
+  },
+
+  get_gpu_script_manifest: async ({ node_id, node_handle }: GetGpuScriptManifestArgs) => {
+    const store = useGraphStore.getState();
+    const handleMap = getSharedHandleMap();
+    const nodeId = node_id ?? (node_handle ? handleMap.getNodeId(node_handle) : undefined);
+    if (!nodeId) {
+      return { success: false, error: 'Unknown node id/handle.' };
+    }
+
+    const node = store.nodes.get(nodeId);
+    if (!node) {
+      return { success: false, error: 'Node not found.' };
+    }
+
+    if (!node.typeId.startsWith('gpu_script')) {
+      return { success: false, error: 'Node is not a GPU Script node.' };
+    }
+
+    const manifestValue = node.params['__script_manifest'];
+    if (!manifestValue || !('String' in manifestValue) || typeof manifestValue.String !== 'string') {
+      return {
+        success: false,
+        node_id: nodeId,
+        handle: node_handle ?? handleMap.getHandle(nodeId),
+        message: 'GPU Script manifest not found. Compile the script first to populate __script_manifest.',
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(manifestValue.String) as Record<string, unknown>;
+      return {
+        success: true,
+        node_id: nodeId,
+        handle: node_handle ?? handleMap.getHandle(nodeId),
+        manifest: parsed,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        node_id: nodeId,
+        handle: node_handle ?? handleMap.getHandle(nodeId),
+        error: `Failed to parse __script_manifest JSON: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   },
 };
 
@@ -295,6 +405,16 @@ export const cascadeTools = {
     description: 'Get the full schema for a specific node type: all params with types/ranges/options, inputs, and outputs.',
     inputSchema: getNodeSchemaSchema,
     execute: toolExecutors.get_node_schema,
+  }),
+  create_gpu_script: tool({
+    description: 'Generate a custom GPU Script node from a text description. Creates a draft node, compiles the GLSL manifest, and returns the node id plus status/errors.',
+    inputSchema: createGpuScriptSchema,
+    execute: toolExecutors.create_gpu_script,
+  }),
+  get_gpu_script_manifest: tool({
+    description: 'Fetch the compiled GPU Script manifest for an existing GPU Script node (from __script_manifest). Returns an error if the node has not been compiled yet.',
+    inputSchema: getGpuScriptManifestSchema,
+    execute: toolExecutors.get_gpu_script_manifest,
   }),
 };
 

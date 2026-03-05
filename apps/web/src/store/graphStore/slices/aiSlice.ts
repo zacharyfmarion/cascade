@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { NodeSpec } from '../../types';
 import { getEngine } from '../kernel';
+import { formatGpuScriptCompileError } from '../../../engine/gpuScriptErrors';
 
 export interface AiSliceState {
   aiNodeStatuses: Record<string, string>;
@@ -91,18 +92,22 @@ export const createAiSlice: StateCreator<
   compileScriptNode: async (nodeId, manifestJson) => {
     const eng = getEngine();
     if (!eng.compileScriptNode) throw new Error("Engine doesn't support script compilation");
-    const spec = await eng.compileScriptNode(nodeId, manifestJson);
-    const specs = await eng.listNodeTypes();
-    const existingIdx = specs.findIndex(s => s.id === spec.id);
-    if (existingIdx >= 0) {
-      specs[existingIdx] = spec;
-    } else {
-      specs.push(spec);
-    }
+    try {
+      const spec = await eng.compileScriptNode(nodeId, manifestJson);
+      const specs = await eng.listNodeTypes();
+      const existingIdx = specs.findIndex(s => s.id === spec.id);
+      if (existingIdx >= 0) {
+        specs[existingIdx] = spec;
+      } else {
+        specs.push(spec);
+      }
 
-    set({ nodeSpecs: specs, dirty: true });
-    get().triggerAffectedViewers([nodeId]);
-    return spec;
+      set({ nodeSpecs: specs, dirty: true });
+      get().triggerAffectedViewers([nodeId]);
+      return spec;
+    } catch (error) {
+      throw new Error(formatGpuScriptCompileError(error, manifestJson));
+    }
   },
 
   setDslHandle: (nodeId, handle) => {
