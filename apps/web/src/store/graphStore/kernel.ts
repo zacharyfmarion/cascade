@@ -36,6 +36,8 @@ export const kernel = {
   renderSuspendCount: 0,
   renderNeededWhileSuspended: false,
   graphRevision: 0,
+  /** Guards against concurrent undo/redo operations. Resolves when the current operation completes. */
+  undoLock: Promise.resolve() as Promise<void>,
 };
 
 export function buildGroupIOSpecs(
@@ -262,6 +264,10 @@ export interface UndoSnapshot {
   imageData: Map<string, Uint8Array>;
   /** Sequence metadata per LoadImageSequence node id */
   sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
+  /** @internal Promise resolving to engineState — awaited on commit to prevent incomplete snapshots */
+  _pendingEngineState?: Promise<unknown>;
+  /** @internal Promise resolving to imageData — awaited on commit to prevent incomplete snapshots */
+  _pendingImageData?: Promise<Map<string, Uint8Array>>;
 }
 
 /** Type guard to distinguish SequenceInfo from VideoInfo */

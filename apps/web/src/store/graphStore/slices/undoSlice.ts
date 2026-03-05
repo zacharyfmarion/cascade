@@ -121,18 +121,30 @@ export const createUndoSlice: StateCreator<
     undo: () => {
       const snapshot = kernel.undoStack.pop();
       if (!snapshot) return;
-      captureSnapshot().then(async current => {
+      // Serialize undo/redo operations via a promise chain to prevent
+      // concurrent stack mutations when the user clicks rapidly.
+      // The pop() above is safe outside the lock because JS is single-threaded:
+      // each synchronous call gets its own snapshot before yielding.
+      kernel.undoLock = kernel.undoLock.then(async () => {
+        const current = await captureSnapshot();
         kernel.redoStack.push(current);
         await restoreSnapshot(snapshot);
+      }).catch(() => {
+        // Swallow errors to prevent breaking the promise chain.
+        // restoreSnapshot already handles per-node failures internally.
+        set({ canUndo: kernel.undoStack.length > 0, canRedo: kernel.redoStack.length > 0 });
       });
     },
 
     redo: () => {
       const snapshot = kernel.redoStack.pop();
       if (!snapshot) return;
-      captureSnapshot().then(async current => {
+      kernel.undoLock = kernel.undoLock.then(async () => {
+        const current = await captureSnapshot();
         kernel.undoStack.push(current);
         await restoreSnapshot(snapshot);
+      }).catch(() => {
+        set({ canUndo: kernel.undoStack.length > 0, canRedo: kernel.redoStack.length > 0 });
       });
     },
 

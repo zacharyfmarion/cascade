@@ -54,6 +54,11 @@ export const createLiveParamsSlice: StateCreator<
   return {
     setParamLive: async (nodeId, key, value) => {
       if (!kernel.preCommitSnapshot) {
+        // Capture both engineState and imageData as promises that resolve
+        // before commit. Previous code fired these as detached promises,
+        // risking incomplete snapshots if commit happened before they resolved.
+        const engineStateP = Promise.resolve(getEngine().exportGraph());
+        const imageDataP = get().collectImageData();
         kernel.preCommitSnapshot = {
           engineState: null,
           nodes: new Map(get().nodes),
@@ -62,11 +67,13 @@ export const createLiveParamsSlice: StateCreator<
           editingStack: cloneEditingStack(get().editingStack),
           imageData: new Map(),
           sequenceInfoMap: new Map(get().sequenceInfoMap),
+          _pendingEngineState: engineStateP,
+          _pendingImageData: imageDataP,
         };
-        Promise.resolve(getEngine().exportGraph()).then(state => {
+        engineStateP.then(state => {
           if (kernel.preCommitSnapshot) kernel.preCommitSnapshot.engineState = state;
         });
-        get().collectImageData().then(data => {
+        imageDataP.then(data => {
           if (kernel.preCommitSnapshot) kernel.preCommitSnapshot.imageData = data;
         });
       }
@@ -130,8 +137,15 @@ export const createLiveParamsSlice: StateCreator<
 
     setParamCommit: async (nodeId, key, value) => {
       if (kernel.preCommitSnapshot) {
-        if (!kernel.preCommitSnapshot.engineState) {
-          kernel.preCommitSnapshot.engineState = await getEngine().exportGraph();
+        // Await both pending async captures to ensure snapshot is complete
+        // before pushing to undo stack. This prevents incomplete undo entries
+        // when the user commits faster than the async captures resolve.
+        const [engineState] = await Promise.all([
+          kernel.preCommitSnapshot._pendingEngineState ?? Promise.resolve(kernel.preCommitSnapshot.engineState),
+          kernel.preCommitSnapshot._pendingImageData ?? Promise.resolve(kernel.preCommitSnapshot.imageData),
+        ]);
+        if (!kernel.preCommitSnapshot.engineState && engineState) {
+          kernel.preCommitSnapshot.engineState = engineState;
         }
         kernel.undoStack.push(kernel.preCommitSnapshot);
         if (kernel.undoStack.length > useSettingsStore.getState().maxUndoSteps) kernel.undoStack.shift();
@@ -184,6 +198,8 @@ export const createLiveParamsSlice: StateCreator<
 
     setInputDefaultLive: async (nodeId, portName, value) => {
       if (!kernel.preCommitSnapshot) {
+        const engineStateP = Promise.resolve(getEngine().exportGraph());
+        const imageDataP = get().collectImageData();
         kernel.preCommitSnapshot = {
           engineState: null,
           nodes: new Map(get().nodes),
@@ -192,11 +208,13 @@ export const createLiveParamsSlice: StateCreator<
           editingStack: cloneEditingStack(get().editingStack),
           imageData: new Map(),
           sequenceInfoMap: new Map(get().sequenceInfoMap),
+          _pendingEngineState: engineStateP,
+          _pendingImageData: imageDataP,
         };
-        Promise.resolve(getEngine().exportGraph()).then(state => {
+        engineStateP.then(state => {
           if (kernel.preCommitSnapshot) kernel.preCommitSnapshot.engineState = state;
         });
-        get().collectImageData().then(data => {
+        imageDataP.then(data => {
           if (kernel.preCommitSnapshot) kernel.preCommitSnapshot.imageData = data;
         });
       }
@@ -240,8 +258,12 @@ export const createLiveParamsSlice: StateCreator<
 
     setInputDefaultCommit: async (nodeId, portName, value) => {
       if (kernel.preCommitSnapshot) {
-        if (!kernel.preCommitSnapshot.engineState) {
-          kernel.preCommitSnapshot.engineState = await getEngine().exportGraph();
+        const [engineState] = await Promise.all([
+          kernel.preCommitSnapshot._pendingEngineState ?? Promise.resolve(kernel.preCommitSnapshot.engineState),
+          kernel.preCommitSnapshot._pendingImageData ?? Promise.resolve(kernel.preCommitSnapshot.imageData),
+        ]);
+        if (!kernel.preCommitSnapshot.engineState && engineState) {
+          kernel.preCommitSnapshot.engineState = engineState;
         }
         kernel.undoStack.push(kernel.preCommitSnapshot);
         if (kernel.undoStack.length > useSettingsStore.getState().maxUndoSteps) kernel.undoStack.shift();
