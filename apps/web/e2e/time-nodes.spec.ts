@@ -98,7 +98,7 @@ test.describe('Time Nodes', () => {
     await harness(page, 'waitForRenderIdle');
 
     // Change offset param
-    await harness(page, 'setParam', offset, 'offset', { Integer: 5 });
+    await harness(page, 'setParam', offset, 'offset', { Int: 5 });
     await harness(page, 'waitForRenderIdle');
 
     const result = (await harness(page, 'getViewerResult', viewer)) as {
@@ -107,7 +107,7 @@ test.describe('Time Nodes', () => {
     expect(result?.hasPixels).toBe(true);
 
     // Change to negative offset
-    await harness(page, 'setParam', offset, 'offset', { Integer: -3 });
+    await harness(page, 'setParam', offset, 'offset', { Int: -3 });
     await harness(page, 'waitForRenderIdle');
 
     const result2 = (await harness(page, 'getViewerResult', viewer)) as {
@@ -130,7 +130,7 @@ test.describe('Time Nodes', () => {
     await harness(page, 'waitForRenderIdle');
 
     // Change held frame
-    await harness(page, 'setParam', hold, 'frame', { Integer: 10 });
+    await harness(page, 'setParam', hold, 'frame', { Int: 10 });
     await harness(page, 'waitForRenderIdle');
 
     const result = (await harness(page, 'getViewerResult', viewer)) as {
@@ -197,7 +197,7 @@ test.describe('Time Nodes', () => {
 
     await harness(page, 'connect', solid, 'field', offset, 'input');
     await harness(page, 'connect', offset, 'output', viewer, 'value');
-    await harness(page, 'setParam', offset, 'offset', { Integer: -2 });
+    await harness(page, 'setParam', offset, 'offset', { Int: -2 });
     await harness(page, 'waitForRenderIdle');
 
     // Change current frame
