@@ -7,7 +7,7 @@
  * without fragile UI interactions (dragging ports, etc.).
  */
 import { useGraphStore, getEngine } from '../store/graphStore';
-import type { ParamValue } from '../store/types';
+import type { NodeSpec, ParamValue } from '../store/types';
 
 export interface CascadeTestHarness {
   /** Wait for the WASM engine to be fully initialized */
@@ -90,6 +90,11 @@ export interface CascadeTestHarness {
     height?: number;
   } | null;
   getNodeErrors(): Record<string, string>;
+  getNodeSpec(nodeId: string): {
+    id: string;
+    inputs: Array<{ name: string; value_type: string }>;
+    outputs: Array<{ name: string; value_type: string }>;
+  } | null;
 
   // --- Viewer display controls ---
   getViewerDisplayState(): { channel: string | null; gain: number; gamma: number } | null;
@@ -396,6 +401,51 @@ function createTestHarness(): CascadeTestHarness {
       try { return JSON.parse(raw); } catch { return null; }
     },
 
+    getNodeSpec(nodeId: string): {
+      id: string;
+      inputs: Array<{ name: string; value_type: string }>;
+      outputs: Array<{ name: string; value_type: string }>;
+    } | null {
+      // Try per-instance spec first (dynamic ports), then fall back to engine
+      const instanceSpec = useGraphStore.getState().nodeSpecsById.get(nodeId);
+      if (instanceSpec) {
+        return {
+          id: instanceSpec.id,
+          inputs: instanceSpec.inputs.map((inp) => ({
+            name: inp.name,
+            value_type: inp.ty,
+          })),
+          outputs: instanceSpec.outputs.map((out) => ({
+            name: out.name,
+            value_type: out.ty,
+          })),
+        };
+      }
+      // Fall back to engine bridge
+      try {
+        const engine = getEngine();
+        if (engine.getNodeSpec) {
+          const spec = engine.getNodeSpec(nodeId);
+          if (spec && typeof spec === 'object' && 'id' in spec) {
+            const s = spec as NodeSpec;
+            return {
+              id: s.id,
+              inputs: s.inputs.map((inp) => ({
+                name: inp.name,
+                value_type: inp.ty,
+              })),
+              outputs: s.outputs.map((out) => ({
+                name: out.name,
+                value_type: out.ty,
+              })),
+            };
+          }
+        }
+      } catch {
+        // Engine not available
+      }
+      return null;
+    },
   };
 }
 

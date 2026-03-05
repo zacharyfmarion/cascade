@@ -428,8 +428,12 @@ impl Engine {
     ) -> Result<(), JsValue> {
         let from_id = parse_node_id(&self.uuid_map, from_node).map_err(to_js_error)?;
         let to_id = parse_node_id(&self.uuid_map, to_node).map_err(to_js_error)?;
+        let spec_provider = InstanceAwareSpecProvider {
+            registry: &self.registry,
+            instances: &self.nodes,
+        };
         self.graph
-            .connect(&self.registry, from_id, from_port, to_id, to_port)
+            .connect(&spec_provider, from_id, from_port, to_id, to_port)
             .map_err(to_js_error)
     }
 

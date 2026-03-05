@@ -441,11 +441,23 @@ pub fn decode_exr_layer(
     // Build channel name to index map
     let channels = &layer.channel_data.list;
 
-    // Helper: find channel data as f32 values
-    let get_channel_f32 = |name: &str| -> Option<Vec<f32>> {
+    // Helper: find channel data as f32 values.
+    // Channel names in the decoded data use their FULL form (e.g. "BG.Depth.V")
+    // while ExrChannelSet stores stripped suffixes (e.g. "V").  Try the full
+    // prefixed name first, then fall back to the bare suffix for the default
+    // (unnamed) layer whose channels have no prefix.
+    let get_channel_f32 = |suffix: &str| -> Option<Vec<f32>> {
+        let full_name = if descriptor.layer_name.is_empty() {
+            suffix.to_string()
+        } else {
+            format!("{}.{}", descriptor.layer_name, suffix)
+        };
         channels
             .iter()
-            .find(|c| c.name.to_string() == name)
+            .find(|c| {
+                let n = c.name.to_string();
+                n == full_name || n == suffix
+            })
             .map(|c| c.sample_data.values_as_f32().collect::<Vec<f32>>())
     };
 
@@ -875,6 +887,51 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_named_layer_round_trip() -> Result<(), CascadeError> {
+        // This tests the bug where prefixed channel names (e.g. "mask.R")
+        // failed to match stripped suffixes ("R") during decode.
+        let primary_data = vec![0.1f32; 4 * 4 * 4];
+        let mask_data: Vec<f32> = (0..4 * 4)
+            .flat_map(|i| {
+                let v = i as f32 / 16.0;
+                [v, v, v, 1.0]
+            })
+            .collect();
+        let primary = make_test_image(4, 4, primary_data)?;
+        let mask = make_test_image(4, 4, mask_data.clone())?;
+
+        let bytes = encode_multilayer_exr(
+            &[("", &primary), ("mask", &mask)],
+            "ZIP",
+        )?;
+
+        let metadata = parse_exr_metadata(&bytes)?;
+        assert_eq!(metadata.layers.len(), 2);
+
+        // Find the named "mask" layer port
+        let mask_descriptor = metadata.layers.iter()
+            .find(|l| l.layer_name == "mask")
+            .expect("mask layer should exist in metadata");
+
+        // Decode the named layer — this exercises the prefix-aware lookup
+        let decoded = decode_exr_layer(&bytes, &metadata, &mask_descriptor.port_name)?;
+        assert_eq!(decoded.width, 4);
+        assert_eq!(decoded.height, 4);
+
+        // Verify pixel values survived the round trip
+        let dec = &*decoded.data;
+        for i in 0..(4 * 4) {
+            let expected_v = i as f32 / 16.0;
+            assert!(
+                (dec[i * 4] - expected_v).abs() < 0.001,
+                "Pixel {i} R: expected {expected_v}, got {}",
+                dec[i * 4]
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_encode_empty_layers_error() {
         let result = encode_multilayer_exr(&[], "PIZ");
         assert!(result.is_err());
@@ -912,6 +969,39 @@ mod tests {
             assert_eq!(layer.encoding.compression, expected);
         }
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_fixture_depth_layer() -> Result<(), CascadeError> {
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap().parent().unwrap()
+            .join("apps/web/e2e/fixtures/test_multilayer.exr");
+        if !fixture_path.exists() {
+            return Ok(());
+        }
+        let bytes =
+            std::fs::read(&fixture_path).map_err(|e| CascadeError::Other(e.to_string()))?;
+        let metadata = parse_exr_metadata(&bytes)?;
+
+        // Verify two layers: unnamed primary + named depth mask
+        assert_eq!(metadata.layers.len(), 2);
+        assert_eq!(metadata.layers[1].port_name, "depth");
+        assert_eq!(metadata.layers[1].kind, ExrLayerKind::Mask);
+
+        // Decode primary
+        let primary = metadata.primary_layer_port.as_ref()
+            .ok_or_else(|| CascadeError::Other("No primary".into()))?;
+        let img = decode_exr_layer(&bytes, &metadata, primary)?;
+        assert_eq!(img.width, 4);
+        assert_eq!(img.height, 4);
+
+        // Decode depth mask
+        let mask = decode_exr_layer(&bytes, &metadata, "depth")?;
+        assert_eq!(mask.width, 4);
+        assert_eq!(mask.height, 4);
+        // Depth values should be gradient 0..15/16
+        assert!((mask.data[0] - 0.0).abs() < 0.001);
         Ok(())
     }
 }

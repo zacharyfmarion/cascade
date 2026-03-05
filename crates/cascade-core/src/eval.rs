@@ -427,7 +427,9 @@ impl Evaluator {
                     })?;
                 let elapsed = start.elapsed();
                 node_timings.insert(node_id, elapsed);
-                for output in spec.outputs.iter() {
+                // Use instance spec (not registry) to include dynamic outputs
+                let instance_spec = node.spec();
+                for output in instance_spec.outputs.iter() {
                     let value = outputs.get(&output.name).cloned().unwrap_or(Value::None);
                     let byte_size = value.estimate_bytes();
                     access_counter = access_counter.saturating_add(1);

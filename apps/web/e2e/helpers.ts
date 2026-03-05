@@ -40,6 +40,11 @@ export interface CascadeTestHarness {
   loadImageFile(nodeId: string, data: number[], fileName?: string): Promise<void>;
   getViewerDisplayState(): Promise<{ channel: string | null; gain: number; gamma: number } | null>;
   getPixelInspectorValue(): Promise<{ x: number; y: number; r: number; g: number; b: number; a: number } | null>;
+  getNodeSpec(nodeId: string): Promise<{
+    id: string;
+    inputs: Array<{ name: string; value_type: string }>;
+    outputs: Array<{ name: string; value_type: string }>;
+  } | null>;
 }
 
 export interface HarnessWindow extends Window {
