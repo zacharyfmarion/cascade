@@ -16,7 +16,9 @@ export function createCascadeTransport(
 ) {
   const anthropic = createAnthropic({
     apiKey,
-    baseURL: isTauri() ? undefined : '/api/anthropic/v1',
+    // Anthropic supports direct browser access via the special header below.
+    // No CORS proxy needed (unlike Replicate). Tauri calls the API directly
+    // from Rust, so no baseURL override needed for desktop builds.
     headers: isTauri() ? undefined : { 'anthropic-dangerous-direct-browser-access': 'true' },
   });
 
