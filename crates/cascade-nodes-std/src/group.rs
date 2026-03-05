@@ -6,7 +6,7 @@ use cascade_core::group::{GroupDefinition, GroupInterface, InternalConnection, I
 use cascade_core::node::{EvalContext, Node, NodeFuture, NodeRegistry};
 use cascade_core::types::*;
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, RwLock};
 
 pub struct GroupInputNode {
@@ -121,11 +121,58 @@ pub struct GroupNode {
     id_map: HashMap<String, NodeId>,
 }
 
+#[derive(Clone, Debug)]
+pub struct InternalNodeState {
+    pub params: HashMap<String, ParamValue>,
+    pub input_defaults: HashMap<String, ParamValue>,
+}
+
 struct GroupNodeState {
     internal_graph: Graph,
     internal_nodes: HashMap<NodeId, Arc<dyn Node>>,
     internal_evaluator: Evaluator,
     internal_registry: NodeRegistry,
+}
+
+struct GroupStateRestore<'a> {
+    state_mutex: &'a Mutex<GroupNodeState>,
+    internal_graph: Graph,
+    internal_nodes: HashMap<NodeId, Arc<dyn Node>>,
+    internal_registry: NodeRegistry,
+    internal_evaluator: Evaluator,
+}
+
+impl<'a> GroupStateRestore<'a> {
+    fn new(
+        state_mutex: &'a Mutex<GroupNodeState>,
+        internal_graph: Graph,
+        internal_nodes: HashMap<NodeId, Arc<dyn Node>>,
+        internal_registry: NodeRegistry,
+        internal_evaluator: Evaluator,
+    ) -> Self {
+        Self {
+            state_mutex,
+            internal_graph,
+            internal_nodes,
+            internal_registry,
+            internal_evaluator,
+        }
+    }
+}
+
+impl Drop for GroupStateRestore<'_> {
+    fn drop(&mut self) {
+        let mut state = match self.state_mutex.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        state.internal_graph = std::mem::replace(&mut self.internal_graph, Graph::new());
+        state.internal_nodes = std::mem::take(&mut self.internal_nodes);
+        state.internal_registry =
+            std::mem::replace(&mut self.internal_registry, NodeRegistry::new());
+        state.internal_evaluator =
+            std::mem::replace(&mut self.internal_evaluator, Evaluator::new());
+    }
 }
 
 impl GroupNode {
@@ -160,6 +207,29 @@ impl GroupNode {
                 .map(|promo| promo.spec.clone())
                 .collect(),
         }
+    }
+
+    pub fn snapshot_internal_state(
+        &self,
+    ) -> Result<HashMap<String, InternalNodeState>, CascadeError> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| CascadeError::Other("Group state lock poisoned".to_string()))?;
+        let mut snapshot = HashMap::new();
+        for (internal_id, node_id) in &self.id_map {
+            let node = state.internal_graph.nodes.get(*node_id).ok_or_else(|| {
+                CascadeError::Other(format!("Internal node not found: {internal_id}"))
+            })?;
+            snapshot.insert(
+                internal_id.clone(),
+                InternalNodeState {
+                    params: node.params.clone(),
+                    input_defaults: node.input_defaults.clone(),
+                },
+            );
+        }
+        Ok(snapshot)
     }
 
     pub fn derive_interface(
@@ -215,6 +285,9 @@ impl GroupNode {
         interface: &GroupInterface,
         registry: &NodeRegistry,
     ) -> Result<(GroupNodeState, NodeId, NodeId, HashMap<String, NodeId>), String> {
+        if Self::internal_graph_has_cycle(definition) {
+            return Err("Internal group graph contains a cycle".to_string());
+        }
         let mut graph = Graph::new();
         let mut internal_nodes: HashMap<NodeId, Arc<dyn Node>> = HashMap::new();
         let mut internal_registry = NodeRegistry::new();
@@ -371,6 +444,52 @@ impl GroupNode {
             .find(|node| node.id == node_id)
             .ok_or_else(|| format!("Unknown internal node: {node_id}"))
     }
+
+    fn internal_graph_has_cycle(definition: &GroupDefinition) -> bool {
+        let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+        for node in &definition.internal_graph.nodes {
+            adjacency.entry(node.id.clone()).or_default();
+        }
+        for conn in &definition.internal_graph.connections {
+            adjacency
+                .entry(conn.from_node.clone())
+                .or_default()
+                .push(conn.to_node.clone());
+        }
+
+        let mut visiting = HashSet::new();
+        let mut visited = HashSet::new();
+        for node_id in adjacency.keys() {
+            if Self::visit_internal_node(node_id, &adjacency, &mut visiting, &mut visited) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn visit_internal_node(
+        node_id: &str,
+        adjacency: &HashMap<String, Vec<String>>,
+        visiting: &mut HashSet<String>,
+        visited: &mut HashSet<String>,
+    ) -> bool {
+        if visited.contains(node_id) {
+            return false;
+        }
+        if !visiting.insert(node_id.to_string()) {
+            return true;
+        }
+        if let Some(neighbors) = adjacency.get(node_id) {
+            for neighbor in neighbors {
+                if Self::visit_internal_node(neighbor, adjacency, visiting, visited) {
+                    return true;
+                }
+            }
+        }
+        visiting.remove(node_id);
+        visited.insert(node_id.to_string());
+        false
+    }
 }
 
 impl Node for GroupNode {
@@ -380,7 +499,7 @@ impl Node for GroupNode {
 
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
-            let (mut internal_graph, internal_nodes, internal_registry, mut internal_evaluator) = {
+            let mut state_restore = {
                 let mut state = self
                     .state
                     .lock()
@@ -421,7 +540,8 @@ impl Node for GroupNode {
                     std::mem::replace(&mut state.internal_registry, NodeRegistry::new());
                 let internal_evaluator =
                     std::mem::replace(&mut state.internal_evaluator, Evaluator::new());
-                (
+                GroupStateRestore::new(
+                    &self.state,
                     internal_graph,
                     internal_nodes,
                     internal_registry,
@@ -431,11 +551,12 @@ impl Node for GroupNode {
 
             let mut outputs = HashMap::new();
             for port in &self.interface.outputs {
-                let eval_result = internal_evaluator
+                let eval_result = state_restore
+                    .internal_evaluator
                     .evaluate(
-                        &mut internal_graph,
-                        &internal_registry,
-                        &internal_nodes,
+                        &mut state_restore.internal_graph,
+                        &state_restore.internal_registry,
+                        &state_restore.internal_nodes,
                         self.group_output_id,
                         &port.name,
                         ctx.frame_time,
@@ -447,15 +568,6 @@ impl Node for GroupNode {
                     .await?;
                 outputs.insert(port.name.clone(), eval_result.value);
             }
-
-            let mut state = self
-                .state
-                .lock()
-                .map_err(|_| CascadeError::Other("Group state lock poisoned".to_string()))?;
-            state.internal_graph = internal_graph;
-            state.internal_nodes = internal_nodes;
-            state.internal_registry = internal_registry;
-            state.internal_evaluator = internal_evaluator;
 
             Ok(outputs)
         })

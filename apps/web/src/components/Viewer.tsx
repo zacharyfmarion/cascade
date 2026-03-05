@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
@@ -227,17 +227,15 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const [gain, setGain] = useState(1);
   const [gamma, setGamma] = useState(1);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
-  const [panelWidth, setPanelWidth] = useState(panelApi?.width ?? Infinity);
-
-  // Track panel width from dockview for responsive toolbar
-  useEffect(() => {
-    if (!panelApi) return;
-    setPanelWidth(panelApi.width);
-    const disposable = panelApi.onDidDimensionsChange((event) => {
-      setPanelWidth(event.width);
-    });
-    return () => disposable.dispose();
-  }, [panelApi]);
+  const panelWidth = useSyncExternalStore(
+    (onStoreChange) => {
+      if (!panelApi) return () => {};
+      const disposable = panelApi.onDidDimensionsChange(() => onStoreChange());
+      return () => disposable.dispose();
+    },
+    () => panelApi?.width ?? Infinity,
+    () => panelApi?.width ?? Infinity,
+  );
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -261,6 +259,16 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const fitToView = useCallback(() => {
     transformRef.current?.centerView(computeFitScale());
   }, [computeFitScale]);
+
+  const handleToggleFit = useCallback(() => {
+    const fitScale = computeFitScale();
+    const currentScale = transformRef.current?.state.scale ?? 1;
+    if (Math.abs(currentScale - fitScale) < 0.01) {
+      transformRef.current?.centerView(1);
+    } else {
+      fitToView();
+    }
+  }, [computeFitScale, fitToView]);
 
   const selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds).pop()! : null;
 
@@ -473,14 +481,13 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
             <TransformComponent
               wrapperStyle={{ width: '100%', height: '100%' }}
               wrapperProps={{
-                onDoubleClick: () => {
-                  const fitScale = computeFitScale();
-                  const currentScale = transformRef.current?.state.scale ?? 1;
-                  // If close to fit scale, go to 1:1; otherwise fit
-                  if (Math.abs(currentScale - fitScale) < 0.01) {
-                    transformRef.current?.centerView(1);
-                  } else {
-                    fitToView();
+                role: 'button',
+                tabIndex: 0,
+                onDoubleClick: handleToggleFit,
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    handleToggleFit();
                   }
                 },
               }}

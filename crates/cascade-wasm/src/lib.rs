@@ -2125,9 +2125,8 @@ impl Engine {
         let updated_arc = Arc::new(updated.clone());
         let mut refreshed_nodes = Vec::with_capacity(group_node_ids.len());
         for node_id in &group_node_ids {
-            let group_node =
-                GroupNode::from_definition(updated_arc.clone(), &self.registry)
-                    .map_err(CascadeError::Other)?;
+            let group_node = GroupNode::from_definition(updated_arc.clone(), &self.registry)
+                .map_err(CascadeError::Other)?;
             refreshed_nodes.push((*node_id, Arc::new(group_node)));
         }
 
