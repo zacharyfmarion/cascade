@@ -10,7 +10,7 @@ use cascade_core::ai::AiProvider;
 use cascade_core::color::{BuiltinColorManagement, ColorManagement};
 use cascade_core::error::CascadeError;
 use cascade_core::eval::Evaluator;
-use cascade_core::graph::{Graph, NodeId};
+use cascade_core::graph::{Graph, InstanceAwareSpecProvider, NodeId};
 use cascade_core::group::{
     CustomNodeInfo, GroupDefinition, InternalConnection, InternalNode, NodePackage,
     SerializableInternalGraph,
@@ -106,6 +106,23 @@ pub struct RestoredNode {
     pub position: (f64, f64),
     pub params: HashMap<String, ParamValue>,
     pub input_defaults: HashMap<String, ParamValue>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrunedConnection {
+    pub from_node: String,
+    pub from_port: String,
+    pub to_node: String,
+    pub to_port: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeInterfaceChange {
+    pub new_spec: NodeSpec,
+    pub removed_output_ports: Vec<String>,
+    pub pruned_connections: Vec<PrunedConnection>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1506,7 +1523,11 @@ impl Engine {
         Ok(())
     }
 
-    pub fn load_image_data(&mut self, node_id: &str, data: &[u8]) -> Result<(), CascadeError> {
+    pub fn load_image_data(
+        &mut self,
+        node_id: &str,
+        data: &[u8],
+    ) -> Result<NodeInterfaceChange, CascadeError> {
         let id = self.parse_node_id(node_id)?;
         let node = self
             .nodes
@@ -1516,8 +1537,33 @@ impl Engine {
             .as_any()
             .downcast_ref::<InputLoadImage>()
             .ok_or_else(|| CascadeError::Other("Node is not LoadImage".to_string()))?;
-        let _removed = load_node.set_image_data(data)?;
-        Ok(())
+        let removed = load_node.set_image_data(data)?;
+        self.graph.mark_dirty(id);
+
+        // Get the updated spec (includes dynamic ports)
+        let new_spec = node.spec();
+
+        // Prune connections that reference removed ports
+        let spec_provider = InstanceAwareSpecProvider {
+            registry: &self.registry,
+            instances: &self.nodes,
+        };
+        let pruned = self.graph.prune_connections_for_node(id, &spec_provider);
+        let pruned_connections = pruned
+            .into_iter()
+            .map(|pc| PrunedConnection {
+                from_node: format_node_id(&self.graph, pc.from_node),
+                from_port: pc.from_port,
+                to_node: format_node_id(&self.graph, pc.to_node),
+                to_port: pc.to_port,
+            })
+            .collect();
+
+        Ok(NodeInterfaceChange {
+            new_spec,
+            removed_output_ports: removed,
+            pruned_connections,
+        })
     }
 
     pub fn get_image_data(&self, node_id: &str) -> Result<Vec<u8>, CascadeError> {

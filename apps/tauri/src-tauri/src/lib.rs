@@ -126,7 +126,7 @@ fn set_muted(state: State<'_, EngineState>, node_id: String, muted: bool) -> Res
 fn load_image_data(
     state: State<'_, EngineState>,
     request: tauri::ipc::Request,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let node_id = request
         .headers()
         .get("x-node-id")
@@ -137,9 +137,11 @@ fn load_image_data(
         return Err("Expected raw body with image data".to_string());
     };
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.engine
+    let change = s
+        .engine
         .load_image_data(&node_id, data)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&change).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
