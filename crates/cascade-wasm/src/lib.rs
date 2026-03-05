@@ -518,14 +518,15 @@ impl Engine {
             instances: &self.nodes,
         };
         let pruned = self.graph.prune_connections_for_node(id, &spec_provider);
-        let pruned_wasm: Vec<PrunedConnectionWasm> = pruned.into_iter().map(|pc| {
-            PrunedConnectionWasm {
+        let pruned_wasm: Vec<PrunedConnectionWasm> = pruned
+            .into_iter()
+            .map(|pc| PrunedConnectionWasm {
                 from_node: format_node_id(&self.graph, pc.from_node),
                 from_port: pc.from_port,
                 to_node: format_node_id(&self.graph, pc.to_node),
                 to_port: pc.to_port,
-            }
-        }).collect();
+            })
+            .collect();
 
         let change = NodeInterfaceChangeWasm {
             new_spec,
@@ -627,14 +628,15 @@ impl Engine {
             instances: &self.nodes,
         };
         let pruned = self.graph.prune_connections_for_node(id, &spec_provider);
-        let pruned_wasm: Vec<PrunedConnectionWasm> = pruned.into_iter().map(|pc| {
-            PrunedConnectionWasm {
+        let pruned_wasm: Vec<PrunedConnectionWasm> = pruned
+            .into_iter()
+            .map(|pc| PrunedConnectionWasm {
                 from_node: format_node_id(&self.graph, pc.from_node),
                 from_port: pc.from_port,
                 to_node: format_node_id(&self.graph, pc.to_node),
                 to_port: pc.to_port,
-            }
-        }).collect();
+            })
+            .collect();
 
         let change = NodeInterfaceChangeWasm {
             new_spec,
@@ -2124,7 +2126,6 @@ impl Engine {
         let spec = node.spec();
         serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
     }
-
 
     /// Evaluate a node graph up to the given node+port and return raw bytes.
     /// Used for SaveExr → browser download flow.

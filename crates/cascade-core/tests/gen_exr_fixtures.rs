@@ -68,7 +68,9 @@ fn generate_multilayer_exr() {
         });
     }
     let primary_layer = Layer {
-        channel_data: AnyChannels { list: primary_channels },
+        channel_data: AnyChannels {
+            list: primary_channels,
+        },
         attributes: LayerAttributes::named(Text::from("")),
         size: Vec2(w, h),
         encoding: Encoding {
@@ -88,7 +90,9 @@ fn generate_multilayer_exr() {
         sampling: Vec2(1, 1),
     });
     let depth_layer = Layer {
-        channel_data: AnyChannels { list: depth_channels },
+        channel_data: AnyChannels {
+            list: depth_channels,
+        },
         attributes: LayerAttributes::named(Text::from("depth")),
         size: Vec2(w, h),
         encoding: Encoding {

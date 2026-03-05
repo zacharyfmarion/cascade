@@ -3670,10 +3670,26 @@ mod tests {
         let output = eval_keymix(a, b, Some(mask), params);
 
         let px = output.get_pixel_f32(0, 0);
-        assert!(approx_eq(px[0], 0.5), "red channel should be 0.5, got {}", px[0]);
-        assert!(approx_eq(px[1], 0.0), "green channel should be 0.0, got {}", px[1]);
-        assert!(approx_eq(px[2], 0.5), "blue channel should be 0.5, got {}", px[2]);
-        assert!(approx_eq(px[3], 1.0), "alpha channel should be 1.0, got {}", px[3]);
+        assert!(
+            approx_eq(px[0], 0.5),
+            "red channel should be 0.5, got {}",
+            px[0]
+        );
+        assert!(
+            approx_eq(px[1], 0.0),
+            "green channel should be 0.0, got {}",
+            px[1]
+        );
+        assert!(
+            approx_eq(px[2], 0.5),
+            "blue channel should be 0.5, got {}",
+            px[2]
+        );
+        assert!(
+            approx_eq(px[3], 1.0),
+            "alpha channel should be 1.0, got {}",
+            px[3]
+        );
     }
 
     #[test]
@@ -3697,7 +3713,11 @@ mod tests {
         let output = eval_keymix(a, b, Some(mask), params);
 
         let px = output.get_pixel_f32(0, 0);
-        assert_color_approx(px, [0.0, 0.0, 1.0, 1.0], "inverted white mask should select B");
+        assert_color_approx(
+            px,
+            [0.0, 0.0, 1.0, 1.0],
+            "inverted white mask should select B",
+        );
     }
 
     #[test]
@@ -3744,7 +3764,8 @@ mod tests {
             min: IVec2::new(1, 1),
             max: IVec2::new(3, 3),
         };
-        let b = Image::new_with_domain(b_format, b_dw, b_data, ColorSpaceId::default_working()).unwrap();
+        let b = Image::new_with_domain(b_format, b_dw, b_data, ColorSpaceId::default_working())
+            .unwrap();
 
         // Create 4x4 mask at (0,0)
         let mask = make_test_image(4, 4, [1.0, 1.0, 1.0, 1.0]);
@@ -3758,7 +3779,11 @@ mod tests {
 
         // At (2,2): overlap region, white mask selects A
         let px_22 = output.get_pixel_f32(2, 2);
-        assert_color_approx(px_22, [1.0, 0.0, 0.0, 1.0], "at (2,2) overlap should select A");
+        assert_color_approx(
+            px_22,
+            [1.0, 0.0, 0.0, 1.0],
+            "at (2,2) overlap should select A",
+        );
     }
 
     #[test]
@@ -3785,9 +3810,21 @@ mod tests {
         let px = output.get_pixel_f32(0, 0);
         // Luma = 0.2126 * 1.0 + 0.7152 * 0.0 + 0.0722 * 0.0 = 0.2126
         // white * 0.2126 + black * (1 - 0.2126) ≈ [0.2126, 0.2126, 0.2126, 1.0]
-        assert!(approx_eq(px[0], 0.2126), "red should be ~0.2126, got {}", px[0]);
-        assert!(approx_eq(px[1], 0.2126), "green should be ~0.2126, got {}", px[1]);
-        assert!(approx_eq(px[2], 0.2126), "blue should be ~0.2126, got {}", px[2]);
+        assert!(
+            approx_eq(px[0], 0.2126),
+            "red should be ~0.2126, got {}",
+            px[0]
+        );
+        assert!(
+            approx_eq(px[1], 0.2126),
+            "green should be ~0.2126, got {}",
+            px[1]
+        );
+        assert!(
+            approx_eq(px[2], 0.2126),
+            "blue should be ~0.2126, got {}",
+            px[2]
+        );
     }
 
     #[test]
@@ -3799,7 +3836,10 @@ mod tests {
         let output = eval_keymix(a.clone(), b, Some(mask), params);
 
         assert_eq!(output.format, a.format, "output format should match A");
-        assert_eq!(output.color_space, a.color_space, "output color space should match A");
+        assert_eq!(
+            output.color_space, a.color_space,
+            "output color space should match A"
+        );
     }
 
     #[test]
@@ -3811,7 +3851,11 @@ mod tests {
         let output = eval_keymix(a, b, Some(mask), params);
 
         let px = output.get_pixel_f32(0, 0);
-        assert_color_approx(px, [0.0, 0.0, 1.0, 1.0], "single pixel black mask should select B");
+        assert_color_approx(
+            px,
+            [0.0, 0.0, 1.0, 1.0],
+            "single pixel black mask should select B",
+        );
     }
 
     #[test]
@@ -3823,7 +3867,11 @@ mod tests {
         let output = eval_keymix(a, b, Some(mask), params);
 
         let px = output.get_pixel_f32(0, 0);
-        assert_color_approx(px, [0.0, 0.0, 0.0, 0.0], "transparent inputs should stay transparent");
+        assert_color_approx(
+            px,
+            [0.0, 0.0, 0.0, 0.0],
+            "transparent inputs should stay transparent",
+        );
     }
 
     #[test]
@@ -3844,5 +3892,4 @@ mod tests {
         assert!(approx_eq(px[2], 0.5), "blue should be 0.5, got {}", px[2]);
         assert!(approx_eq(px[3], 1.0), "alpha should be 1.0, got {}", px[3]);
     }
-
 }

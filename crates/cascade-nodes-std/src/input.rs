@@ -28,7 +28,9 @@ enum ParsedImage {
     /// Standard raster image (PNG, JPEG, etc.) — already decoded.
     Standard(Image),
     /// Multi-layer EXR — metadata parsed, pixels decoded lazily.
-    Exr { metadata: ExrMetadata },
+    Exr {
+        metadata: ExrMetadata,
+    },
 }
 
 impl Default for LoadImage {
@@ -52,7 +54,9 @@ impl LoadImage {
     pub fn set_image_data(&self, bytes: &[u8]) -> Result<Vec<String>, CascadeError> {
         // Capture previous output port names for pruning
         let old_ports: Vec<String> = {
-            let guard = self.parsed.lock()
+            let guard = self
+                .parsed
+                .lock()
                 .map_err(|_| CascadeError::Other("Parsed mutex poisoned".into()))?;
             match &*guard {
                 ParsedImage::Empty => vec![],
@@ -71,7 +75,9 @@ impl LoadImage {
 
         // Clear decode cache
         {
-            let mut cache = self.decode_cache.lock()
+            let mut cache = self
+                .decode_cache
+                .lock()
                 .map_err(|_| CascadeError::Other("Decode cache mutex poisoned".into()))?;
             cache.clear();
         }
@@ -79,7 +85,9 @@ impl LoadImage {
         // Store raw bytes
         let bytes_arc = Arc::new(bytes.to_vec());
         {
-            let mut guard = self.original_bytes.lock()
+            let mut guard = self
+                .original_bytes
+                .lock()
                 .map_err(|_| CascadeError::Other("Bytes mutex poisoned".into()))?;
             *guard = Some(bytes_arc);
         }
@@ -87,7 +95,9 @@ impl LoadImage {
         if exr::is_exr(bytes) {
             // EXR path: parse metadata only (no pixel decode)
             let metadata = exr::parse_exr_metadata(bytes)?;
-            let mut guard = self.parsed.lock()
+            let mut guard = self
+                .parsed
+                .lock()
                 .map_err(|_| CascadeError::Other("Parsed mutex poisoned".into()))?;
             *guard = ParsedImage::Exr { metadata };
         } else {
@@ -97,28 +107,38 @@ impl LoadImage {
             let rgba = decoded.to_rgba8();
             let (width, height) = rgba.dimensions();
             if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-                return Err(CascadeError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+                return Err(CascadeError::ImageTooLarge {
+                    width,
+                    height,
+                    max: MAX_IMAGE_DIM,
+                });
             }
             let raw = rgba.as_raw();
             let lut = srgb_to_linear_lut();
             let pixel_count = (width as usize) * (height as usize);
             let mut data = vec![0.0f32; pixel_count * 4];
-            data.par_chunks_exact_mut(4).enumerate().for_each(|(i, out)| {
-                let idx = i * 4;
-                out[0] = lut[raw[idx] as usize];
-                out[1] = lut[raw[idx + 1] as usize];
-                out[2] = lut[raw[idx + 2] as usize];
-                out[3] = raw[idx + 3] as f32 / 255.0;
-            });
+            data.par_chunks_exact_mut(4)
+                .enumerate()
+                .for_each(|(i, out)| {
+                    let idx = i * 4;
+                    out[0] = lut[raw[idx] as usize];
+                    out[1] = lut[raw[idx + 1] as usize];
+                    out[2] = lut[raw[idx + 2] as usize];
+                    out[3] = raw[idx + 3] as f32 / 255.0;
+                });
             let image = Image::from_f32_data(width, height, data)?;
-            let mut guard = self.parsed.lock()
+            let mut guard = self
+                .parsed
+                .lock()
                 .map_err(|_| CascadeError::Other("Parsed mutex poisoned".into()))?;
             *guard = ParsedImage::Standard(image);
         }
 
         // Compute removed ports
         let new_ports: Vec<String> = {
-            let guard = self.parsed.lock()
+            let guard = self
+                .parsed
+                .lock()
                 .map_err(|_| CascadeError::Other("Parsed mutex poisoned".into()))?;
             match &*guard {
                 ParsedImage::Empty => vec![],
@@ -135,7 +155,8 @@ impl LoadImage {
             }
         };
 
-        let removed: Vec<String> = old_ports.into_iter()
+        let removed: Vec<String> = old_ports
+            .into_iter()
             .filter(|p| !new_ports.contains(p))
             .collect();
 
@@ -143,48 +164,10 @@ impl LoadImage {
     }
 
     pub fn get_image_bytes(&self) -> Option<Vec<u8>> {
-        self.original_bytes.lock().ok()
+        self.original_bytes
+            .lock()
+            .ok()
             .and_then(|guard| guard.as_ref().map(|arc| arc.as_ref().clone()))
-    }
-
-    /// Decode a specific EXR layer on demand. Caches the result.
-    fn decode_exr_layer(&self, port_name: &str) -> Result<Arc<Image>, CascadeError> {
-        // Check cache first
-        {
-            let cache = self.decode_cache.lock()
-                .map_err(|_| CascadeError::Other("Decode cache mutex poisoned".into()))?;
-            if let Some(cached) = cache.get(port_name) {
-                return Ok(Arc::clone(cached));
-            }
-        }
-
-        // Get raw bytes and metadata
-        let bytes = {
-            let guard = self.original_bytes.lock()
-                .map_err(|_| CascadeError::Other("Bytes mutex poisoned".into()))?;
-            guard.as_ref().cloned().ok_or_else(|| CascadeError::MissingInput("No EXR data loaded".into()))?
-        };
-
-        let metadata = {
-            let guard = self.parsed.lock()
-                .map_err(|_| CascadeError::Other("Parsed mutex poisoned".into()))?;
-            match &*guard {
-                ParsedImage::Exr { metadata } => metadata.clone(),
-                _ => return Err(CascadeError::Other("Not an EXR file".into())),
-            }
-        };
-
-        // Decode the specific layer
-        let image = Arc::new(exr::decode_exr_layer(&bytes, &metadata, port_name)?);
-
-        // Cache it
-        {
-            let mut cache = self.decode_cache.lock()
-                .map_err(|_| CascadeError::Other("Decode cache mutex poisoned".into()))?;
-            cache.insert(port_name.to_string(), Arc::clone(&image));
-        }
-
-        Ok(image)
     }
 }
 
@@ -241,40 +224,97 @@ impl Node for LoadImage {
 
     fn evaluate<'a>(&'a self, _ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
-            let guard = self.parsed.lock()
+            let guard = self
+                .parsed
+                .lock()
                 .map_err(|_| CascadeError::Other("Parsed mutex poisoned".into()))?;
 
             match &*guard {
-                ParsedImage::Empty => {
-                    Err(CascadeError::MissingInput("image_data".to_string()))
-                }
+                ParsedImage::Empty => Err(CascadeError::MissingInput("image_data".to_string())),
                 ParsedImage::Standard(image) => {
                     let mut outputs = HashMap::new();
                     outputs.insert("image".to_string(), Value::Image(image.clone()));
                     Ok(outputs)
                 }
                 ParsedImage::Exr { metadata } => {
-                    // Drop the lock before decoding (decode_exr_layer needs its own locks)
+                    // Drop the lock before decoding (decode_all_layers needs its own locks)
                     let meta = metadata.clone();
                     drop(guard);
 
-                    let mut outputs = HashMap::new();
-
-                    // Decode primary layer for the "image" output
-                    if let Some(ref primary_port) = meta.primary_layer_port {
-                        let img = self.decode_exr_layer(primary_port)?;
-                        outputs.insert("image".to_string(), Value::Image((*img).clone()));
-                    } else {
+                    if meta.primary_layer_port.is_none() {
                         return Err(CascadeError::ExrNoUsablePrimaryLayer);
                     }
 
-                    // Decode each non-primary layer
+                    // Collect all port names that need decoding
+                    let all_ports: Vec<String> = {
+                        let mut ports = Vec::new();
+                        if let Some(ref p) = meta.primary_layer_port {
+                            ports.push(p.clone());
+                        }
+                        for layer in &meta.layers {
+                            if Some(&layer.port_name) != meta.primary_layer_port.as_ref() {
+                                ports.push(layer.port_name.clone());
+                            }
+                        }
+                        ports
+                    };
+
+                    // Check if all layers are already cached
+                    let all_cached = {
+                        let cache = self.decode_cache.lock().map_err(|_| {
+                            CascadeError::Other("Decode cache mutex poisoned".into())
+                        })?;
+                        all_ports.iter().all(|p| cache.contains_key(p))
+                    };
+
+                    if !all_cached {
+                        // Bulk decode all layers in a single file read
+                        let bytes = {
+                            let guard = self
+                                .original_bytes
+                                .lock()
+                                .map_err(|_| CascadeError::Other("Bytes mutex poisoned".into()))?;
+                            guard.as_ref().cloned().ok_or_else(|| {
+                                CascadeError::MissingInput("No EXR data loaded".into())
+                            })?
+                        };
+
+                        let port_refs: Vec<&str> = all_ports.iter().map(|s| s.as_str()).collect();
+                        let decoded = exr::decode_all_layers(&bytes, &meta, Some(&port_refs))?;
+
+                        // Populate cache atomically
+                        let mut cache = self.decode_cache.lock().map_err(|_| {
+                            CascadeError::Other("Decode cache mutex poisoned".into())
+                        })?;
+                        for (port_name, image) in decoded {
+                            cache.entry(port_name).or_insert_with(|| Arc::new(image));
+                        }
+                    }
+
+                    // Build outputs from cache
+                    let cache = self
+                        .decode_cache
+                        .lock()
+                        .map_err(|_| CascadeError::Other("Decode cache mutex poisoned".into()))?;
+                    let mut outputs = HashMap::new();
+
+                    if let Some(ref primary_port) = meta.primary_layer_port {
+                        let img = cache.get(primary_port).ok_or_else(|| {
+                            CascadeError::ExrDecode(format!(
+                                "Primary layer '{}' not decoded",
+                                primary_port
+                            ))
+                        })?;
+                        outputs.insert("image".to_string(), Value::Image((**img).clone()));
+                    }
+
                     for layer in &meta.layers {
                         if Some(&layer.port_name) == meta.primary_layer_port.as_ref() {
                             continue;
                         }
-                        let img = self.decode_exr_layer(&layer.port_name)?;
-                        outputs.insert(layer.port_name.clone(), Value::Image((*img).clone()));
+                        if let Some(img) = cache.get(&layer.port_name) {
+                            outputs.insert(layer.port_name.clone(), Value::Image((**img).clone()));
+                        }
                     }
 
                     Ok(outputs)
@@ -295,24 +335,30 @@ impl Node for LoadImage {
 /// Shared decoder for standard raster images (PNG, JPEG, BMP, WebP).
 /// Converts to f32 RGBA linear.
 fn decode_standard_image(bytes: &[u8]) -> Result<Image, CascadeError> {
-    let decoded = image::load_from_memory(bytes)
-        .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+    let decoded =
+        image::load_from_memory(bytes).map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
     let rgba = decoded.to_rgba8();
     let (width, height) = rgba.dimensions();
     if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-        return Err(CascadeError::ImageTooLarge { width, height, max: MAX_IMAGE_DIM });
+        return Err(CascadeError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        });
     }
     let raw = rgba.as_raw();
     let lut = srgb_to_linear_lut();
     let pixel_count = (width as usize) * (height as usize);
     let mut data = vec![0.0f32; pixel_count * 4];
-    data.par_chunks_exact_mut(4).enumerate().for_each(|(i, out)| {
-        let idx = i * 4;
-        out[0] = lut[raw[idx] as usize];
-        out[1] = lut[raw[idx + 1] as usize];
-        out[2] = lut[raw[idx + 2] as usize];
-        out[3] = raw[idx + 3] as f32 / 255.0;
-    });
+    data.par_chunks_exact_mut(4)
+        .enumerate()
+        .for_each(|(i, out)| {
+            let idx = i * 4;
+            out[0] = lut[raw[idx] as usize];
+            out[1] = lut[raw[idx + 1] as usize];
+            out[2] = lut[raw[idx + 2] as usize];
+            out[3] = raw[idx + 3] as f32 / 255.0;
+        });
     Image::from_f32_data(width, height, data)
 }
 
@@ -377,7 +423,10 @@ impl FrameCache {
     }
 
     fn get(&self, frame: u64) -> Option<&Image> {
-        self.entries.iter().find(|(f, _)| *f == frame).map(|(_, img)| img)
+        self.entries
+            .iter()
+            .find(|(f, _)| *f == frame)
+            .map(|(_, img)| img)
     }
 
     fn insert(&mut self, frame: u64, image: Image) {
@@ -422,10 +471,14 @@ impl LoadImageSequence {
     pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<Vec<String>, CascadeError> {
         // Collect old output port names before update
         let old_ports: Vec<String> = {
-            let guard = self.exr_metadata.lock()
+            let guard = self
+                .exr_metadata
+                .lock()
                 .map_err(|_| CascadeError::Other("Metadata mutex poisoned".to_string()))?;
             match &*guard {
-                Some(metadata) => metadata.layers.iter()
+                Some(metadata) => metadata
+                    .layers
+                    .iter()
                     .filter(|l| metadata.primary_layer_port.as_ref() != Some(&l.port_name))
                     .map(|l| l.port_name.clone())
                     .collect(),
@@ -442,16 +495,22 @@ impl LoadImageSequence {
             map
         };
 
-        let mut cache = self.frame_cache.lock()
+        let mut cache = self
+            .frame_cache
+            .lock()
             .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
         cache.insert(frame, outputs);
 
         // Collect new output port names after update
         let new_ports: Vec<String> = {
-            let guard = self.exr_metadata.lock()
+            let guard = self
+                .exr_metadata
+                .lock()
                 .map_err(|_| CascadeError::Other("Metadata mutex poisoned".to_string()))?;
             match &*guard {
-                Some(metadata) => metadata.layers.iter()
+                Some(metadata) => metadata
+                    .layers
+                    .iter()
                     .filter(|l| metadata.primary_layer_port.as_ref() != Some(&l.port_name))
                     .map(|l| l.port_name.clone())
                     .collect(),
@@ -460,7 +519,8 @@ impl LoadImageSequence {
         };
 
         // Return ports that existed before but don't exist now
-        let removed = old_ports.into_iter()
+        let removed = old_ports
+            .into_iter()
             .filter(|p| !new_ports.contains(p))
             .collect();
         Ok(removed)
@@ -531,7 +591,12 @@ impl LoadImageSequence {
     }
 
     /// Load a single frame from disk. Detects EXR and returns all layer outputs.
-    fn load_frame(&self, dir: &str, pattern: &str, frame: u64) -> Result<HashMap<String, Image>, CascadeError> {
+    fn load_frame(
+        &self,
+        dir: &str,
+        pattern: &str,
+        frame: u64,
+    ) -> Result<HashMap<String, Image>, CascadeError> {
         let padding = parse_frame_padding(pattern);
         let normalized = normalize_pattern(pattern);
         let filename = normalized.replace("{frame}", &format_frame_number(frame, padding));
@@ -557,34 +622,33 @@ impl LoadImageSequence {
 
         // Capture metadata from first EXR frame for interface stability
         {
-            let mut meta_guard = self.exr_metadata.lock()
+            let mut meta_guard = self
+                .exr_metadata
+                .lock()
                 .map_err(|_| CascadeError::Other("EXR metadata mutex poisoned".into()))?;
             if meta_guard.is_none() {
                 *meta_guard = Some(metadata.clone());
             }
         }
 
-        let mut outputs = HashMap::new();
+        // Bulk decode all layers in a single pass
+        let mut outputs = exr::decode_all_layers(bytes, &metadata, None)?;
 
-        // Decode primary layer
+        // Remap primary layer to "image" output port
         if let Some(ref primary_port) = metadata.primary_layer_port {
-            let img = exr::decode_exr_layer(bytes, &metadata, primary_port)?;
-            outputs.insert("image".to_string(), img);
+            if let Some(img) = outputs.remove(primary_port) {
+                outputs.insert("image".to_string(), img);
+            }
         }
 
-        // Decode non-primary layers
+        // Fill in missing non-primary layers with black images
         for layer in &metadata.layers {
             if Some(&layer.port_name) == metadata.primary_layer_port.as_ref() {
                 continue;
             }
-            match exr::decode_exr_layer(bytes, &metadata, &layer.port_name) {
-                Ok(img) => { outputs.insert(layer.port_name.clone(), img); }
-                Err(_) => {
-                    // Missing layer in this frame — output black image
-                    let black = Image::new(metadata.primary_width, metadata.primary_height);
-                    outputs.insert(layer.port_name.clone(), black);
-                }
-            }
+            outputs
+                .entry(layer.port_name.clone())
+                .or_insert_with(|| Image::new(metadata.primary_width, metadata.primary_height));
         }
 
         Ok(outputs)
@@ -658,7 +722,9 @@ impl Node for LoadImageSequence {
         Box::pin(async move {
             let frame = ctx.frame_time.frame;
 
-            let mut cache = self.frame_cache.lock()
+            let mut cache = self
+                .frame_cache
+                .lock()
                 .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
 
             // Check cache
@@ -670,7 +736,9 @@ impl Node for LoadImageSequence {
                 return Ok(outputs);
             }
 
-            let dir_guard = self.directory.lock()
+            let dir_guard = self
+                .directory
+                .lock()
                 .map_err(|_| CascadeError::Other("Directory mutex poisoned".to_string()))?;
 
             let dir = match dir_guard.as_ref() {

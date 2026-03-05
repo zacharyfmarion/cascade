@@ -193,12 +193,22 @@ impl Graph {
             .get(to_node)
             .ok_or(CascadeError::NodeNotFound(to_node))?;
 
-        let from_spec = spec_provider.get_node_spec(from_node, &from_instance.type_id).ok_or_else(|| {
-            CascadeError::InvalidConnection(format!("Unknown node type: {}", from_instance.type_id))
-        })?;
-        let to_spec = spec_provider.get_node_spec(to_node, &to_instance.type_id).ok_or_else(|| {
-            CascadeError::InvalidConnection(format!("Unknown node type: {}", to_instance.type_id))
-        })?;
+        let from_spec = spec_provider
+            .get_node_spec(from_node, &from_instance.type_id)
+            .ok_or_else(|| {
+                CascadeError::InvalidConnection(format!(
+                    "Unknown node type: {}",
+                    from_instance.type_id
+                ))
+            })?;
+        let to_spec = spec_provider
+            .get_node_spec(to_node, &to_instance.type_id)
+            .ok_or_else(|| {
+                CascadeError::InvalidConnection(format!(
+                    "Unknown node type: {}",
+                    to_instance.type_id
+                ))
+            })?;
 
         let from_port_spec = from_spec
             .outputs

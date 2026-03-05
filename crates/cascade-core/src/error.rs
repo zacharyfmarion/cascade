@@ -43,7 +43,12 @@ pub enum CascadeError {
     #[error("No usable primary RGBA layer found in EXR file")]
     ExrNoUsablePrimaryLayer,
     #[error("EXR layer '{layer_name}' too large: {width}x{height} exceeds max {max}")]
-    ExrLayerTooLarge { layer_name: String, width: u32, height: u32, max: u32 },
+    ExrLayerTooLarge {
+        layer_name: String,
+        width: u32,
+        height: u32,
+        max: u32,
+    },
     #[error("Expected Bytes value, got {got}")]
     ValueNotBytes { got: String },
 }

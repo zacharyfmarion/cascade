@@ -199,10 +199,7 @@ impl GpuKernelNode {
         }
 
         for name in optional_inputs {
-            let has_value = matches!(
-                ctx.inputs.get(name),
-                Some(Value::Image(_))
-            );
+            let has_value = matches!(ctx.inputs.get(name), Some(Value::Image(_)));
             let value: i32 = if has_value { 1 } else { 0 };
             bytes.extend_from_slice(&value.to_le_bytes());
             total_scalars += 1;

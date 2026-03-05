@@ -1,11 +1,11 @@
 use cascade_core::color::ColorManagement;
+use cascade_core::exr::encode_multilayer_exr;
 use cascade_core::node::{EvalContext, Node, NodeFuture};
 use cascade_core::types::*;
-use cascade_core::exr::encode_multilayer_exr;
-use std::sync::Arc;
 use rayon::prelude::*;
 use std::any::Any;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub struct Viewer;
 
@@ -181,7 +181,6 @@ impl Node for ExportImage {
     }
 }
 
-
 /// Encodes one or more image inputs into an in-memory EXR file.
 pub struct SaveExr;
 
@@ -256,10 +255,7 @@ impl Node for SaveExr {
             let bytes = encode_multilayer_exr(&layers, compression)?;
 
             let mut outputs = HashMap::new();
-            outputs.insert(
-                "exr_bytes".to_string(),
-                Value::Bytes(Arc::new(bytes)),
-            );
+            outputs.insert("exr_bytes".to_string(), Value::Bytes(Arc::new(bytes)));
             Ok(outputs)
         })
     }

@@ -1,234 +1,347 @@
-# Cascade Roadmap: Production-Grade Node Library
+# Cascade Product Roadmap
 
-Gap analysis and prioritized plan for reaching moderately production-grade compositing capabilities.
+## Vision
 
----
+**Cascade is the fastest way to build, share, and run image pipelines — with GPU compute and AI assistance — anywhere.**
 
-## Current State (Inventory)
+Cascade is not "open-source Nuke." It is a **programmable image platform** that runs in the browser and on the desktop, where anyone can build visual effects pipelines, share them as links, and extend them with custom GPU shaders — assisted by AI.
 
-~50 registered nodes across 8 categories:
+## Strategic Positioning
 
-| Category | Nodes | Assessment |
-|----------|-------|------------|
-| **Input** | LoadImage, LoadImageSequence | Minimal |
-| **Output** | Viewer, ExportImage, ExportImageSequence, ExportVideo | Decent |
-| **Color** | BrightnessContrast, HueSaturation, Invert, Levels, **Curves** (per-channel, monotone cubic), ColorBalance, ChannelShuffle, Threshold, Posterize, Gamma, **Grade**, **Clamp**, ColorRamp, ColorPalette, SeparateHSVA, CombineHSVA, WhiteBalance, Vibrance, GradientMap, ToneMap, ColorConvert | **Strong** |
-| **Filter** | GaussianBlur, Sharpen, EdgeDetect, Dilate, Erode, Median, Vignette, Glow, LensDistortion | Decent |
-| **Composite** | Blend (19 modes), AlphaOver, **Merge** (14 Porter-Duff ops, bbox control) | Good |
-| **Transform** | Resize, Crop, Flip, Rotate, Translate, Transform2D, **CornerPin**, **STMap** | Good |
-| **Generator** | SolidColor, Noise, Gradient, Checkerboard, RasterizeField, FloatConstant, IntegerConstant, Shape, **UVMap** | Good |
-| **Matte** | Premultiply, Unpremultiply, SetAlpha, ExtractChannel, ChromaKey, Despill, LuminanceKey, DifferenceMatte, EdgeBlur, MatteExpand, MatteShrink | **Good** |
-| **Channel** | SeparateRGBA, CombineRGBA, CopyChannels, ChannelShuffle, ExtractChannel | **Good** |
-| **Utility** | MapRange, Math, ImageMath, Dot, **ProjectInfo**, **ImageInfo** | Decent |
-| **Other** | GroupNode system, GpuScript, AiInpaint | Nice extras |
+### What Makes Cascade Different
 
----
+| Axis | Nuke / Fusion | Blender Compositor | Cascade |
+|---|---|---|---|
+| **Access** | $$$, desktop only | Free, desktop only, embedded in 3D app | Free, browser + desktop, standalone |
+| **Extensibility** | Python scripting, proprietary plugin API | Python, limited to Blender ecosystem | Live GPU compute (GLSL), custom DSL, AI-generated nodes |
+| **Shareability** | Project files only | .blend files only | URL links, embeddable, text DSL |
+| **AI Integration** | None | None | AI graph authoring, AI GPU shader generation, AI processing nodes |
+| **Onboarding** | Weeks | Days | Minutes (templates + AI) |
+| **Architecture** | C++, decades of tech debt | C++, secondary to 3D core | Rust/WASM, modern from scratch |
 
-## Tier 1: Critical Gaps (Blocking for Real Compositing)
+### Core Differentiators (Moat)
 
-### 1. No Mask/Roto Tools
+1. **Browser-native compositing** — Zero install, shareable via URL, embeddable in docs/tools. No competitor runs a real node compositor in the browser with GPU compute.
+2. **Programmable GPU compute** — Users write GLSL `process()` functions that compile to real-time GPU shaders. AI can generate these on demand. This isn't a plugin API — it's a live programmable compute pipeline.
+3. **AI-native workflow** — Working DSL for AI graph manipulation (read/write/edit graphs as text), AI-assisted GLSL generation, and AI processing nodes. The AI doesn't just suggest — it builds.
+4. **Correct compositing math** — f32 linear RGBA, EXR-style data/display windows, Porter-Duff compositing, OCIO color management. Professional results, accessible tools.
 
-Production compositing is 60% masking. Current coverage is thin.
+### Target Users
 
-**Missing nodes:**
-- **Roto / Bezier shape masks** — editable bezier splines with per-point feathering, animatable per-frame. The most-used node in Nuke. The existing `Shape` node only does rectangles/ellipses/polygons, not freeform splines.
-- **Luminance Key / Luma Matte** — key on brightness, not just color. Essential for sky replacements, window pulls.
-- **Difference Matte** — compare clean plate vs. footage to generate matte. Standard green screen workflow.
-- **IBK / Advanced Keyer** — ChromaKey uses simple Euclidean distance in RGB. Production keyers work in YCbCr/HSV, output core/soft/eroded mattes, and handle spill, translucency, and hair detail.
-- **Matte operations** — dedicated EdgeBlur (blur just the matte edge), MatteShrink, MatteExpand, InvertMatte applied specifically to alpha channels.
-
-### 2. ~~No Merge / Multi-Input Compositing Node~~ ✅ DONE
-
-Blend and AlphaOver are 2-input only with no resolution negotiation.
-
-**Missing:**
-- **Merge node** with explicit bounding box control (union, intersection, A, B) and support for mismatched resolutions.
-- **Porter-Duff operations beyond Over** — Stencil, Mask, In, Out, Atop, Xor.
-
-### 3. ~~No Format / Resolution Awareness~~ ✅ DONE
-
-This is architectural. Currently images are bare width×height pixel buffers.
-
-**Missing concepts:**
-- **Pixel aspect ratio**
-- **Display window vs. data window** (bounding box)
-- **Format** (project resolution)
-- **Reformat node** — conform images to project resolution with letterbox/pillarbox/fit/fill/distort options
-- **Overscan** — rendering beyond frame boundaries for filter effects near edges
-
-When two images of different sizes meet at a Blend node, coordinates just clamp. There's no way to place a smaller image centered or at an offset within a larger canvas.
-
-### 4. No 2D Tracking / Stabilization
-
-**Missing nodes:**
-- **Tracker** — track point(s) across frames, output transform data
-- **Stabilize** — apply inverse of tracked motion
-- **Corner Pin** — 4-point perspective distort (screen/sign replacement)
-
-Without tracking, the most basic VFX shot (putting something on a wall, replacing a screen) is impossible.
+| Segment | Why Cascade | What They Do |
+|---|---|---|
+| **Indie game/film teams** | Can't afford Nuke, Blender compositor is awkward, Natron is dead | Look-dev, matte extraction, texture processing, comp |
+| **Content & product image teams** | High-volume manual Photoshop workflows | Product photo cleanup, social media variants, batch processing |
+| **Web-native creators & educators** | Nothing good runs in-browser for node compositing | Tutorials, demos, quick experiments, shareable examples |
+| **Technical artists & creative coders** | Want programmable image compute without building a pipeline | Custom GPU effects, procedural textures, shader prototyping |
+| **Developers building image tools** | No good embeddable node-graph image engine exists | Integrate compositing into their own products |
 
 ---
 
-## Tier 2: Major Gaps (Painful to Work Without)
+## Current State (What Works Today)
 
-### ~~5. Curves Node is Oversimplified~~ ✅ DONE
+### Node Library (~50 nodes across 9 categories)
 
-~~Current Curves uses 5 fixed control points with a cubic spline. Needs:~~
-- ~~Arbitrary control point count (add/remove)~~
-- ~~Per-channel curves (separate R, G, B, master)~~
-- ~~Interactive curve editor widget in the UI~~
+- **Color** (21 nodes) — Grade, ColorCorrect, HueShift, Curves, CDL, Clamp, Saturation, Posterize, Threshold, Exposure, WhiteBalance, LUT, sRGB conversion, etc.
+- **Filter** (9) — GaussianBlur, Sharpen, Median, EdgeDetect, Emboss, DirectionalBlur, RadialBlur, Bloom, Defocus
+- **Composite** (3) — Merge (14 Porter-Duff blend modes), AlphaOver, Premult/Unpremult
+- **Transform** (8) — Translate, Scale, Rotate, Flip, Crop, Reformat, CornerPin, STMap
+- **Generator** (9) — Solid, Checkerboard, Gradient, Noise, Ramp, Text, Grid, ColorWheel, etc.
+- **Matte** (11) — ChromaKey, LuminanceKey, DifferenceMatte, EdgeBlur, MatteExpand, MatteShrink, etc.
+- **Channel** (5) — Shuffle, SeparateRGBA, CombineRGBA, CopyChannels, etc.
+- **Utility** (6) — Dot, Switch, Blend, etc.
+- **Input/Output** (6) — LoadImage, SaveImage, Viewer, etc.
 
-Implemented: Monotone cubic Hermite interpolation (Fritsch-Carlson), 4 independent curves (Master/R/G/B), SVG-based interactive curve editor with click-to-add, drag-to-move, right-click-to-delete, custom CurvesNode React component with channel tabs.
+### Platform & Architecture
 
-### 6. ~~Distort / Warp Nodes~~ PARTIALLY DONE
+- ✅ Rust core → WASM (browser) + Tauri (desktop) from single codebase
+- ✅ f32 RGBA linear color space, EXR-style data/display windows
+- ✅ Pull-based evaluator with dirty propagation and LRU cache
+- ✅ GPU compute pipeline (GLSL → naga → wgpu)
+- ✅ Self-describing NodeSpec system (add Rust node → UI auto-generates)
+- ✅ React + xyflow + Zustand frontend with 12-slice store architecture
+- ✅ Undo/redo (50 deep), cut/copy/paste, context menus
+- ✅ Blender-style inline parameter sliders
+- ✅ Full-stack error handling with per-node error attribution
+- ✅ Criterion benchmarks, Playwright E2E tests, CI pipeline
 
-Beyond LensDistortion:
-- ~~**IDistort / STMap** — distort using a UV map image (essential for CG integration)~~ ✅ DONE
-- ~~**Corner Pin / Perspective Transform** — 4-point warp~~ ✅ DONE
-- ~~**UV Map generator** — identity UV pass for STMap workflows~~ ✅ DONE
-- **Mesh Warp** — freeform grid deformation
-- **Spherize / Twirl / Wave** — creative distortions
+### AI Features (Working)
 
-### ~~7. No Motion Blur~~ ✅ PARTIALLY DONE
+- ✅ **AI Chat Assistant** with Claude — floating panel, vision (512px thumbnails)
+- ✅ **Graph DSL** — bidirectional text representation (`handle = NodeType(param: value)`, `target.input <- source.output`), AI reads/writes/edits graphs via 5 tools
+- ✅ **AI Node Creation** — AI writes DSL to create and wire new nodes, working end-to-end
+- ✅ **GPU Script Node** — user-authored GLSL `process()` functions compiled to real-time GPU shaders via wgpu
+- ✅ **AI-assisted GLSL generation** — AI writes GPU shader code for the Script node
+- ✅ **AI Processing Nodes** — Depth estimation, inpainting via Replicate API
 
-- **Vector blur / Directional blur** — blur along a vector field (from 3D motion vectors)
-- ~~**Radial blur** — zoom-style blur~~ ✅ DONE
-- ~~**Directional blur** — blur in a specific direction~~ ✅ DONE
+### Node Groups (Working, Needs Investment)
 
-~~Only isotropic Gaussian blur exists.~~ Directional and radial blur implemented. Vector blur (from motion vectors) remains for future CG integration work.
-
-### 8. No Time Operations
-
-For sequence/video work:
-- **TimeOffset** — shift footage in time
-- **TimeWarp / Retime** — speed up, slow down, reverse
-- **FrameHold** — freeze on a specific frame
-- **FrameBlend** — blend adjacent frames (cheap slow-mo)
-
-`FrameTime` exists in the engine but no nodes manipulate it.
-
-### 9. No Expression / Scripting for Params
-
-Production processors link parameters with expressions ("blur sigma = distance × 0.5"). The `promotable` system allows connections but there's no expression language. The Math node only does basic operations.
-
-### 10. ~~Incomplete Channel Handling~~ ✅ DONE
-
-- No **Separate/Combine RGBA** nodes (HSVA exists but not RGBA)
-- No **Copy** node to selectively copy channels between images
-- No **Shuffle2** equivalent (combine channels from two different sources)
-- `ChannelShuffle` only works within a single image
+- ✅ Create groups from selected nodes
+- ✅ Enter/exit group editing (editing stack navigation)
+- ✅ Group I/O nodes (group_input, group_output)
+- ✅ Dynamic interface (add/remove ports)
+- ✅ Export group as package (JSON)
+- ⚠️ **Buggy**: Needs stability investment before being a reliable workflow primitive
 
 ---
 
-## Tier 3: Nice-to-Have (Differentiators)
+## Roadmap
 
-### 11. No 3D Compositing Awareness
+### Phase 1: Make It Reliable & Useful
+*Goal: Someone can do real work in Cascade and come back tomorrow. The existing features work well enough to trust.*
 
-- No deep compositing support
-- No Z-depth channel or multi-channel EXR support
-- No ZDefocus (depth-of-field from Z channel)
-- No fog/atmosphere from depth
-- No position pass support
-- Image format is fixed at RGBA — no arbitrary AOV channels
+**Priority: Ship quality over new features.**
 
-### 12. Missing Common VFX Nodes
+#### 1.1 Node Group Stability 🔧
+Node groups are the foundation of reusable pipelines, templates, and the future ecosystem. They exist but need investment to be reliable.
 
-- ~~**Grade** node (lift/gamma/gain per channel — the workhorse of color correction in Nuke)~~ ✅ DONE
-- ~~**Clamp** — clamp pixel values to a range~~ ✅ DONE
-- **Unpremult → operation → Premult** convenience (toggle on nodes)
-- **Mirror / Tile / Offset** for texture work
-- **Grain** — add/remove film grain
-- **Denoise** — spatial or temporal denoising
-- **MotionBlur2D** on transforms (Translate/Rotate produce hard edges)
-- ~~**Text** node — render text to image~~ ✅ DONE
-- ~~**Dot** (pass-through for graph organization)~~ ✅ DONE
-- ~~**ProjectInfo / ImageInfo** — expose project and image metadata as node outputs~~ ✅ DONE
+- [ ] Audit and fix existing group bugs (connection handling, undo/redo within groups, nested group edge cases)
+- [ ] Stabilize enter/exit editing flow
+- [ ] Ensure groups work correctly with all node types (including GPU Script nodes)
+- [ ] Group import from JSON (complement to existing export)
+- [ ] Duplicate/instantiate groups within a project
 
-### ~~13. Blend Node Correctness Issues~~ ✅ DONE
+#### 1.2 AI + GPU Script Integration 🧠⚡
+The AI DSL and GPU Script node are both working but disconnected. Unifying them creates the killer feature: *"Describe a visual effect → get a real-time GPU shader → tweak sliders."*
 
-~~Output alpha uses `base_a.max(blend_a)` which is incorrect for proper alpha compositing — should follow Porter-Duff rules per blend mode. This produces visible fringing with semi-transparent elements.~~
-~~Output clamps to [0,1] which prevents HDR compositing (values >1.0 are meaningful).~~
+- [ ] AI can generate GPU Script node GLSL through the DSL (currently separate workflows)
+- [ ] AI can read and modify existing GPU Script GLSL code
+- [ ] AI understands GPU Script parameters and can set appropriate defaults, ranges, and UI hints
+- [ ] GPU Script node improvements: better error messages on compile failure, parameter hot-reload, preview during editing
+- [ ] Consider: unified DSL syntax for declaring GPU Script nodes inline (e.g., `effect = GpuScript(glsl: "...", params: {...})`)
 
-Fixed: Alpha now uses Porter-Duff "over" formula (`blend_alpha + base_a * (1 - blend_alpha)`). RGB clamping removed to preserve HDR values.
+#### 1.3 AI API Access (CORS) 🌐
+The AI features are already BYOK — users supply their own Replicate and Anthropic API keys, stored locally. The only infrastructure issue is **CORS**: browser `fetch()` can't call `api.replicate.com` directly because Replicate doesn't return `Access-Control-Allow-Origin` headers. A thin Cloudflare Worker proxy (`workers/proxy/`) adds CORS headers to make browser requests work. In dev, Vite's dev server proxy handles this.
 
-### ~~14. GaussianBlur Dark Halo Artifacts~~ ✅ DONE
+**Confirmed**: Replicate has no browser/CORS support and no plans to add it (SDK docs explicitly state browser is unsupported; GitHub issue #164 closed with no solution, March 2025). The Cloudflare Worker proxy is the correct architecture.
 
-~~The blur implementation blurs all 4 channels including alpha. For compositing, you almost always want to blur RGB only and keep alpha intact, or blur alpha separately. Blurring premultiplied RGBA together creates dark halos around edges.~~
+- [x] ~~Investigate Replicate browser/CORS support~~ — confirmed not available, proxy is required
+- [ ] Keep the Cloudflare Worker (it's free-tier, stateless, no API keys stored). Add a comment in `workers/proxy/worker.js` explaining why it exists.
+- [ ] For Tauri desktop builds: call Replicate directly from the Rust backend (no CORS restriction), bypassing the proxy
+- [ ] Verify Anthropic API production path (currently proxied through Vite dev server only — may need a similar Worker or direct Tauri call)
+- [ ] Add clear user-facing docs: "You need your own API keys for AI features"
 
-Fixed: Off-by-one in sliding window subtraction index corrected. Premultiply/unpremultiply sandwich added so transparent pixels don't bleed black into RGB. Sharpen node also fixed. Glow node switched from O(w×h×r) naive blur to O(w×h) sliding window (~10-20x speedup). Reference test added against naive Gaussian convolution.
+#### 1.4 I/O Maturity 📁
+Getting images in and out reliably is table-stakes.
 
----
+- [ ] EXR multi-layer support — dynamic ports per layer (plan exists, phases 6-7 remaining)
+- [ ] Image sequence input/output (numbered frames)
+- [ ] Drag-and-drop improvements (multiple files, folder drop)
+- [ ] Metadata preservation through the pipeline
+- [ ] Common format support audit (WebP, AVIF, HDR)
 
-## Architectural Constraints
+#### 1.5 Frontend Polish 🎨
+Existing UX gaps that hurt daily use.
 
-1. **Field abstraction is clever but limiting** — Fields compose well for generators and color ops but can't do spatial filters (blur, sharpen, dilate) since those need neighboring pixel access. Every filter node must rasterize first, creating an impedance mismatch.
-
-2. **No concept of "format" on connections** — the graph connects `Image` or `Field` values but carries no resolution metadata. A production processor needs bounding box negotiation between nodes.
-
-3. **No multi-channel / AOV system** — `Value::Image` is always RGBA. No way to carry depth, motion vectors, normals, cryptomatte, or arbitrary passes through the graph. This blocks CG integration workflows.
-
-4. **No streaming / tile-based processing** — every node materializes full-resolution buffers. At 4K+ this becomes a memory bottleneck.
-
----
-
-## Prioritized Implementation Order
-
-Foundational work first, then nodes that unlock real workflows.
-
-### Phase 1: Foundations
-
-| # | Item | Type | Why |
-|---|------|------|-----|
-| 1 | ~~Format/resolution awareness on images + Reformat node~~ | Architecture + Node | ✅ DONE — Format, RectI, data_window, display_window, PixelAspectRatio all implemented |
-| 2 | ~~Merge node with Porter-Duff ops and bbox control~~ | Node | ✅ DONE — 14 operations (Over, Under, In, Out, Atop, Xor, Stencil, Mask, Plus, Multiply, Difference, Screen, Max, Min), 4 bbox modes, opacity, mix, mask input. Verified against canonical Porter-Duff reference. |
-| 3 | ~~Separate/Combine RGBA + Copy channels~~ | Nodes | ✅ DONE — SeparateRGBA, CombineRGBA, CopyChannels (Shuffle2-style, 2 inputs, per-channel source selection from A or B) |
-
-### Phase 2: Color & Correction
-
-| # | Item | Type | Why |
-|---|------|------|-----|
-| ~~4~~ | ~~Proper Curves (per-channel, arbitrary control points, UI widget)~~ ✅ | ~~Node + Frontend~~ | Monotone cubic Hermite, 4 channels, interactive SVG editor |
-| 5 | ~~Grade node (lift/gamma/gain)~~ | Node | ✅ DONE — Per-channel lift/gamma/gain with mask support and field passthrough |
-| 6 | ~~Clamp node~~ | Node | ✅ DONE — Per-channel min/max with optional alpha clamp, mask support, field passthrough |
-
-### Phase 3: Masking & Keying
-
-| # | Item | Type | Why |
-|---|------|------|-----|
-| 7 | Roto/mask shapes with bezier splines + feathering | Node + Frontend | The core masking tool (deferred) |
-| ~~8~~ | ~~Luminance Key + Difference Matte~~ ✅ | ~~Nodes~~ | LuminanceKey (brightness/channel keying with soft range), DifferenceMatte (clean plate comparison) |
-| ~~9~~ | ~~Matte operation nodes (EdgeBlur, shrink, expand)~~ ✅ | ~~Nodes~~ | EdgeBlur (alpha-edge-only blur), MatteExpand (dilate), MatteShrink (erode) |
-
-### Phase 4: Transform & Distort
-
-| # | Item | Type | Why |
-|---|------|------|-----|
-| ~~10~~ | ~~Corner Pin transform~~ ✅ | ~~Node~~ | Screen replacement, sign replacement |
-| ~~11~~ | ~~STMap / IDistort~~ ✅ | ~~Node~~ | CG integration workflow |
-| ~~12~~ | ~~Directional blur + Radial blur~~ ✅ | ~~Nodes~~ | DirectionalBlur (angle + length), RadialBlur (zoom-style, center point) |
-
-### Phase 5: Time & Tracking
-
-| # | Item | Type | Why |
-|---|------|------|-----|
-| 13 | Time nodes (offset, hold, retime) | Nodes | Required for any sequence work |
-| 14 | 2D Tracker + Stabilize | Nodes | Unlocks matchmove workflows |
-
-### Phase 6: Bug Fixes & Polish
-
-| # | Item | Type | Why |
-|---|------|------|-----|
-| ~~15~~ | ~~Fix Blend node alpha compositing (Porter-Duff correctness)~~ ✅ | ~~Bug fix~~ | Porter-Duff "over" alpha, HDR-safe RGB |
-| ~~16~~ | ~~Fix GaussianBlur alpha handling~~ ✅ | ~~Bug fix~~ | Off-by-one fix, premultiply sandwich, Sharpen/Glow also fixed |
-| ~~17~~ | ~~Dot node (pass-through)~~ ✅ | ~~Node~~ | Pass-through for graph organization |
-| ~~18~~ | ~~Text node~~ ✅ | ~~Node~~ | Render text to RGBA with ab_glyph, embedded font, multi-line, alignment |
+- [ ] Fix live param race conditions (Engineering Roadmap Phase 3)
+- [ ] Node deletion cleanup edge cases (Engineering Roadmap Phase 3)
+- [ ] Performance: proxy resolution rendering for large images
+- [ ] Performance: background thread rendering (non-blocking UI)
+- [ ] Mini-map improvements, better zoom/pan UX
+- [ ] Keyboard shortcuts audit and documentation
 
 ---
 
-## Pre-Release: AI Proxy Architecture
+### Phase 2: Make It Shareable
+*Goal: Graphs spread. People discover Cascade through someone else's work. The web-native advantage becomes the growth engine.*
 
-The AI nodes (Depth Estimate, Inpaint) call the Replicate API. In the browser, requests are proxied through a Cloudflare Worker (`workers/replicate-proxy/`) to avoid CORS. The Tauri desktop app calls Replicate directly (no CORS in native HTTP).
+#### 2.1 Templates & Presets 📋
+Templates dramatically reduce time-to-value and showcase what's possible.
 
-**Before release, rethink this approach:**
-- The shared Cloudflare Worker means all users' API requests route through a single proxy. At scale this could hit free-tier limits (100K req/day) and creates a single point of failure.
-- Options to evaluate: (1) let users deploy their own worker via one-click template, (2) move AI calls to a lightweight backend, (3) use Replicate's streaming API with server-sent events from a backend, (4) for the web version, require the desktop app for AI features.
+- [ ] Template system — load a pre-built graph as a starting point
+- [ ] Ship 10-15 curated starter templates:
+  - Product photography cleanup (background removal + color grade)
+  - Social media image variants (resize + overlay + text)
+  - Film look-dev (CDL + curves + grain + vignette)
+  - Texture generation (noise + warp + colorize)
+  - Matte extraction (chroma key + edge refinement)
+  - Custom GPU effect showcase (chromatic aberration, glitch, CRT)
+- [ ] "Save as template" from any graph
+- [ ] Template browser with previews in the node library panel
+- [ ] Node group presets — save and reuse parameterized groups
+
+#### 2.2 Share as URL / Embed 🔗
+This is the web-native superpower. No other compositor can do this.
+
+- [ ] Graph serialization to URL-safe format (DSL text or compressed JSON)
+- [ ] "Share" button → generates a link that opens Cascade with the graph pre-loaded
+- [ ] Embed mode — `<iframe>` embed with reduced UI for docs, tutorials, blog posts
+- [ ] Read-only viewer mode (see the graph and result without editing)
+- [ ] "Remix" button — fork someone's shared graph into your own workspace
+
+#### 2.3 Project Organization 📂
+Move beyond single-graph sessions.
+
+- [ ] Multiple compositions per project
+- [ ] Named bookmarks / favorites for nodes and groups
+- [ ] Recent projects list
+- [ ] Auto-save and recovery
+- [ ] Version history (local, leveraging DSL diffability)
+
+#### 2.4 Batch / Headless Rendering 🏭
+Turns Cascade from a GUI tool into a pipeline tool.
+
+- [ ] CLI interface: `cascade render graph.json --input plate.exr --output result.exr`
+- [ ] Batch mode: render a graph over a folder of input images
+- [ ] Parameterized rendering: override node params from CLI args
+- [ ] CI/CD integration (run Cascade as a build step)
+- [ ] Node.js / Rust library mode (embed the engine in other tools)
+
+---
+
+### Phase 3: Make It Smart
+*Goal: AI removes the expertise barrier. Non-experts can build sophisticated pipelines. Experts can move faster.*
+
+#### 3.1 AI Assistant Polish 🤖
+The assistant works. Make it great.
+
+- [ ] Iterative self-correction — AI renders, sees result, adjusts
+- [ ] Multi-turn context — AI remembers the conversation and graph evolution
+- [ ] Suggested prompts / quick actions ("Make it warmer", "Add a vignette", "Key out the green")
+- [ ] Cmd+K palette — quick AI actions without opening the full chat
+- [ ] Natural language parameter adjustment ("make the blur stronger", "shift the hue toward orange")
+
+#### 3.2 AI GPU Shader Generation (Differentiator) ⚡
+This is what no one else has. Invest heavily.
+
+- [ ] Curated library of AI-generated GPU effects as examples/templates
+- [ ] "Effect gallery" — browse community GPU scripts, fork and modify
+- [ ] AI can compose multiple GPU stages (chain Script nodes intelligently)
+- [ ] Shader parameter inference — AI generates sensible slider ranges and labels
+- [ ] Live preview during AI generation (stream partial GLSL, compile incrementally)
+- [ ] Safety: sandboxed shader execution, prevent infinite loops, resource limits
+
+#### 3.3 AI Processing Nodes (Commodity, Lower Priority) 🧩
+These are nice-to-have but not differentiators — every image app is adding them.
+
+- [ ] Expand to: style transfer, super-resolution, background removal, color grading suggestions
+- [ ] Support multiple providers beyond Replicate (local models via ONNX, other APIs)
+- [ ] Position as optional power-ups, not core product
+- [ ] Ensure graceful degradation when AI services are unavailable
+
+---
+
+### Phase 4: Earn the Right (Build Only With User Demand)
+*Goal: Add VFX-hard features when adoption signals justify the investment. These are expensive to build and serve a narrow audience — only worth it when that audience is actively using Cascade.*
+
+**Gate**: Only move items from Phase 4 to active development when there is clear evidence of user demand (GitHub issues, Discord requests, usage data showing users hitting the limitation).
+
+#### 4.1 Animation & Keyframes 🎬
+Plan exists. Enables motion graphics and temporal workflows without requiring tracking.
+
+- [ ] Per-parameter FCurves (Nuke-style) — Float, Int, Bool, Color
+- [ ] Keyframe indicators on parameter widgets
+- [ ] Timeline bar with playback controls
+- [ ] Dopesheet panel (MVP)
+- [ ] Curve editor (full)
+- [ ] Frame range, FPS, playback settings
+
+#### 4.2 Drawing & Masking ✏️
+Roto and bezier masks. Only build when users are asking.
+
+- [ ] Roto node — bezier spline masks with feathering
+- [ ] Paint node — basic brush-based masking
+- [ ] Shape generators (rectangle, ellipse, polygon masks)
+- [ ] Per-point animation (requires 4.1)
+
+#### 4.3 Motion & Tracking 🎯
+2D tracking and stabilization. Extremely hard to do well. Only build when competitive pressure demands it.
+
+- [ ] Point tracking (single and multi-point)
+- [ ] Stabilization (translate, rotate, scale)
+- [ ] Corner pin tracking
+- [ ] Planar tracking (stretch goal)
+
+#### 4.4 Advanced Compositing 🔬
+Niche features for specific workflows.
+
+- [ ] Expressions / parameter linking (simpler than full scripting — link one param to another with math)
+- [ ] Time operations (TimeOffset, TimeWarp, FrameHold, FrameBlend) — requires 4.1
+- [ ] Mesh warp, Spherize, Twirl, Wave distortions
+- [ ] Vector blur / motion blur on transforms
+- [ ] Multi-channel EXR / AOV workflows
+- [ ] Deep compositing (very niche, massive complexity — likely never worth it for Cascade's audience)
+
+---
+
+### Phase 5: Platform & Ecosystem (Long-term)
+*Goal: Cascade becomes a platform others build on, not just a tool.*
+
+#### 5.1 Plugin Ecosystem
+- [ ] Public node API for third-party Rust/WASM nodes
+- [ ] Node package registry (share and install community nodes)
+- [ ] GPU Script sharing platform (browse, fork, publish shaders)
+
+#### 5.2 Collaboration
+- [ ] Real-time collaborative editing (CRDT-based)
+- [ ] Comments and annotations on graphs
+- [ ] Review mode (client reviews comp with feedback)
+
+#### 5.3 Integrations
+- [ ] Blender bridge (send renders to Cascade for comp)
+- [ ] Game engine integration (Unreal/Unity/Godot texture pipeline)
+- [ ] Figma/design tool export
+- [ ] Cloud rendering for heavy batch jobs
+
+---
+
+## Engineering Prerequisites
+
+These engineering investments from the [Engineering Roadmap](./ENGINEERING_ROADMAP.md) are prerequisites for product phases:
+
+| Engineering Work | Enables Product Phase | Status |
+|---|---|---|
+| Full-stack error handling | Phase 1 (reliability) | ✅ Done |
+| Cache eviction, selective invalidation | Phase 1 (performance) | ✅ Done |
+| Store split (12 slices) | Phase 1 (frontend) | ✅ Done |
+| GPU texture pooling | Phase 1 (GPU Script perf) | Pending |
+| Live param race condition fix | Phase 1 (frontend polish) | Pending |
+| EngineBridge abstraction split | Phase 2 (batch/headless) | Pending |
+| EvalSession / ResourceStore | Phase 2 (project org) | Pending |
+| Background thread rendering | Phase 1 (UX) | Pending |
+| Tile-based processing | Phase 4 (large image perf) | Pending |
+| Multi-channel Value type | Phase 4 (EXR/AOV) | Pending |
+
+---
+
+## Success Metrics
+
+Stop measuring against Nuke's feature list. Measure:
+
+| Metric | What It Tells You | Target (6mo post-launch) |
+|---|---|---|
+| **Activation rate** | % of visitors who complete a first useful render | > 40% |
+| **Weekly retained creators** | People who come back and build graphs | > 500 |
+| **Graphs shared** | Viral coefficient — do people send Cascade links? | > 100/week |
+| **Custom GPU scripts created** | Are technical users extending the platform? | > 50 unique |
+| **Time to first useful output** | Onboarding quality | < 5 minutes |
+| **Template usage rate** | Are templates driving activation? | > 60% of new users start from template |
+| **AI assistant usage** | Is AI reducing the expertise barrier? | > 30% of sessions use AI |
+
+---
+
+## What This Roadmap Deliberately Omits
+
+These are features from the old roadmap that are intentionally deprioritized or removed:
+
+| Feature | Why Omitted |
+|---|---|
+| **Deep compositing** | Massive complexity, extremely niche audience. Not worth the investment for Cascade's target users. |
+| **ZDefocus** | Depth-based defocus is cool but narrow. AI depth estimation + regular Defocus gets 80% there. |
+| **Grain synthesis** | Nice-to-have but not a driver of adoption. Can be done via GPU Script. |
+| **Denoise** | Commodity feature. Better served by AI models than hand-coded algorithms. |
+| **3D awareness** | Cascade is a 2D compositing tool. Don't try to be a 3D tool. |
+| **Full Python scripting** | The DSL + AI + GPU Script covers the extensibility need. Python adds massive complexity. |
+
+---
+
+## Decision Log
+
+| Date | Decision | Rationale |
+|---|---|---|
+| 2026-03-04 | Pivot from "Nuke gap analysis" to "programmable image platform" | Chasing Nuke parity targets an already-served audience with the hardest features. Web-native + AI + GPU compute is the actual differentiation. |
+| 2026-03-04 | Deprioritize roto/tracking to Phase 4 (demand-gated) | Expensive to build well, serves narrow audience, doesn't leverage any of Cascade's unique strengths. |
+| 2026-03-04 | Prioritize AI+GPU Script integration as Phase 1 | This is the killer feature no competitor has. Unifying the working DSL with GPU Script creation makes it coherent. |
+| 2026-03-04 | Add templates/presets as Phase 2 priority | Templates are the highest-leverage onboarding tool. Show users what's possible, reduce time-to-value. |
+| 2026-03-04 | Flag AI proxy architecture as pre-release blocker | Shipping with a shared Cloudflare Worker proxying user API keys is not acceptable for a public release. |
+| 2026-03-04 | Gate Phase 4 features on user demand signals | Prevents building expensive features nobody asked for. Let adoption data drive the investment. |

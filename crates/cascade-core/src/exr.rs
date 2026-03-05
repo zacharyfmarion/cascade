@@ -6,7 +6,7 @@
 
 use crate::error::CascadeError;
 use crate::types::{Image, MAX_IMAGE_DIM};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -518,6 +518,158 @@ pub fn decode_exr_layer(
     crate::types::Image::from_f32_data(width, height, data)
 }
 
+/// Decode multiple EXR layers in a single file-read pass.
+///
+/// Instead of calling [`decode_exr_layer`] N times (each of which decompresses
+/// the entire file), this reads and decompresses the file **once** and extracts
+/// all requested layers.  Pass `None` for `requested_ports` to decode every
+/// layer described in `metadata`.
+pub fn decode_all_layers(
+    bytes: &[u8],
+    metadata: &ExrMetadata,
+    requested_ports: Option<&[&str]>,
+) -> Result<HashMap<String, Image>, CascadeError> {
+    use exr::prelude::*;
+
+    // Determine which descriptors to decode
+    let descriptors: Vec<&ExrLayerDescriptor> = metadata
+        .layers
+        .iter()
+        .filter(|l| match &requested_ports {
+            Some(ports) => ports.contains(&l.port_name.as_str()),
+            None => true,
+        })
+        .collect();
+
+    if descriptors.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // Single file read + decompress
+    let exr_image = read()
+        .no_deep_data()
+        .largest_resolution_level()
+        .all_channels()
+        .all_layers()
+        .all_attributes()
+        .from_buffered(std::io::Cursor::new(bytes))
+        .map_err(|e| CascadeError::ExrDecode(e.to_string()))?;
+
+    let mut results = HashMap::with_capacity(descriptors.len());
+
+    for descriptor in &descriptors {
+        // Find matching layer in decoded data
+        let layer = exr_image
+            .layer_data
+            .iter()
+            .find(|l| {
+                let name = l
+                    .attributes
+                    .layer_name
+                    .as_ref()
+                    .map(|n| n.to_string())
+                    .unwrap_or_default();
+                name == descriptor.layer_name
+            })
+            .ok_or_else(|| {
+                CascadeError::ExrDecode(format!(
+                    "Layer '{}' not found in EXR data",
+                    descriptor.layer_name
+                ))
+            })?;
+
+        let size = layer.size;
+        let width = size.0 as u32;
+        let height = size.1 as u32;
+
+        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+            return Err(CascadeError::ExrLayerTooLarge {
+                layer_name: descriptor.layer_name.clone(),
+                width,
+                height,
+                max: MAX_IMAGE_DIM,
+            });
+        }
+
+        let pixel_count = (width as usize) * (height as usize);
+        let mut data = vec![0.0f32; pixel_count * 4];
+
+        let channels = &layer.channel_data.list;
+
+        // Channel lookup: try full prefixed name first, then bare suffix
+        let get_channel_f32 = |suffix: &str| -> Option<Vec<f32>> {
+            let full_name = if descriptor.layer_name.is_empty() {
+                suffix.to_string()
+            } else {
+                format!("{}.{}", descriptor.layer_name, suffix)
+            };
+            channels
+                .iter()
+                .find(|c| {
+                    let n = c.name.to_string();
+                    n == full_name || n == suffix
+                })
+                .map(|c| c.sample_data.values_as_f32().collect::<Vec<f32>>())
+        };
+
+        let r_data = descriptor
+            .channel_set
+            .r
+            .as_ref()
+            .and_then(|n| get_channel_f32(n));
+        let g_data = descriptor
+            .channel_set
+            .g
+            .as_ref()
+            .and_then(|n| get_channel_f32(n));
+        let b_data = descriptor
+            .channel_set
+            .b
+            .as_ref()
+            .and_then(|n| get_channel_f32(n));
+        let a_data = descriptor
+            .channel_set
+            .a
+            .as_ref()
+            .and_then(|n| get_channel_f32(n));
+
+        match descriptor.kind {
+            ExrLayerKind::Rgba => {
+                for i in 0..pixel_count {
+                    data[i * 4] = r_data.as_ref().map_or(0.0, |d| d[i]);
+                    data[i * 4 + 1] = g_data.as_ref().map_or(0.0, |d| d[i]);
+                    data[i * 4 + 2] = b_data.as_ref().map_or(0.0, |d| d[i]);
+                    data[i * 4 + 3] = a_data.as_ref().map_or(1.0, |d| d[i]);
+                }
+            }
+            ExrLayerKind::Mask => {
+                let ch_data = r_data
+                    .as_ref()
+                    .or(g_data.as_ref())
+                    .or(b_data.as_ref())
+                    .ok_or_else(|| {
+                        CascadeError::ExrDecode(format!(
+                            "No channel data found for mask layer '{}'",
+                            descriptor.layer_name
+                        ))
+                    })?;
+                for i in 0..pixel_count {
+                    let v = ch_data[i];
+                    data[i * 4] = v;
+                    data[i * 4 + 1] = v;
+                    data[i * 4 + 2] = v;
+                    data[i * 4 + 3] = 1.0;
+                }
+            }
+        }
+
+        let image = crate::types::Image::from_f32_data(width, height, data)?;
+        results.insert(descriptor.port_name.clone(), image);
+    }
+
+    Ok(results)
+}
+
 // ---------------------------------------------------------------------------
 // Encoding
 // ---------------------------------------------------------------------------
@@ -900,16 +1052,15 @@ mod tests {
         let primary = make_test_image(4, 4, primary_data)?;
         let mask = make_test_image(4, 4, mask_data.clone())?;
 
-        let bytes = encode_multilayer_exr(
-            &[("", &primary), ("mask", &mask)],
-            "ZIP",
-        )?;
+        let bytes = encode_multilayer_exr(&[("", &primary), ("mask", &mask)], "ZIP")?;
 
         let metadata = parse_exr_metadata(&bytes)?;
         assert_eq!(metadata.layers.len(), 2);
 
         // Find the named "mask" layer port
-        let mask_descriptor = metadata.layers.iter()
+        let mask_descriptor = metadata
+            .layers
+            .iter()
             .find(|l| l.layer_name == "mask")
             .expect("mask layer should exist in metadata");
 
@@ -975,13 +1126,15 @@ mod tests {
     #[test]
     fn test_decode_fixture_depth_layer() -> Result<(), CascadeError> {
         let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent().unwrap().parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("apps/web/e2e/fixtures/test_multilayer.exr");
         if !fixture_path.exists() {
             return Ok(());
         }
-        let bytes =
-            std::fs::read(&fixture_path).map_err(|e| CascadeError::Other(e.to_string()))?;
+        let bytes = std::fs::read(&fixture_path).map_err(|e| CascadeError::Other(e.to_string()))?;
         let metadata = parse_exr_metadata(&bytes)?;
 
         // Verify two layers: unnamed primary + named depth mask
@@ -990,7 +1143,9 @@ mod tests {
         assert_eq!(metadata.layers[1].kind, ExrLayerKind::Mask);
 
         // Decode primary
-        let primary = metadata.primary_layer_port.as_ref()
+        let primary = metadata
+            .primary_layer_port
+            .as_ref()
             .ok_or_else(|| CascadeError::Other("No primary".into()))?;
         let img = decode_exr_layer(&bytes, &metadata, primary)?;
         assert_eq!(img.width, 4);
@@ -1002,6 +1157,161 @@ mod tests {
         assert_eq!(mask.height, 4);
         // Depth values should be gradient 0..15/16
         assert!((mask.data[0] - 0.0).abs() < 0.001);
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_all_layers_round_trip() -> Result<(), CascadeError> {
+        let primary_data: Vec<f32> = (0..4 * 4)
+            .flat_map(|i| {
+                let v = i as f32 / 16.0;
+                [v, v + 0.01, v + 0.02, 1.0]
+            })
+            .collect();
+        let mask_data: Vec<f32> = (0..4 * 4)
+            .flat_map(|i| {
+                let v = i as f32 / 16.0;
+                [v, v, v, 1.0]
+            })
+            .collect();
+
+        let primary = make_test_image(4, 4, primary_data.clone())?;
+        let mask = make_test_image(4, 4, mask_data.clone())?;
+
+        let bytes = encode_multilayer_exr(&[("", &primary), ("mask", &mask)], "ZIP")?;
+
+        let metadata = parse_exr_metadata(&bytes)?;
+        assert_eq!(metadata.layers.len(), 2);
+
+        // Decode ALL layers in one pass
+        let decoded = decode_all_layers(&bytes, &metadata, None)?;
+        assert_eq!(decoded.len(), 2);
+
+        // Verify primary layer
+        let primary_port = metadata.primary_layer_port.as_ref().unwrap();
+        let dec_primary = decoded
+            .get(primary_port)
+            .expect("primary should be in results");
+        assert_eq!(dec_primary.width, 4);
+        assert_eq!(dec_primary.height, 4);
+        for i in 0..(4 * 4) {
+            let expected = i as f32 / 16.0;
+            assert!(
+                (dec_primary.data[i * 4] - expected).abs() < 0.001,
+                "Primary pixel {i}: expected {expected}, got {}",
+                dec_primary.data[i * 4]
+            );
+        }
+
+        // Verify mask layer
+        let mask_desc = metadata
+            .layers
+            .iter()
+            .find(|l| l.layer_name == "mask")
+            .expect("mask layer should exist");
+        let dec_mask = decoded
+            .get(&mask_desc.port_name)
+            .expect("mask should be in results");
+        assert_eq!(dec_mask.width, 4);
+        assert_eq!(dec_mask.height, 4);
+        for i in 0..(4 * 4) {
+            let expected = i as f32 / 16.0;
+            assert!(
+                (dec_mask.data[i * 4] - expected).abs() < 0.001,
+                "Mask pixel {i}: expected {expected}, got {}",
+                dec_mask.data[i * 4]
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_all_layers_filtered() -> Result<(), CascadeError> {
+        let primary = make_test_image(4, 4, vec![0.25; 4 * 4 * 4])?;
+        let mask = make_test_image(4, 4, vec![0.75; 4 * 4 * 4])?;
+
+        let bytes = encode_multilayer_exr(&[("", &primary), ("mask", &mask)], "ZIP")?;
+
+        let metadata = parse_exr_metadata(&bytes)?;
+        let mask_desc = metadata
+            .layers
+            .iter()
+            .find(|l| l.layer_name == "mask")
+            .expect("mask layer should exist");
+
+        // Decode only the mask layer
+        let decoded = decode_all_layers(&bytes, &metadata, Some(&[mask_desc.port_name.as_str()]))?;
+        assert_eq!(decoded.len(), 1);
+        assert!(decoded.contains_key(&mask_desc.port_name));
+
+        // The primary layer should NOT be in the results
+        let primary_port = metadata.primary_layer_port.as_ref().unwrap();
+        assert!(!decoded.contains_key(primary_port));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_all_layers_empty_request() -> Result<(), CascadeError> {
+        let img = make_test_image(4, 4, vec![0.5; 4 * 4 * 4])?;
+        let bytes = encode_multilayer_exr(&[("", &img)], "ZIP")?;
+        let metadata = parse_exr_metadata(&bytes)?;
+
+        // Requesting no ports returns empty
+        let decoded = decode_all_layers(&bytes, &metadata, Some(&[]))?;
+        assert!(decoded.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_all_layers_fixture() -> Result<(), CascadeError> {
+        let fixture_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("apps/web/e2e/fixtures/test_multilayer.exr");
+        if !fixture_path.exists() {
+            return Ok(());
+        }
+        let bytes = std::fs::read(&fixture_path).map_err(|e| CascadeError::Other(e.to_string()))?;
+        let metadata = parse_exr_metadata(&bytes)?;
+
+        // Decode all layers at once
+        let decoded = decode_all_layers(&bytes, &metadata, None)?;
+        assert_eq!(decoded.len(), metadata.layers.len());
+
+        // Verify primary exists and has correct dimensions
+        let primary_port = metadata
+            .primary_layer_port
+            .as_ref()
+            .ok_or_else(|| CascadeError::Other("No primary".into()))?;
+        let primary = decoded
+            .get(primary_port)
+            .ok_or_else(|| CascadeError::Other("Primary not decoded".into()))?;
+        assert_eq!(primary.width, 4);
+        assert_eq!(primary.height, 4);
+
+        // Verify depth mask exists
+        let depth = decoded
+            .get("depth")
+            .ok_or_else(|| CascadeError::Other("Depth not decoded".into()))?;
+        assert_eq!(depth.width, 4);
+        assert_eq!(depth.height, 4);
+        // Depth gradient should start at 0
+        assert!((depth.data[0] - 0.0).abs() < 0.001);
+
+        // Cross-check: results should match individual decode_exr_layer calls
+        let single_primary = decode_exr_layer(&bytes, &metadata, primary_port)?;
+        for i in 0..single_primary.data.len() {
+            assert!(
+                (primary.data[i] - single_primary.data[i]).abs() < 0.001,
+                "Primary mismatch at index {i}"
+            );
+        }
+
         Ok(())
     }
 }
