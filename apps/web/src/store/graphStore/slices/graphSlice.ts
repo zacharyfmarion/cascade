@@ -171,6 +171,9 @@ export const createGraphSlice: StateCreator<
         set({ renderResults: newResults });
       }
 
+      // Clean up renderGenerations entry to prevent memory leak
+      kernel.renderGenerations.delete(id);
+
       if (removedNode?.typeId === 'load_image_sequence') {
         sequenceFrameManager.clear(id);
         get().recomputeSequenceState();

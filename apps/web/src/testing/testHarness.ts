@@ -7,6 +7,7 @@
  * without fragile UI interactions (dragging ports, etc.).
  */
 import { useGraphStore, getEngine } from '../store/graphStore';
+import { useLayoutStore } from '../store/layoutStore';
 import type { NodeSpec, ParamValue } from '../store/types';
 
 export interface CascadeTestHarness {
@@ -42,10 +43,18 @@ export interface CascadeTestHarness {
   stepBackward(): void;
 
   // --- Groups ---
-  createGroup(nodeIds: string[], name?: string): Promise<void>;
+  createGroup(nodeIds: string[], name?: string): Promise<string | null>;
   enterGroup(groupNodeId: string): Promise<void>;
   exitGroup(): void;
   getEditingStack(): Array<{ id: string; label: string }>;
+  ungroupNode(groupNodeId: string): Promise<void>;
+  renameGroup(groupNodeId: string, newName: string): Promise<void>;
+  exportGroupAsPackage(groupDefId: string): unknown;
+  getNodeParams(nodeId: string): Record<string, unknown>;
+  duplicateNode(nodeId: string): Promise<string | null>;
+
+  // --- Layout ---
+  resizeViewerPanel(targetWidth: number): boolean;
 
   // --- Playback (extended) ---
   togglePlayback(): void;
@@ -324,8 +333,12 @@ function createTestHarness(): CascadeTestHarness {
     },
 
     // --- Groups ---
-    async createGroup(nodeIds: string[], name?: string): Promise<void> {
+    async createGroup(nodeIds: string[], name?: string): Promise<string | null> {
+      const beforeIds = new Set(useGraphStore.getState().nodes.keys());
       await useGraphStore.getState().createGroup(nodeIds, name);
+      const afterIds = [...useGraphStore.getState().nodes.keys()];
+      const newId = afterIds.find(id => !beforeIds.has(id));
+      return newId ?? null;
     },
     async enterGroup(groupNodeId: string): Promise<void> {
       await useGraphStore.getState().enterGroup(groupNodeId);
@@ -341,6 +354,34 @@ function createTestHarness(): CascadeTestHarness {
         id: e.id,
         label: e.label,
       }));
+    },
+    async ungroupNode(groupNodeId: string): Promise<void> {
+      await useGraphStore.getState().ungroupNode(groupNodeId);
+    },
+    async renameGroup(groupNodeId: string, newName: string): Promise<void> {
+      await useGraphStore.getState().renameGroup(groupNodeId, newName);
+    },
+    exportGroupAsPackage(groupDefId: string): unknown {
+      return useGraphStore.getState().exportGroupAsPackage(groupDefId);
+    },
+    getNodeParams(nodeId: string): Record<string, unknown> {
+      const node = useGraphStore.getState().nodes.get(nodeId);
+      if (!node) return {};
+      return { ...node.params };
+    },
+    async duplicateNode(nodeId: string): Promise<string | null> {
+      const s = useGraphStore.getState();
+      const node = s.nodes.get(nodeId);
+      if (!node) return null;
+      const offset = { x: node.position.x + 20, y: node.position.y + 20 };
+      const newId = await s.addNode(node.typeId, offset);
+      for (const [key, value] of Object.entries(node.params)) {
+        await s.setParam(newId, key, value as ParamValue);
+      }
+      for (const [key, value] of Object.entries(node.inputDefaults)) {
+        await s.setInputDefault(newId, key, value as ParamValue);
+      }
+      return newId;
     },
 
     // --- Playback (extended) ---
@@ -445,6 +486,24 @@ function createTestHarness(): CascadeTestHarness {
         // Engine not available
       }
       return null;
+    },
+    /**
+     * Resize a dockview panel's containing group to a target width.
+     * Used by viewer-controls E2E tests to ensure the viewer panel is
+     * wide enough for responsive controls (gain/gamma/channels) to appear.
+     */
+    resizeViewerPanel(targetWidth: number): boolean {
+      const api = useLayoutStore.getState().dockviewApi;
+      if (!api) return false;
+      const panel = api.getPanel('viewer');
+      if (!panel?.group) return false;
+      const group = panel.group;
+      // setSize is the dockview API to programmatically resize a group
+      if (typeof (group.api as unknown as Record<string, unknown>).setSize === 'function') {
+        (group.api as unknown as { setSize: (opts: { width: number }) => void }).setSize({ width: targetWidth });
+        return true;
+      }
+      return false;
     },
   };
 }

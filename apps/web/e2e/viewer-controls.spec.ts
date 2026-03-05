@@ -9,8 +9,27 @@ async function setupSolidColorPipeline(
   page: import('@playwright/test').Page,
   color?: { r: number; g: number; b: number; a: number },
 ) {
+  // Use a wide viewport so the dockview layout has room.
+  await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto('/');
+
+  // Clear any persisted dockview layout from a previous test so we always
+  // start from the default layout. Without this, resizeViewerPanel writes
+  // to localStorage and bleeds into parallel tests / later runs.
+  await page.evaluate(() => {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('dockview') || k.includes('layout'))
+      .forEach(k => localStorage.removeItem(k));
+  });
+  // Reload so the app starts with the default layout.
+  await page.reload();
   await waitForApp(page);
+
+  // Programmatically widen the viewer panel past the 520px responsive
+  // breakpoint so display controls (channels, gain, gamma) are visible.
+  await harness(page, 'resizeViewerPanel', 700);
+  // Allow dockview layout to reflow after resize.
+  await page.waitForTimeout(300);
 
   const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
   const viewerId = (await harness(page, 'addNode', 'viewer', { x: 400, y: 100 })) as string;

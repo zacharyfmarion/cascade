@@ -44,6 +44,7 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const showDisplayControls = panelWidth >= 520;
+  const showResetDisplayControls = Math.abs(gain - 1) > 0.001 || Math.abs(gamma - 1) > 0.001;
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -76,13 +77,25 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
         <ZoomOut size={14} />
       </button>
 
-      <div 
-        className="viewer-toolbar__zoom-display" 
-        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-        role="button"
-        tabIndex={0}
-      >
-        {zoomPercent}%
+      <div className="viewer-toolbar__zoom-display">
+        <button
+          type="button"
+          className="viewer-toolbar__zoom-display-button"
+          onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+          aria-haspopup="menu"
+          aria-expanded={isDropdownOpen}
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: 'inherit',
+            font: 'inherit',
+            cursor: 'pointer',
+            width: '100%',
+            height: '100%',
+          }}
+        >
+          {zoomPercent}%
+        </button>
         {isDropdownOpen && (
           <div className="viewer-toolbar__dropdown" ref={dropdownRef}>
             {presets.map((preset) => (
@@ -182,15 +195,17 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
           </label>
 
           {/* Reset display controls */}
-          <button
-            type="button"
-            className="viewer-toolbar__btn viewer-toolbar__reset-btn"
-            onClick={onResetDisplayControls}
-            title="Reset Display Controls"
-            data-testid="reset-display-btn"
-          >
-            <RotateCcw size={12} />
-          </button>
+          {showResetDisplayControls && (
+            <button
+              type="button"
+              className="viewer-toolbar__btn viewer-toolbar__reset-btn"
+              onClick={onResetDisplayControls}
+              title="Reset Display Controls"
+              data-testid="reset-display-btn"
+            >
+              <RotateCcw size={12} />
+            </button>
+          )}
         </>
       )}
     </div>
