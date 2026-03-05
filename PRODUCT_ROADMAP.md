@@ -116,9 +116,9 @@ The AI features are already BYOK — users supply their own Replicate and Anthro
 **Confirmed**: Replicate has no browser/CORS support and no plans to add it (SDK docs explicitly state browser is unsupported; GitHub issue #164 closed with no solution, March 2025). The Cloudflare Worker proxy is the correct architecture.
 
 - [x] ~~Investigate Replicate browser/CORS support~~ — confirmed not available, proxy is required
-- [ ] Keep the Cloudflare Worker (it's free-tier, stateless, no API keys stored). Add a comment in `workers/proxy/worker.js` explaining why it exists.
+- [x] ~~Document the Cloudflare Worker~~ — comprehensive JSDoc added to `workers/proxy/worker.js` explaining why it exists, security model, and architecture
 - [ ] For Tauri desktop builds: call Replicate directly from the Rust backend (no CORS restriction), bypassing the proxy
-- [ ] Verify Anthropic API production path (currently proxied through Vite dev server only — may need a similar Worker or direct Tauri call)
+- [x] ~~Verify Anthropic API production path~~ — FIXED: AI chat was routing through `/api/anthropic/v1` (Vite dev proxy only, broken in production). Updated `transport.ts` to use Anthropic's `anthropic-dangerous-direct-browser-access` header for direct browser access (same pattern as ScriptNodeEditor). GPU Script GLSL generation was already working in production.
 - [ ] Add clear user-facing docs: "You need your own API keys for AI features"
 
 #### 1.4 I/O Maturity 📁
