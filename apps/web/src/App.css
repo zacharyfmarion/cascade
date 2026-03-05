@@ -75,7 +75,7 @@
   --dv-background-color: var(--bg-primary);
   --dv-group-view-background-color: var(--bg-secondary);
   --dv-separator-border: var(--border-default);
-  --dv-drag-over-background-color: rgba(var(--accent-primary-rgb, 0, 128, 255), 0.15);
+  --dv-drag-over-background-color: rgb(var(--accent-primary-rgb, 0, 128, 255), 0.15);
   --dv-drag-over-border-color: var(--accent-primary);
 }
 

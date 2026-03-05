@@ -2,7 +2,7 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: Inter, system-ui, -apple-system, sans-serif;
   overflow: hidden;
 }
 
@@ -14,12 +14,13 @@ body {
   --xy-controls-button-color-hover: var(--text-primary);
   --xy-controls-button-border-color: var(--border-default);
   --xy-controls-box-shadow: 0 0 2px 1px var(--shadow-overlay);
+
   border-radius: 4px;
   overflow: hidden;
 }
 
 .react-flow__controls-button svg {
-  fill: currentColor;
+  fill: currentcolor;
 }
 
 /* ── React Flow MiniMap ───────────────────────────────────────── */
@@ -361,6 +362,7 @@ body {
   background: var(--accent-primary);
   color: #fff;
 }
+
 .node-btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
 }
@@ -370,6 +372,7 @@ body {
   color: var(--text-primary);
   border: 1px solid var(--border-default);
 }
+
 .node-btn--secondary:hover:not(:disabled) {
   background: var(--bg-secondary);
 }
@@ -384,6 +387,7 @@ body {
   border: 1px dashed var(--border-default);
   color: var(--text-secondary);
 }
+
 .node-btn--dashed:hover:not(:disabled) {
   border-color: var(--accent-primary);
   color: var(--accent-primary);
@@ -468,18 +472,21 @@ body {
   font-size: 0.6rem;
   padding: 4px;
   border-radius: 3px;
-  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .node-status--info {
   color: var(--text-secondary);
 }
+
 .node-status--success {
   color: var(--accent-primary);
 }
+
 .node-status--danger {
   color: var(--status-danger);
 }
+
 .node-status--errorBg {
   background: var(--status-errorBg);
   color: var(--status-danger);
@@ -574,10 +581,7 @@ body {
 .base-node--muted::after {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   pointer-events: none;
   background: linear-gradient(
     to bottom right,
@@ -684,6 +688,7 @@ body {
   width: 16px;
   height: 16px;
 }
+
 .node-port__remove:hover {
   color: var(--status-danger);
 }
@@ -699,7 +704,7 @@ body {
   font-weight: 600;
   z-index: 10;
   pointer-events: none;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
 }
 
 /* ── Error Badge ──────────────────────────────────────────────── */
@@ -712,7 +717,7 @@ body {
   font-weight: 600;
   z-index: 10;
   cursor: default;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 30%);
 }
 
 /* ── Frame Range Grid ─────────────────────────────────────────── */
@@ -774,6 +779,7 @@ body {
   border: 1px solid var(--border-default);
   cursor: crosshair;
   background-color: var(--bg-tertiary);
+
   /* Checkerboard pattern for transparency */
   background-image:
     linear-gradient(45deg, var(--bg-secondary) 25%, transparent 25%),
@@ -781,7 +787,7 @@ body {
     linear-gradient(45deg, transparent 75%, var(--bg-secondary) 75%),
     linear-gradient(-45deg, transparent 75%, var(--bg-secondary) 75%);
   background-size: 10px 10px;
-  background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0;
   overflow: hidden;
 }
 
@@ -836,13 +842,13 @@ body {
   transform: rotate(45deg);
   border: 2px solid var(--bg-surface);
   border-radius: 2px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
-  background-color: currentColor; /* Inherits color from inline style */
+  box-shadow: 0 2px 4px rgb(0 0 0 / 40%);
+  background-color: currentcolor; /* Inherits color from inline style */
 }
 
 .node-color-ramp__stop--selected .node-color-ramp__stop-handle {
   border-color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--accent-primary), 0 2px 5px rgba(0,0,0,0.6);
+  box-shadow: 0 0 0 1px var(--accent-primary), 0 2px 5px rgb(0 0 0 / 60%);
 }
 
 .node-color-ramp__editor {
@@ -854,12 +860,19 @@ body {
   background: var(--bg-surface);
   border-radius: 4px;
   border: 1px solid var(--border-default);
-  animation: slideDown 0.15s ease-out;
+  animation: slide-down 0.15s ease-out;
 }
 
-@keyframes slideDown {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .node-color-swatch {
@@ -871,7 +884,8 @@ body {
   border: 1px solid var(--border-default);
   flex-shrink: 0;
   cursor: pointer;
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 10%);
+
   /* Checkerboard for alpha */
   background-image:
     linear-gradient(45deg, var(--bg-tertiary) 25%, transparent 25%),
@@ -879,7 +893,7 @@ body {
     linear-gradient(45deg, transparent 75%, var(--bg-tertiary) 75%),
     linear-gradient(-45deg, transparent 75%, var(--bg-tertiary) 75%);
   background-size: 8px 8px;
-  background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
   background-color: var(--bg-surface);
 }
 
@@ -910,6 +924,7 @@ body {
   border: 1px solid var(--border-default);
   text-align: center;
 }
+
 /* Shared node-control tokens */
 :root {
   --node-label-font-size: 0.72rem;
@@ -919,18 +934,15 @@ body {
   --code-text: #e6edf3;
   --status-error-bright: #ef4444;
   --status-success-bright: #4caf50;
-  --status-error-subtle-bg: rgba(239, 68, 68, 0.1);
-  --status-error-subtle-border: rgba(239, 68, 68, 0.2);
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
-  --shadow-md: 0 2px 4px rgba(0,0,0,0.5);
-  --overlay-dim: rgba(0, 0, 0, 0.5);
-  --overlay-label: rgba(0, 0, 0, 0.45);
-  --text-inverse: #ffffff;
-  --node-label-font-size: 0.72rem;
-}
+  --status-error-subtle-bg: rgb(239 68 68 / 10%);
+  --status-error-subtle-border: rgb(239 68 68 / 20%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow-md: 0 2px 4px rgb(0 0 0 / 50%);
+  --overlay-dim: rgb(0 0 0 / 50%);
+  --overlay-label: rgb(0 0 0 / 45%);
+  --text-inverse: #fff;
 
-/* Timing colors */
-:root {
+  /* Timing colors */
   --timing-fast: #2e7d32;
   --timing-medium: #ff8f00;
   --timing-slow: #c62828;
@@ -939,15 +951,13 @@ body {
   --channel-g: #60c060;
   --channel-b: #6080e0;
   --channel-a: #b0b0b0;
-  
+
   /* Toast Accents */
   --toast-info-accent: #3b82f6;
   --toast-success-accent: #22c55e;
   --toast-warning-accent: #eab308;
   --toast-error-accent: #ef4444;
-  }
-
-  }
+}
 
 /* ── Viewer Toolbar ──────────────────────────────────────────── */
 .viewer-toolbar {
@@ -966,7 +976,7 @@ body {
   padding: 0 4px;
   gap: 2px;
   z-index: 100;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 20%);
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1028,7 +1038,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid var(--border-default);
   border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 30%);
   padding: 4px 0;
   min-width: 80px;
   display: flex;
@@ -1060,7 +1070,7 @@ body {
     linear-gradient(45deg, transparent 75%, var(--bg-primary) 75%),
     linear-gradient(-45deg, transparent 75%, var(--bg-primary) 75%);
   background-size: 16px 16px;
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
 /* ── Viewer Channel Buttons ───────────────────────────────────── */
@@ -1097,14 +1107,17 @@ body {
   color: var(--channel-r);
   background: var(--bg-surface);
 }
+
 .viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--g {
   color: var(--channel-g);
   background: var(--bg-surface);
 }
+
 .viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--b {
   color: var(--channel-b);
   background: var(--bg-surface);
 }
+
 .viewer-toolbar__channel-btn--active.viewer-toolbar__channel-btn--a {
   color: var(--channel-a);
   background: var(--bg-surface);
@@ -1130,7 +1143,6 @@ body {
   width: 50px;
   height: 4px;
   appearance: none;
-  -webkit-appearance: none;
   background: var(--border-default);
   border-radius: 2px;
   outline: none;
@@ -1138,7 +1150,7 @@ body {
 }
 
 .viewer-toolbar__slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
+  appearance: none;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -1173,7 +1185,7 @@ body {
   color: var(--text-secondary);
   z-index: 100;
   pointer-events: none;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 20%);
   white-space: nowrap;
 }
 
