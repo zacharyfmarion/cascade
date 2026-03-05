@@ -73,7 +73,7 @@ export const GroupNodeComponent: React.FC<NodeProps> = (props) => {
       </NodeSection>
 
       <div className="node-hint">
-        Double-click or Tab to edit
+        Double-click to edit
       </div>
     </BaseNode>
   );

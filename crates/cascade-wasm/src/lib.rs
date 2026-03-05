@@ -272,6 +272,52 @@ impl Engine {
         Ok(spec)
     }
 
+    fn internal_graph_has_cycle(graph: &SerializableInternalGraph) -> bool {
+        let mut adjacency: HashMap<String, Vec<String>> = HashMap::new();
+        for node in &graph.nodes {
+            adjacency.entry(node.id.clone()).or_default();
+        }
+        for conn in &graph.connections {
+            adjacency
+                .entry(conn.from_node.clone())
+                .or_default()
+                .push(conn.to_node.clone());
+        }
+
+        let mut visiting = HashSet::new();
+        let mut visited = HashSet::new();
+        for node_id in adjacency.keys() {
+            if Self::visit_internal_graph_node(node_id, &adjacency, &mut visiting, &mut visited) {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn visit_internal_graph_node(
+        node_id: &str,
+        adjacency: &HashMap<String, Vec<String>>,
+        visiting: &mut HashSet<String>,
+        visited: &mut HashSet<String>,
+    ) -> bool {
+        if visited.contains(node_id) {
+            return false;
+        }
+        if !visiting.insert(node_id.to_string()) {
+            return true;
+        }
+        if let Some(neighbors) = adjacency.get(node_id) {
+            for neighbor in neighbors {
+                if Self::visit_internal_graph_node(neighbor, adjacency, visiting, visited) {
+                    return true;
+                }
+            }
+        }
+        visiting.remove(node_id);
+        visited.insert(node_id.to_string());
+        false
+    }
+
     fn collect_group_deps(
         &self,
         group_def_id: &str,
@@ -301,11 +347,16 @@ impl Engine {
         let mut visited = HashSet::new();
         self.collect_group_deps(group_def_id, &mut collected, &mut visited);
 
+        let sanitized_nodes = collected
+            .into_iter()
+            .map(|definition| sanitize_group_definition(&definition))
+            .collect();
+
         let package = NodePackage {
             version: 1,
             cascade_version: env!("CARGO_PKG_VERSION").to_string(),
             exported_at: String::new(),
-            nodes: collected,
+            nodes: sanitized_nodes,
         };
         let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
         package
@@ -962,7 +1013,7 @@ impl Engine {
             .map(|node| SerializableNode {
                 id: format_node_id(&self.graph, node.id),
                 type_id: node.type_id.clone(),
-                params: node.params.clone(),
+                params: strip_internal_params(&node.params),
                 input_defaults: node.input_defaults.clone(),
                 position: node.position,
                 muted: node.muted,
@@ -982,7 +1033,7 @@ impl Engine {
             .group_definitions
             .values()
             .filter(|def| !def.is_builtin)
-            .map(|def| def.as_ref().clone())
+            .map(|def| sanitize_group_definition(def))
             .collect();
         let graph = SerializableGraph {
             nodes,
@@ -1644,6 +1695,13 @@ impl Engine {
             .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
         let gpos = inst.position;
 
+        let group_node = self
+            .nodes
+            .get(&gid)
+            .and_then(|node| node.as_any().downcast_ref::<GroupNode>())
+            .ok_or_else(|| CascadeError::Other("Group node instance not found".to_string()))?;
+        let internal_state = group_node.snapshot_internal_state()?;
+
         struct ExtConn {
             from_node: NodeId,
             from_port: String,
@@ -1703,11 +1761,18 @@ impl Engine {
             if internal.type_id == "group_input" || internal.type_id == "group_output" {
                 continue;
             }
-            let ox = match internal.params.get("__group_offset_x") {
+            let state_entry = internal_state.get(&internal.id);
+            let mut params = state_entry
+                .map(|state| state.params.clone())
+                .unwrap_or_else(|| internal.params.clone());
+            let input_defaults = state_entry
+                .map(|state| state.input_defaults.clone())
+                .unwrap_or_else(|| internal.input_defaults.clone());
+            let ox = match params.get("__group_offset_x") {
                 Some(ParamValue::Float(v)) => *v,
                 _ => 0.0,
             };
-            let oy = match internal.params.get("__group_offset_y") {
+            let oy = match params.get("__group_offset_y") {
                 Some(ParamValue::Float(v)) => *v,
                 _ => 0.0,
             };
@@ -1716,13 +1781,12 @@ impl Engine {
                 .add_node_internal(&internal.type_id, pos.0, pos.1)
                 .ok_or_else(|| CascadeError::Other("Failed to restore node".to_string()))?;
             let new_id = parse_node_id(&self.uuid_map, &new_str)?;
-            let mut params = internal.params.clone();
             params.remove("__group_offset_x");
             params.remove("__group_offset_y");
             for (k, v) in &params {
                 self.graph.set_param(new_id, k, v.clone());
             }
-            for (k, v) in &internal.input_defaults {
+            for (k, v) in &input_defaults {
                 self.graph.set_input_default(new_id, k, v.clone());
             }
             id_map.insert(internal.id.clone(), new_id);
@@ -1731,7 +1795,7 @@ impl Engine {
                 type_id: internal.type_id.clone(),
                 position: pos,
                 params,
-                input_defaults: internal.input_defaults.clone(),
+                input_defaults,
             });
         }
 
@@ -1975,6 +2039,10 @@ impl Engine {
             to_port: to_port.to_string(),
         });
 
+        if Self::internal_graph_has_cycle(&updated.internal_graph) {
+            return Err(CascadeError::CycleDetected);
+        }
+
         let interface =
             GroupNode::derive_interface(&updated, &self.registry).map_err(CascadeError::Other)?;
 
@@ -2047,13 +2115,6 @@ impl Engine {
             });
         }
 
-        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
-
-        let def_arc = self
-            .group_definitions
-            .get(group_def_id)
-            .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
-
         let group_node_ids: Vec<NodeId> = self
             .graph
             .nodes
@@ -2061,11 +2122,19 @@ impl Engine {
             .filter(|(_, n)| n.type_id == group_def_id)
             .map(|(id, _)| id)
             .collect();
+        let updated_arc = Arc::new(updated.clone());
+        let mut refreshed_nodes = Vec::with_capacity(group_node_ids.len());
+        for node_id in &group_node_ids {
+            let group_node =
+                GroupNode::from_definition(updated_arc.clone(), &self.registry)
+                    .map_err(CascadeError::Other)?;
+            refreshed_nodes.push((*node_id, Arc::new(group_node)));
+        }
 
-        for node_id in group_node_ids {
-            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
-                .map_err(CascadeError::Other)?;
-            self.nodes.insert(node_id, Arc::new(group_node));
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
+
+        for (node_id, group_node) in refreshed_nodes {
+            self.nodes.insert(node_id, group_node);
             self.graph
                 .prune_connections_for_node(node_id, &self.registry);
         }
@@ -2308,6 +2377,29 @@ fn cascade_error_to_edit_kind(err: &CascadeError) -> EditErrorKind {
             node_id: String::new(),
         },
     }
+}
+
+fn strip_internal_params(params: &HashMap<String, ParamValue>) -> HashMap<String, ParamValue> {
+    params
+        .iter()
+        .filter(|(key, _)| !key.starts_with("__"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+fn sanitize_group_definition(definition: &GroupDefinition) -> GroupDefinition {
+    let mut sanitized = definition.clone();
+    sanitized.internal_graph.nodes = sanitized
+        .internal_graph
+        .nodes
+        .iter()
+        .map(|node| {
+            let mut node = node.clone();
+            node.params = strip_internal_params(&node.params);
+            node
+        })
+        .collect();
+    sanitized
 }
 
 #[derive(Serialize, Deserialize)]
