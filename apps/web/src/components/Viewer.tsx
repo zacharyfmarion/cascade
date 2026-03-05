@@ -201,7 +201,11 @@ const ScalarViewer: React.FC<{ result: ViewerResult }> = ({ result }) => {
   }
 };
 
-export const Viewer: React.FC = () => {
+interface ViewerProps {
+  panelApi?: { width: number; height: number; onDidDimensionsChange: (cb: (event: { width: number; height: number }) => void) => { dispose: () => void } };
+}
+
+export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const selectedNodeIds = useGraphStore(s => s.selectedNodeIds);
   const nodes = useGraphStore(s => s.nodes);
   const renderResults = useGraphStore(s => s.renderResults);
@@ -223,6 +227,17 @@ export const Viewer: React.FC = () => {
   const [gain, setGain] = useState(1);
   const [gamma, setGamma] = useState(1);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
+  const [panelWidth, setPanelWidth] = useState(panelApi?.width ?? Infinity);
+
+  // Track panel width from dockview for responsive toolbar
+  useEffect(() => {
+    if (!panelApi) return;
+    setPanelWidth(panelApi.width);
+    const disposable = panelApi.onDidDimensionsChange((event) => {
+      setPanelWidth(event.width);
+    });
+    return () => disposable.dispose();
+  }, [panelApi]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -516,6 +531,7 @@ export const Viewer: React.FC = () => {
           gamma={gamma}
           onGammaChange={setGamma}
           onResetDisplayControls={handleResetDisplayControls}
+          panelWidth={panelWidth}
       />
       
       {dimensions && hasPixels && (

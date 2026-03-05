@@ -16,6 +16,7 @@ interface ViewerToolbarProps {
   gamma: number;
   onGammaChange: (gamma: number) => void;
   onResetDisplayControls: () => void;
+  panelWidth?: number;
 }
 
 const CHANNELS: { key: 'r' | 'g' | 'b' | 'a'; label: string }[] = [
@@ -39,8 +40,10 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
   gamma,
   onGammaChange,
   onResetDisplayControls,
+  panelWidth = Infinity,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const showDisplayControls = panelWidth >= 520;
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +63,6 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
   };
 
   const presets = [25, 50, 100, 200, 400];
-  const showResetButton = gain !== 1 || gamma !== 1;
 
   return (
     <div className="viewer-toolbar">
@@ -129,65 +131,67 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
         1:1
       </button>
 
-      <div className="viewer-toolbar__separator" />
+      {showDisplayControls && (
+        <>
+          <div className="viewer-toolbar__separator" />
 
-      {/* Channel isolation buttons */}
-      {CHANNELS.map(({ key, label }) => (
-        <button
-          key={key}
-          type="button"
-          className={`viewer-toolbar__channel-btn viewer-toolbar__channel-btn--${key}${activeChannel === key ? ' viewer-toolbar__channel-btn--active' : ''}`}
-          onClick={() => onChannelChange(activeChannel === key ? null : key)}
-          title={`Solo ${label} channel (${key})`}
-          data-testid={`channel-btn-${key}`}
-        >
-          {label}
-        </button>
-      ))}
+          {/* Channel isolation buttons */}
+          {CHANNELS.map(({ key, label }) => (
+            <button
+              key={key}
+              type="button"
+              className={`viewer-toolbar__channel-btn viewer-toolbar__channel-btn--${key}${activeChannel === key ? ' viewer-toolbar__channel-btn--active' : ''}`}
+              onClick={() => onChannelChange(activeChannel === key ? null : key)}
+              title={`Solo ${label} channel (${key})`}
+              data-testid={`channel-btn-${key}`}
+            >
+              {label}
+            </button>
+          ))}
 
-      <div className="viewer-toolbar__separator" />
+          <div className="viewer-toolbar__separator" />
 
-      {/* Gain control */}
-      <label className="viewer-toolbar__slider-group" title={`Gain: ${gain.toFixed(2)}x`}>
-        <span className="viewer-toolbar__slider-label">Exp</span>
-        <input
-          type="range"
-          className="viewer-toolbar__slider"
-          min={-3}
-          max={3}
-          step={0.05}
-          value={Math.log2(gain)}
-          onChange={(e) => onGainChange(Math.pow(2, parseFloat(e.target.value)))}
-          data-testid="gain-slider"
-        />
-      </label>
+          {/* Gain control */}
+          <label className="viewer-toolbar__slider-group" title={`Gain: ${gain.toFixed(2)}x`}>
+            <span className="viewer-toolbar__slider-label">Exp</span>
+            <input
+              type="range"
+              className="viewer-toolbar__slider"
+              min={-3}
+              max={3}
+              step={0.05}
+              value={Math.log2(gain)}
+              onChange={(e) => onGainChange(Math.pow(2, parseFloat(e.target.value)))}
+              data-testid="gain-slider"
+            />
+          </label>
 
-      {/* Gamma control */}
-      <label className="viewer-toolbar__slider-group" title={`Gamma: ${gamma.toFixed(2)}`}>
-        <span className="viewer-toolbar__slider-label">Gam</span>
-        <input
-          type="range"
-          className="viewer-toolbar__slider"
-          min={0.1}
-          max={4.0}
-          step={0.05}
-          value={gamma}
-          onChange={(e) => onGammaChange(parseFloat(e.target.value))}
-          data-testid="gamma-slider"
-        />
-      </label>
+          {/* Gamma control */}
+          <label className="viewer-toolbar__slider-group" title={`Gamma: ${gamma.toFixed(2)}`}>
+            <span className="viewer-toolbar__slider-label">Gam</span>
+            <input
+              type="range"
+              className="viewer-toolbar__slider"
+              min={0.1}
+              max={4.0}
+              step={0.05}
+              value={gamma}
+              onChange={(e) => onGammaChange(parseFloat(e.target.value))}
+              data-testid="gamma-slider"
+            />
+          </label>
 
-      {/* Reset button */}
-      {showResetButton && (
-        <button
-          type="button"
-          className="viewer-toolbar__btn"
-          onClick={onResetDisplayControls}
-          title="Reset Gain & Gamma"
-          data-testid="reset-display-btn"
-        >
-          <RotateCcw size={12} />
-        </button>
+          {/* Reset display controls */}
+          <button
+            type="button"
+            className="viewer-toolbar__btn viewer-toolbar__reset-btn"
+            onClick={onResetDisplayControls}
+            title="Reset Display Controls"
+            data-testid="reset-display-btn"
+          >
+            <RotateCcw size={12} />
+          </button>
+        </>
       )}
     </div>
   );

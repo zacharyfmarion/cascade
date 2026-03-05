@@ -34,7 +34,7 @@ const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
 
 const NodeLibraryPanel: React.FC<IDockviewPanelProps> = () => <NodeLibrary />;
 const InspectorPanel: React.FC<IDockviewPanelProps> = () => <Inspector />;
-const ViewerPanel: React.FC<IDockviewPanelProps> = () => <Viewer />;
+const ViewerPanel: React.FC<IDockviewPanelProps> = (props) => <Viewer panelApi={props.api} />;
 const TimelinePanel: React.FC<IDockviewPanelProps> = () => <Timeline />;
 const DslEditorPanel: React.FC<IDockviewPanelProps> = () => <DslEditor />;
 
