@@ -119,6 +119,12 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 - Prefer doing things right over doing things fast. A well-designed solution that takes longer is always preferable to a hacky shortcut.
 - **When you hit an architectural limitation — stop.** If the current architecture cannot cleanly support what you're trying to do (e.g., the type system doesn't express a needed concept, the evaluator can't handle a new execution pattern, the graph model doesn't support a required connection type), do not work around it. Instead: (1) clearly describe the limitation and why it blocks the correct implementation, (2) propose what architectural changes might be needed, and (3) ask the user how to proceed before writing any code.
 
+## Implementation plans
+
+When starting a non-trivial feature or change, create a Markdown plan file in `implementation-plans/` (e.g., `implementation-plans/gpu-blur-node.md`). The plan should outline the goal, approach, affected files, and a checklist of steps.
+
+As you work, **mark off progress in the plan file** (using `- [x]` checkboxes) in addition to updating your TODO tool. The plan file serves as a durable, human-readable record of what was done and what remains — it persists across sessions and is visible to other agents and the user, unlike the TODO tool which is ephemeral.
+
 ## Parallel agents
 
 Multiple AI agents may be working on this repository simultaneously. If you encounter unexpected changes, new files, or compilation errors that you did not introduce, **ignore them and move on**. Do not attempt to delete, revert, or fix changes made by other agents — they are handling their own work.

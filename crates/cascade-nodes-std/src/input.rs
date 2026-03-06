@@ -1,8 +1,8 @@
+use crate::transform::resize_nearest;
 use cascade_core::error::CascadeError;
 use cascade_core::exr::{self, ExrLayerKind, ExrMetadata};
 use cascade_core::node::{EvalContext, Node, NodeFuture};
 use cascade_core::types::*;
-use crate::transform::resize_nearest;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
@@ -331,7 +331,10 @@ impl Node for LoadImage {
                                 primary_port
                             ))
                         })?;
-                        outputs.insert("image".to_string(), Value::Image(preview_downscale((**img).clone(), preview_scale)?));
+                        outputs.insert(
+                            "image".to_string(),
+                            Value::Image(preview_downscale((**img).clone(), preview_scale)?),
+                        );
                     }
 
                     for layer in &meta.layers {
@@ -339,7 +342,10 @@ impl Node for LoadImage {
                             continue;
                         }
                         if let Some(img) = cache.get(&layer.port_name) {
-                            outputs.insert(layer.port_name.clone(), Value::Image(preview_downscale((**img).clone(), preview_scale)?));
+                            outputs.insert(
+                                layer.port_name.clone(),
+                                Value::Image(preview_downscale((**img).clone(), preview_scale)?),
+                            );
                         }
                     }
 

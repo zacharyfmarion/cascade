@@ -704,7 +704,9 @@ impl VideoDecoder {
             });
         }
 
-        let state = state_guard.as_mut().ok_or_else(|| "sequential reader state unexpectedly empty".to_string())?;
+        let state = state_guard
+            .as_mut()
+            .ok_or_else(|| "sequential reader state unexpectedly empty".to_string())?;
         let output_base: &AVAssetReaderOutput = &state.track_output;
         let sample = unsafe { output_base.copyNextSampleBuffer() };
 

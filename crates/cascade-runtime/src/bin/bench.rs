@@ -60,42 +60,19 @@ impl OutputFormat {
 #[derive(Clone, Debug, ValueEnum)]
 enum NodeKind {
     Passthrough,
-    HueSaturation,
-    BrightnessContrast,
-    Invert,
     GaussianBlur,
-    Levels,
     Curves,
-    ColorBalance,
-    ChannelShuffle,
-    Threshold,
-    Posterize,
-    Gamma,
     SeparateHsva,
-    WhiteBalance,
-    Vibrance,
-    GradientMap,
-    ToneMap,
     Sharpen,
-    EdgeDetect,
     Dilate,
     Erode,
     Median,
-    Vignette,
     Glow,
-    LensDistortion,
-    Premultiply,
-    Unpremultiply,
-    ExtractChannel,
     ChromaKey,
-    Despill,
     Crop,
     Flip,
-    Rotate,
     Translate,
-    Transform2D,
     Resize,
-    MapRange,
     MathNode,
 }
 
@@ -103,42 +80,19 @@ impl NodeKind {
     fn node_id(&self) -> Option<&'static str> {
         match self {
             Self::Passthrough => None,
-            Self::HueSaturation => Some("hue_saturation"),
-            Self::BrightnessContrast => Some("brightness_contrast"),
-            Self::Invert => Some("invert"),
             Self::GaussianBlur => Some("gaussian_blur"),
-            Self::Levels => Some("levels"),
             Self::Curves => Some("curves"),
-            Self::ColorBalance => Some("color_balance"),
-            Self::ChannelShuffle => Some("channel_shuffle"),
-            Self::Threshold => Some("threshold"),
-            Self::Posterize => Some("posterize"),
-            Self::Gamma => Some("gamma"),
             Self::SeparateHsva => Some("separate_hsva"),
-            Self::WhiteBalance => Some("white_balance"),
-            Self::Vibrance => Some("vibrance"),
-            Self::GradientMap => Some("gradient_map"),
-            Self::ToneMap => Some("tone_map"),
             Self::Sharpen => Some("sharpen"),
-            Self::EdgeDetect => Some("edge_detect"),
             Self::Dilate => Some("dilate"),
             Self::Erode => Some("erode"),
             Self::Median => Some("median"),
-            Self::Vignette => Some("vignette"),
             Self::Glow => Some("glow"),
-            Self::LensDistortion => Some("lens_distortion"),
-            Self::Premultiply => Some("premultiply"),
-            Self::Unpremultiply => Some("unpremultiply"),
-            Self::ExtractChannel => Some("extract_channel"),
             Self::ChromaKey => Some("chroma_key"),
-            Self::Despill => Some("despill"),
             Self::Crop => Some("crop"),
             Self::Flip => Some("flip"),
-            Self::Rotate => Some("rotate"),
             Self::Translate => Some("translate"),
-            Self::Transform2D => Some("transform_2d"),
             Self::Resize => Some("resize"),
-            Self::MapRange => Some("map_range"),
             Self::MathNode => Some("math"),
         }
     }
@@ -146,95 +100,29 @@ impl NodeKind {
     fn label(&self) -> &'static str {
         match self {
             Self::Passthrough => "passthrough",
-            Self::HueSaturation => "hue_saturation",
-            Self::BrightnessContrast => "brightness_contrast",
-            Self::Invert => "invert",
             Self::GaussianBlur => "gaussian_blur",
-            Self::Levels => "levels",
             Self::Curves => "curves",
-            Self::ColorBalance => "color_balance",
-            Self::ChannelShuffle => "channel_shuffle",
-            Self::Threshold => "threshold",
-            Self::Posterize => "posterize",
-            Self::Gamma => "gamma",
             Self::SeparateHsva => "separate_hsva",
-            Self::WhiteBalance => "white_balance",
-            Self::Vibrance => "vibrance",
-            Self::GradientMap => "gradient_map",
-            Self::ToneMap => "tone_map",
             Self::Sharpen => "sharpen",
-            Self::EdgeDetect => "edge_detect",
             Self::Dilate => "dilate",
             Self::Erode => "erode",
             Self::Median => "median",
-            Self::Vignette => "vignette",
             Self::Glow => "glow",
-            Self::LensDistortion => "lens_distortion",
-            Self::Premultiply => "premultiply",
-            Self::Unpremultiply => "unpremultiply",
-            Self::ExtractChannel => "extract_channel",
             Self::ChromaKey => "chroma_key",
-            Self::Despill => "despill",
             Self::Crop => "crop",
             Self::Flip => "flip",
-            Self::Rotate => "rotate",
             Self::Translate => "translate",
-            Self::Transform2D => "transform_2d",
             Self::Resize => "resize",
-            Self::MapRange => "map_range",
             Self::MathNode => "math",
         }
     }
 
     fn configure_params(&self, engine: &mut Engine, node_id: &str) -> Result<(), String> {
         match self {
-            Self::Passthrough
-            | Self::Invert
-            | Self::Premultiply
-            | Self::Unpremultiply
-            | Self::SeparateHsva => Ok(()),
-            Self::HueSaturation => {
-                engine
-                    .set_param(node_id, "hue", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "saturation", ParamValue::Float(0.2))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "value", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::BrightnessContrast => {
-                engine
-                    .set_param(node_id, "brightness", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "contrast", ParamValue::Float(0.2))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
+            Self::Passthrough | Self::SeparateHsva => Ok(()),
             Self::GaussianBlur => {
                 engine
                     .set_param(node_id, "sigma", ParamValue::Float(5.0))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Levels => {
-                engine
-                    .set_param(node_id, "in_black", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "in_white", ParamValue::Float(0.9))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "gamma", ParamValue::Float(1.2))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "out_black", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "out_white", ParamValue::Float(1.0))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
@@ -256,138 +144,12 @@ impl NodeKind {
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
-            Self::ColorBalance => {
-                engine
-                    .set_param(node_id, "shadow_r", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "shadow_g", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "shadow_b", ParamValue::Float(-0.1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "mid_r", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "mid_g", ParamValue::Float(0.05))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "mid_b", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "highlight_r", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "highlight_g", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "highlight_b", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::ChannelShuffle => {
-                engine
-                    .set_param(node_id, "r_source", ParamValue::Int(2))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "g_source", ParamValue::Int(0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "b_source", ParamValue::Int(1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "a_source", ParamValue::Int(3))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Threshold => {
-                engine
-                    .set_param(node_id, "threshold", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Posterize => {
-                engine
-                    .set_param(node_id, "levels", ParamValue::Int(8))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Gamma => {
-                engine
-                    .set_param(node_id, "gamma", ParamValue::Float(2.2))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::WhiteBalance => {
-                engine
-                    .set_param(node_id, "temperature", ParamValue::Float(0.3))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "tint", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Vibrance => {
-                engine
-                    .set_param(node_id, "vibrance", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::GradientMap => {
-                engine
-                    .set_param(node_id, "color_low_r", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_low_g", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_low_b", ParamValue::Float(0.2))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_mid_r", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_mid_g", ParamValue::Float(0.2))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_mid_b", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_high_r", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_high_g", ParamValue::Float(0.9))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "color_high_b", ParamValue::Float(0.8))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "strength", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::ToneMap => {
-                engine
-                    .set_param(node_id, "method", ParamValue::Int(0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "exposure", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
             Self::Sharpen => {
                 engine
                     .set_param(node_id, "amount", ParamValue::Float(0.5))
                     .map_err(|e| e.to_string())?;
                 engine
                     .set_param(node_id, "radius", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::EdgeDetect => {
-                engine
-                    .set_param(node_id, "strength", ParamValue::Float(1.0))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
@@ -409,18 +171,6 @@ impl NodeKind {
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
-            Self::Vignette => {
-                engine
-                    .set_param(node_id, "amount", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "size", ParamValue::Float(0.8))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "softness", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
             Self::Glow => {
                 engine
                     .set_param(node_id, "threshold", ParamValue::Float(0.8))
@@ -430,24 +180,6 @@ impl NodeKind {
                     .map_err(|e| e.to_string())?;
                 engine
                     .set_param(node_id, "intensity", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::LensDistortion => {
-                engine
-                    .set_param(node_id, "distortion", ParamValue::Float(0.3))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "chromatic_aberration", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "scale", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::ExtractChannel => {
-                engine
-                    .set_param(node_id, "channel", ParamValue::Int(0))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
@@ -466,24 +198,6 @@ impl NodeKind {
                     .map_err(|e| e.to_string())?;
                 engine
                     .set_param(node_id, "softness", ParamValue::Float(0.1))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Despill => {
-                engine
-                    .set_param(node_id, "method", ParamValue::Int(0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "strength", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "key_r", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "key_g", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "key_b", ParamValue::Float(0.0))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
@@ -511,48 +225,12 @@ impl NodeKind {
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
-            Self::Rotate => {
-                engine
-                    .set_param(node_id, "angle", ParamValue::Float(45.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "filter", ParamValue::Int(1))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
             Self::Translate => {
                 engine
                     .set_param(node_id, "x", ParamValue::Int(100))
                     .map_err(|e| e.to_string())?;
                 engine
                     .set_param(node_id, "y", ParamValue::Int(50))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::Transform2D => {
-                engine
-                    .set_param(node_id, "translate_x", ParamValue::Float(50.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "translate_y", ParamValue::Float(30.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "rotate", ParamValue::Float(15.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "scale_x", ParamValue::Float(1.5))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "scale_y", ParamValue::Float(1.5))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "pivot_x", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "pivot_y", ParamValue::Float(0.5))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "filter", ParamValue::Int(1))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }
@@ -565,24 +243,6 @@ impl NodeKind {
                     .map_err(|e| e.to_string())?;
                 engine
                     .set_param(node_id, "filter", ParamValue::Int(1))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            Self::MapRange => {
-                engine
-                    .set_param(node_id, "from_min", ParamValue::Float(0.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "from_max", ParamValue::Float(1.0))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "to_min", ParamValue::Float(0.2))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "to_max", ParamValue::Float(0.8))
-                    .map_err(|e| e.to_string())?;
-                engine
-                    .set_param(node_id, "clamp", ParamValue::Bool(true))
                     .map_err(|e| e.to_string())?;
                 Ok(())
             }

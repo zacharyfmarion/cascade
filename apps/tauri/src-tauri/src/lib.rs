@@ -222,7 +222,6 @@ fn set_param_and_render(
     Ok(Response::new(buf))
 }
 
-
 #[tauri::command]
 fn set_input_default_and_render(
     state: State<'_, EngineState>,
@@ -751,7 +750,7 @@ pub fn run() {
             get_image_data,
             render_viewer,
             set_param_and_render,
-                set_input_default_and_render,
+            set_input_default_and_render,
             export_graph,
             import_graph,
             save_project,
