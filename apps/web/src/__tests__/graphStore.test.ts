@@ -473,7 +473,7 @@ describe('graphStore AI node operations', () => {
       aiNodeStale: { [id]: false },
     });
     mockEngine.getNodeExecutionState = () => ({ status: 'complete', isStale: true, error: '' });
-    useGraphStore.getState().refreshAiNodeStale();
+    await useGraphStore.getState().refreshAiNodeStale();
     expect(useGraphStore.getState().aiNodeStale[id]).toBe(true);
   });
 

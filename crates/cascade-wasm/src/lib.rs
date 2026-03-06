@@ -15,7 +15,7 @@ use cascade_core::group::{
 };
 use cascade_core::node::{Node, NodeRegistry};
 use cascade_core::types::{
-    ColorStop, Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value, ValueType,
+    ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value, ValueType,
 };
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{GpuContext, KernelManifest};
@@ -928,21 +928,8 @@ impl Engine {
     ) -> ViewerResultWasm {
         let w = w.max(1);
         let h = h.max(1);
-        let mut pixels_f32 = vec![0.0f32; (w * h * 4) as usize];
-        for y in 0..h {
-            for x in 0..w {
-                let u = (x as f32 + 0.5) / w as f32;
-                let v = (y as f32 + 0.5) / h as f32;
-                let rgba = field.sample(u, v);
-                let idx = ((y * w + x) * 4) as usize;
-                pixels_f32[idx] = rgba[0];
-                pixels_f32[idx + 1] = rgba[1];
-                pixels_f32[idx + 2] = rgba[2];
-                pixels_f32[idx + 3] = rgba[3];
-            }
-        }
-        // Convert f32 pixels to Image, then to RGBA8
-        match Image::from_f32_data(w, h, pixels_f32) {
+        // Use Field::rasterize() which parallelizes with Rayon par_chunks_exact_mut
+        match field.rasterize(w, h) {
             Ok(img) => {
                 let rgba8 = Viewer::image_to_rgba8_with_display(
                     &img,

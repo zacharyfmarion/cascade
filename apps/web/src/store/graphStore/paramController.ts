@@ -335,8 +335,8 @@ export async function commitParamEdit(
   const newNodes = new Map(get().nodes);
   const node = newNodes.get(nodeId);
   if (node) {
-    node.params = { ...node.params, [key]: value };
-    newNodes.set(nodeId, { ...node });
+    const updatedNode = { ...node, params: { ...node.params, [key]: value } };
+    newNodes.set(nodeId, updatedNode);
     set({ nodes: newNodes, previewScale: 1, dirty: true });
   } else {
     set({ previewScale: 1 });
@@ -344,7 +344,7 @@ export async function commitParamEdit(
 
   clearDraft(nodeId);
   if (node) {
-    syncNodeCommitted(nodeId, node.params, node.inputDefaults);
+    syncNodeCommitted(nodeId, { ...node.params, [key]: value }, node.inputDefaults);
   }
 
   cancelLiveState();
@@ -395,8 +395,8 @@ export async function commitInputDefault(
   const newNodes = new Map(get().nodes);
   const node = newNodes.get(nodeId);
   if (node) {
-    node.inputDefaults = { ...node.inputDefaults, [portName]: value };
-    newNodes.set(nodeId, { ...node });
+    const updatedNode = { ...node, inputDefaults: { ...node.inputDefaults, [portName]: value } };
+    newNodes.set(nodeId, updatedNode);
     set({ nodes: newNodes, previewScale: 1, dirty: true });
   } else {
     set({ previewScale: 1 });
@@ -404,7 +404,7 @@ export async function commitInputDefault(
 
   clearDraft(nodeId);
   if (node) {
-    syncNodeCommitted(nodeId, node.params, node.inputDefaults);
+    syncNodeCommitted(nodeId, node.params, { ...node.inputDefaults, [portName]: value });
   }
 
   cancelLiveState();

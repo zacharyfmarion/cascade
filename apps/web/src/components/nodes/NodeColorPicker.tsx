@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useRef } from 'react';
 import { NodeSlider } from './NodeSlider';
 import { linearToSrgbChannel, floatToByte, linearToHex, hexToLinear } from './colorUtils';
 
@@ -32,16 +32,20 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
     };
   }, [r, g, b, a]);
 
+  const lastEmittedHexRef = useRef<string>(hexValue);
+
   const handleColorInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
-    const [nr, ng, nb] = hexToLinear((e.target as HTMLInputElement).value);
+    const hex = (e.target as HTMLInputElement).value;
+    if (hex === lastEmittedHexRef.current) return; // dedup rapid identical events
+    lastEmittedHexRef.current = hex;
+    const [nr, ng, nb] = hexToLinear(hex);
     onChange([nr, ng, nb, a]);
   }, [a, onChange]);
 
   const handleColorCommit = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const [nr, ng, nb] = hexToLinear(e.target.value);
-    onChange([nr, ng, nb, a]);
     onChangeCommit?.([nr, ng, nb, a]);
-  }, [a, onChange, onChangeCommit]);
+  }, [a, onChangeCommit]);
 
   const handleAlphaChange = useCallback((newAlpha: number) => {
     onChange([r, g, b, newAlpha]);

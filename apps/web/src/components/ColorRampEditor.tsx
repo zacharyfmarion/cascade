@@ -122,7 +122,11 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
     }
   }, [onChange, safeStops, selectedIndex]);
 
+  const lastColorHexRef = useRef<string>('');
+
   const handleColorChange = useCallback((hex: string) => {
+    if (hex === lastColorHexRef.current) return; // dedup rapid identical events
+    lastColorHexRef.current = hex;
     if (selectedIndex !== null) {
       const updated = [...safeStops];
       const oldAlpha = updated[selectedIndex].color[3];

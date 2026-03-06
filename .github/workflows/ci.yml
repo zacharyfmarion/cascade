@@ -112,6 +112,9 @@ jobs:
 
       - name: CSS Lint
         run: yarn lint:css
+
+      - name: Unit tests
+        run: yarn test
   e2e-test:
     name: E2E Tests (Playwright)
     runs-on: ubuntu-latest
