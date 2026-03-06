@@ -1,9 +1,15 @@
+pub mod blend_kernels;
+pub mod color_kernels;
+pub mod color_kernels_advanced;
 pub mod context;
 pub mod kernel_node;
 pub mod kuwahara;
 pub mod manifest;
+pub mod matte_kernels;
 pub mod template;
+pub mod transform_kernels;
 pub mod transpile;
+pub mod utility_kernels;
 
 use std::sync::Arc;
 
@@ -13,8 +19,49 @@ use crate::kernel_node::GpuKernelNode;
 use crate::kuwahara::GpuKuwaharaNode;
 use crate::manifest::builtin_pixelate_manifest;
 
+use crate::blend_kernels::{
+    builtin_alpha_over_manifest, builtin_blend_manifest, builtin_channel_shuffle_manifest,
+    builtin_copy_channels_manifest, builtin_image_math_manifest, builtin_key_mix_manifest,
+    builtin_merge_manifest,
+};
+use crate::color_kernels::{
+    builtin_brightness_contrast_manifest, builtin_clamp_manifest, builtin_gamma_manifest,
+    builtin_hue_saturation_manifest, builtin_invert_manifest, builtin_posterize_manifest,
+    builtin_threshold_manifest, builtin_white_balance_manifest,
+};
+use crate::color_kernels_advanced::{
+    builtin_color_balance_manifest, builtin_grade_manifest, builtin_gradient_map_manifest,
+    builtin_levels_manifest, builtin_tone_map_manifest, builtin_vibrance_manifest,
+};
+use crate::matte_kernels::{
+    builtin_chroma_key_manifest, builtin_despill_manifest, builtin_difference_matte_manifest,
+    builtin_extract_channel_manifest, builtin_luminance_key_manifest,
+    builtin_premultiply_manifest, builtin_set_alpha_manifest, builtin_unpremultiply_manifest,
+};
+use crate::transform_kernels::{
+    builtin_gpu_resize_manifest, builtin_gpu_rotate_manifest,
+    builtin_gpu_transform_2d_manifest,
+};
+use crate::utility_kernels::{
+    builtin_edge_detect_manifest, builtin_gpu_color_ramp_manifest,
+    builtin_lens_distortion_manifest, builtin_map_range_manifest, builtin_vignette_manifest,
+};
+
 pub use crate::context::GpuContext;
 pub use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
+
+fn register_kernel_node(
+    registry: &mut NodeRegistry,
+    context: &Arc<GpuContext>,
+    manifest: KernelManifest,
+) {
+    let ctx = context.clone();
+    let id = manifest.id.clone();
+    registry.register(&id, move || {
+        let m = manifest.clone();
+        Arc::new(GpuKernelNode::from_manifest(m, ctx.clone()).expect("GPU node"))
+    });
+}
 
 pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>) {
     let ctx = context.clone();
@@ -27,6 +74,55 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     registry.register("kuwahara", move || {
         Arc::new(GpuKuwaharaNode::new(ctx.clone()))
     });
+
+    // --- Color kernels (simple) ---
+    register_kernel_node(registry, &context, builtin_invert_manifest());
+    register_kernel_node(registry, &context, builtin_brightness_contrast_manifest());
+    register_kernel_node(registry, &context, builtin_hue_saturation_manifest());
+    register_kernel_node(registry, &context, builtin_gamma_manifest());
+    register_kernel_node(registry, &context, builtin_threshold_manifest());
+    register_kernel_node(registry, &context, builtin_posterize_manifest());
+    register_kernel_node(registry, &context, builtin_white_balance_manifest());
+    register_kernel_node(registry, &context, builtin_clamp_manifest());
+
+    // --- Color kernels (advanced) ---
+    register_kernel_node(registry, &context, builtin_levels_manifest());
+    register_kernel_node(registry, &context, builtin_vibrance_manifest());
+    register_kernel_node(registry, &context, builtin_tone_map_manifest());
+    register_kernel_node(registry, &context, builtin_grade_manifest());
+    register_kernel_node(registry, &context, builtin_gradient_map_manifest());
+    register_kernel_node(registry, &context, builtin_color_balance_manifest());
+
+    // --- Matte kernels ---
+    register_kernel_node(registry, &context, builtin_premultiply_manifest());
+    register_kernel_node(registry, &context, builtin_unpremultiply_manifest());
+    register_kernel_node(registry, &context, builtin_chroma_key_manifest());
+    register_kernel_node(registry, &context, builtin_despill_manifest());
+    register_kernel_node(registry, &context, builtin_luminance_key_manifest());
+    register_kernel_node(registry, &context, builtin_difference_matte_manifest());
+    register_kernel_node(registry, &context, builtin_set_alpha_manifest());
+    register_kernel_node(registry, &context, builtin_extract_channel_manifest());
+
+    // --- Blend/composite kernels ---
+    register_kernel_node(registry, &context, builtin_blend_manifest());
+    register_kernel_node(registry, &context, builtin_alpha_over_manifest());
+    register_kernel_node(registry, &context, builtin_merge_manifest());
+    register_kernel_node(registry, &context, builtin_key_mix_manifest());
+    register_kernel_node(registry, &context, builtin_image_math_manifest());
+    register_kernel_node(registry, &context, builtin_channel_shuffle_manifest());
+    register_kernel_node(registry, &context, builtin_copy_channels_manifest());
+
+    // --- Utility/filter kernels ---
+    register_kernel_node(registry, &context, builtin_map_range_manifest());
+    register_kernel_node(registry, &context, builtin_vignette_manifest());
+    register_kernel_node(registry, &context, builtin_gpu_color_ramp_manifest());
+    register_kernel_node(registry, &context, builtin_edge_detect_manifest());
+    register_kernel_node(registry, &context, builtin_lens_distortion_manifest());
+
+    // --- Transform kernels ---
+    register_kernel_node(registry, &context, builtin_gpu_resize_manifest());
+    register_kernel_node(registry, &context, builtin_gpu_rotate_manifest());
+    register_kernel_node(registry, &context, builtin_gpu_transform_2d_manifest());
 }
 
 #[cfg(test)]
