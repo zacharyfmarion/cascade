@@ -2877,7 +2877,7 @@ impl EngineErrorDto {
             CascadeError::PortNotFound { .. } => ("PORT_NOT_FOUND", "graph"),
             CascadeError::InvalidImageData { .. } => ("INVALID_IMAGE_DATA", "eval"),
             CascadeError::ImageTooLarge { .. } => ("IMAGE_TOO_LARGE", "io"),
-            CascadeError::EvalFailed { .. } => unreachable!(),
+            CascadeError::EvalFailed { .. } => ("EVAL_FAILED", "eval"),
             CascadeError::ExrMetadata(_)
             | CascadeError::ExrDecode(_)
             | CascadeError::ExrUnsupportedLayer { .. }

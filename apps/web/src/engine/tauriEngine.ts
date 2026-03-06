@@ -89,12 +89,11 @@ export class TauriEngine implements EngineBridge {
   }
 
   async setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number): Promise<Array<[string, ViewerResult]>> {
-    // For input defaults, set the value and let the caller handle rendering
-    if (mutation.type === 'inputDefault') {
-      await invoke('set_input_default', { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value });
-      return [];
-    }
-    const buf = await invoke<ArrayBuffer>('set_param_and_render', { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame });
+    const cmd = mutation.type === 'param' ? 'set_param_and_render' : 'set_input_default_and_render';
+    const args = mutation.type === 'param'
+      ? { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame }
+      : { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value, frame };
+    const buf = await invoke<ArrayBuffer>(cmd, args);
     const results: Array<[string, ViewerResult]> = [];
     if (!buf || buf.byteLength < 4) return results;
 

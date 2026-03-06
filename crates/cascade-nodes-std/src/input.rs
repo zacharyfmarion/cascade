@@ -612,7 +612,7 @@ impl LoadImageSequence {
         Ok(SequenceInfo {
             frame_count: frame_numbers.len() as u64,
             first_frame: frame_numbers[0],
-            last_frame: *frame_numbers.last().unwrap(),
+            last_frame: frame_numbers[frame_numbers.len() - 1],
         })
     }
 
@@ -837,7 +837,7 @@ pub fn detect_sequence_pattern(dir: &str) -> String {
     }
 
     let sample = &filenames[0];
-    let numeric_re = regex::Regex::new(r"\d+").unwrap();
+    let numeric_re = regex::Regex::new(r"\d+").expect("static regex is valid");
     let mut best_match: Option<regex::Match> = None;
     for m in numeric_re.find_iter(sample) {
         match &best_match {

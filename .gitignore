@@ -53,3 +53,6 @@ apps/tauri/src-tauri/gen/
 # Playwright
 test-results/
 playwright-report/
+
+# Personal skills (not shared with repo)
+.opencode/skills/multi-review/

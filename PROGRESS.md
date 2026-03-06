@@ -149,14 +149,14 @@
 ### High Priority
 
 #### Performance
-- [ ] Proxy resolution during slider interaction (render at lower res while dragging, full res on mouse up)
+- [x] ~~Proxy resolution during slider interaction (render at lower res while dragging, full res on mouse up)~~
 - [ ] Tiled processing for large images (chunk into tiles that fit CPU cache)
 - [ ] Background thread rendering (Web Workers for WASM, separate thread for native)
-- [ ] Memory pressure management (LRU eviction of cached results)
+- [x] ~~Memory pressure management (LRU eviction of cached results)~~
 
 #### UX Improvements
 - [ ] Node groups / subgraphs (collapse multiple nodes into one)
-- [ ] Keyboard shortcuts panel
+- [x] ~~Keyboard shortcuts panel~~
 - [ ] Zoom to fit / zoom to selection
 - [ ] Connection validation preview (highlight compatible ports while dragging)
 - [ ] Node search command palette (Ctrl+K or Tab in canvas)

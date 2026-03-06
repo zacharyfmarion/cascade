@@ -133,12 +133,12 @@ Getting images in and out reliably is table-stakes.
 #### 1.5 Frontend Polish 🎨
 Existing UX gaps that hurt daily use.
 
-- [ ] Fix live param race conditions (Engineering Roadmap Phase 3)
+- [x] Fix live param race conditions (Engineering Roadmap Phase 3)
 - [ ] Node deletion cleanup edge cases (Engineering Roadmap Phase 3)
-- [ ] Performance: proxy resolution rendering for large images
+- [x] Performance: proxy resolution rendering for large images
 - [ ] Performance: background thread rendering (non-blocking UI)
-- [ ] Mini-map improvements, better zoom/pan UX
-- [ ] Keyboard shortcuts audit and documentation
+- [x] Mini-map improvements, better zoom/pan UX
+- [x] Keyboard shortcuts audit and documentation
 
 ---
 
@@ -295,7 +295,7 @@ These engineering investments from the [Engineering Roadmap](./ENGINEERING_ROADM
 | Cache eviction, selective invalidation | Phase 1 (performance) | ✅ Done |
 | Store split (12 slices) | Phase 1 (frontend) | ✅ Done |
 | GPU texture pooling | Phase 1 (GPU Script perf) | Pending |
-| Live param race condition fix | Phase 1 (frontend polish) | Pending |
+| Live param race condition fix | Phase 1 (frontend polish) | ✅ Done |
 | EngineBridge abstraction split | Phase 2 (batch/headless) | Pending |
 | EvalSession / ResourceStore | Phase 2 (project org) | Pending |
 | Background thread rendering | Phase 1 (UX) | Pending |

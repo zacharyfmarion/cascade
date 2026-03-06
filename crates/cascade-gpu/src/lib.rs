@@ -59,7 +59,9 @@ fn register_kernel_node(
     let id = manifest.id.clone();
     registry.register(&id, move || {
         let m = manifest.clone();
-        Arc::new(GpuKernelNode::from_manifest(m, ctx.clone()).expect("GPU node"))
+        // SAFETY: manifest was validated by the caller before reaching this factory.
+        // NodeRegistry::register requires infallible Fn() -> Arc<dyn Node>.
+        Arc::new(GpuKernelNode::from_manifest(m, ctx.clone()).expect("GPU node factory: manifest was pre-validated"))
     });
 }
 
@@ -67,7 +69,8 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     let ctx = context.clone();
     registry.register("gpu_kernel::pixelate", move || {
         let manifest = builtin_pixelate_manifest();
-        Arc::new(GpuKernelNode::from_manifest(manifest, ctx.clone()).expect("GPU node"))
+        // SAFETY: builtin manifest is known-valid at compile time.
+        Arc::new(GpuKernelNode::from_manifest(manifest, ctx.clone()).expect("GPU node factory: builtin manifest"))
     });
 
     let ctx = context.clone();

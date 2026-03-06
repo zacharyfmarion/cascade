@@ -222,6 +222,46 @@ fn set_param_and_render(
     Ok(Response::new(buf))
 }
 
+
+#[tauri::command]
+fn set_input_default_and_render(
+    state: State<'_, EngineState>,
+    node_id: String,
+    port_name: String,
+    value: serde_json::Value,
+    frame: u64,
+) -> Result<Response, String> {
+    let t0 = Instant::now();
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let param_value: cascade_runtime::ParamValue =
+        serde_json::from_value(value).map_err(|e| e.to_string())?;
+    let results = s
+        .engine
+        .set_input_default_and_render_viewers(&node_id, &port_name, param_value, frame)
+        .map_err(|e| e.to_string())?;
+    let elapsed = t0.elapsed();
+    eprintln!(
+        "[perf] set_input_default_and_render: {:.1}ms ({} viewers)",
+        elapsed.as_secs_f64() * 1000.0,
+        results.len()
+    );
+
+    let total_size: usize = 4 + results
+        .iter()
+        .map(|(id, r)| 4 + id.len() + 8 + r.pixels.len())
+        .sum::<usize>();
+    let mut buf = Vec::with_capacity(total_size);
+    buf.extend_from_slice(&(results.len() as u32).to_le_bytes());
+    for (id, r) in &results {
+        buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
+        buf.extend_from_slice(id.as_bytes());
+        buf.extend_from_slice(&r.width.to_le_bytes());
+        buf.extend_from_slice(&r.height.to_le_bytes());
+        buf.extend_from_slice(&r.pixels);
+    }
+    Ok(Response::new(buf))
+}
+
 #[tauri::command]
 fn export_graph(state: State<'_, EngineState>) -> Result<String, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
@@ -711,6 +751,7 @@ pub fn run() {
             get_image_data,
             render_viewer,
             set_param_and_render,
+                set_input_default_and_render,
             export_graph,
             import_graph,
             save_project,

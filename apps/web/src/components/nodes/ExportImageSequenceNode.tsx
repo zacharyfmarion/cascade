@@ -94,6 +94,7 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
       }
     } catch (err) {
       console.error('Failed to open folder dialog:', err);
+      useGraphStore.getState().pushToast('error', 'Export failed', err instanceof Error ? err.message : String(err));
     } finally {
       setBrowsing(false);
     }

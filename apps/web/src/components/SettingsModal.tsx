@@ -141,6 +141,7 @@ function AppearanceTab() {
           importVSCodeThemeJson(text);
         } catch (err) {
           console.error('Failed to import VS Code theme:', err);
+          useGraphStore.getState().pushToast('error', 'Theme import failed', err instanceof Error ? err.message : String(err));
         }
       });
       e.target.value = '';

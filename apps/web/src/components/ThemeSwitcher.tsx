@@ -1,3 +1,4 @@
+import { useGraphStore } from '../store/graphStore/store';
 import React, { useCallback, useRef } from 'react';
 import { useThemeStore } from '../store/themeStore';
 
@@ -32,6 +33,7 @@ export const ThemeSwitcher: React.FC = () => {
           importVSCodeThemeJson(text);
         } catch (err) {
           console.error('Failed to import VS Code theme:', err);
+          useGraphStore.getState().pushToast('error', 'Theme import failed', err instanceof Error ? err.message : String(err));
         }
       });
       e.target.value = '';

@@ -10,18 +10,17 @@ Cascade is a node-based image processing application. The Rust backend handles g
 
 ```
 crates/
-  cascade-core/       # Graph, evaluator, node trait, types, errors
+  cascade-core/       # Graph engine, evaluator, node trait, type system
   cascade-nodes-std/  # All built-in CPU node implementations + benchmarks
   cascade-gpu/        # wgpu compute shader pipeline (GLSL → WGSL via naga)
+  cascade-ocio/       # OpenColorIO integration (display/view transforms)
+  cascade-ocio-sys/   # OpenColorIO C FFI bindings (auto-stubs if not installed)
+  cascade-video/      # Video I/O support
   cascade-wasm/       # wasm-bindgen bridge exposing Engine to JS
   cascade-runtime/    # Native runtime engine + CLI bench tool
-  │   ├── cascade-nodes-std/  # All built-in CPU node implementations + benchmarks
-  │   ├── cascade-gpu/        # wgpu compute shader pipeline (GLSL → WGSL via naga)
-  │   ├── cascade-wasm/       # wasm-bindgen bridge exposing Engine to JS
-  │   └── cascade-runtime/    # Native runtime engine + CLI bench tool
 apps/
-  web/                   # React + Vite + @xyflow/react + Zustand
-  tauri/                 # Tauri v2 desktop shell
+  web/                # React + Vite + @xyflow/react + Zustand
+  tauri/              # Tauri v2 desktop shell
 ```
 
 ## Key architectural rules
@@ -37,6 +36,15 @@ apps/
 - **Arc vs Box**: Node instances are `Arc<dyn Node>` (not `Box`) to enable cheap cloning for background renders.
 - **Error handling**: Use `CascadeError` from `cascade-core`. Don't use `unwrap()` or `panic!()` in library code. Image constructors (`from_f32_data`, `from_f32_data_with_space`, `new_with_domain`, `from_f16_data`) return `Result<Image, CascadeError>` — always propagate with `?` in production code.
 - **Error propagation (WASM bridge)**: All functions in `cascade-wasm` must return `Result<_, JsValue>` and use `map_err(to_engine_error)?` for error propagation. Never use `unwrap_or(JsValue::NULL)`, bare `.unwrap()`, or `.expect()` in production WASM bridge code. The crate enforces `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
+
+### Performance and error handling
+
+Performance and robust error handling are first-class concerns in this project — not afterthoughts.
+
+- **Prefer GPU nodes over CPU nodes.** When implementing image processing operations, default to a GPU kernel node (`cascade-gpu`) unless the operation fundamentally cannot run on the GPU (e.g., it requires random access to the full image, complex branching logic, or external library calls). GPU nodes run orders of magnitude faster on large images.
+- **CPU fallback is acceptable** when GPU is unavailable at runtime, but the GPU path should be the primary implementation when feasible.
+- **Profile before assuming.** If you're unsure whether a GPU implementation will be faster for a given operation, say so — don't guess. Criterion benchmarks exist for CPU nodes; use them as a baseline.
+- **Error handling is mandatory, not optional.** Every new code path must propagate errors properly using `CascadeError` (Rust) or structured `EngineError` (frontend). See the Rust and Frontend error handling rules above. Never silently discard errors or fall back to default values without logging.
 
 ### Frontend (TypeScript/React)
 
@@ -72,8 +80,6 @@ wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wa
 - **Integration tests**: `crates/cascade-core/tests/basic.rs` — full pipeline tests through standard nodes.
 - **GPU tests**: In `cascade-gpu/src/lib.rs`. Tests that need a GPU gracefully skip when `GpuContext::new()` fails (expected in CI).
 - **Benchmarks**: Criterion benchmarks in `crates/cascade-nodes-std/benches/node_benchmarks.rs`. Covers blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion.
-- **GPU tests**: In `cascade-gpu/src/lib.rs`. Tests that need a GPU gracefully skip when `GpuContext::new()` fails (expected in CI).
-- **Benchmarks**: Criterion benchmarks in `crates/cascade-nodes-std/benches/node_benchmarks.rs`. Covers blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion.
 - **Frontend linting**: ESLint with TypeScript, React Hooks, and custom `no-hardcoded-colors` rule.
 
 ## CI
@@ -82,17 +88,19 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 
 ## Common patterns
 
-### Adding a new CPU node
+### Adding a new node
+
+**Default to a GPU kernel node** when the operation is a per-pixel transform (color correction, filters, blending, etc.). GPU nodes are dramatically faster and simpler to write for these cases. Only use a CPU node (`cascade-nodes-std`) when the operation requires complex control flow, full-image random access, or external library calls that can't run in a shader.
+
+#### CPU node
 
 1. Create struct in the appropriate file under `crates/cascade-nodes-std/src/` (e.g., `color_ops.rs` for color nodes, `filter_ops.rs` for filters)
-2. Implement `Node` trait with `spec()` and `evaluate()`
-3. Add `pub use` in `crates/cascade-nodes-std/src/lib.rs`
 2. Implement `Node` trait with `spec()` and `evaluate()`
 3. Add `pub use` in `crates/cascade-nodes-std/src/lib.rs`
 4. Register in `register_standard_nodes()` with a unique string ID
 5. Add tests inline or in the crate's test module
 
-### Adding a GPU kernel node
+#### GPU kernel node
 
 1. Create a `KernelManifest` (JSON or Rust struct) with id, ports, params, and GLSL kernel body
 2. The GLSL `process(vec4 color, vec2 uv, ivec2 pixel)` function returns the output color
@@ -109,6 +117,7 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 - **Never apply a quick fix if it's not the architecturally correct fix.** A band-aid that papers over a design problem is worse than no fix at all — it adds complexity and makes the real fix harder later.
 - When you identify that the correct solution requires a larger refactor, **always surface this to the user**. Explain what the right architecture looks like, why the simple fix is insufficient, and ask whether we should proceed with the refactor instead.
 - Prefer doing things right over doing things fast. A well-designed solution that takes longer is always preferable to a hacky shortcut.
+- **When you hit an architectural limitation — stop.** If the current architecture cannot cleanly support what you're trying to do (e.g., the type system doesn't express a needed concept, the evaluator can't handle a new execution pattern, the graph model doesn't support a required connection type), do not work around it. Instead: (1) clearly describe the limitation and why it blocks the correct implementation, (2) propose what architectural changes might be needed, and (3) ask the user how to proceed before writing any code.
 
 ## Parallel agents
 

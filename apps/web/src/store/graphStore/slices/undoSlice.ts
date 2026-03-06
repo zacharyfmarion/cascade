@@ -2,8 +2,8 @@ import type { ParamValue } from '../../types';
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import { kernel, cloneEditingStack, getEngine } from '../kernel';
-import type { UndoSnapshot, ParamDeltaSnapshot } from '../kernel';
-import { isParamDelta } from '../kernel';
+import type { UndoSnapshot, ParamDeltaSnapshot, MuteDeltaSnapshot } from '../kernel';
+import { isParamDelta, isMuteDelta } from '../kernel';
 import { syncAllCommitted } from '../nodeDraftStore';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { useSettingsStore } from '../../settingsStore';
@@ -128,6 +128,55 @@ export const createUndoSlice: StateCreator<
   };
 
   /**
+   * Restore a lightweight mute-delta snapshot.
+   * Applies oldMuted/newMuted for each entry in the engine, restores Zustand
+   * state, and re-renders affected viewers.
+   */
+  const restoreMuteDelta = async (delta: MuteDeltaSnapshot, direction: 'undo' | 'redo') => {
+    const eng = getEngine();
+
+    for (const entry of delta.entries) {
+      const muted = direction === 'undo' ? entry.oldMuted : entry.newMuted;
+      await Promise.resolve(eng.setMuted(entry.nodeId, muted));
+    }
+
+    // Restore Zustand state from the snapshot
+    set({
+      nodes: new Map(delta.nodes),
+      connections: [...delta.connections],
+      frames: new Map(delta.frames),
+      editingStack: cloneEditingStack(delta.editingStack),
+      selectedNodeIds: new Set(),
+      selectedFrameId: null,
+      renderResults: new Map(),
+      canUndo: kernel.undoStack.length > 0,
+      canRedo: kernel.redoStack.length > 0,
+      sequenceInfoMap: new Map(delta.sequenceInfoMap),
+    });
+
+    get().triggerAllViewers();
+    syncAllCommitted(get().nodes);
+  };
+
+  /**
+   * Create a reverse mute-delta snapshot (for redo stack when undoing,
+   * or for undo stack when redoing).
+   */
+  const createReverseMuteDelta = (delta: MuteDeltaSnapshot): MuteDeltaSnapshot => ({
+    kind: 'mute-delta',
+    entries: delta.entries.map(e => ({
+      nodeId: e.nodeId,
+      oldMuted: e.newMuted,
+      newMuted: e.oldMuted,
+    })),
+    nodes: new Map(get().nodes),
+    connections: [...get().connections],
+    frames: new Map(get().frames),
+    editingStack: cloneEditingStack(get().editingStack),
+    sequenceInfoMap: new Map(get().sequenceInfoMap),
+  });
+
+  /**
    * Create a reverse param-delta snapshot (for redo stack when undoing a delta,
    * or for undo stack when redoing a delta).
    */
@@ -185,6 +234,11 @@ export const createUndoSlice: StateCreator<
           const reverseDelta = createReverseDelta(snapshot);
           kernel.redoStack.push(reverseDelta);
           await restoreParamDelta(snapshot, snapshot.oldValue);
+        } else if (isMuteDelta(snapshot)) {
+          // Lightweight path: reverse mute entries for redo, then restore
+          const reverseDelta = createReverseMuteDelta(snapshot);
+          kernel.redoStack.push(reverseDelta);
+          await restoreMuteDelta(snapshot, 'undo');
         } else {
           // Full snapshot path (structural edits like add/remove node)
           const current = await captureSnapshot();
@@ -207,6 +261,11 @@ export const createUndoSlice: StateCreator<
           const reverseDelta = createReverseDelta(snapshot);
           kernel.undoStack.push(reverseDelta);
           await restoreParamDelta(snapshot, snapshot.oldValue);
+        } else if (isMuteDelta(snapshot)) {
+          // Lightweight path: reverse mute entries for undo, then restore
+          const reverseDelta = createReverseMuteDelta(snapshot);
+          kernel.undoStack.push(reverseDelta);
+          await restoreMuteDelta(snapshot, 'redo');
         } else {
           // Full snapshot path
           const current = await captureSnapshot();

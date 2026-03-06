@@ -5,7 +5,7 @@ import type { NodeInterfaceChange } from '../../../engine/bridge';
 import { parseEngineError } from '../../../engine/engineError';
 import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
-import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs } from '../kernel';
+import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
 import { pendingImageFiles } from '../../../components/nodes/pendingImageFiles';
 
 export interface GraphSliceState {
@@ -25,7 +25,7 @@ export interface GraphSliceActions {
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
-  setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
+  setParam: (nodeId: string, key: string, value: ParamValue) => void;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
   setPosition: (nodeId: string, position: { x: number; y: number }) => void;
   toggleMuteSelected: () => Promise<void>;
@@ -301,8 +301,10 @@ export const createGraphSlice: StateCreator<
       }
     },
 
-    setParam: async (nodeId, key, value) => {
-      await get().pushUndo();
+    setParam: (nodeId, key, value) => {
+      // Synchronous delta undo — no Worker calls, no blocking.
+      // Captures oldValue from current Zustand state before mutating.
+      pushParamDeltaSync('param', nodeId, key, get, set);
       tagUiOrigin();
       getEngine().setParam(nodeId, key, value);
       const newNodes = new Map(get().nodes);
@@ -312,11 +314,17 @@ export const createGraphSlice: StateCreator<
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
       }
+      // Fill in newValue on the delta we just pushed so redo works.
+      const lastUndo = kernel.undoStack[kernel.undoStack.length - 1];
+      if (lastUndo && 'kind' in lastUndo && lastUndo.kind === 'param-delta') {
+        lastUndo.newValue = value;
+      }
       get().triggerAffectedViewers([nodeId]);
     },
 
     setInputDefault: async (nodeId, portName, value) => {
-      await get().pushUndo();
+      // Synchronous delta undo — same pattern as setParam.
+      pushParamDeltaSync('inputDefault', nodeId, portName, get, set);
       tagUiOrigin();
       await getEngine().setInputDefault(nodeId, portName, value);
       const newNodes = new Map(get().nodes);
@@ -325,6 +333,11 @@ export const createGraphSlice: StateCreator<
         node.inputDefaults = { ...node.inputDefaults, [portName]: value };
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
+      }
+      // Fill in newValue on the delta.
+      const lastUndo = kernel.undoStack[kernel.undoStack.length - 1];
+      if (lastUndo && 'kind' in lastUndo && lastUndo.kind === 'param-delta') {
+        lastUndo.newValue = value;
       }
       get().triggerAffectedViewers([nodeId]);
     },
@@ -355,10 +368,16 @@ export const createGraphSlice: StateCreator<
       });
       if (selectedIds.length === 0) return;
 
-      await get().pushUndo();
-
       const anyUnmuted = selectedIds.some(id => !nodes.get(id)?.muted);
       const newMuted = anyUnmuted;
+
+      // Synchronous mute-delta undo — capture before mutating.
+      const entries = selectedIds.map(id => ({
+        nodeId: id,
+        oldMuted: nodes.get(id)?.muted ?? false,
+        newMuted,
+      }));
+      pushMuteDeltaSync(entries, get, set);
 
       const eng = getEngine();
 

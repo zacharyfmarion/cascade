@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { isPixelResult } from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
+import { useSettingsStore } from '../settingsStore';
 
 export const DEFAULT_FRAME_COLOR = 'purple';
 
@@ -311,7 +312,111 @@ export interface ParamDeltaSnapshot {
   sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
 }
 
-export type AnyUndoSnapshot = UndoSnapshot | ParamDeltaSnapshot;
+// ---------------------------------------------------------------------------
+// Mute-delta snapshots — lightweight undo for mute toggles
+// ---------------------------------------------------------------------------
+
+export interface MuteDeltaEntry {
+  nodeId: string;
+  oldMuted: boolean;
+  newMuted: boolean;
+}
+
+export interface MuteDeltaSnapshot {
+  kind: 'mute-delta';
+  entries: MuteDeltaEntry[];
+  /** Pre-edit Zustand state for full restoration */
+  nodes: Map<string, NodeInstance>;
+  connections: Connection[];
+  frames: Map<string, Frame>;
+  editingStack: EditingContext[];
+  sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
+}
+
+export type AnyUndoSnapshot = UndoSnapshot | ParamDeltaSnapshot | MuteDeltaSnapshot;
 
 export const isParamDelta = (s: AnyUndoSnapshot): s is ParamDeltaSnapshot =>
   'kind' in s && s.kind === 'param-delta';
+
+export const isMuteDelta = (s: AnyUndoSnapshot): s is MuteDeltaSnapshot =>
+  'kind' in s && s.kind === 'mute-delta';
+
+// ---------------------------------------------------------------------------
+// Synchronous delta-push helpers — shared by graphSlice and paramController
+// ---------------------------------------------------------------------------
+
+/**
+ * Push a param-delta snapshot synchronously onto the undo stack.
+ * No Worker calls, no exportGraph, no collectImageData.
+ * Used by graphSlice.setParam / setInputDefault for instant undo capture.
+ */
+export function pushParamDeltaSync(
+  editType: 'param' | 'inputDefault',
+  nodeId: string,
+  key: string,
+  get: () => GraphStoreReadonly,
+  set: (partial: { canUndo: boolean; canRedo: boolean; dirty?: boolean }) => void,
+): void {
+  const node = get().nodes.get(nodeId);
+  const oldValue =
+    editType === 'param'
+      ? node?.params[key]
+      : node?.inputDefaults?.[key];
+
+  const delta: ParamDeltaSnapshot = {
+    kind: 'param-delta',
+    editType,
+    nodeId,
+    key,
+    oldValue,
+    nodes: new Map(get().nodes),
+    connections: [...get().connections],
+    frames: new Map(get().frames),
+    editingStack: cloneEditingStack(get().editingStack),
+    sequenceInfoMap: new Map(get().sequenceInfoMap),
+  };
+
+  kernel.undoStack.push(delta);
+  if (kernel.undoStack.length > _maxUndoSteps()) kernel.undoStack.shift();
+  kernel.redoStack.length = 0;
+  set({ canUndo: true, canRedo: false, dirty: true });
+}
+
+/**
+ * Push a mute-delta snapshot synchronously onto the undo stack.
+ */
+export function pushMuteDeltaSync(
+  entries: MuteDeltaEntry[],
+  get: () => GraphStoreReadonly,
+  set: (partial: { canUndo: boolean; canRedo: boolean; dirty?: boolean }) => void,
+): void {
+  const delta: MuteDeltaSnapshot = {
+    kind: 'mute-delta',
+    entries,
+    nodes: new Map(get().nodes),
+    connections: [...get().connections],
+    frames: new Map(get().frames),
+    editingStack: cloneEditingStack(get().editingStack),
+    sequenceInfoMap: new Map(get().sequenceInfoMap),
+  };
+
+  kernel.undoStack.push(delta);
+  if (kernel.undoStack.length > _maxUndoSteps()) kernel.undoStack.shift();
+  kernel.redoStack.length = 0;
+  set({ canUndo: true, canRedo: false, dirty: true });
+}
+
+// Minimal read-only shape of GraphState needed by sync helpers.
+// Avoids circular import of the full GraphState type.
+export interface GraphStoreReadonly {
+  nodes: Map<string, NodeInstance>;
+  connections: Connection[];
+  frames: Map<string, Frame>;
+  editingStack: EditingContext[];
+  sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
+}
+
+/** Lazily read max undo steps from settings store. */
+function _maxUndoSteps(): number {
+  return useSettingsStore.getState().maxUndoSteps;
+}

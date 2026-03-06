@@ -345,9 +345,11 @@ impl Engine {
             .insert(manifest_id.clone(), manifest.clone());
         let manifest_for_factory = manifest.clone();
         Arc::make_mut(&mut self.registry).register(&manifest_id, move || {
+            // SAFETY: manifest was validated by from_manifest() on line 341.
+            // NodeRegistry::register requires infallible Fn() -> Arc<dyn Node>.
             Arc::new(
                 GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_context.clone())
-                    .expect("GPU node"),
+                    .expect("GPU node factory: manifest was pre-validated"),
             )
         });
         Ok(spec)
@@ -1328,9 +1330,11 @@ impl Engine {
         let manifest_for_factory = manifest.clone();
         let gpu_ctx = gpu_context.clone();
         Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+            // SAFETY: manifest was validated by from_manifest() above.
+            // NodeRegistry::register_or_replace requires infallible Fn() -> Arc<dyn Node>.
             Arc::new(
                 GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
-                    .expect("GPU node"),
+                    .expect("GPU node factory: manifest was pre-validated"),
             )
         });
 
@@ -2073,19 +2077,19 @@ impl Engine {
                                 };
 
                                 if let Err(e) = encode_result {
-                                    let mut err_guard = job.error.lock().unwrap();
+                                    let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                                     *err_guard =
                                         Some(format!("Frame {frame} encode/write failed: {e}"));
                                     return;
                                 }
                             } else {
-                                let mut err_guard = job.error.lock().unwrap();
+                                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                                 *err_guard = Some(format!("Frame {frame} output is not an image"));
                                 return;
                             }
                         }
                         Err(e) => {
-                            let mut err_guard = job.error.lock().unwrap();
+                            let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                             *err_guard = Some(format!("Frame {frame} evaluation failed: {e}"));
                             return;
                         }
@@ -2104,7 +2108,7 @@ impl Engine {
                 } else {
                     "Render thread panicked with unknown error".to_string()
                 };
-                let mut err_guard = job.error.lock().unwrap();
+                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                 *err_guard = Some(msg);
             }
 
@@ -2213,13 +2217,13 @@ impl Engine {
                     Ok(eval_result) => match &eval_result.value {
                         Value::Image(image) => (image.width, image.height),
                         _ => {
-                            let mut err_guard = job.error.lock().unwrap();
+                            let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                             *err_guard = Some("First frame output is not an image".to_string());
                             return;
                         }
                     },
                     Err(e) => {
-                        let mut err_guard = job.error.lock().unwrap();
+                        let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                         *err_guard = Some(format!("First frame evaluation failed: {e}"));
                         return;
                     }
@@ -2237,7 +2241,7 @@ impl Engine {
                 let mut encoder = match cascade_video::VideoEncoder::new(&output_path, config) {
                     Ok(enc) => enc,
                     Err(e) => {
-                        let mut err_guard = job.error.lock().unwrap();
+                        let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                         *err_guard = Some(format!("Failed to create video encoder: {e}"));
                         return;
                     }
@@ -2248,7 +2252,7 @@ impl Engine {
                         let rgba8 = Viewer::image_to_rgba8(&image, cm);
                         job.current_frame.store(range.start, Ordering::Relaxed);
                         if let Err(e) = encoder.encode_frame(&rgba8) {
-                            let mut err_guard = job.error.lock().unwrap();
+                            let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                             *err_guard = Some(format!("Frame {} encode failed: {e}", range.start));
                             return;
                         }
@@ -2280,20 +2284,20 @@ impl Engine {
                             if let Value::Image(image) = eval_result.value {
                                 let rgba8 = Viewer::image_to_rgba8(&image, cm);
                                 if let Err(e) = encoder.encode_frame(&rgba8) {
-                                    let mut err_guard = job.error.lock().unwrap();
+                                    let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                                     *err_guard =
                                         Some(format!("Frame {} encode failed: {e}", frame));
                                     return;
                                 }
                             } else {
-                                let mut err_guard = job.error.lock().unwrap();
+                                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                                 *err_guard =
                                     Some(format!("Frame {} output is not an image", frame));
                                 return;
                             }
                         }
                         Err(e) => {
-                            let mut err_guard = job.error.lock().unwrap();
+                            let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                             *err_guard = Some(format!("Frame {} evaluation failed: {}", frame, e));
                             return;
                         }
@@ -2304,7 +2308,7 @@ impl Engine {
 
                 if !job.cancelled.load(Ordering::Relaxed) {
                     if let Err(e) = encoder.finish() {
-                        let mut err_guard = job.error.lock().unwrap();
+                        let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                         *err_guard = Some(format!("Failed to finalize video: {e}"));
                     }
                 }
@@ -2318,7 +2322,7 @@ impl Engine {
                 } else {
                     "Render thread panicked with unknown error".to_string()
                 };
-                let mut err_guard = job.error.lock().unwrap();
+                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
                 *err_guard = Some(msg);
             }
 

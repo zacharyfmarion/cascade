@@ -117,10 +117,10 @@ Broke `graphStore.ts` (~2,900 lines) into 12 focused Zustand slices composed via
 - [x] ESLint `max-lines` rule (300 lines) on `store.ts` to prevent regression
 - [x] Public surface test snapshots all store keys against an allowlist
 - [x] 365 tests passing, zero consumer file changes across all 44 importing files
-### 3.2 Fix live parameter race conditions
-- [ ] Await `exportGraph()` in `setParamLive()` before storing the snapshot, or use a synchronous snapshot mechanism
-- [ ] Add a gesture lock to prevent overlapping `setParamLive`/`setParamCommit` sequences
-- [ ] Ensure `liveRenderGeneration` properly discards stale renders without race windows
+### 3.2 ~~Fix live parameter race conditions~~ ✅
+- [x] ~~Await `exportGraph()` in `setParamLive()` before storing the snapshot, or use a synchronous snapshot mechanism~~
+- [x] ~~Add a gesture lock to prevent overlapping `setParamLive`/`setParamCommit` sequences~~
+- [x] ~~Ensure `liveRenderGeneration` properly discards stale renders without race windows~~
 
 ### 3.3 Clean up state on node deletion
 - [ ] When removing a node, also delete entries from `renderResults`, `nodeTimings`, `aiNodeStatuses`, `aiNodeStale`
@@ -188,9 +188,9 @@ Items that can be done incrementally alongside any other phase.
 - [ ] Consider adding a GPU CI runner or at minimum ensuring GPU test skip-detection works reliably
 
 ### 5.4 E2E tests
-- [ ] Add Playwright E2E tests for core workflows: load image → add nodes → connect → verify render output
-- [ ] Test undo/redo, save/load round-trip, node deletion, parameter editing
-- [ ] Run in CI on every PR
+- [x] ~~Add Playwright E2E tests for core workflows: load image → add nodes → connect → verify render output~~
+- [x] ~~Test undo/redo, save/load round-trip, node deletion, parameter editing~~
+- [x] ~~Run in CI on every PR~~
 
 ---
 

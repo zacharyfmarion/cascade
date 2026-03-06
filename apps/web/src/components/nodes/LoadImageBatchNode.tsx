@@ -42,6 +42,7 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
       await loadBatchFiles(props.id, files);
     } catch (err) {
       console.error('Failed to load image batch:', err);
+      useGraphStore.getState().pushToast('error', 'Failed to load images', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
       if (fileInputRef.current) {

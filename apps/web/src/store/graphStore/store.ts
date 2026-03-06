@@ -110,7 +110,7 @@ export interface GraphState {
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
-  setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
+  setParam: (nodeId: string, key: string, value: ParamValue) => void;
   setDslHandle: (nodeId: string, handle: string) => void;
   setParamLive: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamCommit: (nodeId: string, key: string, value: ParamValue) => Promise<void>;

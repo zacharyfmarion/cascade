@@ -100,6 +100,7 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
       }
     } catch (err) {
       console.error('Failed to open file dialog:', err);
+      useGraphStore.getState().pushToast('error', 'Failed to load image sequence', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -120,6 +121,7 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
       await setSequenceFiles(props.id, files);
     } catch (err) {
       console.error('Failed to load image sequence:', err);
+      useGraphStore.getState().pushToast('error', 'Failed to load image sequence', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
       if (fileInputRef.current) {

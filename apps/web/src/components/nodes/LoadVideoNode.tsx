@@ -57,6 +57,7 @@ export const LoadVideoNode: React.FC<NodeProps> = (props) => {
       }
     } catch (err) {
       console.error('Failed to load video:', err);
+      useGraphStore.getState().pushToast('error', 'Failed to load video', err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }

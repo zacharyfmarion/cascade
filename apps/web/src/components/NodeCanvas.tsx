@@ -274,6 +274,7 @@ export const NodeCanvas: React.FC = () => {
       }
     } catch (e) {
       console.error('[ContextMenu] addNode failed:', e);
+      useGraphStore.getState().pushToast('error', 'Failed to add node', e instanceof Error ? e.message : String(e));
     }
 
     setPendingConnection(null);
@@ -767,6 +768,7 @@ export const NodeCanvas: React.FC = () => {
               await importCustomNodes(text);
             } catch (e) {
               console.error('[Drop] compnode import failed:', e);
+              useGraphStore.getState().pushToast('error', 'Import failed', e instanceof Error ? e.message : String(e));
             }
           }
           return;
@@ -784,6 +786,7 @@ export const NodeCanvas: React.FC = () => {
               loadImageFile(newId, imageFiles[i]);
             } catch (e) {
               console.error('[Drop] image addNode failed:', e);
+              useGraphStore.getState().pushToast('error', 'Failed to add image node', e instanceof Error ? e.message : String(e));
             }
           }
           return;
@@ -853,6 +856,7 @@ export const NodeCanvas: React.FC = () => {
                 return;
               } catch (e) {
                 console.error('[Drop] Auto-insert failed:', e);
+                useGraphStore.getState().pushToast('error', 'Auto-insert failed', e instanceof Error ? e.message : String(e));
               }
             }
           }
@@ -860,6 +864,7 @@ export const NodeCanvas: React.FC = () => {
       }
       addNode(typeId, position).catch(e => {
         console.error('[Drop] addNode failed:', e);
+        useGraphStore.getState().pushToast('error', 'Failed to add node', e instanceof Error ? e.message : String(e));
       });
     },
     [addNode, screenToFlowPosition, getNodes, getEdges, storeConnect, storeDisconnect]
@@ -1035,6 +1040,7 @@ export const NodeCanvas: React.FC = () => {
           storeLoadImageFile(newId, file);
         } catch (e) {
           console.error('[Paste] image addNode failed:', e);
+          useGraphStore.getState().pushToast('error', 'Failed to add pasted image', e instanceof Error ? e.message : String(e));
         }
       }
     };
