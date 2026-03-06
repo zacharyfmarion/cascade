@@ -315,11 +315,18 @@ impl Node for ColorRampNode {
             category: "Color".to_string(),
             description: "Map luminance through a color ramp".to_string(),
             inputs: vec![PortSpec {
-                name: "image".to_string(),
-                label: "Image".to_string(),
-                ty: ValueType::Image,
-                ..Default::default()
-            }],
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "mask".to_string(),
+                    label: "Mask".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
             outputs: vec![PortSpec {
                 name: "image".to_string(),
                 label: "Image".to_string(),
@@ -420,6 +427,11 @@ impl Node for ColorRampNode {
                         data,
                         image.color_space.clone(),
                     )?;
+                    let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
+                        crate::mask_utils::apply_mask(&image, &output, mask)?
+                    } else {
+                        output
+                    };
                     let mut outputs = HashMap::new();
                     outputs.insert("image".to_string(), Value::Image(output));
                     Ok(outputs)
