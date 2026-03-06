@@ -5,7 +5,7 @@
   ],
   "scripts": {
     "dev:web": "yarn workspace web dev",
-    "dev:desktop": "cargo tauri dev --manifest-path apps/tauri/src-tauri/Cargo.toml",
+    "dev:desktop": "cd apps/tauri/src-tauri && cargo tauri dev",
     "lint": "yarn workspace web lint",
     "build:web": "yarn workspace web build"
   },
