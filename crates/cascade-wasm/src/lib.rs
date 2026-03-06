@@ -32,6 +32,17 @@ use std::sync::Arc;
 use uuid::Uuid;
 use wasm_bindgen::prelude::*;
 
+#[cfg(feature = "wasm-threads")]
+pub use wasm_bindgen_rayon::init_thread_pool;
+
+/// Returns the number of threads in the Rayon thread pool.
+/// When wasm-threads is enabled and initThreadPool was called, this returns > 1.
+/// Otherwise returns 1 (single-threaded fallback).
+#[wasm_bindgen]
+pub fn rayon_num_threads() -> usize {
+    rayon::current_num_threads()
+}
+
 #[derive(Debug, Clone)]
 enum RunStatus {
     Idle,

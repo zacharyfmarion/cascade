@@ -1,4 +1,7 @@
-import init, { Engine, needs_migration_json, migrate_document_json } from '../wasm-pkg/cascade_wasm';
+// WASM modules are dynamically imported for threaded/non-threaded dual-bundle support.
+// See wasm-pkg/ (single-threaded, stable) and wasm-pkg-threads/ (multi-threaded, nightly).
+type WasmModule = typeof import('../wasm-pkg/cascade_wasm');
+type EngineInstance = InstanceType<WasmModule['Engine']>;
 import * as Comlink from 'comlink';
 import type { AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
@@ -48,7 +51,9 @@ const createDocumentEnvelope = (graph: unknown) => ({
   scripts: {},
 });
 
-let engine: Engine | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let engine: any = null;
+let wasmModule: WasmModule | null = null;
 let initPromise: Promise<void> | null = null;
 let lastTimings: Record<string, number> = {};
 
@@ -150,12 +155,12 @@ class EngineScheduler {
 
 const scheduler = new EngineScheduler();
 
-const getEngine = (): Engine => {
+const getEngine = (): EngineInstance => {
   if (!engine) throw new Error('WASM engine not initialized');
   return engine;
 };
 
-const getEngineWithBindings = () => getEngine() as Engine & {
+const getEngineWithBindings = () => getEngine() as EngineInstance & {
   set_muted: (nodeId: string, muted: boolean) => void;
   load_palette_data: (nodeId: string, data: Uint8Array) => [number, number, number, number][];
   load_sequence_frame_data: (nodeId: string, frame: bigint, data: Uint8Array) => NodeInterfaceChange;
@@ -190,13 +195,40 @@ const engineAPI = {
       return true;
     }
     initPromise = (async () => {
-      await init();
-      engine = new Engine();
+      const useThreads =
+        typeof crossOriginIsolated !== 'undefined' &&
+        crossOriginIsolated &&
+        typeof SharedArrayBuffer !== 'undefined';
+
+      if (useThreads) {
+        try {
+          const threaded = await import('../wasm-pkg-threads/cascade_wasm');
+          await threaded.default();
+          const cores = navigator.hardwareConcurrency ?? 4;
+          const threads = Math.min(8, Math.max(1, cores - 1));
+          await threaded.initThreadPool(threads);
+          wasmModule = threaded as unknown as WasmModule;
+          engine = new threaded.Engine();
+          console.log(`[cascade] Threaded WASM initialized with ${threaded.rayon_num_threads()} threads`);
+        } catch (e) {
+          console.warn('[cascade] Threaded WASM failed, falling back to single-threaded:', e);
+          engine = null;
+        }
+      }
+
+      if (!engine) {
+        const st: WasmModule = await import('../wasm-pkg/cascade_wasm');
+        await st.default();
+        wasmModule = st;
+        engine = new st.Engine();
+        console.log('[cascade] Single-threaded WASM initialized');
+      }
+
       try {
         await engine.init_gpu();
-        console.log('[WASM] GPU initialized successfully');
+        console.log('[cascade] GPU initialized successfully');
       } catch (e) {
-        console.warn('[WASM] GPU initialization failed (GPU nodes will be unavailable):', e);
+        console.warn('[cascade] GPU initialization failed (GPU nodes will be unavailable):', e);
       }
     })();
     await initPromise;
@@ -874,11 +906,13 @@ const engineAPI = {
   },
 
   migrateDocument(jsonStr: string): string {
-    return migrate_document_json(jsonStr);
+    if (!wasmModule) throw new Error('WASM not initialized');
+    return wasmModule.migrate_document_json(jsonStr);
   },
 
   needsMigration(jsonStr: string): boolean {
-    return needs_migration_json(jsonStr);
+    if (!wasmModule) throw new Error('WASM not initialized');
+    return wasmModule.needs_migration_json(jsonStr);
   },
 };
 

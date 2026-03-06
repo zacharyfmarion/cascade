@@ -81,6 +81,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Install wasm-pack
@@ -119,6 +124,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
 
       - uses: Swatinem/rust-cache@v2
 

@@ -45,7 +45,7 @@ Loading a multi-layer OpenEXR file freezes the UI for ~30s on web (WASM) and ~3s
 
 ---
 
-## Phase 1: Decode-Once Architecture
+## Phase 1: Decode-Once Architecture ✅ COMPLETE
 
 **Goal:** Eliminate redundant decompression. One file read → all layers extracted.
 **Impact:** 30s → ~10s (web), 3s → ~1s (desktop)
@@ -359,16 +359,15 @@ Start with **progress callback + loading indicator** (Phase 2's cancel/progress)
 ## Implementation Order
 
 ```
-Phase 1 (Decode-Once)          ← DO FIRST. Biggest impact, lowest risk.
+Phase 1 (Decode-Once)          ✅ COMPLETE
   ↓
 Phase 3 (Optimize Internals)   ← Quick follow-up, same code area.
   ↓
 Phase 2 (Web Worker)           ✅ COMPLETE
   ↓
-Phase 4 (wasm-bindgen-rayon)   ← Optional. Product decision on headers.
+Phase 4 (wasm-bindgen-rayon)   ← Next up. Product decision on headers: APPROVED.
   ↓
 Phase 5 (Progressive)          ← Future. After evaluator model matures.
-```
 
 ### Expected Results After Phases 1-3
 
