@@ -158,12 +158,12 @@ pub fn builtin_vignette_manifest() -> KernelManifest {
     }
 }
 
-pub fn builtin_gpu_color_ramp_manifest() -> KernelManifest {
+pub fn builtin_gpu_two_color_map_manifest() -> KernelManifest {
     KernelManifest {
-        id: "gpu_kernel::color_ramp".to_string(),
-        display_name: "Color Ramp".to_string(),
+        id: "gpu_kernel::two_color_map".to_string(),
+        display_name: "Two Color Map".to_string(),
         category: "Color".to_string(),
-        description: "Map luminance through a two-point color ramp".to_string(),
+        description: "Map luminance through a two-point color map".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
@@ -422,8 +422,8 @@ mod tests {
     }
 
     #[test]
-    fn test_color_ramp_manifest_glsl() {
-        let manifest = builtin_gpu_color_ramp_manifest();
+    fn test_two_color_map_manifest_glsl() {
+        let manifest = builtin_gpu_two_color_map_manifest();
         let glsl = manifest.build_glsl().expect("GLSL should build");
         assert!(glsl.contains("low_r"));
         assert!(glsl.contains("high_b"));

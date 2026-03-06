@@ -24,7 +24,7 @@ pub use ai::{
     decode_response_image, encode_image_png, AiDepthEstimate, AiGenerateImage, AiInpaint,
     AiRemoveBackground, AiUpscale,
 };
-pub use color::{CombineHsva, SeparateHsva};
+pub use color::{ColorRampNode, CombineHsva, SeparateHsva};
 pub use color_convert::ColorConvert;
 pub use color_ops::Curves;
 pub use filter::GaussianBlur;
@@ -67,6 +67,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("color_palette", || Arc::new(ColorPaletteNode::new()));
     registry.register("separate_hsva", || Arc::new(SeparateHsva::new()));
     registry.register("combine_hsva", || Arc::new(CombineHsva::new()));
+    registry.register("color_ramp", || Arc::new(ColorRampNode::new()));
 
     registry.register("math", || Arc::new(MathNode::new()));
     registry.register("dot", || Arc::new(Dot::new()));

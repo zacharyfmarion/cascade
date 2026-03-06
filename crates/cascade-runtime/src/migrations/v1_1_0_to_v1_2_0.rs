@@ -240,7 +240,9 @@ fn map_cpu_to_gpu(type_id: &str) -> Option<&'static str> {
         "grade" => Some("gpu_kernel::grade"),
         "gradient_map" => Some("gpu_kernel::gradient_map"),
         "tone_map" => Some("gpu_kernel::tone_map"),
-        "color_ramp" => Some("gpu_kernel::color_ramp"),
+        // color_ramp stays as CPU node (not migrated to GPU)
+        // gpu_kernel::color_ramp was briefly shipped but renamed to two_color_map
+        "gpu_kernel::color_ramp" => Some("gpu_kernel::two_color_map"),
         "premultiply" => Some("gpu_kernel::premultiply"),
         "unpremultiply" => Some("gpu_kernel::unpremultiply"),
         "set_alpha" => Some("gpu_kernel::set_alpha"),

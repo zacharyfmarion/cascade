@@ -254,7 +254,7 @@ const NODE_SPECS: NodeSpec[] = [
      ]
    },
    {
-     id: 'gpu_kernel::color_ramp',
+     id: 'color_ramp',
      display_name: 'Color Ramp',
      category: 'Color',
      description: 'Map luminance through a color ramp',

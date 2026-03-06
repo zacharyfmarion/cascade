@@ -1,7 +1,8 @@
-use cascade_core::node::{EvalContext, Node, NodeFuture};
+use cascade_core::node::{EvalContext, ImageOrField, Node, NodeFuture};
 use cascade_core::types::*;
 use rayon::prelude::*;
 use std::any::Any;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 pub struct SeparateHsva;
@@ -290,4 +291,211 @@ fn luminance_at(image: &Image, idx: usize) -> f32 {
     let g = image.data[idx + 1];
     let b = image.data[idx + 2];
     0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+pub struct ColorRampNode;
+
+impl Default for ColorRampNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ColorRampNode {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for ColorRampNode {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "color_ramp".to_string(),
+            display_name: "Color Ramp".to_string(),
+            category: "Color".to_string(),
+            description: "Map luminance through a color ramp".to_string(),
+            inputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            outputs: vec![PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..Default::default()
+            }],
+            params: vec![
+                ParamSpec {
+                    key: "stops".to_string(),
+                    label: "Color Ramp".to_string(),
+                    ty: ValueType::Float,
+                    default: ParamDefault::ColorRamp(vec![
+                        ColorStop {
+                            position: 0.0,
+                            color: [0.0, 0.0, 0.0, 1.0],
+                        },
+                        ColorStop {
+                            position: 1.0,
+                            color: [1.0, 1.0, 1.0, 1.0],
+                        },
+                    ]),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::ColorRamp,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "interpolation".to_string(),
+                    label: "Interpolation".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec!["Linear".to_string(), "Constant".to_string()]),
+                    promotable: true,
+                },
+            ],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            match ctx.get_input_image_or_field("image")? {
+                ImageOrField::Field(field) => {
+                    let stops = ctx.get_param_color_ramp("stops")?;
+                    let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
+                    let mut sorted_stops = stops.clone();
+                    sorted_stops.sort_by(|a, b| {
+                        a.position
+                            .partial_cmp(&b.position)
+                            .unwrap_or(Ordering::Equal)
+                    });
+                    let source = field.sample_fn.clone();
+                    let transform = field.transform.clone();
+                    let stops = sorted_stops.clone();
+                    let mapped = Field::with_transform(
+                        move |u, v| {
+                            let [r, g, b, _] = (source)(u, v);
+                            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            evaluate_color_ramp(&stops, luminance, interpolation)
+                        },
+                        transform,
+                    );
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Field(mapped));
+                    Ok(outputs)
+                }
+                ImageOrField::Image(image) => {
+                    let stops = ctx.get_param_color_ramp("stops")?;
+                    let interpolation = ctx.get_param_int("interpolation")?.clamp(0, 1);
+                    let mut sorted_stops = stops.clone();
+                    sorted_stops.sort_by(|a, b| {
+                        a.position
+                            .partial_cmp(&b.position)
+                            .unwrap_or(Ordering::Equal)
+                    });
+                    let pixel_count = image.pixel_count();
+                    let mut data = vec![0.0f32; pixel_count * 4];
+                    data.par_chunks_exact_mut(4)
+                        .enumerate()
+                        .for_each(|(i, out)| {
+                            let idx = i * 4;
+                            let r = image.data[idx];
+                            let g = image.data[idx + 1];
+                            let b = image.data[idx + 2];
+                            let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+                            let rgba = evaluate_color_ramp(&sorted_stops, luminance, interpolation);
+                            out[0] = rgba[0];
+                            out[1] = rgba[1];
+                            out[2] = rgba[2];
+                            out[3] = rgba[3];
+                        });
+                    let output = Image::new_with_domain(
+                        image.format.clone(),
+                        image.data_window,
+                        data,
+                        image.color_space.clone(),
+                    )?;
+                    let mut outputs = HashMap::new();
+                    outputs.insert("image".to_string(), Value::Image(output));
+                    Ok(outputs)
+                }
+            }
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+/// Evaluate the color ramp at t using linear or constant interpolation.
+fn evaluate_color_ramp(stops: &[ColorStop], t: f32, interpolation: i64) -> [f32; 4] {
+    if stops.is_empty() {
+        return [0.0, 0.0, 0.0, 1.0];
+    }
+    if stops.len() == 1 {
+        return [
+            stops[0].color[0] as f32,
+            stops[0].color[1] as f32,
+            stops[0].color[2] as f32,
+            stops[0].color[3] as f32,
+        ];
+    }
+    let first = &stops[0];
+    let last = &stops[stops.len() - 1];
+    if t <= first.position as f32 {
+        return [
+            first.color[0] as f32,
+            first.color[1] as f32,
+            first.color[2] as f32,
+            first.color[3] as f32,
+        ];
+    }
+    if t >= last.position as f32 {
+        return [
+            last.color[0] as f32,
+            last.color[1] as f32,
+            last.color[2] as f32,
+            last.color[3] as f32,
+        ];
+    }
+    for window in stops.windows(2) {
+        let left = &window[0];
+        let right = &window[1];
+        let left_pos = left.position as f32;
+        let right_pos = right.position as f32;
+        if t >= left_pos && t <= right_pos {
+            if interpolation == 1 {
+                return [
+                    left.color[0] as f32,
+                    left.color[1] as f32,
+                    left.color[2] as f32,
+                    left.color[3] as f32,
+                ];
+            }
+            let denom = right_pos - left_pos;
+            let t_norm = if denom.abs() > f32::EPSILON {
+                (t - left_pos) / denom
+            } else {
+                0.0
+            };
+            let mut out = [0.0f32; 4];
+            for (c, value) in out.iter_mut().enumerate() {
+                let left_val = left.color[c] as f32;
+                let right_val = right.color[c] as f32;
+                *value = left_val * (1.0 - t_norm) + right_val * t_norm;
+            }
+            return out;
+        }
+    }
+    [0.0, 0.0, 0.0, 1.0]
 }

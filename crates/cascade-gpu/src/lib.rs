@@ -40,7 +40,7 @@ use crate::matte_kernels::{
 };
 use crate::transform_kernels::{builtin_gpu_rotate_manifest, builtin_gpu_transform_2d_manifest};
 use crate::utility_kernels::{
-    builtin_edge_detect_manifest, builtin_gpu_color_ramp_manifest,
+    builtin_edge_detect_manifest, builtin_gpu_two_color_map_manifest,
     builtin_lens_distortion_manifest, builtin_map_range_manifest, builtin_vignette_manifest,
 };
 
@@ -121,7 +121,7 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     // --- Utility/filter kernels ---
     register_kernel_node(registry, &context, builtin_map_range_manifest());
     register_kernel_node(registry, &context, builtin_vignette_manifest());
-    register_kernel_node(registry, &context, builtin_gpu_color_ramp_manifest());
+    register_kernel_node(registry, &context, builtin_gpu_two_color_map_manifest());
     register_kernel_node(registry, &context, builtin_edge_detect_manifest());
     register_kernel_node(registry, &context, builtin_lens_distortion_manifest());
 
