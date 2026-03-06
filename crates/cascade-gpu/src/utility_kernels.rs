@@ -3,7 +3,7 @@ use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
 pub fn builtin_map_range_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::map_range".to_string(),
-        display_name: "Map Range (GPU)".to_string(),
+        display_name: "Map Range".to_string(),
         category: "Utility".to_string(),
         description: "Map values from one range to another".to_string(),
         inputs: vec![ManifestPort {
@@ -85,13 +85,14 @@ pub fn builtin_map_range_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_vignette_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::vignette".to_string(),
-        display_name: "Vignette (GPU)".to_string(),
+        display_name: "Vignette".to_string(),
         category: "Filter".to_string(),
         description: "Apply vignette effect".to_string(),
         inputs: vec![ManifestPort {
@@ -153,13 +154,14 @@ pub fn builtin_vignette_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_gpu_color_ramp_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::color_ramp".to_string(),
-        display_name: "Color Ramp (GPU)".to_string(),
+        display_name: "Color Ramp".to_string(),
         category: "Color".to_string(),
         description: "Map luminance through a two-point color ramp".to_string(),
         inputs: vec![ManifestPort {
@@ -251,13 +253,14 @@ pub fn builtin_gpu_color_ramp_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_edge_detect_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::edge_detect".to_string(),
-        display_name: "Edge Detect (GPU)".to_string(),
+        display_name: "Edge Detect".to_string(),
         category: "Filter".to_string(),
         description: "Detect edges using Sobel convolution".to_string(),
         inputs: vec![ManifestPort {
@@ -301,13 +304,14 @@ pub fn builtin_edge_detect_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_lens_distortion_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::lens_distortion".to_string(),
-        display_name: "Lens Distortion (GPU)".to_string(),
+        display_name: "Lens Distortion".to_string(),
         category: "Filter".to_string(),
         description: "Apply barrel or pincushion lens distortion".to_string(),
         inputs: vec![ManifestPort {
@@ -345,13 +349,25 @@ pub fn builtin_lens_distortion_manifest() -> KernelManifest {
                 ui: Some("Slider".to_string()),
                 options: vec![],
             },
+            ManifestParam {
+                key: "scale".to_string(),
+                label: "Scale".to_string(),
+                ty: "Float".to_string(),
+                default: serde_json::Value::from(1.0),
+                min: Some(0.5),
+                max: Some(2.0),
+                step: Some(0.01),
+                ui: Some("Slider".to_string()),
+                options: vec![],
+            },
         ],
         kernel: r#"
     ivec2 dims = imageSize(u_input);
     vec2 center = (vec2(dims) - 1.0) * 0.5;
     vec2 delta = vec2(pixel) - center;
+    vec2 scaled_delta = delta / scale;
     float max_r = length(center);
-    float r = max_r > 0.0 ? length(delta) / max_r : 0.0;
+    float r = max_r > 0.0 ? length(scaled_delta) / max_r : 0.0;
     float r2 = r * r;
     float base = 1.0 + distortion * r2;
     float ca = dispersion * 0.02;
@@ -360,9 +376,9 @@ pub fn builtin_lens_distortion_manifest() -> KernelManifest {
     float factor_b = base * (1.0 - ca);
     ivec2 max_coord = dims - 1;
 
-    vec2 src_r = center + delta * factor_r;
-    vec2 src_g = center + delta * factor_g;
-    vec2 src_b = center + delta * factor_b;
+    vec2 src_r = center + scaled_delta * factor_r;
+    vec2 src_g = center + scaled_delta * factor_g;
+    vec2 src_b = center + scaled_delta * factor_b;
 
     ivec2 coord_r = clamp(ivec2(round(src_r)), ivec2(0), max_coord);
     ivec2 coord_g = clamp(ivec2(round(src_g)), ivec2(0), max_coord);
@@ -376,6 +392,7 @@ pub fn builtin_lens_distortion_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 

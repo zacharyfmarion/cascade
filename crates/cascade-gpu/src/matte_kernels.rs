@@ -3,8 +3,8 @@ use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
 pub fn builtin_premultiply_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::premultiply".to_string(),
-        display_name: "Premultiply (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Premultiply".to_string(),
+        category: "Matte".to_string(),
         description: "Premultiply alpha".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -24,14 +24,15 @@ pub fn builtin_premultiply_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        supports_mask: false,
     }
 }
 
 pub fn builtin_unpremultiply_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::unpremultiply".to_string(),
-        display_name: "Unpremultiply (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Unpremultiply".to_string(),
+        category: "Matte".to_string(),
         description: "Unpremultiply alpha".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -55,14 +56,15 @@ pub fn builtin_unpremultiply_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        supports_mask: false,
     }
 }
 
 pub fn builtin_chroma_key_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::chroma_key".to_string(),
-        display_name: "Chroma Key (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Chroma Key".to_string(),
+        category: "Matte".to_string(),
         description: "Key out by color".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -142,14 +144,15 @@ pub fn builtin_chroma_key_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_despill_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::despill".to_string(),
-        display_name: "Despill (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Despill".to_string(),
+        category: "Matte".to_string(),
         description: "Remove color spill from keyed footage".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -247,14 +250,15 @@ pub fn builtin_despill_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_luminance_key_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::luminance_key".to_string(),
-        display_name: "Luminance Key (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Luminance Key".to_string(),
+        category: "Matte".to_string(),
         description: "Generate matte from pixel brightness".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -307,6 +311,17 @@ pub fn builtin_luminance_key_manifest() -> KernelManifest {
                 ui: Some("Slider".to_string()),
                 options: vec![],
             },
+            ManifestParam {
+                key: "invert".to_string(),
+                label: "Invert".to_string(),
+                ty: "Int".to_string(),
+                default: serde_json::Value::from(0),
+                min: Some(0.0),
+                max: Some(1.0),
+                step: Some(1.0),
+                ui: Some("Checkbox".to_string()),
+                options: vec![],
+            },
         ],
         kernel: r#"
     float low_v = min(low, high);
@@ -322,18 +337,20 @@ pub fn builtin_luminance_key_manifest() -> KernelManifest {
         sval = luminance(color);
     }
     float key = smoothstep(low_v, high_v, sval);
+    if (invert == 1) { key = 1.0 - key; }
     return vec4(color.rgb, color.a * key);
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_difference_matte_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::difference_matte".to_string(),
-        display_name: "Difference Matte (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Difference Matte".to_string(),
+        category: "Matte".to_string(),
         description: "Generate matte from difference between footage and clean plate".to_string(),
         inputs: vec![
             ManifestPort {
@@ -388,14 +405,15 @@ pub fn builtin_difference_matte_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_set_alpha_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::set_alpha".to_string(),
-        display_name: "Set Alpha (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Set Alpha".to_string(),
+        category: "Matte".to_string(),
         description: "Set alpha from luminance".to_string(),
         inputs: vec![
             ManifestPort {
@@ -424,14 +442,15 @@ pub fn builtin_set_alpha_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        supports_mask: false,
     }
 }
 
 pub fn builtin_extract_channel_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::extract_channel".to_string(),
-        display_name: "Extract Channel (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Extract Channel".to_string(),
+        category: "Matte".to_string(),
         description: "Extract a single channel".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -476,6 +495,7 @@ pub fn builtin_extract_channel_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        supports_mask: false,
     }
 }
 

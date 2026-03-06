@@ -3,8 +3,8 @@ use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
 pub fn builtin_blend_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::blend".to_string(),
-        display_name: "Blend (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Blend".to_string(),
+        category: "Composite".to_string(),
         description: "Blend two images with classic blend modes".to_string(),
         inputs: vec![
             ManifestPort {
@@ -181,18 +181,19 @@ pub fn builtin_blend_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_alpha_over_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::alpha_over".to_string(),
-        display_name: "Alpha Over (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Alpha Over".to_string(),
+        category: "Composite".to_string(),
         description: "Composite foreground over background".to_string(),
         inputs: vec![
             ManifestPort {
-                name: "image".to_string(),
+                name: "background".to_string(),
                 label: "Background".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
@@ -230,24 +231,25 @@ pub fn builtin_alpha_over_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_merge_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::merge".to_string(),
-        display_name: "Merge (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Merge".to_string(),
+        category: "Composite".to_string(),
         description: "Merge two images with Porter-Duff operations".to_string(),
         inputs: vec![
             ManifestPort {
-                name: "image".to_string(),
+                name: "A".to_string(),
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
             },
             ManifestPort {
-                name: "b_image".to_string(),
+                name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
@@ -299,7 +301,7 @@ pub fn builtin_merge_manifest() -> KernelManifest {
             },
         ],
         kernel: r#"
-    vec4 b = imageLoad(u_b_image, pixel);
+    vec4 b = imageLoad(u_B, pixel);
     float a_alpha = clamp(color.a, 0.0, 1.0);
     float b_alpha = clamp(b.a, 0.0, 1.0);
     float m_r = 0.0;
@@ -403,30 +405,31 @@ pub fn builtin_merge_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_key_mix_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::key_mix".to_string(),
-        display_name: "Key Mix (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Key Mix".to_string(),
+        category: "Composite".to_string(),
         description: "Mix two images using a mask".to_string(),
         inputs: vec![
             ManifestPort {
-                name: "image".to_string(),
+                name: "A".to_string(),
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
             },
             ManifestPort {
-                name: "b_image".to_string(),
+                name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
             },
             ManifestPort {
-                name: "mask_image".to_string(),
+                name: "mask".to_string(),
                 label: "Mask".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
@@ -450,8 +453,8 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
             options: vec![],
         }],
         kernel: r#"
-    vec4 b = imageLoad(u_b_image, pixel);
-    vec4 mask_tex = imageLoad(u_mask_image, pixel);
+    vec4 b = imageLoad(u_B, pixel);
+    vec4 mask_tex = imageLoad(u_mask, pixel);
     float m = luminance(mask_tex);
     if (invert_mask != 0) {
         m = 1.0 - m;
@@ -462,24 +465,25 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_image_math_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::image_math".to_string(),
-        display_name: "Image Math (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Image Math".to_string(),
+        category: "Composite".to_string(),
         description: "Apply math operations per-pixel on images".to_string(),
         inputs: vec![
             ManifestPort {
-                name: "image".to_string(),
+                name: "A".to_string(),
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
             },
             ManifestPort {
-                name: "b_image".to_string(),
+                name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
@@ -518,7 +522,7 @@ pub fn builtin_image_math_manifest() -> KernelManifest {
             ],
         }],
         kernel: r#"
-    vec4 b = imageLoad(u_b_image, pixel);
+    vec4 b = imageLoad(u_B, pixel);
     vec3 out_rgb = color.rgb;
 
     for (int i = 0; i < 3; i++) {
@@ -573,14 +577,15 @@ pub fn builtin_image_math_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_channel_shuffle_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::channel_shuffle".to_string(),
-        display_name: "Channel Shuffle (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Channel Shuffle".to_string(),
+        category: "Composite".to_string(),
         description: "Shuffle RGBA channels".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -675,24 +680,25 @@ pub fn builtin_channel_shuffle_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_copy_channels_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::copy_channels".to_string(),
-        display_name: "Copy Channels (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Copy Channels".to_string(),
+        category: "Composite".to_string(),
         description: "Copy channels between two images".to_string(),
         inputs: vec![
             ManifestPort {
-                name: "image".to_string(),
+                name: "A".to_string(),
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
             },
             ManifestPort {
-                name: "b_image".to_string(),
+                name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
@@ -787,7 +793,7 @@ pub fn builtin_copy_channels_manifest() -> KernelManifest {
             },
         ],
         kernel: r#"
-    vec4 b = imageLoad(u_b_image, pixel);
+    vec4 b = imageLoad(u_B, pixel);
     int r_idx = clamp(red_from, 0, 7);
     int g_idx = clamp(green_from, 0, 7);
     int b_idx = clamp(blue_from, 0, 7);
@@ -802,6 +808,7 @@ pub fn builtin_copy_channels_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 

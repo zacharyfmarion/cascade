@@ -3,8 +3,8 @@ use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
 pub fn builtin_levels_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::levels".to_string(),
-        display_name: "Levels (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Levels".to_string(),
+        category: "Color".to_string(),
         description: "Adjust levels".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -92,14 +92,15 @@ pub fn builtin_levels_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_vibrance_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::vibrance".to_string(),
-        display_name: "Vibrance (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Vibrance".to_string(),
+        category: "Color".to_string(),
         description: "Selectively boost saturation".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -182,14 +183,15 @@ pub fn builtin_vibrance_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_tone_map_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::tone_map".to_string(),
-        display_name: "Tone Map (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Tone Map".to_string(),
+        category: "Color".to_string(),
         description: "Apply tone mapping".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -261,14 +263,15 @@ pub fn builtin_tone_map_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_grade_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::grade".to_string(),
-        display_name: "Grade (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Grade".to_string(),
+        category: "Color".to_string(),
         description: "Lift/Gamma/Gain color correction per channel".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -405,14 +408,15 @@ pub fn builtin_grade_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_gradient_map_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::gradient_map".to_string(),
-        display_name: "Gradient Map (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Gradient Map".to_string(),
+        category: "Color".to_string(),
         description: "Map luminance to a color gradient".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -551,14 +555,15 @@ pub fn builtin_gradient_map_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_color_balance_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::color_balance".to_string(),
-        display_name: "Color Balance (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Color Balance".to_string(),
+        category: "Color".to_string(),
         description: "Adjust color balance".to_string(),
         inputs: vec![ManifestPort {
             name: "image".to_string(),
@@ -689,6 +694,7 @@ pub fn builtin_color_balance_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 

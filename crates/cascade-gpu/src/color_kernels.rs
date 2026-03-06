@@ -3,7 +3,7 @@ use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
 pub fn builtin_invert_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::invert".to_string(),
-        display_name: "GPU Invert".to_string(),
+        display_name: "Invert".to_string(),
         category: "Color".to_string(),
         description: "Invert colors".to_string(),
         inputs: vec![ManifestPort {
@@ -13,8 +13,8 @@ pub fn builtin_invert_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -24,13 +24,14 @@ pub fn builtin_invert_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_brightness_contrast_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::brightness_contrast".to_string(),
-        display_name: "GPU Brightness / Contrast".to_string(),
+        display_name: "Brightness / Contrast".to_string(),
         category: "Color".to_string(),
         description: "Adjust brightness and contrast".to_string(),
         inputs: vec![ManifestPort {
@@ -40,8 +41,8 @@ pub fn builtin_brightness_contrast_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -77,13 +78,14 @@ pub fn builtin_brightness_contrast_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_hue_saturation_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::hue_saturation".to_string(),
-        display_name: "GPU Hue / Saturation / Lightness".to_string(),
+        display_name: "Hue / Saturation / Lightness".to_string(),
         category: "Color".to_string(),
         description: "Adjust hue, saturation, and lightness".to_string(),
         inputs: vec![ManifestPort {
@@ -93,8 +95,8 @@ pub fn builtin_hue_saturation_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -195,13 +197,14 @@ pub fn builtin_hue_saturation_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_gamma_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::gamma".to_string(),
-        display_name: "GPU Gamma".to_string(),
+        display_name: "Gamma".to_string(),
         category: "Color".to_string(),
         description: "Adjust gamma".to_string(),
         inputs: vec![ManifestPort {
@@ -211,8 +214,8 @@ pub fn builtin_gamma_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -233,13 +236,14 @@ pub fn builtin_gamma_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_threshold_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::threshold".to_string(),
-        display_name: "GPU Threshold".to_string(),
+        display_name: "Threshold".to_string(),
         category: "Color".to_string(),
         description: "Threshold image".to_string(),
         inputs: vec![ManifestPort {
@@ -249,8 +253,8 @@ pub fn builtin_threshold_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -272,13 +276,14 @@ pub fn builtin_threshold_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_posterize_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::posterize".to_string(),
-        display_name: "GPU Posterize".to_string(),
+        display_name: "Posterize".to_string(),
         category: "Color".to_string(),
         description: "Posterize image".to_string(),
         inputs: vec![ManifestPort {
@@ -288,8 +293,8 @@ pub fn builtin_posterize_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -311,13 +316,14 @@ pub fn builtin_posterize_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_white_balance_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::white_balance".to_string(),
-        display_name: "GPU White Balance".to_string(),
+        display_name: "White Balance".to_string(),
         category: "Color".to_string(),
         description: "Adjust white balance".to_string(),
         inputs: vec![ManifestPort {
@@ -327,8 +333,8 @@ pub fn builtin_white_balance_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -368,13 +374,14 @@ pub fn builtin_white_balance_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
 pub fn builtin_clamp_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::clamp".to_string(),
-        display_name: "GPU Clamp".to_string(),
+        display_name: "Clamp".to_string(),
         category: "Color".to_string(),
         description: "Clamp RGB values".to_string(),
         inputs: vec![ManifestPort {
@@ -384,8 +391,8 @@ pub fn builtin_clamp_manifest() -> KernelManifest {
             optional: false,
         }],
         outputs: vec![ManifestPort {
-            name: "output".to_string(),
-            label: "Output".to_string(),
+            name: "image".to_string(),
+            label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
         }],
@@ -418,6 +425,7 @@ pub fn builtin_clamp_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        ..KernelManifest::default()
     }
 }
 
