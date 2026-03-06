@@ -114,7 +114,9 @@ pub fn decode_all_layers(
 
 ---
 
-## Phase 2: Web Worker Engine Offloading
+## Phase 2: Web Worker Engine Offloading ✅ COMPLETE
+
+**Status:** Implemented and shipped. The entire WASM engine runs in a Web Worker with Comlink. Live preview during slider drags works via fire-and-coalesce render scheduling. Param-delta undo avoids blocking the Worker queue.
 
 **Goal:** UI never freezes during EXR decode (or any engine operation).
 **Impact:** Perceived responsiveness — loading spinner instead of freeze. Actual decode time unchanged.
@@ -361,7 +363,7 @@ Phase 1 (Decode-Once)          ← DO FIRST. Biggest impact, lowest risk.
   ↓
 Phase 3 (Optimize Internals)   ← Quick follow-up, same code area.
   ↓
-Phase 2 (Web Worker)           ← UI responsiveness. Architectural.
+Phase 2 (Web Worker)           ✅ COMPLETE
   ↓
 Phase 4 (wasm-bindgen-rayon)   ← Optional. Product decision on headers.
   ↓

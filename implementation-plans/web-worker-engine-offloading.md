@@ -1,4 +1,17 @@
-# Phase 2: Web Worker Engine Offloading
+# Phase 2: Web Worker Engine Offloading ✅ COMPLETE
+
+## Status
+
+**COMPLETE.** Implemented and shipped to main. Key implementation details:
+
+- `engineWorker.ts` — Worker entry point with WASM engine + `EngineScheduler` (FIFO + `enqueueLive` latest-wins)
+- `workerEngine.ts` — Main-thread Comlink proxy implementing `EngineBridge`
+- `paramController.ts` — Fire-and-coalesce live render scheduling (at most 1 render in-flight)
+- `nodeDraftStore.ts` — Per-node draft stores for zero-re-render slider drags
+- Param-delta undo snapshots (synchronous, no `exportGraph` blocking Worker queue)
+- Sync ops (`typesCompatible`, `needsMigration`, `migrateDocument`) stay on main thread
+- `?noworker=true` fallback to `WasmEngine` for debugging
+- `setAndRender` atomic Worker operation for live preview (~5fps during drags)
 
 ## Goal
 Move the entire WASM engine into a Web Worker so the UI never freezes during EXR decode, graph evaluation, or rendering. Loading spinner instead of freeze.
