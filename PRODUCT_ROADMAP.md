@@ -93,23 +93,23 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 **Priority: Ship quality over new features.**
 
 #### 1.1 Node Group Stability 🔧
-Node groups are the foundation of reusable pipelines, templates, and the future ecosystem. They exist but need investment to be reliable.
+Node groups are the foundation of reusable pipelines, templates, and the future ecosystem. They exist and have received hardening investment (panic safety, cycle detection, atomic updates, param preservation) but need further reliability work.
 
-- [ ] Audit and fix existing group bugs (connection handling, undo/redo within groups, nested group edge cases)
+- [x] Harden group internals (panic safety, cycle detection, atomic updates, param preservation)
+- [ ] Audit and fix remaining group bugs (connection handling, undo/redo within groups, nested group edge cases)
 - [ ] Stabilize enter/exit editing flow
 - [ ] Ensure groups work correctly with all node types (including GPU Script nodes)
 - [ ] Group import from JSON (complement to existing export)
 - [ ] Duplicate/instantiate groups within a project
-
 #### 1.2 AI + GPU Script Integration 🧠⚡
-The AI DSL and GPU Script node are both working but disconnected. Unifying them creates the killer feature: *"Describe a visual effect → get a real-time GPU shader → tweak sliders."*
+The AI DSL and GPU Script node are now connected via `create_gpu_script` and `get_gpu_script_manifest` AI tools. The foundation is in place — AI can programmatically create GPU Script nodes and inspect their manifests. Next steps are deepening the integration.
 
-- [ ] AI can generate GPU Script node GLSL through the DSL (currently separate workflows)
-- [ ] AI can read and modify existing GPU Script GLSL code
+- [x] AI can create GPU Script nodes programmatically (`create_gpu_script` tool)
+- [x] AI can inspect GPU Script manifests (`get_gpu_script_manifest` tool)
+- [ ] AI can read and modify existing GPU Script GLSL code (edit, not just create)
 - [ ] AI understands GPU Script parameters and can set appropriate defaults, ranges, and UI hints
 - [ ] GPU Script node improvements: better error messages on compile failure, parameter hot-reload, preview during editing
 - [ ] Consider: unified DSL syntax for declaring GPU Script nodes inline (e.g., `effect = GpuScript(glsl: "...", params: {...})`)
-
 #### 1.3 AI API Access (CORS) 🌐
 The AI features are already BYOK — users supply their own Replicate and Anthropic API keys, stored locally. The only infrastructure issue is **CORS**: browser `fetch()` can't call `api.replicate.com` directly because Replicate doesn't return `Access-Control-Allow-Origin` headers. A thin Cloudflare Worker proxy (`workers/proxy/`) adds CORS headers to make browser requests work. In dev, Vite's dev server proxy handles this.
 
@@ -121,25 +121,30 @@ The AI features are already BYOK — users supply their own Replicate and Anthro
 - [x] ~~Verify Anthropic API production path~~ — FIXED: AI chat was routing through `/api/anthropic/v1` (Vite dev proxy only, broken in production). Updated `transport.ts` to use Anthropic's `anthropic-dangerous-direct-browser-access` header for direct browser access (same pattern as ScriptNodeEditor). GPU Script GLSL generation was already working in production.
 - [ ] Add clear user-facing docs: "You need your own API keys for AI features"
 
-#### 1.4 I/O Maturity 📁
+#### 1.4 I/O Maturity 📁 (Partially Complete)
 Getting images in and out reliably is table-stakes.
 
-- [ ] EXR multi-layer support — dynamic ports per layer (plan exists, phases 6-7 remaining)
-- [ ] Image sequence input/output (numbered frames)
+- [x] EXR multi-layer support — dynamic ports per layer, SaveExr node, full encode/decode pipeline
+- [x] EXR performance — single-pass decode for all layers
+- [x] Instance-aware specs for dynamic port connections (SpecProvider trait)
+- [x] Image sequence input/output (LoadImageSequence with EXR support)
 - [ ] Drag-and-drop improvements (multiple files, folder drop)
 - [ ] Metadata preservation through the pipeline
 - [ ] Common format support audit (WebP, AVIF, HDR)
-
-#### 1.5 Frontend Polish 🎨
+#### 1.5 Frontend Polish 🎨 (Partially Complete)
 Existing UX gaps that hurt daily use.
 
 - [x] Fix live param race conditions (Engineering Roadmap Phase 3)
-- [ ] Node deletion cleanup edge cases (Engineering Roadmap Phase 3)
-- [x] Performance: proxy resolution rendering for large images
-- [ ] Performance: background thread rendering (non-blocking UI)
+- [x] Fix color picker and color ramp input lag during drag
+- [x] Performance: proxy resolution rendering for large images (engine-side preview scaling)
+- [x] Performance: background thread rendering via Web Worker for live param drags
+- [x] WASM multi-threading (wasm-bindgen-rayon) — all Rayon parallelism works in browser
+- [x] Viewer enhancements — channel isolation, pixel inspector, gain/gamma controls
+- [x] Toast notification system for user feedback
 - [x] Mini-map improvements, better zoom/pan UX
 - [x] Keyboard shortcuts audit and documentation
-
+- [ ] Node deletion cleanup edge cases (Engineering Roadmap Phase 3)
+- [ ] Full async background rendering for non-live evaluation
 ---
 
 ### Phase 2: Make It Shareable
@@ -256,12 +261,11 @@ Roto and bezier masks. Only build when users are asking.
 Niche features for specific workflows.
 
 - [ ] Expressions / parameter linking (simpler than full scripting — link one param to another with math)
-- [ ] Time operations (TimeOffset, TimeWarp, FrameHold, FrameBlend) — requires 4.1
+- [x] Time operations (TimeOffset, FrameHold, FrameBlend) — **completed, no longer requires animation system**
 - [ ] Mesh warp, Spherize, Twirl, Wave distortions
 - [ ] Vector blur / motion blur on transforms
-- [ ] Multi-channel EXR / AOV workflows
+- [x] Multi-channel EXR / AOV workflows — **completed** (EXR multi-layer support with dynamic ports)
 - [ ] Deep compositing (very niche, massive complexity — likely never worth it for Cascade's audience)
-
 ---
 
 ### Phase 5: Platform & Ecosystem (Long-term)
@@ -294,14 +298,17 @@ These engineering investments from the [Engineering Roadmap](./ENGINEERING_ROADM
 | Full-stack error handling | Phase 1 (reliability) | ✅ Done |
 | Cache eviction, selective invalidation | Phase 1 (performance) | ✅ Done |
 | Store split (12 slices) | Phase 1 (frontend) | ✅ Done |
+| GPU/CPU node unification | Phase 1 (node library) | ✅ Done |
+| System-level mask support | Phase 1 (GPU node usability) | ✅ Done |
+| WASM multi-threading | Phase 1 (performance) | ✅ Done |
+| Web Worker engine + preview scaling | Phase 1 (live param UX) | ✅ Done |
+| EXR multi-layer support | Phase 1 (I/O maturity) | ✅ Done |
 | GPU texture pooling | Phase 1 (GPU Script perf) | Pending |
 | Live param race condition fix | Phase 1 (frontend polish) | ✅ Done |
 | EngineBridge abstraction split | Phase 2 (batch/headless) | Pending |
 | EvalSession / ResourceStore | Phase 2 (project org) | Pending |
-| Background thread rendering | Phase 1 (UX) | Pending |
+| Full async background rendering | Phase 1 (UX) | Pending |
 | Tile-based processing | Phase 4 (large image perf) | Pending |
-| Multi-channel Value type | Phase 4 (EXR/AOV) | Pending |
-
 ---
 
 ## Success Metrics
@@ -339,6 +346,9 @@ These are features from the old roadmap that are intentionally deprioritized or 
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-03-06 | Mark I/O Maturity (1.4) as partially complete | EXR multi-layer, image sequences, SaveExr all shipped. Remaining: drag-drop improvements, metadata preservation, format audit. |
+| 2026-03-06 | Move Time Nodes and EXR/AOV out of Phase 4.4 | Both completed ahead of schedule — time nodes don't require animation system, EXR support shipped with dynamic ports. |
+| 2026-03-06 | Elevate GPU texture pooling priority | With 35+ GPU nodes after unification, chained GPU pipelines are common. Texture pooling is now a real-world performance need, not theoretical. |
 | 2026-03-04 | Pivot from "Nuke gap analysis" to "programmable image platform" | Chasing Nuke parity targets an already-served audience with the hardest features. Web-native + AI + GPU compute is the actual differentiation. |
 | 2026-03-04 | Deprioritize roto/tracking to Phase 4 (demand-gated) | Expensive to build well, serves narrow audience, doesn't leverage any of Cascade's unique strengths. |
 | 2026-03-04 | Prioritize AI+GPU Script integration as Phase 1 | This is the killer feature no competitor has. Unifying the working DSL with GPU Script creation makes it coherent. |
