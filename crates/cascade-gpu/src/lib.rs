@@ -208,6 +208,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
 
         use cascade_core::node::Node;
@@ -290,6 +291,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
 
         let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
@@ -351,6 +353,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
 
         let result = pollster::block_on(node.evaluate(&eval_ctx))

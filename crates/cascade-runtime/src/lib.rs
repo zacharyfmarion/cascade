@@ -1672,6 +1672,7 @@ impl Engine {
             self.ai_provider.as_deref(),
             &self.project_format,
             &HashMap::new(),
+            1.0,
         ))?;
         self.last_timings = eval_result
             .node_timings
@@ -1723,6 +1724,7 @@ impl Engine {
             self.ai_provider.as_deref(),
             &self.project_format,
             &HashMap::new(),
+            1.0,
         ))
     }
 
@@ -1755,6 +1757,7 @@ impl Engine {
             self.ai_provider.as_deref(),
             &self.project_format,
             &HashMap::new(),
+            1.0,
         ))?;
         match eval_result.value {
             Value::Image(image) => {
@@ -1830,6 +1833,73 @@ impl Engine {
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &HashMap::new(),
+                1.0,
+            )) {
+                for (nid, duration) in eval_result.node_timings {
+                    merged_timings.insert(
+                        format_node_id(&self.graph, nid),
+                        duration.as_secs_f64() * 1000.0,
+                    );
+                }
+                if let Value::Image(image) = eval_result.value {
+                    let width = image.width;
+                    let height = image.height;
+                    let pixels = Viewer::image_to_rgba8_with_display(
+                        &image,
+                        cm,
+                        &self.active_display,
+                        &self.active_view,
+                    );
+                    results.push((
+                        vid_str,
+                        RenderResult {
+                            width,
+                            height,
+                            pixels,
+                        },
+                    ));
+                }
+            }
+        }
+        self.last_timings = merged_timings;
+        Ok(results)
+    }
+
+
+    pub fn set_input_default_and_render_viewers(
+        &mut self,
+        node_id: &str,
+        port_name: &str,
+        value: ParamValue,
+        frame: u64,
+    ) -> Result<Vec<(String, RenderResult)>, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        self.graph.set_input_default(id, port_name, value);
+
+        let viewer_ids: Vec<(NodeId, String)> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.type_id == "viewer")
+            .map(|(id, _)| (id, format_node_id(&self.graph, id)))
+            .collect();
+
+        let mut results = Vec::new();
+        let mut merged_timings = HashMap::new();
+        let cm = self.color_management.as_ref();
+        for (vid, vid_str) in viewer_ids {
+            if let Ok(eval_result) = pollster::block_on(self.evaluator.evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                vid,
+                "display",
+                FrameTime { frame },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+                &HashMap::new(),
+                1.0,
             )) {
                 for (nid, duration) in eval_result.node_timings {
                     merged_timings.insert(
@@ -1966,6 +2036,7 @@ impl Engine {
                         ai_provider.as_deref(),
                         &render_project_format,
                         &HashMap::new(),
+                        1.0,
                     )) {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {
@@ -2135,6 +2206,7 @@ impl Engine {
                     ai_provider.as_deref(),
                     &render_project_format,
                     &HashMap::new(),
+                    1.0,
                 ));
 
                 let (width, height) = match &first_frame_result {
@@ -2202,6 +2274,7 @@ impl Engine {
                         ai_provider.as_deref(),
                         &render_project_format,
                         &HashMap::new(),
+                        1.0,
                     )) {
                         Ok(eval_result) => {
                             if let Value::Image(image) = eval_result.value {

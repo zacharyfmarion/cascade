@@ -185,6 +185,7 @@ const getEngineWithBindings = () => getEngine() as EngineInstance & {
   set_project_format?: (width: number, height: number) => void;
   export_group_as_package?: (groupDefId: string) => unknown;
   import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+  render_viewer_scaled?: (viewerId: string, frame: bigint, scale: number) => Promise<unknown>;
 };
 
 const engineAPI = {
@@ -304,7 +305,8 @@ const engineAPI = {
     });
   },
 
-  setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number): Promise<Array<[string, ViewerResult]>> {
+  setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number, previewScale?: number): Promise<Array<[string, ViewerResult]>> {
+    const scale = previewScale ?? 1;
     return scheduler.enqueueLive(async (): Promise<Array<[string, ViewerResult]>> => {
       const workerStart = performance.now();
       console.log(`[WORKER-DIAG] setAndRender started at ${workerStart.toFixed(1)}ms`);
@@ -324,7 +326,11 @@ const engineAPI = {
 
       for (const viewerId of viewerIds) {
         const rvStart = performance.now();
-        const rawResult = await eng.render_viewer(viewerId, BigInt(frame));
+        const eng2 = getEngineWithBindings();
+        const useScaled = scale < 1 && typeof eng2.render_viewer_scaled === 'function';
+        const rawResult = useScaled
+          ? await eng2.render_viewer_scaled(viewerId, BigInt(frame), scale)
+          : await eng.render_viewer(viewerId, BigInt(frame));
         console.log(`[WORKER-DIAG] render_viewer(${viewerId}) took ${(performance.now() - rvStart).toFixed(1)}ms`);
         if (!rawResult || typeof rawResult !== 'object') continue;
 

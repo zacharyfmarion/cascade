@@ -2,10 +2,34 @@ use cascade_core::error::CascadeError;
 use cascade_core::exr::{self, ExrLayerKind, ExrMetadata};
 use cascade_core::node::{EvalContext, Node, NodeFuture};
 use cascade_core::types::*;
+use crate::transform::resize_nearest;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
+
+/// Minimum dimension (pixels) to avoid degenerate downscales.
+const MIN_PREVIEW_DIM: u32 = 32;
+/// Minimum total pixel count for preview (64×64).
+const MIN_PREVIEW_PIXELS: u32 = 64 * 64;
+
+/// Downscale an image for preview rendering.
+/// Returns the original if scale >= 1.0 or the image is already small.
+fn preview_downscale(image: Image, scale: f32) -> Result<Image, CascadeError> {
+    if scale >= 1.0 {
+        return Ok(image);
+    }
+    let total = image.width as u64 * image.height as u64;
+    if total <= MIN_PREVIEW_PIXELS as u64 {
+        return Ok(image);
+    }
+    let new_w = ((image.width as f32 * scale).round() as u32).max(MIN_PREVIEW_DIM);
+    let new_h = ((image.height as f32 * scale).round() as u32).max(MIN_PREVIEW_DIM);
+    if new_w >= image.width && new_h >= image.height {
+        return Ok(image);
+    }
+    resize_nearest(&image, new_w, new_h)
+}
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Metadata about a loaded image sequence (frame count, range).
@@ -222,8 +246,9 @@ impl Node for LoadImage {
         }
     }
 
-    fn evaluate<'a>(&'a self, _ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
+            let preview_scale = ctx.preview_scale;
             let guard = self
                 .parsed
                 .lock()
@@ -232,8 +257,9 @@ impl Node for LoadImage {
             match &*guard {
                 ParsedImage::Empty => Err(CascadeError::MissingInput("image_data".to_string())),
                 ParsedImage::Standard(image) => {
+                    let scaled = preview_downscale(image.clone(), preview_scale)?;
                     let mut outputs = HashMap::new();
-                    outputs.insert("image".to_string(), Value::Image(image.clone()));
+                    outputs.insert("image".to_string(), Value::Image(scaled));
                     Ok(outputs)
                 }
                 ParsedImage::Exr { metadata } => {
@@ -305,7 +331,7 @@ impl Node for LoadImage {
                                 primary_port
                             ))
                         })?;
-                        outputs.insert("image".to_string(), Value::Image((**img).clone()));
+                        outputs.insert("image".to_string(), Value::Image(preview_downscale((**img).clone(), preview_scale)?));
                     }
 
                     for layer in &meta.layers {
@@ -313,7 +339,7 @@ impl Node for LoadImage {
                             continue;
                         }
                         if let Some(img) = cache.get(&layer.port_name) {
-                            outputs.insert(layer.port_name.clone(), Value::Image((**img).clone()));
+                            outputs.insert(layer.port_name.clone(), Value::Image(preview_downscale((**img).clone(), preview_scale)?));
                         }
                     }
 

@@ -27,7 +27,6 @@ import type { GraphState } from './store';
 import {
   kernel,
   cloneEditingStack,
-  downscaleRenderResult,
   getEngine,
 } from './kernel';
 import type { ParamDeltaSnapshot } from './kernel';
@@ -178,7 +177,7 @@ function dispatchLiveRender(
   const eng = getEngine();
 
   if (eng.setAndRender) {
-    eng.setAndRender(mutation, get().currentFrame).then(async results => {
+    eng.setAndRender(mutation, get().currentFrame, liveScale).then(async results => {
       // ALWAYS display whatever the Worker produced — even if a newer
       // mutation is pending. Showing a slightly-stale frame is far better
       // than showing nothing during a drag. The next render (dispatched
@@ -186,8 +185,7 @@ function dispatchLiveRender(
       if (results.length > 0) {
         const newResults = new Map(get().renderResults);
         for (const [vid, r] of results) {
-          const scaled = await downscaleRenderResult(r, liveScale);
-          newResults.set(vid, scaled);
+          newResults.set(vid, r);
         }
         set({ renderResults: newResults, lastError: null });
         updateNodeTimings(get, set);
@@ -270,8 +268,7 @@ async function commitRender(
       if (results.length > 0) {
         const newResults = new Map(get().renderResults);
         for (const [vid, r] of results) {
-          const scaled = await downscaleRenderResult(r, 1);
-          newResults.set(vid, scaled);
+          newResults.set(vid, r);
         }
         if (renderGeneration !== kernel.liveRenderGeneration) return;
         set({ renderResults: newResults, lastError: null });

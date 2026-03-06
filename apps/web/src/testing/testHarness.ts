@@ -229,15 +229,26 @@ function createTestHarness(): CascadeTestHarness {
     },
 
     async waitForRenderIdle(): Promise<void> {
-      // Wait for the engine scheduler to drain all queued operations
+      // Wait for the engine scheduler and render lock to fully settle.
+      // We loop because a render finishing can enqueue follow-up renders
+      // (e.g., connecting 3 viewers fires 3 sequential renders that may
+      // not all be queued when the first idle check runs).
       const engine = kernel.engine;
-      if (engine?.whenIdle) {
-        await engine.whenIdle();
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (engine?.whenIdle) {
+          await engine.whenIdle();
+        }
+        await kernel.renderLock;
+        // Brief pause to let any follow-up renders enqueue
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        // Check if new work was enqueued during the pause
+        if (engine?.whenIdle) {
+          await engine.whenIdle();
+        }
+        await kernel.renderLock;
       }
-      // Also wait for render lock chain to settle
-      await kernel.renderLock;
-      // Give one extra frame for React to flush state updates
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Final React flush
+      await new Promise((resolve) => setTimeout(resolve, 50));
     },
 
     async undo(): Promise<void> {

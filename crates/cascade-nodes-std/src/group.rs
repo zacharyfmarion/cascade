@@ -564,6 +564,7 @@ impl Node for GroupNode {
                         ctx.ai_provider,
                         ctx.project_format,
                         &HashMap::new(),
+                        ctx.preview_scale,
                     )
                     .await?;
                 outputs.insert(port.name.clone(), eval_result.value);

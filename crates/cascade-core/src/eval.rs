@@ -101,6 +101,7 @@ pub struct CacheKey {
     pub param_revision: u64,
     pub upstream_hash: u64,
     pub project_format_hash: u64,
+    pub preview_scale_q: u16,
 }
 
 impl Evaluator {
@@ -197,6 +198,7 @@ impl Evaluator {
         ai_provider: Option<&dyn crate::ai::AiProvider>,
         project_format: &Format,
         ai_node_cache: &HashMap<NodeId, HashMap<String, Value>>,
+        preview_scale: f32,
     ) -> Result<EvalResult, CascadeError> {
         let mut cache = std::mem::take(&mut self.cache);
         let mut access_counter = self.access_counter;
@@ -229,6 +231,7 @@ impl Evaluator {
                     param_revision: instance.param_revision,
                     upstream_hash,
                     project_format_hash: pf_hash,
+                    preview_scale_q: (preview_scale * 1024.0).round() as u16,
                 };
 
                 let cache_hit = !graph.is_dirty(node_id)
@@ -367,6 +370,7 @@ impl Evaluator {
                             alt_frame_time,
                             color_management,
                             project_format,
+                            preview_scale,
                             0,
                             &mut access_counter,
                             &mut total_bytes,
@@ -415,6 +419,7 @@ impl Evaluator {
                             std::sync::LazyLock::new(HashMap::new);
                         Some(ai_node_cache.get(&node_id).unwrap_or(&EMPTY))
                     },
+                    preview_scale,
                 };
                 let start = Instant::now();
                 let outputs = node
@@ -528,6 +533,7 @@ impl Evaluator {
         ai_provider: Option<&dyn crate::ai::AiProvider>,
         project_format: &Format,
         ai_node_cache: &HashMap<NodeId, HashMap<String, Value>>,
+        preview_scale: f32,
     ) -> Result<(), CascadeError> {
         let mut cache = std::mem::take(&mut self.cache);
         let mut access_counter = self.access_counter;
@@ -564,6 +570,7 @@ impl Evaluator {
                     param_revision: instance.param_revision,
                     upstream_hash,
                     project_format_hash: pf_hash,
+                    preview_scale_q: (preview_scale * 1024.0).round() as u16,
                 };
 
                 let cache_hit = !graph.is_dirty(node_id)
@@ -672,6 +679,7 @@ impl Evaluator {
                             std::sync::LazyLock::new(HashMap::new);
                         Some(ai_node_cache.get(&node_id).unwrap_or(&EMPTY))
                     },
+                    preview_scale,
                 };
                 let outputs = node
                     .evaluate(&ctx)
@@ -758,6 +766,7 @@ impl Evaluator {
         node_id: NodeId,
         frame_time: FrameTime,
         project_format: &Format,
+        preview_scale: f32,
     ) -> Result<CacheKey, CascadeError> {
         let instance = graph
             .nodes
@@ -778,6 +787,7 @@ impl Evaluator {
             param_revision: instance.param_revision,
             upstream_hash,
             project_format_hash: pf_hash,
+            preview_scale_q: (preview_scale * 1024.0).round() as u16,
         })
     }
 
@@ -880,6 +890,7 @@ fn eval_node_output_at(
     frame_time: FrameTime,
     color_management: &dyn ColorManagement,
     project_format: &Format,
+    preview_scale: f32,
     depth: u32,
     access_counter: &mut u64,
     total_bytes: &mut usize,
@@ -913,6 +924,7 @@ fn eval_node_output_at(
                 frame_time,
                 color_management,
                 project_format,
+                preview_scale,
                 depth + 1,
                 access_counter,
                 total_bytes,
@@ -961,6 +973,7 @@ fn eval_node_output_at(
         param_revision: instance.param_revision,
         upstream_hash,
         project_format_hash: pf_hash,
+        preview_scale_q: (preview_scale * 1024.0).round() as u16,
     };
 
     let cache_hit = !graph.is_dirty(node_id)
@@ -1051,6 +1064,7 @@ fn eval_node_output_at(
                 alt_frame_time,
                 color_management,
                 project_format,
+                preview_scale,
                 depth + 1,
                 access_counter,
                 total_bytes,
@@ -1073,6 +1087,7 @@ fn eval_node_output_at(
                 std::sync::LazyLock::new(HashMap::new);
             Some(&EMPTY)
         },
+        preview_scale,
     };
 
     let waker = std::task::Waker::noop();
@@ -1299,6 +1314,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -1352,6 +1368,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result1.is_ok());
 
@@ -1368,6 +1385,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result2.is_ok());
 
@@ -1429,6 +1447,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result1.is_ok());
 
@@ -1452,6 +1471,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result2.is_ok());
     }
@@ -1485,6 +1505,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -1640,6 +1661,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -1689,6 +1711,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result1.is_ok());
 
@@ -1705,6 +1728,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result2.is_ok());
 
@@ -1879,6 +1903,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -2000,6 +2025,7 @@ mod tests {
             None,
             &project_format,
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -2068,6 +2094,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -2137,6 +2164,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         assert!(result.is_ok());
@@ -2184,16 +2212,17 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let frame_time = FrameTime { frame: 0 };
         let format = Format::hd();
 
         let key1 = evaluator
-            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format, 1.0)
             .unwrap();
         let key2 = evaluator
-            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format, 1.0)
             .unwrap();
 
         assert_eq!(
@@ -2243,20 +2272,21 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let frame_time = FrameTime { frame: 0 };
         let format = Format::hd();
 
         let key_before = evaluator
-            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format, 1.0)
             .unwrap();
 
         // Change a param on the processor node
         graph.set_param(processor_id, "factor", ParamValue::Float(2.0));
 
         let key_after = evaluator
-            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format)
+            .compute_node_cache_key(&graph, &registry, processor_id, frame_time, &format, 1.0)
             .unwrap();
 
         assert_ne!(
@@ -2310,6 +2340,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let format = Format::hd();
@@ -2321,6 +2352,7 @@ mod tests {
                 processor_id,
                 FrameTime { frame: 0 },
                 &format,
+                1.0,
             )
             .unwrap();
         let key_frame_1 = evaluator
@@ -2330,6 +2362,7 @@ mod tests {
                 processor_id,
                 FrameTime { frame: 1 },
                 &format,
+                1.0,
             )
             .unwrap();
 
@@ -2399,10 +2432,11 @@ mod tests {
             None,
             &format,
             &HashMap::new(),
+            1.0,
         ));
 
         let key_before = evaluator
-            .compute_node_cache_key(&graph, &registry, sink_id, frame_time, &format)
+            .compute_node_cache_key(&graph, &registry, sink_id, frame_time, &format, 1.0)
             .unwrap();
 
         // Change a param on the upstream source node — this changes the upstream hash for sink
@@ -2420,10 +2454,11 @@ mod tests {
             None,
             &format,
             &HashMap::new(),
+            1.0,
         ));
 
         let key_after = evaluator
-            .compute_node_cache_key(&graph, &registry, sink_id, frame_time, &format)
+            .compute_node_cache_key(&graph, &registry, sink_id, frame_time, &format, 1.0)
             .unwrap();
 
         assert_ne!(
@@ -2463,10 +2498,11 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let key_hd = evaluator
-            .compute_node_cache_key(&graph, &registry, source_id, frame_time, &Format::hd())
+            .compute_node_cache_key(&graph, &registry, source_id, frame_time, &Format::hd(), 1.0)
             .unwrap();
         let key_custom = evaluator
             .compute_node_cache_key(
@@ -2475,6 +2511,7 @@ mod tests {
                 source_id,
                 frame_time,
                 &Format::from_dimensions(1280, 720),
+                1.0,
             )
             .unwrap();
 
@@ -2541,6 +2578,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         assert!(result.is_ok());
 
@@ -2589,6 +2627,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let metrics = evaluator.metrics();
@@ -2637,6 +2676,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let bytes_before = evaluator.metrics().total_bytes;
@@ -2690,6 +2730,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
 
         let metrics = evaluator.metrics();
@@ -2742,6 +2783,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         let m1 = evaluator.metrics();
         assert_eq!(m1.miss_count, 2);
@@ -2758,6 +2800,7 @@ mod tests {
             None,
             &Format::hd(),
             &HashMap::new(),
+            1.0,
         ));
         let m2 = evaluator.metrics();
         assert_eq!(m2.hit_count, 2);

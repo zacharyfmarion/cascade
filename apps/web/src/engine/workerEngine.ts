@@ -57,6 +57,7 @@ interface WorkerAPI {
   setAndRender(
     mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue },
     frame: number,
+    previewScale?: number,
   ): Promise<Array<[string, ViewerResult]> | null>;
 
   registerGpuKernel(manifestJson: string): Promise<NodeSpec | null>;
@@ -222,9 +223,10 @@ export class WorkerEngine implements EngineBridge {
   setAndRender(
     mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue },
     frame: number,
+    previewScale?: number,
   ): Promise<Array<[string, ViewerResult]>> {
     return this.getAPI()
-      .setAndRender(mutation, frame)
+      .setAndRender(mutation, frame, previewScale)
       .then((result) => result ?? []);
   }
 

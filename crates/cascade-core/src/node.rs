@@ -29,6 +29,10 @@ pub struct EvalContext<'a> {
     pub ai_provider: Option<&'a dyn crate::ai::AiProvider>,
     pub project_format: &'a Format,
     pub ai_cached_outputs: Option<&'a HashMap<String, Value>>,
+    /// Scale factor for preview rendering (1.0 = full resolution).
+    /// Source nodes (e.g. LoadImage) use this to downscale at load time,
+    /// so all downstream processing operates on fewer pixels.
+    pub preview_scale: f32,
 }
 
 impl<'a> EvalContext<'a> {

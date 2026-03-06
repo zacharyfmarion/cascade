@@ -691,7 +691,7 @@ impl Node for Translate {
     }
 }
 
-fn resize_nearest(image: &Image, out_w: u32, out_h: u32) -> Result<Image, CascadeError> {
+pub fn resize_nearest(image: &Image, out_w: u32, out_h: u32) -> Result<Image, CascadeError> {
     let in_w = image.width as usize;
     let in_h = image.height as usize;
     let out_w_usize = out_w as usize;

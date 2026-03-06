@@ -93,13 +93,13 @@ export interface EngineBridge {
   setPosition(nodeId: string, x: number, y: number): Promise<void> | void;
   setMuted(nodeId: string, muted: boolean): Promise<void> | void;
   /** Atomic set-value + render for live interactions. Works for both params and input defaults. */
-  setAndRender?(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number): Promise<Array<[string, ViewerResult]>>;
+  setAndRender?(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number, previewScale?: number): Promise<Array<[string, ViewerResult]>>;
   registerGpuKernel?(manifestJson: string): Promise<NodeSpec> | NodeSpec;
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;
   setDslHandle?(nodeId: string, handle: string): Promise<void> | void;
   loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   loadPaletteData?(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> | [number, number, number, number][];
-  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> | ViewerResult | null;
+  renderViewer(viewerNodeId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> | ViewerResult | null;
   exportGraph(): Promise<unknown> | unknown;
   importGraph(data: unknown): Promise<void> | void;
   exportDocument?(): Promise<unknown> | unknown;

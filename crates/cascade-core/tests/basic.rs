@@ -59,6 +59,7 @@ fn graph_connects_and_evaluates_chain() {
         None,
         &Format::hd(),
         &HashMap::new(),
+        1.0,
     ))
     .unwrap();
     match eval_result.value {
@@ -94,6 +95,7 @@ fn cache_hit_skips_evaluation() {
         None,
         &Format::hd(),
         &HashMap::new(),
+        1.0,
     ))
     .unwrap();
     block_on(evaluator.evaluate(
@@ -107,6 +109,7 @@ fn cache_hit_skips_evaluation() {
         None,
         &Format::hd(),
         &HashMap::new(),
+        1.0,
     ))
     .unwrap();
 
@@ -173,6 +176,7 @@ fn test_time_offset_pipeline() {
         None,
         &Format::hd(),
         &HashMap::new(),
+        1.0,
     ))
     .unwrap();
 
@@ -221,6 +225,7 @@ fn test_frame_hold_pipeline() {
         None,
         &Format::hd(),
         &HashMap::new(),
+        1.0,
     ))
     .unwrap();
 
@@ -269,6 +274,7 @@ fn test_frame_blend_pipeline() {
         None,
         &Format::hd(),
         &HashMap::new(),
+        1.0,
     ))
     .unwrap();
 
@@ -545,6 +551,7 @@ fn promoted_string_param_receives_connected_text_value() {
         None,
         &pf,
         &ai_cache,
+        1.0,
     ))
     .expect("evaluation should succeed");
 
@@ -615,6 +622,7 @@ fn evaluate_upstream_caches_upstream_outputs_for_target_node() {
         None,
         &pf,
         &ai_cache,
+        1.0,
     ))
     .expect("evaluate_upstream should succeed");
 
@@ -684,6 +692,7 @@ fn promoted_string_param_empty_when_not_connected() {
         None,
         &pf,
         &ai_cache,
+        1.0,
     ))
     .expect("evaluation should succeed");
 

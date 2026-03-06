@@ -50,7 +50,7 @@ pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, SaveExr, Vi
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use time_ops::{FrameBlend, FrameHold, TimeOffset};
-pub use transform::{CornerPin, Crop, Flip, Resize, Rotate, STMap, Transform2D, Translate};
+pub use transform::{resize_nearest, CornerPin, Crop, Flip, Resize, Rotate, STMap, Transform2D, Translate};
 pub use utility::{Dot, ImageInfo, ImageMath, MapRange, MathNode, ProjectInfo};
 
 pub fn register_standard_nodes(registry: &mut NodeRegistry) {
@@ -212,6 +212,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         result.get("image").unwrap().clone()
@@ -235,6 +236,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         result.get("image").unwrap().clone()
@@ -663,6 +665,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         match result.get("image").unwrap() {
@@ -963,6 +966,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         match result.get("image").unwrap() {
@@ -1932,6 +1936,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(sep.evaluate(&ctx)).unwrap();
         let red = match result.get("red").unwrap() {
@@ -2001,6 +2006,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let sep_result = block_on(sep.evaluate(&ctx)).unwrap();
         let red = sep_result.get("red").unwrap().clone();
@@ -2023,6 +2029,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let comb_result = block_on(comb.evaluate(&ctx2)).unwrap();
         let output = match comb_result.get("image").unwrap() {
@@ -2524,6 +2531,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let img = match result.get("image").unwrap() {
@@ -2572,6 +2580,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let image = match result.get("image").unwrap() {
@@ -2606,6 +2615,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let img = match result.get("image").unwrap() {
@@ -3424,6 +3434,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
         let img = match result.get("image").unwrap() {
@@ -3466,6 +3477,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let uv_result = block_on(uv_node.evaluate(&ctx)).unwrap();
         let uv_img = match uv_result.get("image").unwrap() {
@@ -3512,6 +3524,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         block_on(node.evaluate(&ctx)).unwrap()
     }
@@ -3561,6 +3574,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = block_on(node.evaluate(&ctx)).unwrap();
 
@@ -3621,6 +3635,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let node = KeyMix::new();
         let result = block_on(node.evaluate(&ctx)).unwrap();

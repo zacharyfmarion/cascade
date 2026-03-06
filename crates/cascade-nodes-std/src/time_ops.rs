@@ -398,6 +398,7 @@ mod tests {
             ai_provider: None,
             project_format: &format,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
 
         let node = FrameBlend::new();

@@ -55,6 +55,7 @@ fn make_context<'a>(
         ai_provider: None,
         project_format: FORMAT.get_or_init(Format::hd),
         ai_cached_outputs: None,
+        preview_scale: 1.0,
     }
 }
 

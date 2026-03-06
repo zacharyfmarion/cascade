@@ -853,6 +853,7 @@ impl Engine {
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &self.ai_node_cache,
+                1.0,
             )
             .await
             .map_err(to_js_error)?;
@@ -905,22 +906,46 @@ impl Engine {
                 // Rasterize field at project format resolution for preview
                 let w = self.project_format.width();
                 let h = self.project_format.height();
-                let mut pixel_data = vec![0f32; (w * h * 4) as usize];
-                for y in 0..h {
-                    for x in 0..w {
-                        let u = (x as f32 + 0.5) / w as f32;
-                        let v_coord = (y as f32 + 0.5) / h as f32;
-                        let color = (field.sample_fn)(u, v_coord);
-                        let idx = ((y * w + x) * 4) as usize;
-                        pixel_data[idx] = color[0];
-                        pixel_data[idx + 1] = color[1];
-                        pixel_data[idx + 2] = color[2];
-                        pixel_data[idx + 3] = color[3];
-                    }
-                }
-                let field_image = Image::from_f32_data(w, h, pixel_data).map_err(to_js_error)?;
-                let pixels = Viewer::image_to_rgba8_with_display(
-                    &field_image,
+                self.rasterize_field(field, w, h, cm)
+            }
+            Value::Bytes(_) => ViewerResultWasm::None {
+                value_type: "bytes".to_string(),
+            },
+            Value::None => ViewerResultWasm::None {
+                value_type: "none".to_string(),
+            },
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    /// Rasterize a field to pixels at the given dimensions.
+    fn rasterize_field(
+        &self,
+        field: &cascade_core::types::Field,
+        w: u32,
+        h: u32,
+        cm: &dyn cascade_core::color::ColorManagement,
+    ) -> ViewerResultWasm {
+        let w = w.max(1);
+        let h = h.max(1);
+        let mut pixels_f32 = vec![0.0f32; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let u = (x as f32 + 0.5) / w as f32;
+                let v = (y as f32 + 0.5) / h as f32;
+                let rgba = field.sample(u, v);
+                let idx = ((y * w + x) * 4) as usize;
+                pixels_f32[idx] = rgba[0];
+                pixels_f32[idx + 1] = rgba[1];
+                pixels_f32[idx + 2] = rgba[2];
+                pixels_f32[idx + 3] = rgba[3];
+            }
+        }
+        // Convert f32 pixels to Image, then to RGBA8
+        match Image::from_f32_data(w, h, pixels_f32) {
+            Ok(img) => {
+                let rgba8 = Viewer::image_to_rgba8_with_display(
+                    &img,
                     cm,
                     &self.active_display,
                     &self.active_view,
@@ -929,9 +954,98 @@ impl Engine {
                     value_type: "field".to_string(),
                     width: w,
                     height: h,
+                    pixels: rgba8,
+                }
+            }
+            Err(_) => ViewerResultWasm::None {
+                value_type: "field_error".to_string(),
+            },
+        }
+    }
+
+    /// Render a viewer at reduced resolution for preview.
+    /// `preview_scale` is clamped to (0, 1] — values <= 0 are treated as 1.0 (full res).
+    pub async fn render_viewer_scaled(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<JsValue, JsValue> {
+        let scale = if preview_scale <= 0.0 || preview_scale > 1.0 {
+            1.0
+        } else {
+            preview_scale
+        };
+        let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
+        let cm = &self.color_management;
+        let eval_result = self
+            .evaluator
+            .evaluate(
+                &mut self.graph,
+                &self.registry,
+                &self.nodes,
+                id,
+                "display",
+                FrameTime { frame },
+                cm,
+                self.ai_provider.as_deref(),
+                &self.project_format,
+                &self.ai_node_cache,
+                scale,
+            )
+            .await
+            .map_err(to_js_error)?;
+        self.last_timings = eval_result
+            .node_timings
+            .into_iter()
+            .map(|(node_id, duration)| {
+                (
+                    format_node_id(&self.graph, node_id),
+                    duration.as_secs_f64() * 1000.0,
+                )
+            })
+            .collect();
+        let result = match eval_result.value {
+            Value::Image(ref image) => {
+                let pixels = Viewer::image_to_rgba8_with_display(
+                    image,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
+                ViewerResultWasm::Pixels {
+                    value_type: "image".to_string(),
+                    width: image.width,
+                    height: image.height,
                     pixels,
                 }
             }
+            Value::Field(ref field) => {
+                // Rasterize field at scaled resolution for preview
+                let w = (self.project_format.width() as f32 * scale).round() as u32;
+                let h = (self.project_format.height() as f32 * scale).round() as u32;
+                self.rasterize_field(field, w, h, cm)
+            }
+            Value::Float(v) => ViewerResultWasm::Float {
+                value_type: "float".to_string(),
+                value: v,
+            },
+            Value::Int(v) => ViewerResultWasm::Int {
+                value_type: "int".to_string(),
+                value: v,
+            },
+            Value::Bool(v) => ViewerResultWasm::Bool {
+                value_type: "bool".to_string(),
+                value: v,
+            },
+            Value::Color(c) => ViewerResultWasm::Color {
+                value_type: "color".to_string(),
+                value: c,
+            },
+            Value::String(ref s) => ViewerResultWasm::StringVal {
+                value_type: "string".to_string(),
+                value: s.clone(),
+            },
             Value::Bytes(_) => ViewerResultWasm::None {
                 value_type: "bytes".to_string(),
             },
@@ -1001,6 +1115,7 @@ impl Engine {
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &self.ai_node_cache,
+                1.0,
             )
             .await
             .map_err(to_js_error)?;
@@ -1087,6 +1202,7 @@ impl Engine {
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &self.ai_node_cache,
+                1.0,
             )
             .await
             .map_err(to_js_error)?;
@@ -1206,6 +1322,7 @@ impl Engine {
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &self.ai_node_cache,
+                1.0,
             )
             .await
             .map_err(to_js_error)?;
@@ -1264,6 +1381,7 @@ impl Engine {
             ai_provider: ai_prov.as_deref(),
             project_format: &pf,
             ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
         let result = node_arc.evaluate(&ctx).await;
 
@@ -1279,6 +1397,7 @@ impl Engine {
                         nid,
                         FrameTime { frame: 0 },
                         &self.project_format,
+                        1.0,
                     )
                     .ok();
                 let state = self
@@ -1322,6 +1441,7 @@ impl Engine {
                                 nid,
                                 FrameTime { frame: 0 },
                                 &self.project_format,
+                                1.0,
                             ) {
                                 Ok(current_key) => {
                                     s.last_run_cache_key.as_ref() != Some(&current_key)
@@ -2229,6 +2349,7 @@ impl Engine {
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &self.ai_node_cache,
+                1.0,
             )
             .await
             .map_err(to_js_error)?;
