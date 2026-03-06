@@ -3,9 +3,10 @@ use std::cmp::Ordering;
 use std::fmt;
 
 pub mod v1_0_0_to_v1_1_0;
+pub mod v1_1_0_to_v1_2_0;
 
 /// Current document format version
-pub const CURRENT_VERSION: &str = "1.1.0";
+pub const CURRENT_VERSION: &str = "1.2.0";
 
 /// Error type for migration operations
 #[derive(Debug, Clone)]
@@ -62,12 +63,20 @@ struct Migration {
 /// Each migration transforms a document from one version to the next
 /// Array of available migrations in order
 /// Each migration transforms a document from one version to the next
-static MIGRATIONS: &[Migration] = &[Migration {
-    from_version: "1.0.0",
-    to_version: "1.1.0",
-    description: "Rename Viewer input port 'image' to 'value'",
-    migrate: v1_0_0_to_v1_1_0::migrate,
-}];
+static MIGRATIONS: &[Migration] = &[
+    Migration {
+        from_version: "1.0.0",
+        to_version: "1.1.0",
+        description: "Rename Viewer input port 'image' to 'value'",
+        migrate: v1_0_0_to_v1_1_0::migrate,
+    },
+    Migration {
+        from_version: "1.1.0",
+        to_version: "1.2.0",
+        description: "Unify CPU/GPU nodes: remap CPU node IDs to GPU kernel equivalents, rename ports for consistency",
+        migrate: v1_1_0_to_v1_2_0::migrate,
+    },
+];
 
 /// Extract the format version from a document.
 /// Supports both the current `"cascade"` key and the legacy `"compositor"` key.
@@ -84,9 +93,7 @@ fn extract_version(doc: &Value) -> Result<String, MigrationError> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
-            MigrationError::InvalidStructure(
-                "Missing format_version in envelope".to_string(),
-            )
+            MigrationError::InvalidStructure("Missing format_version in envelope".to_string())
         })
 }
 
