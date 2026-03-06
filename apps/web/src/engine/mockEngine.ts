@@ -30,8 +30,8 @@ const NODE_SPECS: NodeSpec[] = [
     params: []
   },
   {
-    id: 'brightness_contrast',
-    display_name: 'Brightness/Contrast',
+    id: 'gpu_kernel::brightness_contrast',
+    display_name: 'Brightness / Contrast',
     category: 'Color',
     description: 'Adjust brightness and contrast',
     inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
@@ -62,10 +62,10 @@ const NODE_SPECS: NodeSpec[] = [
     ]
   },
   {
-    id: 'hue_saturation',
-    display_name: 'Hue/Saturation',
+    id: 'gpu_kernel::hue_saturation',
+    display_name: 'Hue / Saturation / Lightness',
     category: 'Color',
-    description: 'Adjust hue and saturation',
+    description: 'Adjust hue, saturation and lightness',
     inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
     outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
     params: [
@@ -94,7 +94,7 @@ const NODE_SPECS: NodeSpec[] = [
     ]
   },
   {
-    id: 'invert',
+    id: 'gpu_kernel::invert',
     display_name: 'Invert',
     category: 'Color',
     description: 'Invert colors',
@@ -152,7 +152,7 @@ const NODE_SPECS: NodeSpec[] = [
      params: []
    },
    {
-     id: 'map_range',
+     id: 'gpu_kernel::map_range',
      display_name: 'Map Range',
      category: 'Utility',
      description: 'Map values from one range to another',
@@ -254,7 +254,7 @@ const NODE_SPECS: NodeSpec[] = [
      ]
    },
    {
-     id: 'color_ramp',
+     id: 'gpu_kernel::color_ramp',
      display_name: 'Color Ramp',
      category: 'Color',
      description: 'Map luminance through a color ramp',

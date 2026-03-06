@@ -73,48 +73,48 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
 
   export_image_batch: <FolderOutput size={ICON_SIZE} />,
   // ── Color ──
-  brightness_contrast: <SunMedium size={ICON_SIZE} />,
-  hue_saturation: <Palette size={ICON_SIZE} />,
-  invert: <CircleOff size={ICON_SIZE} />,
-  levels: <SlidersHorizontal size={ICON_SIZE} />,
+  'gpu_kernel::brightness_contrast': <SunMedium size={ICON_SIZE} />,
+  'gpu_kernel::hue_saturation': <Palette size={ICON_SIZE} />,
+  'gpu_kernel::invert': <CircleOff size={ICON_SIZE} />,
+  'gpu_kernel::levels': <SlidersHorizontal size={ICON_SIZE} />,
   curves: <Spline size={ICON_SIZE} />,
-  color_balance: <Scale size={ICON_SIZE} />,
-  channel_shuffle: <Shuffle size={ICON_SIZE} />,
-  threshold: <Binary size={ICON_SIZE} />,
-  posterize: <Grid2x2 size={ICON_SIZE} />,
-  gamma: <Sun size={ICON_SIZE} />,
-  color_ramp: <Paintbrush size={ICON_SIZE} />,
+  'gpu_kernel::color_balance': <Scale size={ICON_SIZE} />,
+  'gpu_kernel::channel_shuffle': <Shuffle size={ICON_SIZE} />,
+  'gpu_kernel::threshold': <Binary size={ICON_SIZE} />,
+  'gpu_kernel::posterize': <Grid2x2 size={ICON_SIZE} />,
+  'gpu_kernel::gamma': <Sun size={ICON_SIZE} />,
+  'gpu_kernel::color_ramp': <Paintbrush size={ICON_SIZE} />,
   color_palette: <Palette size={ICON_SIZE} />,
   separate_hsva: <SplitSquareVertical size={ICON_SIZE} />,
   combine_hsva: <Merge size={ICON_SIZE} />,
   color_convert: <Pipette size={ICON_SIZE} />,
-  white_balance: <Pipette size={ICON_SIZE} />,
-  vibrance: <Sparkles size={ICON_SIZE} />,
-  gradient_map: <Rainbow size={ICON_SIZE} />,
-  tone_map: <SunMedium size={ICON_SIZE} />,
+  'gpu_kernel::white_balance': <Pipette size={ICON_SIZE} />,
+  'gpu_kernel::vibrance': <Sparkles size={ICON_SIZE} />,
+  'gpu_kernel::gradient_map': <Rainbow size={ICON_SIZE} />,
+  'gpu_kernel::tone_map': <SunMedium size={ICON_SIZE} />,
 
   // ── Filter ──
   gaussian_blur: <CircleDot size={ICON_SIZE} />,
   sharpen: <Maximize2 size={ICON_SIZE} />,
-  edge_detect: <Scan size={ICON_SIZE} />,
+  'gpu_kernel::edge_detect': <Scan size={ICON_SIZE} />,
   dilate: <Plus size={ICON_SIZE} />,
   erode: <Minus size={ICON_SIZE} />,
   median: <AlignCenter size={ICON_SIZE} />,
   glow: <Zap size={ICON_SIZE} />,
-  vignette: <CircleDot size={ICON_SIZE} />,
-  lens_distortion: <Circle size={ICON_SIZE} />,
+  'gpu_kernel::vignette': <CircleDot size={ICON_SIZE} />,
+  'gpu_kernel::lens_distortion': <Circle size={ICON_SIZE} />,
 
   // ── Composite ──
-  blend: <Layers size={ICON_SIZE} />,
-  alpha_over: <BlendIcon size={ICON_SIZE} />,
+  'gpu_kernel::blend': <Layers size={ICON_SIZE} />,
+  'gpu_kernel::alpha_over': <BlendIcon size={ICON_SIZE} />,
 
   // ── Transform ──
   resize: <Scaling size={ICON_SIZE} />,
   crop: <Crop size={ICON_SIZE} />,
   flip: <FlipHorizontal2 size={ICON_SIZE} />,
-  rotate: <RotateCw size={ICON_SIZE} />,
+  'gpu_kernel::rotate': <RotateCw size={ICON_SIZE} />,
   translate: <Move size={ICON_SIZE} />,
-  transform_2d: <Move size={ICON_SIZE} />,
+  'gpu_kernel::transform_2d': <Move size={ICON_SIZE} />,
 
   // ── Generator ──
   solid_color: <Square size={ICON_SIZE} />,
@@ -125,15 +125,15 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
   shape: <Shapes size={ICON_SIZE} />,
 
   // ── Matte ──
-  premultiply: <Lock size={ICON_SIZE} />,
-  unpremultiply: <Unlock size={ICON_SIZE} />,
-  set_alpha: <ShieldPlus size={ICON_SIZE} />,
-  extract_channel: <SeparatorVertical size={ICON_SIZE} />,
+  'gpu_kernel::premultiply': <Lock size={ICON_SIZE} />,
+  'gpu_kernel::unpremultiply': <Unlock size={ICON_SIZE} />,
+  'gpu_kernel::set_alpha': <ShieldPlus size={ICON_SIZE} />,
+  'gpu_kernel::extract_channel': <SeparatorVertical size={ICON_SIZE} />,
   chroma_key: <Scissors size={ICON_SIZE} />,
-  despill: <Eraser size={ICON_SIZE} />,
+  'gpu_kernel::despill': <Eraser size={ICON_SIZE} />,
 
   // ── Utility ──
-  map_range: <ArrowLeftRight size={ICON_SIZE} />,
+  'gpu_kernel::map_range': <ArrowLeftRight size={ICON_SIZE} />,
   math: <Calculator size={ICON_SIZE} />,
 
   // ── GPU ──

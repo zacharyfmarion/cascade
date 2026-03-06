@@ -385,7 +385,10 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
         continue;
       }
 
-      const nodeTypeId = pascalToSnake(nodeType);
+      const baseId = pascalToSnake(nodeType);
+      // Try gpu_kernel:: prefix first (most nodes are GPU kernels now)
+      const gpuId = `gpu_kernel::${baseId}`;
+      const nodeTypeId = specById.has(gpuId) ? gpuId : baseId;
       const spec = specById.get(nodeTypeId);
       if (!spec) {
         errors.push({ line: lineNumber, message: `Unknown node type '${nodeType}'` });

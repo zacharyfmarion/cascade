@@ -157,7 +157,9 @@ export function serializeGraph(input: SerializerInput): string {
     if (!node.dslHandle || node.dslHandle !== handle) {
       useGraphStore.getState().setDslHandle(node.id, handle);
     }
-    const typeName = spec ? snakeToPascal(spec.id) : snakeToPascal(node.typeId);
+    const rawId = spec ? spec.id : node.typeId;
+    const strippedId = rawId.replace(/^gpu_kernel::/, '');
+    const typeName = snakeToPascal(strippedId);
 
     const params: string[] = [];
     if (spec) {
