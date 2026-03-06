@@ -5,11 +5,11 @@
   "identifier": "com.cascade.app",
   "build": {
     "beforeDevCommand": {
-      "script": "npm run dev",
+      "script": "yarn dev",
       "cwd": "../../web"
     },
     "beforeBuildCommand": {
-      "script": "npm run build",
+      "script": "yarn build",
       "cwd": "../../web"
     },
     "devUrl": "http://localhost:5173",
