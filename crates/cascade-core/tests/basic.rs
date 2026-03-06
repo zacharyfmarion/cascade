@@ -8,8 +8,7 @@ use cascade_core::types::{
     Value, ValueType,
 };
 use cascade_nodes_std::{
-    register_standard_nodes, BrightnessContrast, FrameBlend, FrameHold, LoadImage, TimeOffset,
-    Viewer,
+    register_standard_nodes, FrameBlend, FrameHold, GaussianBlur, LoadImage, TimeOffset, Viewer,
 };
 use image::codecs::png::PngEncoder;
 use image::ColorType;
@@ -28,7 +27,7 @@ fn graph_connects_and_evaluates_chain() {
 
     let mut graph = Graph::new();
     let load_id = graph.add_node("load_image");
-    let bc_id = graph.add_node("brightness_contrast");
+    let bc_id = graph.add_node("gaussian_blur");
     let viewer_id = graph.add_node("viewer");
 
     graph
@@ -43,7 +42,7 @@ fn graph_connects_and_evaluates_chain() {
     let png_bytes = make_png_bytes();
     load.set_image_data(&png_bytes).unwrap();
     nodes.insert(load_id, Arc::new(load));
-    nodes.insert(bc_id, Arc::new(BrightnessContrast::new()));
+    nodes.insert(bc_id, Arc::new(GaussianBlur::new()));
     nodes.insert(viewer_id, Arc::new(Viewer::new()));
 
     let mut evaluator = Evaluator::new();

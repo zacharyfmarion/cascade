@@ -1869,7 +1869,6 @@ impl Engine {
         Ok(results)
     }
 
-
     pub fn set_input_default_and_render_viewers(
         &mut self,
         node_id: &str,
@@ -2077,13 +2076,15 @@ impl Engine {
                                 };
 
                                 if let Err(e) = encode_result {
-                                    let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                                    let mut err_guard =
+                                        job.error.lock().unwrap_or_else(|e| e.into_inner());
                                     *err_guard =
                                         Some(format!("Frame {frame} encode/write failed: {e}"));
                                     return;
                                 }
                             } else {
-                                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut err_guard =
+                                    job.error.lock().unwrap_or_else(|e| e.into_inner());
                                 *err_guard = Some(format!("Frame {frame} output is not an image"));
                                 return;
                             }
@@ -2284,13 +2285,15 @@ impl Engine {
                             if let Value::Image(image) = eval_result.value {
                                 let rgba8 = Viewer::image_to_rgba8(&image, cm);
                                 if let Err(e) = encoder.encode_frame(&rgba8) {
-                                    let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                                    let mut err_guard =
+                                        job.error.lock().unwrap_or_else(|e| e.into_inner());
                                     *err_guard =
                                         Some(format!("Frame {} encode failed: {e}", frame));
                                     return;
                                 }
                             } else {
-                                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut err_guard =
+                                    job.error.lock().unwrap_or_else(|e| e.into_inner());
                                 *err_guard =
                                     Some(format!("Frame {} output is not an image", frame));
                                 return;
@@ -2600,6 +2603,7 @@ mod tests {
             }],
             params: vec![],
             kernel: "return color;".to_string(),
+            ..KernelManifest::default()
         };
         serde_json::to_string(&manifest).expect("manifest json")
     }
@@ -2693,6 +2697,7 @@ return pixelated;
 "#
             .trim()
             .to_string(),
+            ..KernelManifest::default()
         };
         let manifest_json = serde_json::to_string(&manifest).expect("manifest json");
 
@@ -2932,17 +2937,14 @@ return pixelated;
     fn test_list_node_types_includes_groups() {
         let engine = Engine::new();
         let specs = engine.list_node_types();
-        // GPU kernel groups (pixelate, color_range) require a GPU adapter.
+        // GPU kernel groups require a GPU adapter.
         // On CI or headless environments without a GPU, these groups won't be
         // registered, so we only assert they exist when GPU init succeeded.
+        // Note: Color Range group is temporarily disabled — it depends on CPU image_math
+        // scalar operations not yet supported by the GPU image_math kernel.
         let has_pixelate = specs.iter().any(|s| s.id == "group::pixelate");
-        let has_color_range = specs.iter().any(|s| s.id == "group::color_range");
         if engine.gpu_context().is_some() {
             assert!(has_pixelate, "Pixelate group should appear in node types");
-            assert!(
-                has_color_range,
-                "Color Range group should appear in node types"
-            );
         } else {
             println!("GPU not available, skipping GPU kernel group assertions");
         }
