@@ -66,7 +66,7 @@ const DEFAULT_SETTINGS = {
   gridSize: 15,
   showMinimap: false,
   showTimings: false,
-  livePreviewScale: 0.5,
+  livePreviewScale: 0.3,
   previewIdleDelay: 300,
   maxUndoSteps: 50,
   defaultFps: 24,
