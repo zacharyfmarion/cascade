@@ -16,6 +16,7 @@ pub fn build_kernel_template(
     params: &[KernelParam],
     extra_images: &[String],
     scalar_inputs: &[KernelParam],
+    supports_mask: bool,
 ) -> String {
     let mut all_uniforms = params.to_vec();
     all_uniforms.extend_from_slice(scalar_inputs);
@@ -23,11 +24,23 @@ pub fn build_kernel_template(
     let extra_image_block = build_extra_images_block(extra_images);
     let user_kernel =
         format!("vec4 process(vec4 color, vec2 uv, ivec2 pixel) {{\n{user_kernel_body}\n}}",);
+    let mask_blend = if supports_mask {
+        r#"    if (has_mask == 1) {
+        ivec2 mask_dims = imageSize(u_mask);
+        ivec2 mask_coord = clamp(gid, ivec2(0), mask_dims - 1);
+        float mask_val = imageLoad(u_mask, mask_coord).a;
+        result = mix(color, result, mask_val);
+    }
+"#
+    } else {
+        ""
+    };
 
     TEMPLATE
         .replace("{PARAMS_BLOCK}", &params_block)
         .replace("{EXTRA_IMAGES}", &extra_image_block)
         .replace("{USER_KERNEL}", &user_kernel)
+        .replace("{MASK_BLEND}", mask_blend)
 }
 
 fn build_params_block(params: &[KernelParam]) -> String {
@@ -107,6 +120,7 @@ void main() {
     vec2 uv = (vec2(gid) + 0.5) / vec2(dims);
 
     vec4 result = process(color, uv, gid);
+{MASK_BLEND}
     imageStore(u_output, gid, result);
 }
 "#;

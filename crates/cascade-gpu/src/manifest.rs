@@ -13,6 +13,28 @@ pub struct KernelManifest {
     pub outputs: Vec<ManifestPort>,
     pub params: Vec<ManifestParam>,
     pub kernel: String,
+    #[serde(default = "default_true")]
+    pub supports_mask: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for KernelManifest {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            display_name: String::new(),
+            category: String::new(),
+            description: String::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            params: Vec::new(),
+            kernel: String::new(),
+            supports_mask: true,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -41,7 +63,7 @@ pub struct ManifestParam {
 
 impl KernelManifest {
     pub fn to_node_spec(&self) -> Result<NodeSpec, String> {
-        let inputs = self
+        let mut inputs = self
             .inputs
             .iter()
             .map(|port| {
@@ -54,6 +76,15 @@ impl KernelManifest {
                 })
             })
             .collect::<Result<Vec<_>, String>>()?;
+
+        if self.supports_mask {
+            inputs.push(PortSpec {
+                name: "mask".to_string(),
+                label: "Mask".to_string(),
+                ty: ValueType::Mask,
+                ..Default::default()
+            });
+        }
 
         let outputs = self
             .outputs
@@ -149,12 +180,23 @@ impl KernelManifest {
             });
         }
 
-        let extra_images = image_inputs.into_iter().skip(1).collect::<Vec<_>>();
+        if self.supports_mask {
+            scalar_inputs.push(KernelParam {
+                name: "has_mask".to_string(),
+                ty: ParamType::Int,
+            });
+        }
+
+        let mut extra_images = image_inputs.into_iter().skip(1).collect::<Vec<_>>();
+        if self.supports_mask {
+            extra_images.push("mask".to_string());
+        }
         Ok(build_kernel_template(
             &self.kernel,
             &params,
             &extra_images,
             &scalar_inputs,
+            self.supports_mask,
         ))
     }
 }
@@ -162,8 +204,8 @@ impl KernelManifest {
 pub fn builtin_pixelate_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::pixelate".to_string(),
-        display_name: "Pixelate (GPU)".to_string(),
-        category: "GPU".to_string(),
+        display_name: "Pixelate".to_string(),
+        category: "Filter".to_string(),
         description: "Pixelate an image by snapping pixels to block centers".to_string(),
         inputs: vec![
             ManifestPort {
@@ -313,9 +355,10 @@ pub fn builtin_pixelate_manifest() -> KernelManifest {
         }
         return vec4(best_col, pixelated.a);
     }
-"#
+        "#
         .trim()
         .to_string(),
+        supports_mask: false,
     }
 }
 

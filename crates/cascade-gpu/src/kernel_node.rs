@@ -37,12 +37,15 @@ impl GpuKernelNode {
         let spec = manifest.to_node_spec()?;
         let glsl = manifest.build_glsl()?;
         let wgsl = glsl_to_wgsl(&glsl)?;
-        let optional_inputs: Vec<String> = manifest
+        let mut optional_inputs: Vec<String> = manifest
             .inputs
             .iter()
             .filter(|port| port.optional && matches_image_type(&port.ty))
             .map(|port| port.name.clone())
             .collect();
+        if manifest.supports_mask {
+            optional_inputs.push("mask".to_string());
+        }
         Ok(Self {
             spec,
             wgsl_source: wgsl,

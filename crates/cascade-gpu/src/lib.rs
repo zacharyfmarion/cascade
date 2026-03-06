@@ -35,13 +35,10 @@ use crate::color_kernels_advanced::{
 };
 use crate::matte_kernels::{
     builtin_chroma_key_manifest, builtin_despill_manifest, builtin_difference_matte_manifest,
-    builtin_extract_channel_manifest, builtin_luminance_key_manifest,
-    builtin_premultiply_manifest, builtin_set_alpha_manifest, builtin_unpremultiply_manifest,
+    builtin_extract_channel_manifest, builtin_luminance_key_manifest, builtin_premultiply_manifest,
+    builtin_set_alpha_manifest, builtin_unpremultiply_manifest,
 };
-use crate::transform_kernels::{
-    builtin_gpu_resize_manifest, builtin_gpu_rotate_manifest,
-    builtin_gpu_transform_2d_manifest,
-};
+use crate::transform_kernels::{builtin_gpu_rotate_manifest, builtin_gpu_transform_2d_manifest};
 use crate::utility_kernels::{
     builtin_edge_detect_manifest, builtin_gpu_color_ramp_manifest,
     builtin_lens_distortion_manifest, builtin_map_range_manifest, builtin_vignette_manifest,
@@ -61,7 +58,10 @@ fn register_kernel_node(
         let m = manifest.clone();
         // SAFETY: manifest was validated by the caller before reaching this factory.
         // NodeRegistry::register requires infallible Fn() -> Arc<dyn Node>.
-        Arc::new(GpuKernelNode::from_manifest(m, ctx.clone()).expect("GPU node factory: manifest was pre-validated"))
+        Arc::new(
+            GpuKernelNode::from_manifest(m, ctx.clone())
+                .expect("GPU node factory: manifest was pre-validated"),
+        )
     });
 }
 
@@ -70,7 +70,10 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     registry.register("gpu_kernel::pixelate", move || {
         let manifest = builtin_pixelate_manifest();
         // SAFETY: builtin manifest is known-valid at compile time.
-        Arc::new(GpuKernelNode::from_manifest(manifest, ctx.clone()).expect("GPU node factory: builtin manifest"))
+        Arc::new(
+            GpuKernelNode::from_manifest(manifest, ctx.clone())
+                .expect("GPU node factory: builtin manifest"),
+        )
     });
 
     let ctx = context.clone();
@@ -123,7 +126,6 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     register_kernel_node(registry, &context, builtin_lens_distortion_manifest());
 
     // --- Transform kernels ---
-    register_kernel_node(registry, &context, builtin_gpu_resize_manifest());
     register_kernel_node(registry, &context, builtin_gpu_rotate_manifest());
     register_kernel_node(registry, &context, builtin_gpu_transform_2d_manifest());
 }
@@ -197,6 +199,7 @@ mod tests {
             }],
             kernel: "return vec4(mix(color.rgb, vec3(1.0) - color.rgb, strength), color.a);"
                 .to_string(),
+            ..KernelManifest::default()
         };
 
         let glsl = manifest.build_glsl().expect("GLSL should build");
@@ -229,6 +232,7 @@ mod tests {
                     }],
                     params: vec![],
                     kernel: "return color;".to_string(),
+                    ..KernelManifest::default()
                 };
 
                 let node = kernel_node::GpuKernelNode::from_manifest(manifest, Arc::new(ctx))
@@ -271,6 +275,7 @@ mod tests {
             }],
             params: vec![],
             kernel: "return color;".to_string(),
+            ..KernelManifest::default()
         };
 
         let node =
@@ -470,5 +475,208 @@ mod tests {
             }
             _ => panic!("Expected image output"),
         }
+    }
+
+    // ── Mask support tests ─────────────────────────────────────────
+
+    fn simple_manifest(supports_mask: bool) -> KernelManifest {
+        KernelManifest {
+            id: "test_mask".to_string(),
+            display_name: "Test".to_string(),
+            category: "Color".to_string(),
+            description: "test".to_string(),
+            inputs: vec![manifest::ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+                optional: false,
+            }],
+            outputs: vec![manifest::ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+                optional: false,
+            }],
+            params: vec![],
+            kernel: "return color;".to_string(),
+            supports_mask,
+        }
+    }
+
+    #[test]
+    fn test_mask_support_adds_mask_input_port() {
+        let manifest = simple_manifest(true);
+        let spec = manifest.to_node_spec().unwrap();
+        let mask_port = spec.inputs.iter().find(|p| p.name == "mask");
+        assert!(
+            mask_port.is_some(),
+            "supports_mask=true should add mask input port"
+        );
+        let mask_port = mask_port.unwrap();
+        assert_eq!(mask_port.ty, cascade_core::types::ValueType::Mask);
+        assert_eq!(mask_port.label, "Mask");
+    }
+
+    #[test]
+    fn test_mask_support_false_no_mask_port() {
+        let manifest = simple_manifest(false);
+        let spec = manifest.to_node_spec().unwrap();
+        let mask_port = spec.inputs.iter().find(|p| p.name == "mask");
+        assert!(
+            mask_port.is_none(),
+            "supports_mask=false should not add mask input port"
+        );
+    }
+
+    #[test]
+    fn test_mask_support_glsl_contains_mask_code() {
+        let manifest = simple_manifest(true);
+        let glsl = manifest.build_glsl().unwrap();
+        assert!(
+            glsl.contains("has_mask"),
+            "GLSL should contain has_mask scalar"
+        );
+        assert!(
+            glsl.contains("u_mask"),
+            "GLSL should contain u_mask image binding"
+        );
+        assert!(
+            glsl.contains("mix(color, result, mask_val)"),
+            "GLSL should contain mask blend"
+        );
+    }
+
+    #[test]
+    fn test_mask_support_false_glsl_no_mask_code() {
+        let manifest = simple_manifest(false);
+        let glsl = manifest.build_glsl().unwrap();
+        assert!(
+            !glsl.contains("has_mask"),
+            "GLSL should not contain has_mask"
+        );
+        assert!(!glsl.contains("u_mask"), "GLSL should not contain u_mask");
+        assert!(
+            !glsl.contains("mask_val"),
+            "GLSL should not contain mask blend code"
+        );
+    }
+
+    #[test]
+    fn test_mask_support_default_is_true() {
+        let manifest = KernelManifest::default();
+        assert!(
+            manifest.supports_mask,
+            "Default supports_mask should be true"
+        );
+    }
+
+    #[test]
+    fn test_mask_support_serde_default_true() {
+        // JSON without supports_mask field should default to true
+        let json = r#"{
+            "id": "test",
+            "display_name": "Test",
+            "category": "GPU",
+            "description": "test",
+            "inputs": [{"name": "image", "label": "Image", "ty": "Image"}],
+            "outputs": [{"name": "image", "label": "Image", "ty": "Image"}],
+            "params": [],
+            "kernel": "return color;"
+        }"#;
+        let manifest: KernelManifest = serde_json::from_str(json).unwrap();
+        assert!(
+            manifest.supports_mask,
+            "Missing supports_mask should default to true"
+        );
+    }
+
+    #[test]
+    fn test_mask_support_serde_explicit_false() {
+        let json = r#"{
+            "id": "test",
+            "display_name": "Test",
+            "category": "GPU",
+            "description": "test",
+            "inputs": [{"name": "image", "label": "Image", "ty": "Image"}],
+            "outputs": [{"name": "image", "label": "Image", "ty": "Image"}],
+            "params": [],
+            "kernel": "return color;",
+            "supports_mask": false
+        }"#;
+        let manifest: KernelManifest = serde_json::from_str(json).unwrap();
+        assert!(
+            !manifest.supports_mask,
+            "Explicit supports_mask=false should be false"
+        );
+        let spec = manifest.to_node_spec().unwrap();
+        assert!(
+            spec.inputs.iter().all(|p| p.name != "mask"),
+            "No mask port when false"
+        );
+    }
+
+    #[test]
+    fn test_mask_support_optional_inputs_include_mask() {
+        let ctx = match GpuContext::new() {
+            Ok(ctx) => Arc::new(ctx),
+            Err(e) => {
+                println!("GPU not available, skipping: {e}");
+                return;
+            }
+        };
+        use cascade_core::node::Node;
+        let manifest = simple_manifest(true);
+        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx).unwrap();
+        let spec = node.spec();
+        // Mask should be in the inputs as optional
+        let mask_port = spec.inputs.iter().find(|p| p.name == "mask");
+        assert!(mask_port.is_some(), "Node spec should include mask port");
+    }
+
+    #[test]
+    fn test_mask_support_false_optional_inputs_no_mask() {
+        let ctx = match GpuContext::new() {
+            Ok(ctx) => Arc::new(ctx),
+            Err(e) => {
+                println!("GPU not available, skipping: {e}");
+                return;
+            }
+        };
+        use cascade_core::node::Node;
+        let manifest = simple_manifest(false);
+        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx).unwrap();
+        let spec = node.spec();
+        let mask_port = spec.inputs.iter().find(|p| p.name == "mask");
+        assert!(mask_port.is_none(), "No mask port when supports_mask=false");
+    }
+
+    #[test]
+    fn test_premultiply_no_mask_support() {
+        // Premultiply is a node where masking doesn't make sense
+        let manifest = matte_kernels::builtin_premultiply_manifest();
+        assert!(
+            !manifest.supports_mask,
+            "Premultiply should have supports_mask=false"
+        );
+        let spec = manifest.to_node_spec().unwrap();
+        assert!(
+            spec.inputs.iter().all(|p| p.name != "mask"),
+            "Premultiply should not have mask port"
+        );
+    }
+
+    #[test]
+    fn test_invert_has_mask_support() {
+        // Invert is a typical node that should support masking
+        let manifest = color_kernels::builtin_invert_manifest();
+        assert!(
+            manifest.supports_mask,
+            "Invert should have supports_mask=true"
+        );
+        let spec = manifest.to_node_spec().unwrap();
+        assert!(
+            spec.inputs.iter().any(|p| p.name == "mask"),
+            "Invert should have mask port"
+        );
     }
 }
