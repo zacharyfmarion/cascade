@@ -7,6 +7,7 @@ import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue, ColorStop } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
 import { linearToHex, hexToLinear, linearToSrgbByte } from './colorUtils';
+import { NativeColorInput } from '../ui/NativeColorInput';
 
 type NodeData = {
   label: string;
@@ -91,7 +92,6 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
   // NEW: Local state for smooth dragging
   const [localStops, setLocalStops] = useState<ColorStop[] | null>(null);
   const displayStops = localStops ?? stops;
-  const pendingLiveSyncRef = useRef<number | null>(null);
 
   const interpValue = params['interpolation'] ?? spec.params.find(p => p.key === 'interpolation')?.default;
   const interpolation = interpValue ? Number(extractParamValue(interpValue)) : 0;
@@ -129,24 +129,6 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     setParam(props.id, 'stops', { ColorRamp: newStops } as ParamValue);
   }, [props.id, setParam]);
 
-  // Throttled sync effect
-  useEffect(() => {
-      if (localStops === null || draggingStopId === null) return;
-      
-      if (pendingLiveSyncRef.current !== null) return;
-      
-      pendingLiveSyncRef.current = requestAnimationFrame(() => {
-          pendingLiveSyncRef.current = null;
-          setParamLive(props.id, 'stops', { ColorRamp: localStops } as ParamValue);
-      });
-      
-      return () => {
-          if (pendingLiveSyncRef.current !== null) {
-              cancelAnimationFrame(pendingLiveSyncRef.current);
-              pendingLiveSyncRef.current = null;
-          }
-      };
-  }, [localStops, draggingStopId, props.id, setParamLive]);
 
   const updateStopsCommit = useCallback((newStops: ColorStop[]) => {
     setParamCommit(props.id, 'stops', { ColorRamp: newStops } as ParamValue);
@@ -196,17 +178,18 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     
     setLocalStops(prev => {
         if (!prev) return prev;
-        // Find index by ID
         const idx = stopIds.indexOf(draggingStopId);
         if (idx === -1) return prev;
 
         const updated = [...prev];
         updated[idx] = { ...updated[idx], position: newPos };
+        // Fire live render directly — scheduleLiveRender already coalesces
+        setParamLive(props.id, 'stops', { ColorRamp: updated } as ParamValue);
         return updated;
     });
     
     justDraggedRef.current = true;
-  }, [draggingStopId, stopIds]);
+  }, [draggingStopId, stopIds, props.id, setParamLive]);
 
   const handleBarPointerUp = useCallback(() => {
     if (draggingStopId !== null) {
@@ -251,10 +234,8 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
     
     const updated: ColorStop[] = [...stops];
     updated[idx] = { ...updated[idx], color: [...hexToLinear(hex), updated[idx].color[3]] as [number, number, number, number] };
-    const value = { ColorRamp: updated } as ParamValue;
-    setParamLive(props.id, 'stops', value);
-    setParamCommit(props.id, 'stops', value);
-  }, [selectedStopId, stopIds, stops, props.id, setParamLive, setParamCommit]);
+    setParamCommit(props.id, 'stops', { ColorRamp: updated } as ParamValue);
+  }, [selectedStopId, stopIds, stops, props.id, setParamCommit]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -341,11 +322,10 @@ export const ColorRampNode: React.FC<NodeProps> = (props) => {
                   background: `rgba(${linearToSrgbByte(selectedStop.color[0])},${linearToSrgbByte(selectedStop.color[1])},${linearToSrgbByte(selectedStop.color[2])},1)`,
                 }}
               />
-              <input
-                type="color"
+              <NativeColorInput
                 value={linearToHex(selectedStop.color[0], selectedStop.color[1], selectedStop.color[2])}
-                onInput={(e) => handleColorInput((e.target as HTMLInputElement).value)}
-                onChange={(e) => handleColorCommit(e.target.value)}
+                onLive={handleColorInput}
+                onCommit={handleColorCommit}
                 className="node-color-swatch__input"
               />
             </div>

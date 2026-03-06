@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { NodeSlider } from './NodeSlider';
 import { linearToSrgbChannel, floatToByte, linearToHex, hexToLinear } from './colorUtils';
+import { NativeColorInput } from '../ui/NativeColorInput';
 
 interface NodeColorPickerProps {
   label: string;
@@ -32,18 +33,13 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
     };
   }, [r, g, b, a]);
 
-  const lastEmittedHexRef = useRef<string>(hexValue);
-
-  const handleColorInput = useCallback((e: React.FormEvent<HTMLInputElement>) => {
-    const hex = (e.target as HTMLInputElement).value;
-    if (hex === lastEmittedHexRef.current) return; // dedup rapid identical events
-    lastEmittedHexRef.current = hex;
+  const handleLive = useCallback((hex: string) => {
     const [nr, ng, nb] = hexToLinear(hex);
     onChange([nr, ng, nb, a]);
   }, [a, onChange]);
 
-  const handleColorCommit = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const [nr, ng, nb] = hexToLinear(e.target.value);
+  const handleCommit = useCallback((hex: string) => {
+    const [nr, ng, nb] = hexToLinear(hex);
     onChangeCommit?.([nr, ng, nb, a]);
   }, [a, onChangeCommit]);
 
@@ -78,11 +74,10 @@ export const NodeColorPicker: React.FC<NodeColorPickerProps> = ({
           overflow: 'hidden',
           ...swatchStyle
         }}>
-          <input
-            type="color"
+          <NativeColorInput
             value={hexValue}
-            onInput={handleColorInput}
-            onChange={handleColorCommit}
+            onLive={handleLive}
+            onCommit={handleCommit}
             style={{
               position: 'absolute',
               top: 0,

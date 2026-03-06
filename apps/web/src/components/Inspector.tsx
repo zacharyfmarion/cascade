@@ -154,6 +154,8 @@ const ParamControl: React.FC<{
             <ColorRampEditor
               stops={stops}
               onChange={(newStops) => onChange(paramSpec.key, { ColorRamp: newStops })}
+              onLive={(newStops) => onLive(paramSpec.key, { ColorRamp: newStops })}
+              onCommit={(newStops) => onCommit(paramSpec.key, { ColorRamp: newStops })}
             />
           </div>
         );

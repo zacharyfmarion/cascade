@@ -349,14 +349,17 @@ export class WasmEngine implements EngineBridge {
         case 'image':
         case 'mask':
         case 'field': {
-          const pixelsArr = data.pixels as number[];
-          if (!pixelsArr || pixelsArr.length === 0) return null;
+          const rawPixels = data.pixels;
+          if (!rawPixels || (rawPixels as ArrayLike<number>).length === 0) return null;
+          const pixels = rawPixels instanceof Uint8ClampedArray
+            ? rawPixels
+            : new Uint8ClampedArray(rawPixels as number[]);
           const r: ViewerResult = {
             type,
             nodeId: viewerNodeId,
             width: data.width as number,
             height: data.height as number,
-            pixels: new Uint8ClampedArray(pixelsArr),
+            pixels,
           };
           return r;
         }

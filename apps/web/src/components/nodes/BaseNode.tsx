@@ -9,6 +9,7 @@ import { NodeSlider } from './NodeSlider';
 import { NodeCheckbox, NodeNumberInput, NodeTextArea } from './NodePrimitives';
 import { linearToSrgbChannel, floatToByte, linearToHex, hexToLinear } from './colorUtils';
 import { useNodeInputDefault } from '../../store/graphStore/nodeDraftStore';
+import { NativeColorInput } from '../ui/NativeColorInput';
 
 interface BaseNodeProps {
   id: string;
@@ -52,31 +53,28 @@ const InlineInputControl: React.FC<{
     const sg = floatToByte(linearToSrgbChannel(g));
     const sb = floatToByte(linearToSrgbChannel(b));
     const hex = linearToHex(r, g, b);
-    
+
     return (
       <div className="nopan nodrag" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
         <div style={{
           position: 'relative',
           width: '14px',
           height: '14px',
-  // eslint-disable-next-line cascade-theme/no-hardcoded-colors
+          // eslint-disable-next-line cascade-theme/no-hardcoded-colors
           backgroundColor: `rgba(${sr}, ${sg}, ${sb}, ${a})`,
           border: '1px solid var(--border-default)',
           borderRadius: '2px',
           overflow: 'hidden',
         }}>
-          <input
-            type="color"
+          <NativeColorInput
             value={hex}
-            onInput={(e) => {
-              const [nr, ng, nb] = hexToLinear((e.target as HTMLInputElement).value);
+            onLive={(newHex) => {
+              const [nr, ng, nb] = hexToLinear(newHex);
               setInputDefaultLive(nodeId, portSpec.name, createParamValue(portSpec.ty, [nr, ng, nb, a]));
             }}
-            onChange={(e) => {
-              const [nr, ng, nb] = hexToLinear(e.target.value);
-              const value = createParamValue(portSpec.ty, [nr, ng, nb, a]);
-              setInputDefaultLive(nodeId, portSpec.name, value);
-              setInputDefaultCommit(nodeId, portSpec.name, value);
+            onCommit={(newHex) => {
+              const [nr, ng, nb] = hexToLinear(newHex);
+              setInputDefaultCommit(nodeId, portSpec.name, createParamValue(portSpec.ty, [nr, ng, nb, a]));
             }}
             style={{
               position: 'absolute',

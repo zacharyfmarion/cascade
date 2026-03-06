@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { linearToHex, hexToLinear, linearToSrgbByte } from './nodes/colorUtils';
+import { NativeColorInput } from './ui/NativeColorInput';
 
 export interface ColorStop {
   position: number;
@@ -8,7 +9,12 @@ export interface ColorStop {
 
 interface ColorRampEditorProps {
   stops: ColorStop[];
+  /** Used for non-interactive changes (add/delete stop, color change). */
   onChange: (stops: ColorStop[]) => void;
+  /** Called on every drag tick during stop position dragging. Falls back to onChange if not provided. */
+  onLive?: (stops: ColorStop[]) => void;
+  /** Called once when drag ends. Falls back to onChange if not provided. */
+  onCommit?: (stops: ColorStop[]) => void;
 }
 
 
@@ -36,7 +42,7 @@ const interpolateColor = (stops: ColorStop[], position: number): [number, number
   return sorted[0].color;
 };
 
-export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChange }) => {
+export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChange, onLive, onCommit }) => {
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -83,11 +89,23 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
     }
   }, [onChange, safeStops]);
 
-  const updateStopPosition = useCallback((index: number, newPos: number) => {
+  const handleStopDragMove = useCallback((index: number, newPos: number) => {
     const updated = [...safeStops];
     updated[index] = { ...updated[index], position: newPos };
-    onChange(updated);
-  }, [safeStops, onChange]);
+    // Use onLive for drag ticks (preview-quality render), fall back to onChange
+    (onLive ?? onChange)(updated);
+  }, [safeStops, onLive, onChange]);
+
+  const handleStopDragEnd = useCallback(() => {
+    if (draggingIndex !== null) {
+      // Fire commit render at full resolution on drag end
+      if (onCommit) {
+        const updated = [...safeStops];
+        onCommit(updated);
+      }
+    }
+    setDraggingIndex(null);
+  }, [draggingIndex, safeStops, onCommit]);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -95,24 +113,20 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
         const rect = barRef.current.getBoundingClientRect();
         const rawPos = (e.clientX - rect.left) / rect.width;
         const newPos = Math.max(0, Math.min(1, rawPos));
-        updateStopPosition(draggingIndex, newPos);
+        handleStopDragMove(draggingIndex, newPos);
       }
-    };
-
-    const handleMouseUp = () => {
-      setDraggingIndex(null);
     };
 
     if (draggingIndex !== null) {
       window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('mouseup', handleStopDragEnd);
     }
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseup', handleStopDragEnd);
     };
-  }, [draggingIndex, updateStopPosition]);
+  }, [draggingIndex, handleStopDragMove, handleStopDragEnd]);
 
   const handleDelete = useCallback(() => {
     if (selectedIndex !== null && safeStops.length > 2) {
@@ -122,11 +136,7 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
     }
   }, [onChange, safeStops, selectedIndex]);
 
-  const lastColorHexRef = useRef<string>('');
-
   const handleColorChange = useCallback((hex: string) => {
-    if (hex === lastColorHexRef.current) return; // dedup rapid identical events
-    lastColorHexRef.current = hex;
     if (selectedIndex !== null) {
       const updated = [...safeStops];
       const oldAlpha = updated[selectedIndex].color[3];
@@ -215,10 +225,9 @@ export const ColorRampEditor: React.FC<ColorRampEditorProps> = ({ stops, onChang
   // eslint-disable-next-line cascade-theme/no-hardcoded-colors
             background: `rgba(${linearToSrgbByte(selectedStop.color[0])}, ${linearToSrgbByte(selectedStop.color[1])}, ${linearToSrgbByte(selectedStop.color[2])}, 1)`
           }}>
-            <input
-              type="color"
+            <NativeColorInput
               value={linearToHex(selectedStop.color[0], selectedStop.color[1], selectedStop.color[2])}
-              onChange={(e) => handleColorChange(e.target.value)}
+              onLive={handleColorChange}
               style={{
                 opacity: 0,
                 position: 'absolute',

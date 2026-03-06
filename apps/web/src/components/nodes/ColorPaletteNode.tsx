@@ -6,6 +6,7 @@ import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { linearToHex, hexToLinear, linearToSrgbByte } from './colorUtils';
+import { NativeColorInput } from '../ui/NativeColorInput';
 
 type NodeData = {
   label: string;
@@ -60,11 +61,8 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
   const handleColorCommit = useCallback((index: number, hex: string) => {
     const updated = [...colors];
     updated[index] = [...hexToLinear(hex), updated[index][3]] as [number, number, number, number];
-    const value = { ColorPalette: updated } as ParamValue;
-    // Ensure pre-commit snapshot exists even if onInput never fired
-    setParamLive(nodeId, 'colors', value);
-    setParamCommit(nodeId, 'colors', value);
-  }, [colors, nodeId, setParamLive, setParamCommit]);
+    setParamCommit(nodeId, 'colors', { ColorPalette: updated } as ParamValue);
+  }, [colors, nodeId, setParamCommit]);
 
   const handleFileSelect = useCallback(() => {
     fileInputRef.current?.click();
@@ -122,11 +120,10 @@ export const ColorPaletteNode: React.FC<NodeProps> = (props) => {
                   outline: 'none',
                 }}
               >
-                <input
-                  type="color"
+                <NativeColorInput
                   value={linearToHex(color[0], color[1], color[2])}
-                  onInput={(e) => handleColorInput(i, (e.target as HTMLInputElement).value)}
-                  onChange={(e) => handleColorCommit(i, e.target.value)}
+                  onLive={(hex) => handleColorInput(i, hex)}
+                  onCommit={(hex) => handleColorCommit(i, hex)}
                   style={{
                     position: 'absolute',
                     top: 0,

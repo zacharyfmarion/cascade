@@ -122,7 +122,6 @@ class EngineScheduler {
     this.liveInFlight = true;
     // Chain onto the FIFO so live ops don't overlap with normal ops
     const task = this.chain.then(op);
-    console.log(`[WORKER-DIAG] runLive chained onto scheduler, waiting for chain...`);
     this.chain = task.then(() => undefined, () => undefined);
     task.then(
       (result) => {
@@ -308,8 +307,6 @@ const engineAPI = {
   setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number, previewScale?: number): Promise<Array<[string, ViewerResult]>> {
     const scale = previewScale ?? 1;
     return scheduler.enqueueLive(async (): Promise<Array<[string, ViewerResult]>> => {
-      const workerStart = performance.now();
-      console.log(`[WORKER-DIAG] setAndRender started at ${workerStart.toFixed(1)}ms`);
       const eng = getEngine();
       const raw = paramValueToWasm(mutation.value);
 
@@ -325,13 +322,11 @@ const engineAPI = {
       const results: Array<[string, ViewerResult]> = [];
 
       for (const viewerId of viewerIds) {
-        const rvStart = performance.now();
         const eng2 = getEngineWithBindings();
         const useScaled = scale < 1 && typeof eng2.render_viewer_scaled === 'function';
         const rawResult = useScaled
           ? await eng2.render_viewer_scaled(viewerId, BigInt(frame), scale)
           : await eng.render_viewer(viewerId, BigInt(frame));
-        console.log(`[WORKER-DIAG] render_viewer(${viewerId}) took ${(performance.now() - rvStart).toFixed(1)}ms`);
         if (!rawResult || typeof rawResult !== 'object') continue;
 
         // Extract timings
@@ -357,9 +352,12 @@ const engineAPI = {
           case 'image':
           case 'mask':
           case 'field': {
-            const pixelsArr = data.pixels as number[];
-            if (!pixelsArr || pixelsArr.length === 0) continue;
-            const pixels = new Uint8ClampedArray(pixelsArr);
+            const rawPixels = data.pixels;
+            if (!rawPixels || (rawPixels as ArrayLike<number>).length === 0) continue;
+            // pixels may be Uint8ClampedArray (fast path) or number[] (serde fallback)
+            const pixels = rawPixels instanceof Uint8ClampedArray
+              ? rawPixels
+              : new Uint8ClampedArray(rawPixels as number[]);
             results.push([viewerId, {
               type: type as 'image' | 'mask' | 'field',
               nodeId: viewerId,
@@ -395,7 +393,6 @@ const engineAPI = {
           transferables.push(r.pixels.buffer as ArrayBuffer);
         }
       }
-      console.log(`[WORKER-DIAG] setAndRender total: ${(performance.now() - workerStart).toFixed(1)}ms, ${results.length} viewers`);
       if (transferables.length > 0) {
         return Comlink.transfer(results, transferables);
       }
@@ -458,9 +455,11 @@ const engineAPI = {
         case 'image':
         case 'mask':
         case 'field': {
-          const pixelsArr = data.pixels as number[];
-          if (!pixelsArr || pixelsArr.length === 0) return null;
-          const pixels = new Uint8ClampedArray(pixelsArr);
+          const rawPixels = data.pixels;
+          if (!rawPixels || (rawPixels as ArrayLike<number>).length === 0) return null;
+          const pixels = rawPixels instanceof Uint8ClampedArray
+            ? rawPixels
+            : new Uint8ClampedArray(rawPixels as number[]);
           const r = {
             type: type as 'image' | 'mask' | 'field',
             nodeId: viewerNodeId,

@@ -915,7 +915,7 @@ impl Engine {
                 value_type: "none".to_string(),
             },
         };
-        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+        result.into_js()
     }
 
     /// Rasterize a field to pixels at the given dimensions.
@@ -1040,7 +1040,7 @@ impl Engine {
                 value_type: "none".to_string(),
             },
         };
-        serde_wasm_bindgen::to_value(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+        result.into_js()
     }
 
     pub fn get_last_render_timings(&self) -> Result<JsValue, JsValue> {
@@ -2653,6 +2653,27 @@ enum ViewerResultWasm {
         #[serde(rename = "type")]
         value_type: String,
     },
+}
+
+impl ViewerResultWasm {
+    /// Convert to JsValue, using Uint8ClampedArray for pixel data to avoid
+    /// the ~250ms serde overhead of serializing millions of bytes individually.
+    fn into_js(self) -> Result<JsValue, JsValue> {
+        match self {
+            ViewerResultWasm::Pixels { value_type, width, height, pixels } => {
+                let obj = js_sys::Object::new();
+                js_sys::Reflect::set(&obj, &"type".into(), &value_type.into())?;
+                js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
+                js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                // Use Uint8ClampedArray for zero-copy pixel transfer
+                let arr = js_sys::Uint8ClampedArray::from(pixels.as_slice());
+                js_sys::Reflect::set(&obj, &"pixels".into(), &arr)?;
+                Ok(obj.into())
+            }
+            other => serde_wasm_bindgen::to_value(&other)
+                .map_err(|e| JsValue::from_str(&e.to_string())),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
