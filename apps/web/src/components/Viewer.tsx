@@ -302,10 +302,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
   const dimensions = useMemo(() => {
     if (!activeResult || !isPixelResult(activeResult)) return null;
-    const scale = activeResult.previewScale ?? 1;
     return {
-      w: Math.max(1, Math.round(activeResult.width / scale)),
-      h: Math.max(1, Math.round(activeResult.height / scale)),
+      w: activeResult.originalWidth ?? activeResult.width,
+      h: activeResult.originalHeight ?? activeResult.height,
     };
   }, [activeResult]);
 
@@ -317,8 +316,10 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
     const previewScale = activeResult.previewScale ?? 1;
     previewScaleRef.current = previewScale;
-    const logicalWidth = Math.max(1, Math.round(activeResult.width / previewScale));
-    const logicalHeight = Math.max(1, Math.round(activeResult.height / previewScale));
+    // Use original (pre-downscale) dimensions so the canvas size and
+    // dimsChanged check are immune to preview-scale rounding errors.
+    const logicalWidth = activeResult.originalWidth ?? activeResult.width;
+    const logicalHeight = activeResult.originalHeight ?? activeResult.height;
     const prevDimensions = dimensionsRef.current;
 
     // Keep canvas at logical (full-res) dimensions so TransformWrapper
@@ -374,6 +375,14 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
     if (dimsChanged) {
       setTimeout(() => transformRef.current?.centerView(computeFitScale(), 0), 0);
+    } else if (transformRef.current?.state) {
+      // Preserve zoom/pan when only pixel content changed (e.g. preview render).
+      // The library's internal ResizeObserver may call handleAlignToBounds
+      // which resets the transform — restore it on the next frame.
+      const { positionX, positionY, scale } = transformRef.current.state;
+      requestAnimationFrame(() => {
+        transformRef.current?.setTransform(positionX, positionY, scale, 0);
+      });
     }
   }, [activeResult, computeFitScale, activeChannel, gain, gamma]);
 

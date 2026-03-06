@@ -140,6 +140,8 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
     height: targetHeight,
     pixels: scaledImage.data,
     previewScale: scale,
+    originalWidth: result.originalWidth ?? result.width,
+    originalHeight: result.originalHeight ?? result.height,
   };
 };
 

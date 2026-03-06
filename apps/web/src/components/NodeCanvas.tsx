@@ -52,6 +52,7 @@ const SPECIAL_NODE_TYPES: NodeTypes = {
   export_video: ExportVideoNode,
   export_image_batch: ExportImageBatchNode,
   color_ramp: ColorRampNode,
+  'gpu_kernel::color_ramp': ColorRampNode,
   color_palette: ColorPaletteNode,
   curves: CurvesNode,
   group_input: GroupInputNode,

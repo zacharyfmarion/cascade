@@ -124,9 +124,9 @@ export interface Connection {
 
 // Render result from engine — discriminated union over all value types
 export type ViewerResult =
-  | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
-  | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
-  | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
+  | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
+  | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
+  | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
   | { type: 'float'; nodeId: string; value: number }
   | { type: 'int'; nodeId: string; value: number }
   | { type: 'bool'; nodeId: string; value: boolean }
