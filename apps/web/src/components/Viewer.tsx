@@ -321,9 +321,11 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const logicalHeight = Math.max(1, Math.round(activeResult.height / previewScale));
     const prevDimensions = dimensionsRef.current;
 
-    if (canvas.width !== activeResult.width || canvas.height !== activeResult.height) {
-      canvas.width = activeResult.width;
-      canvas.height = activeResult.height;
+    // Keep canvas at logical (full-res) dimensions so TransformWrapper
+    // never sees a size change when preview scale varies.
+    if (canvas.width !== logicalWidth || canvas.height !== logicalHeight) {
+      canvas.width = logicalWidth;
+      canvas.height = logicalHeight;
       imageDataRef.current = null;
     }
 
@@ -333,20 +335,38 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let imgData = imageDataRef.current;
-    if (!imgData || imgData.width !== activeResult.width || imgData.height !== activeResult.height) {
-      imgData = new ImageData(activeResult.width, activeResult.height);
-      imageDataRef.current = imgData;
-    }
-
     // Apply display-only transforms (channel isolation, gain, gamma)
     const transformed = applyViewerTransforms(activeResult.pixels, {
       channel: activeChannel,
       gain,
       gamma,
     });
-    imgData.data.set(transformed);
-    ctx.putImageData(imgData, 0, 0);
+
+    if (previewScale < 1) {
+      // Downscaled preview: draw pixel data onto a temporary canvas at the
+      // actual (small) resolution, then stretch it up to the logical canvas.
+      const offscreen = document.createElement('canvas');
+      offscreen.width = activeResult.width;
+      offscreen.height = activeResult.height;
+      const offCtx = offscreen.getContext('2d');
+      if (offCtx) {
+        const imgData = new ImageData(activeResult.width, activeResult.height);
+        imgData.data.set(transformed);
+        offCtx.putImageData(imgData, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        ctx.clearRect(0, 0, logicalWidth, logicalHeight);
+        ctx.drawImage(offscreen, 0, 0, logicalWidth, logicalHeight);
+      }
+    } else {
+      // Full resolution: write pixels directly
+      let imgData = imageDataRef.current;
+      if (!imgData || imgData.width !== logicalWidth || imgData.height !== logicalHeight) {
+        imgData = new ImageData(logicalWidth, logicalHeight);
+        imageDataRef.current = imgData;
+      }
+      imgData.data.set(transformed);
+      ctx.putImageData(imgData, 0, 0);
+    }
 
     canvas.style.width = `${logicalWidth}px`;
     canvas.style.height = `${logicalHeight}px`;
@@ -410,23 +430,27 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       if (!canvas) return;
 
       // Get canvas bounding rect to convert screen → canvas coords
+      // Canvas is always at logical dimensions, so these coords are logical pixels.
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
       const scaleY = canvas.height / rect.height;
       const px = Math.floor((e.clientX - rect.left) * scaleX);
       const py = Math.floor((e.clientY - rect.top) * scaleY);
 
-      // Check bounds
+      // Check bounds (logical dimensions)
       if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) {
         setPixelInfo(null);
         return;
       }
 
-      // Read from ORIGINAL pixels (not display-transformed)
-      const idx = (py * canvas.width + px) * 4;
+      // Map logical coords to the actual pixel buffer coords
+      const previewScale = activeResult.previewScale ?? 1;
+      const bufX = Math.min(Math.floor(px * previewScale), activeResult.width - 1);
+      const bufY = Math.min(Math.floor(py * previewScale), activeResult.height - 1);
+      const idx = (bufY * activeResult.width + bufX) * 4;
       setPixelInfo({
-        x: Math.floor(px / (activeResult.previewScale ?? 1)),
-        y: Math.floor(py / (activeResult.previewScale ?? 1)),
+        x: px,
+        y: py,
         r: activeResult.pixels[idx],
         g: activeResult.pixels[idx + 1],
         b: activeResult.pixels[idx + 2],
