@@ -96,20 +96,20 @@ describe('graphStore node CRUD', () => {
   });
 
   it('addNode returns the node id', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     expect(id.length).toBeGreaterThan(0);
     expect(useGraphStore.getState().nodes.has(id)).toBe(true);
   });
 
   it('addNode populates default params for multi-param nodes', async () => {
-    const id = await useGraphStore.getState().addNode('brightness_contrast', { x: 1, y: 2 });
+    const id = await useGraphStore.getState().addNode('gaussian_blur', { x: 1, y: 2 });
     const node = useGraphStore.getState().nodes.get(id);
-    expect(node?.params.brightness).toEqual({ Float: 0 } as ParamValue);
-    expect(node?.params.contrast).toEqual({ Float: 0 } as ParamValue);
+    expect(node?.params.amount).toEqual({ Float: 0.5 } as ParamValue);
+    expect(node?.params.radius).toEqual({ Float: 1.0 } as ParamValue);
   });
 
   it('removeNode deletes the node from the map', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     await useGraphStore.getState().removeNode(id);
     expect(useGraphStore.getState().nodes.has(id)).toBe(false);
   });
@@ -124,7 +124,7 @@ describe('graphStore node CRUD', () => {
   });
 
   it('removeNode removes node from selection', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().selectNode(id);
     await useGraphStore.getState().removeNode(id);
     expect(useGraphStore.getState().selectedNodeIds.has(id)).toBe(false);
@@ -183,20 +183,20 @@ describe('graphStore connections', () => {
 
 describe('graphStore parameters and positioning', () => {
   it('setParam updates the node param value', async () => {
-    const id = await useGraphStore.getState().addNode('brightness_contrast', { x: 0, y: 0 });
-    await useGraphStore.getState().setParam(id, 'brightness', { Float: 0.5 });
-    expect(useGraphStore.getState().nodes.get(id)?.params.brightness).toEqual({ Float: 0.5 } as ParamValue);
+    const id = await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    await useGraphStore.getState().setParam(id, 'amount', { Float: 0.5 });
+    expect(useGraphStore.getState().nodes.get(id)?.params.amount).toEqual({ Float: 0.5 } as ParamValue);
   });
 
   it('setParam calls engine.setParam', async () => {
-    const id = await useGraphStore.getState().addNode('brightness_contrast', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
     const spy = vi.spyOn(mockEngine, 'setParam');
-    await useGraphStore.getState().setParam(id, 'brightness', { Float: 0.2 });
-    expect(spy).toHaveBeenCalledWith(id, 'brightness', { Float: 0.2 });
+    await useGraphStore.getState().setParam(id, 'amount', { Float: 0.2 });
+    expect(spy).toHaveBeenCalledWith(id, 'amount', { Float: 0.2 });
   });
 
   it('setPosition updates the node position', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().setPosition(id, { x: 5, y: 6 });
     expect(useGraphStore.getState().nodes.get(id)?.position).toEqual({ x: 5, y: 6 });
   });
@@ -224,20 +224,20 @@ describe('graphStore input defaults', () => {
 
 describe('graphStore selection', () => {
   it('selectNode sets selectedNodeIds to single id', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().selectNode(id);
     expect(useGraphStore.getState().selectedNodeIds).toEqual(new Set([id]));
   });
 
   it('selectNode with null clears selection', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().selectNode(id);
     useGraphStore.getState().selectNode(null);
     expect(useGraphStore.getState().selectedNodeIds.size).toBe(0);
   });
 
   it('setSelectedNodes sets multiple ids', async () => {
-    const id1 = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id1 = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     const id2 = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
     useGraphStore.getState().setSelectedNodes([id1, id2]);
     expect(useGraphStore.getState().selectedNodeIds).toEqual(new Set([id1, id2]));
@@ -246,19 +246,19 @@ describe('graphStore selection', () => {
 
 describe('graphStore undo/redo', () => {
   it('after addNode, canUndo is true', async () => {
-    await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     expect(useGraphStore.getState().canUndo).toBe(true);
   });
 
   it('undo removes the node', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().undo();
     await flushPromises(2);
     expect(useGraphStore.getState().nodes.has(id)).toBe(false);
   });
 
   it('redo restores the node after undo', async () => {
-    const id = await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    const id = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().undo();
     await flushPromises(2);
     useGraphStore.getState().redo();
@@ -279,7 +279,7 @@ describe('graphStore undo/redo', () => {
   });
 
   it('new mutation after undo clears redo stack', async () => {
-    await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     useGraphStore.getState().undo();
     await flushPromises(2);
     await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
@@ -287,7 +287,7 @@ describe('graphStore undo/redo', () => {
   });
 
   it('dirty flag is set on mutations', async () => {
-    await useGraphStore.getState().addNode('invert', { x: 0, y: 0 });
+    await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
     expect(useGraphStore.getState().dirty).toBe(true);
   });
 });
@@ -382,7 +382,7 @@ describe('graphStore helper behaviors', () => {
     cascade: { format_version: '1.0.0' },
       graph: {
         nodes: [
-          { id: 'n1', type_id: 'brightness_contrast', position: [1, 2], params: { brightness: { Float: 0.25 } } },
+          { id: 'n1', type_id: 'gaussian_blur', position: [1, 2], params: { amount: { Float: 0.25 } } },
         ],
         connections: [],
       },
@@ -391,8 +391,8 @@ describe('graphStore helper behaviors', () => {
     useGraphStore.getState().loadProject(file);
     await flushPromises(2);
     const node = useGraphStore.getState().nodes.get('n1');
-    expect(node?.params.brightness).toEqual({ Float: 0.25 } as ParamValue);
-    expect(node?.params.contrast).toEqual({ Float: 0 } as ParamValue);
+    expect(node?.params.amount).toEqual({ Float: 0.25 } as ParamValue);
+    expect(node?.params.radius).toEqual({ Float: 1.0 } as ParamValue);
   });
 
   it('extractGraphData handles bare graph format', async () => {
@@ -415,7 +415,7 @@ describe('graphStore helper behaviors', () => {
       groupDefId: 'group::test',
       name: 'Test Group',
       nodes: [
-        { id: 'inner-1', typeId: 'invert', position: { x: 0, y: 0 }, params: {}, inputDefaults: {} },
+        { id: 'inner-1', typeId: 'curves', position: { x: 0, y: 0 }, params: {}, inputDefaults: {} },
       ],
       connections: [],
       inputs: [{ name: 'in', label: 'In', ty: 'Image' }],
@@ -508,7 +508,7 @@ describe('graphStore error states', () => {
     const store = mod.useGraphStore;
     store.setState(createInitialState());
     resetNodeCounter();
-    await expect(store.getState().addNode('invert', { x: 0, y: 0 })).rejects.toThrow('Engine not initialized');
+    await expect(store.getState().addNode('curves', { x: 0, y: 0 })).rejects.toThrow('Engine not initialized');
   });
 
   it('renderVideo sets error when engine does not support it', async () => {

@@ -175,20 +175,20 @@ describe('differ', () => {
   });
 
   it('updates multiple params when both changed', () => {
-    const oldNode = makeNode('a', 'BrightnessContrast', 'brightness_contrast', {
-      brightness: { type: 'float', value: 0 },
-      contrast: { type: 'float', value: 0 },
+    const oldNode = makeNode('a', 'GaussianBlur', 'gaussian_blur', {
+      amount: { type: 'float', value: 0 },
+      radius: { type: 'float', value: 0 },
     });
-    const newNode = makeNode('a', 'BrightnessContrast', 'brightness_contrast', {
-      brightness: { type: 'float', value: 0.2 },
-      contrast: { type: 'float', value: -0.3 },
+    const newNode = makeNode('a', 'GaussianBlur', 'gaussian_blur', {
+      amount: { type: 'float', value: 0.2 },
+      radius: { type: 'float', value: 0.3 },
     });
     const mutations = diffAst(makeAst([oldNode], []), makeAst([newNode], []));
 
     expect(mutations).toHaveLength(2);
     expect(mutations).toEqual([
-      { type: 'setParam', handle: 'a', paramKey: 'brightness', value: { type: 'float', value: 0.2 } },
-      { type: 'setParam', handle: 'a', paramKey: 'contrast', value: { type: 'float', value: -0.3 } },
+      { type: 'setParam', handle: 'a', paramKey: 'amount', value: { type: 'float', value: 0.2 } },
+      { type: 'setParam', handle: 'a', paramKey: 'radius', value: { type: 'float', value: 0.3 } },
     ]);
   });
 
@@ -297,7 +297,7 @@ describe('differ', () => {
       toPort: 'image',
       line: 1,
     };
-    const dNew = makeNode('d', 'Invert', 'invert');
+    const dNew = makeNode('d', 'Curves', 'curves');
     const newConn: DslConnection = {
       fromHandle: 'a',
       fromPort: 'image',

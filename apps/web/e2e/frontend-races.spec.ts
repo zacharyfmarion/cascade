@@ -10,7 +10,7 @@ test.describe('Race condition resilience', () => {
   test('rapid undo/redo produces consistent state', async ({ page }) => {
     // Build a chain: solid_color -> brightness_contrast -> viewer
     const solidId = await harness(page, 'addNode', 'solid_color');
-    const bcId = await harness(page, 'addNode', 'brightness_contrast');
+    const bcId = await harness(page, 'addNode', 'gaussian_blur');
     const viewerId = await harness(page, 'addNode', 'viewer');
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
@@ -19,7 +19,7 @@ test.describe('Race condition resilience', () => {
     // Make 5 distinct param changes, each creating an undo entry
     const values = [0.1, 0.2, 0.3, 0.4, 0.5];
     for (const v of values) {
-      await harness(page, 'setParam', bcId, 'brightness', { Float: v });
+      await harness(page, 'setParam', bcId, 'amount', { Float: v });
       await harness(page, 'waitForRenderIdle');
     }
 
@@ -64,7 +64,7 @@ test.describe('Race condition resilience', () => {
     page,
   }) => {
     const solidId = await harness(page, 'addNode', 'solid_color');
-    const bcId = await harness(page, 'addNode', 'brightness_contrast');
+    const bcId = await harness(page, 'addNode', 'gaussian_blur');
     const viewerId = await harness(page, 'addNode', 'viewer');
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
@@ -73,13 +73,13 @@ test.describe('Race condition resilience', () => {
     // Simulate a rapid slider drag: setParamLive many times, then commit
     // Before the fix, the undo snapshot could have incomplete engineState/imageData
     for (let i = 0; i < 10; i++) {
-      await harness(page, 'setParamLive', bcId, 'brightness', {
+      await harness(page, 'setParamLive', bcId, 'amount', {
         Float: i * 0.1,
       });
     }
 
     // Commit immediately — this should await the pending snapshot promises
-    await harness(page, 'setParamCommit', bcId, 'brightness', { Float: 0.9 });
+    await harness(page, 'setParamCommit', bcId, 'amount', { Float: 0.9 });
     await harness(page, 'waitForRenderIdle');
 
     const stateAfterCommit = await harness(page, 'getState');
@@ -104,18 +104,18 @@ test.describe('Race condition resilience', () => {
     page,
   }) => {
     const solidId = await harness(page, 'addNode', 'solid_color');
-    const bcId = await harness(page, 'addNode', 'brightness_contrast');
+    const bcId = await harness(page, 'addNode', 'gaussian_blur');
     const viewerId = await harness(page, 'addNode', 'viewer');
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
     // Set brightness to different values
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.3 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.3 });
     await harness(page, 'waitForRenderIdle');
     const result1 = await harness(page, 'getViewerResult', viewerId);
 
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.7 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.7 });
     await harness(page, 'waitForRenderIdle');
     const result2 = await harness(page, 'getViewerResult', viewerId);
 
@@ -137,18 +137,18 @@ test.describe('Race condition resilience', () => {
 
   test('interleaved undo/redo does not corrupt stacks', async ({ page }) => {
     const solidId = await harness(page, 'addNode', 'solid_color');
-    const bcId = await harness(page, 'addNode', 'brightness_contrast');
+    const bcId = await harness(page, 'addNode', 'gaussian_blur');
     const viewerId = await harness(page, 'addNode', 'viewer');
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
     // Create 3 undo entries
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.2 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.2 });
     await harness(page, 'waitForRenderIdle');
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.5 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.5 });
     await harness(page, 'waitForRenderIdle');
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.8 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.8 });
     await harness(page, 'waitForRenderIdle');
 
     // Undo 2, redo 1, undo 1 — interleaved pattern
@@ -180,14 +180,14 @@ test.describe('Race condition resilience', () => {
     page,
   }) => {
     const solidId = await harness(page, 'addNode', 'solid_color');
-    const bcId = await harness(page, 'addNode', 'brightness_contrast');
+    const bcId = await harness(page, 'addNode', 'gaussian_blur');
     const viewerId = await harness(page, 'addNode', 'viewer');
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
 
     // Start a live param drag
-    await harness(page, 'setParamLive', bcId, 'brightness', { Float: 0.5 });
+    await harness(page, 'setParamLive', bcId, 'amount', { Float: 0.5 });
 
     // Delete the node mid-drag (edge case)
     await harness(page, 'selectNode', bcId);

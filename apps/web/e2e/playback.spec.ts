@@ -74,7 +74,7 @@ test.describe('Playback and rendering', () => {
 
   test('setParam during playback does not crash', async ({ page }) => {
     const solidId = (await harness(page, 'addNode', 'solid_color')) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast')) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur')) as string;
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
 
     // Start playback (no viewer, so no WASM render blocking)
@@ -86,7 +86,7 @@ test.describe('Playback and rendering', () => {
     await page.evaluate(
       ({ bcId }) => {
         const h = (window as unknown as HarnessWindow).__cascadeTest;
-        h.setParam(bcId, 'brightness', { Float: 0.25 });
+        h.setParam(bcId, 'amount', { Float: 0.25 });
       },
       { bcId },
     );

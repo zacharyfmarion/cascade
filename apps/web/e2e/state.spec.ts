@@ -38,7 +38,7 @@ test.describe('Selection state', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const invertId = (await harness(page, 'addNode', 'invert', { x: 300, y: 100 })) as string;
+    const invertId = (await harness(page, 'addNode', 'curves', { x: 300, y: 100 })) as string;
     await harness(page, 'setSelectedNodes', [solidId, invertId]);
 
     const selectedInitial = (await harness(page, 'getSelectedNodes')) as string[];
@@ -48,7 +48,7 @@ test.describe('Selection state', () => {
       type: 'color',
       value: [0.2, 0.4, 0.6, 1.0],
     });
-    await harness(page, 'addNode', 'brightness_contrast', { x: 500, y: 100 });
+    await harness(page, 'addNode', 'gaussian_blur', { x: 500, y: 100 });
 
     const selectedAfter = (await harness(page, 'getSelectedNodes')) as string[];
     expect(selectedAfter).toEqual([solidId, invertId]);

@@ -95,16 +95,16 @@ beforeEach(async () => {
 // ---------------------------------------------------------------------------
 // Helper: build a two-branch graph for viewer invalidation tests
 //
-//   load_image ──► brightness ──► viewer1
+//   load_image ──► gaussian_blur ──► viewer1
 //   load_image ──► invert ──────► viewer2
 // ---------------------------------------------------------------------------
 async function buildTwoBranchGraph() {
   const s = useGraphStore.getState();
   const img1 = await s.addNode('load_image', { x: 0, y: 0 });
-  const bright = await s.addNode('brightness_contrast', { x: 200, y: 0 });
+  const bright = await s.addNode('gaussian_blur', { x: 200, y: 0 });
   const viewer1 = await s.addNode('viewer', { x: 400, y: 0 });
   const img2 = await s.addNode('load_image', { x: 0, y: 200 });
-  const inv = await s.addNode('invert', { x: 200, y: 200 });
+  const inv = await s.addNode('curves', { x: 200, y: 200 });
   const viewer2 = await s.addNode('viewer', { x: 400, y: 200 });
 
   await s.connect(img1, 'image', bright, 'image');
@@ -121,12 +121,12 @@ async function buildTwoBranchGraph() {
 describe('Rendering contracts', () => {
   it('setParam triggers a render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
 
     mockEngine._clearRenderCalls();
-    await s.setParam(bright, 'brightness', { Float: 0.5 });
+    await s.setParam(bright, 'amount', { Float: 0.5 });
     await flushPromises(5);
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
@@ -134,7 +134,7 @@ describe('Rendering contracts', () => {
 
   it('connect triggers a render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
 
     mockEngine._clearRenderCalls();
@@ -146,7 +146,7 @@ describe('Rendering contracts', () => {
 
   it('disconnect triggers a render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
 
@@ -161,7 +161,7 @@ describe('Rendering contracts', () => {
 
   it('setInputDefault triggers a render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
 
@@ -191,7 +191,7 @@ describe('Selective viewer invalidation contracts', () => {
     await flushPromises(3);
 
     mockEngine._clearRenderCalls();
-    await useGraphStore.getState().setParam(bright, 'brightness', { Float: 0.8 });
+    await useGraphStore.getState().setParam(bright, 'amount', { Float: 0.8 });
     await flushPromises(5);
 
     expect(mockEngine._renderCalls).toContain(viewer1);
@@ -213,7 +213,7 @@ describe('Selective viewer invalidation contracts', () => {
   it('connect on branch A renders only viewer on branch A', async () => {
     const s = useGraphStore.getState();
     const img1 = await s.addNode('load_image', { x: 0, y: 0 });
-    const bright = await s.addNode('brightness_contrast', { x: 200, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 200, y: 0 });
     const viewer1 = await s.addNode('viewer', { x: 400, y: 0 });
     const img2 = await s.addNode('load_image', { x: 0, y: 200 });
     const viewer2 = await s.addNode('viewer', { x: 400, y: 200 });
@@ -268,7 +268,7 @@ describe('Selective viewer invalidation contracts', () => {
     delete (mockEngine as any).getAffectedViewers;
 
     mockEngine._clearRenderCalls();
-    await useGraphStore.getState().setParam(bright, 'brightness', { Float: 0.8 });
+    await useGraphStore.getState().setParam(bright, 'amount', { Float: 0.8 });
     await flushPromises(5);
 
     // Should fall back to rendering ALL viewers
@@ -281,7 +281,7 @@ describe('Frame and selection contracts', () => {
   it('frameSelectedNodes creates a frame that bounds selected nodes', async () => {
     const s = useGraphStore.getState();
     const nodeA = await s.addNode('load_image', { x: 100, y: 200 });
-    const nodeB = await s.addNode('brightness_contrast', { x: 400, y: 300 });
+    const nodeB = await s.addNode('gaussian_blur', { x: 400, y: 300 });
 
     s.setSelectedNodes([nodeA, nodeB]);
 
@@ -329,8 +329,8 @@ describe('Render suspension contracts', () => {
     mockEngine._clearRenderCalls();
     await useGraphStore.getState().editTransaction({ origin: 'ui' }, async () => {
       const s = useGraphStore.getState();
-      await s.setParam(bright, 'brightness', { Float: 0.1 });
-      await s.setParam(bright, 'contrast', { Float: 0.9 });
+      await s.setParam(bright, 'amount', { Float: 0.1 });
+      await s.setParam(bright, 'radius', { Float: 0.9 });
     });
     await flushPromises(5);
 
@@ -353,8 +353,8 @@ describe('Render suspension contracts', () => {
     let rendersDuringTransaction = 0;
     await useGraphStore.getState().editTransaction({ origin: 'ui' }, async () => {
       const s = useGraphStore.getState();
-      await s.setParam(bright, 'brightness', { Float: 0.1 });
-      await s.setParam(bright, 'contrast', { Float: 0.9 });
+      await s.setParam(bright, 'amount', { Float: 0.1 });
+      await s.setParam(bright, 'radius', { Float: 0.9 });
       rendersDuringTransaction = mockEngine._renderCalls.length;
     });
     await flushPromises(5);
@@ -373,14 +373,14 @@ describe('Render suspension contracts', () => {
 describe('Cross-action sequence contracts', () => {
   it('undo after setParam restores param value and triggers render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
 
     // Set initial value (creates undo snapshot)
-    await s.setParam(bright, 'brightness', { Float: 0.5 });
+    await s.setParam(bright, 'amount', { Float: 0.5 });
     await flushPromises(3);
 
     // Change it again
-    await s.setParam(bright, 'brightness', { Float: 0.9 });
+    await s.setParam(bright, 'amount', { Float: 0.9 });
     await flushPromises(3);
 
     // Current behavior: undo does not restore param values due to shared snapshot references.
@@ -389,14 +389,14 @@ describe('Cross-action sequence contracts', () => {
     await flushPromises(5);
 
     const node = useGraphStore.getState().nodes.get(bright);
-    expect(node?.params.brightness).toEqual({ Float: 0.9 });
+    expect(node?.params.amount).toEqual({ Float: 0.9 });
     // Current behavior: undo does not trigger a render.
     expect(mockEngine._renderCalls.length).toBe(0);
   });
 
   it('undo after connect removes connection and triggers render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
 
     await s.connect(bright, 'image', viewer, 'image');
@@ -414,11 +414,11 @@ describe('Cross-action sequence contracts', () => {
 
   it('redo after undo restores state and triggers render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
 
-    await s.setParam(bright, 'brightness', { Float: 0.5 });
+    await s.setParam(bright, 'amount', { Float: 0.5 });
     await flushPromises(3);
-    await s.setParam(bright, 'brightness', { Float: 0.9 });
+    await s.setParam(bright, 'amount', { Float: 0.9 });
     await flushPromises(3);
 
     s.undo();
@@ -429,14 +429,14 @@ describe('Cross-action sequence contracts', () => {
     await flushPromises(5);
 
     const node = useGraphStore.getState().nodes.get(bright);
-    expect(node?.params.brightness).toEqual({ Float: 0.9 });
+    expect(node?.params.amount).toEqual({ Float: 0.9 });
     // Current behavior: redo restores state without triggering a render.
     expect(mockEngine._renderCalls.length).toBe(0);
   });
 
   it('connect then disconnect then undo restores the connection', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
 
     await s.connect(bright, 'image', viewer, 'image');
@@ -487,7 +487,7 @@ describe('Node lifecycle contracts', () => {
 
   it('removing a connected node disconnects edges and triggers render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
     await flushPromises(3);
@@ -575,14 +575,14 @@ describe('Dirty flag contracts', () => {
     const s = useGraphStore.getState();
     expect(s.dirty).toBe(false);
 
-    await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    await s.addNode('gaussian_blur', { x: 0, y: 0 });
     expect(useGraphStore.getState().dirty).toBe(true);
   });
 
   it('undo preserves dirty flag (project was modified)', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
-    await s.setParam(bright, 'brightness', { Float: 0.5 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
+    await s.setParam(bright, 'amount', { Float: 0.5 });
 
     s.undo();
     // Still dirty because we added a node before
@@ -591,7 +591,7 @@ describe('Dirty flag contracts', () => {
 
   it('newProject resets dirty flag', async () => {
     const s = useGraphStore.getState();
-    await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    await s.addNode('gaussian_blur', { x: 0, y: 0 });
     expect(useGraphStore.getState().dirty).toBe(true);
 
     await s.newProject();
@@ -602,13 +602,13 @@ describe('Dirty flag contracts', () => {
 describe('setParamLive / setParamCommit contracts', () => {
   it('setParamLive triggers a render', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
     await flushPromises(3);
 
     mockEngine._clearRenderCalls();
-    await s.setParamLive(bright, 'brightness', { Float: 0.5 });
+    await s.setParamLive(bright, 'amount', { Float: 0.5 });
     await flushPromises(5);
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
@@ -616,16 +616,16 @@ describe('setParamLive / setParamCommit contracts', () => {
 
   it('setParamCommit after live edits triggers render and creates undo snapshot', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
     await flushPromises(3);
 
-    await s.setParamLive(bright, 'brightness', { Float: 0.2 });
+    await s.setParamLive(bright, 'amount', { Float: 0.2 });
     await flushPromises(3);
 
     mockEngine._clearRenderCalls();
-    await s.setParamCommit(bright, 'brightness', { Float: 0.2 });
+    await s.setParamCommit(bright, 'amount', { Float: 0.2 });
     await flushPromises(5);
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
@@ -634,16 +634,16 @@ describe('setParamLive / setParamCommit contracts', () => {
 
   it('multiple setParamLive calls before commit create a single undo entry', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
     await flushPromises(3);
 
-    await s.setParamLive(bright, 'brightness', { Float: 0.1 });
-    await s.setParamLive(bright, 'brightness', { Float: 0.4 });
-    await s.setParamLive(bright, 'brightness', { Float: 0.7 });
+    await s.setParamLive(bright, 'amount', { Float: 0.1 });
+    await s.setParamLive(bright, 'amount', { Float: 0.4 });
+    await s.setParamLive(bright, 'amount', { Float: 0.7 });
     await flushPromises(3);
-    await s.setParamCommit(bright, 'brightness', { Float: 0.7 });
+    await s.setParamCommit(bright, 'amount', { Float: 0.7 });
     await flushPromises(5);
 
     s.undo();
@@ -652,7 +652,7 @@ describe('setParamLive / setParamCommit contracts', () => {
     // After undo, the param should revert to the state before setParamLive started
     const node = useGraphStore.getState().nodes.get(bright);
     // preCommitSnapshot may capture state at different points — verify it differs from committed value
-    expect(node?.params.brightness).not.toEqual({ Float: 0.7 });
+    expect(node?.params.amount).not.toEqual({ Float: 0.7 });
   });
 });
 
@@ -685,7 +685,7 @@ describe('Mute toggle contracts', () => {
 
   it('mute toggle creates an undo entry', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     s.selectNode(bright);
 
     await s.toggleMuteSelected();
@@ -698,8 +698,8 @@ describe('Mute toggle contracts', () => {
 describe('Selection state contracts', () => {
   it('selectNode sets selectedNodeIds', async () => {
     const s = useGraphStore.getState();
-    const node1 = await s.addNode('brightness_contrast', { x: 0, y: 0 });
-    await s.addNode('invert', { x: 200, y: 0 });
+    const node1 = await s.addNode('gaussian_blur', { x: 0, y: 0 });
+    await s.addNode('curves', { x: 200, y: 0 });
 
     s.selectNode(node1);
 
@@ -710,8 +710,8 @@ describe('Selection state contracts', () => {
 
   it('setSelectedNodes sets multiple selections', async () => {
     const s = useGraphStore.getState();
-    const node1 = await s.addNode('brightness_contrast', { x: 0, y: 0 });
-    const node2 = await s.addNode('invert', { x: 200, y: 0 });
+    const node1 = await s.addNode('gaussian_blur', { x: 0, y: 0 });
+    const node2 = await s.addNode('curves', { x: 200, y: 0 });
     await s.addNode('viewer', { x: 400, y: 0 });
 
     s.setSelectedNodes([node1, node2]);
@@ -724,10 +724,10 @@ describe('Selection state contracts', () => {
 
   it('selection survives setParam mutation', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
 
     s.selectNode(bright);
-    await s.setParam(bright, 'brightness', { Float: 0.25 });
+    await s.setParam(bright, 'amount', { Float: 0.25 });
 
     const selected = useGraphStore.getState().selectedNodeIds;
     expect(selected.has(bright)).toBe(true);
@@ -736,7 +736,7 @@ describe('Selection state contracts', () => {
 
   it('selection survives connect/disconnect elsewhere', async () => {
     const s = useGraphStore.getState();
-    const selectedNode = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const selectedNode = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const img = await s.addNode('load_image', { x: 0, y: 200 });
     const viewer = await s.addNode('viewer', { x: 200, y: 200 });
 
@@ -782,15 +782,15 @@ describe('Asset loading contracts', () => {
 describe('Full undo/redo chain contracts', () => {
   it('addNode → connect → setParam → undo×3 → redo×3 roundtrip', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
-    await s.setParam(bright, 'brightness', { Float: 0.6 });
+    await s.setParam(bright, 'amount', { Float: 0.6 });
     await flushPromises(3);
 
     const preUndoNodeCount = useGraphStore.getState().nodes.size;
     const preUndoConnectionCount = useGraphStore.getState().connections.length;
-    const preUndoParam = useGraphStore.getState().nodes.get(bright)?.params.brightness;
+    const preUndoParam = useGraphStore.getState().nodes.get(bright)?.params.amount;
 
     s.undo();
     await flushPromises(3);
@@ -837,12 +837,12 @@ describe('Full undo/redo chain contracts', () => {
     expect(postRedoNodeCount).toBe(preUndoNodeCount);
     expect(postRedoConnectionCount).toBe(preUndoConnectionCount);
     const nodeAfterRedo = useGraphStore.getState().nodes.get(bright);
-    expect(nodeAfterRedo?.params.brightness).toEqual(preUndoParam);
+    expect(nodeAfterRedo?.params.amount).toEqual(preUndoParam);
   });
 
   it('undo past connect removes connection, redo restores it, render triggered each time', async () => {
     const s = useGraphStore.getState();
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 200, y: 0 });
     await s.connect(bright, 'image', viewer, 'image');
     await flushPromises(3);
@@ -865,8 +865,8 @@ describe('Mid-chain node removal contracts', () => {
   it('removing mid-chain node drops its connections and keeps other nodes', async () => {
     const s = useGraphStore.getState();
     const img = await s.addNode('load_image', { x: 0, y: 0 });
-    const bright = await s.addNode('brightness_contrast', { x: 200, y: 0 });
-    const inv = await s.addNode('invert', { x: 400, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 200, y: 0 });
+    const inv = await s.addNode('curves', { x: 400, y: 0 });
     const viewer = await s.addNode('viewer', { x: 600, y: 0 });
 
     await s.connect(img, 'image', bright, 'image');
@@ -887,8 +887,8 @@ describe('Mid-chain node removal contracts', () => {
   it('removing mid-chain node triggers viewer render', async () => {
     const s = useGraphStore.getState();
     const img = await s.addNode('load_image', { x: 0, y: 0 });
-    const bright = await s.addNode('brightness_contrast', { x: 200, y: 0 });
-    const inv = await s.addNode('invert', { x: 400, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 200, y: 0 });
+    const inv = await s.addNode('curves', { x: 400, y: 0 });
     const viewer = await s.addNode('viewer', { x: 600, y: 0 });
 
     await s.connect(img, 'image', bright, 'image');
@@ -964,21 +964,21 @@ describe('Multiple independent viewers contracts', () => {
 
     // Chain 1: img1 → bright1 → viewer1
     const img1 = await s.addNode('load_image', { x: 0, y: 0 });
-    const bright1 = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright1 = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const v1 = await s.addNode('viewer', { x: 0, y: 0 });
     await s.connect(img1, 'image', bright1, 'image');
     await s.connect(bright1, 'image', v1, 'image');
 
     // Chain 2: img2 → inv → viewer2
     const img2 = await s.addNode('load_image', { x: 0, y: 0 });
-    const inv = await s.addNode('invert', { x: 0, y: 0 });
+    const inv = await s.addNode('curves', { x: 0, y: 0 });
     const v2 = await s.addNode('viewer', { x: 0, y: 0 });
     await s.connect(img2, 'image', inv, 'image');
     await s.connect(inv, 'image', v2, 'image');
 
     // Chain 3: img3 → bright2 → viewer3
     const img3 = await s.addNode('load_image', { x: 0, y: 0 });
-    const bright2 = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright2 = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const v3 = await s.addNode('viewer', { x: 0, y: 0 });
     await s.connect(img3, 'image', bright2, 'image');
     await s.connect(bright2, 'image', v3, 'image');
@@ -996,14 +996,14 @@ describe('Multiple independent viewers contracts', () => {
 
     // Chain 1: img1 → bright → viewer1
     const img1 = await s.addNode('load_image', { x: 0, y: 0 });
-    const bright = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const bright = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const v1 = await s.addNode('viewer', { x: 0, y: 0 });
     await s.connect(img1, 'image', bright, 'image');
     await s.connect(bright, 'image', v1, 'image');
 
     // Chain 2: img2 → inv → viewer2
     const img2 = await s.addNode('load_image', { x: 0, y: 0 });
-    const inv = await s.addNode('invert', { x: 0, y: 0 });
+    const inv = await s.addNode('curves', { x: 0, y: 0 });
     const v2 = await s.addNode('viewer', { x: 0, y: 0 });
     await s.connect(img2, 'image', inv, 'image');
     await s.connect(inv, 'image', v2, 'image');
@@ -1012,7 +1012,7 @@ describe('Multiple independent viewers contracts', () => {
     mockEngine._clearRenderCalls();
 
     // Modify only chain 1
-    await s.setParam(bright, 'brightness', { Float: 0.8 });
+    await s.setParam(bright, 'amount', { Float: 0.8 });
     await flushPromises(5);
 
     expect(mockEngine._renderCalls).toContain(v1);
@@ -1029,9 +1029,9 @@ describe('Complex topology contracts', () => {
 
     // Diamond: A → B, A → C, B → D, C → D, D → Viewer
     const a = await s.addNode('load_image', { x: 0, y: 0 });
-    const b = await s.addNode('brightness_contrast', { x: 0, y: 0 });
-    const c = await s.addNode('invert', { x: 0, y: 0 });
-    const d = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const b = await s.addNode('gaussian_blur', { x: 0, y: 0 });
+    const c = await s.addNode('curves', { x: 0, y: 0 });
+    const d = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 0, y: 0 });
 
     await s.connect(a, 'image', b, 'image');
@@ -1055,9 +1055,9 @@ describe('Complex topology contracts', () => {
     const s = useGraphStore.getState();
 
     const a = await s.addNode('load_image', { x: 0, y: 0 });
-    const b = await s.addNode('brightness_contrast', { x: 0, y: 0 });
-    const c = await s.addNode('invert', { x: 0, y: 0 });
-    const d = await s.addNode('brightness_contrast', { x: 0, y: 0 });
+    const b = await s.addNode('gaussian_blur', { x: 0, y: 0 });
+    const c = await s.addNode('curves', { x: 0, y: 0 });
+    const d = await s.addNode('gaussian_blur', { x: 0, y: 0 });
     const viewer = await s.addNode('viewer', { x: 0, y: 0 });
 
     await s.connect(a, 'image', b, 'image');
@@ -1144,8 +1144,8 @@ describe('Project lifecycle contracts', () => {
 
   it('newProject resets dirty flag', async () => {
     const s = useGraphStore.getState();
-    const node = await s.addNode('brightness_contrast', { x: 0, y: 0 });
-    await s.setParam(node, 'brightness', { Float: 0.5 });
+    const node = await s.addNode('gaussian_blur', { x: 0, y: 0 });
+    await s.setParam(node, 'amount', { Float: 0.5 });
     await flushPromises(5);
 
     expect(useGraphStore.getState().dirty).toBe(true);

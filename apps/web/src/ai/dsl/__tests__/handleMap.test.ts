@@ -36,7 +36,7 @@ describe('HandleMap', () => {
       const blurHandle = handleMap.getOrCreate('node1', 'gaussian_blur');
       expect(blurHandle).toMatch(/^blur\d+$/);
       
-      const gradeHandle = handleMap.getOrCreate('node2', 'brightness_contrast');
+      const gradeHandle = handleMap.getOrCreate('node2', 'gpu_kernel::brightness_contrast');
       expect(gradeHandle).toMatch(/^grade\d+$/);
       
       const viewerHandle = handleMap.getOrCreate('node3', 'viewer');
@@ -223,9 +223,9 @@ describe('HandleMap', () => {
 
     it('should increment suffix correctly across multiple types', () => {
       const blur1 = handleMap.getOrCreate('id1', 'gaussian_blur');
-      const grade1 = handleMap.getOrCreate('id2', 'brightness_contrast');
+      const grade1 = handleMap.getOrCreate('id2', 'gpu_kernel::brightness_contrast');
       const blur2 = handleMap.getOrCreate('id3', 'gaussian_blur');
-      const grade2 = handleMap.getOrCreate('id4', 'brightness_contrast');
+      const grade2 = handleMap.getOrCreate('id4', 'gpu_kernel::brightness_contrast');
       
       expect(blur1).toBe('blur1');
       expect(grade1).toBe('grade1');
@@ -254,7 +254,7 @@ describe('HandleMap', () => {
     it('should handle multiple operations in sequence', () => {
       // Create initial mappings
       const blur1 = handleMap.getOrCreate('id1', 'gaussian_blur');
-      const grade1 = handleMap.getOrCreate('id2', 'brightness_contrast');
+      const grade1 = handleMap.getOrCreate('id2', 'gpu_kernel::brightness_contrast');
       
       expect(blur1).toBe('blur1');
       expect(grade1).toBe('grade1');

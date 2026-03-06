@@ -167,7 +167,7 @@ test.describe('Time Nodes', () => {
   test('time_offset in multi-node chain works correctly', async ({ page }) => {
     // solid_color → brightness_contrast → time_offset → viewer
     const solid = (await harness(page, 'addNode', 'solid_color')) as string;
-    const bc = (await harness(page, 'addNode', 'brightness_contrast')) as string;
+    const bc = (await harness(page, 'addNode', 'gaussian_blur')) as string;
     const offset = (await harness(page, 'addNode', 'time_offset')) as string;
     const viewer = (await harness(page, 'addNode', 'viewer')) as string;
 

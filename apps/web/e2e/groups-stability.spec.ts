@@ -12,8 +12,8 @@ test.describe('Group stability', () => {
   test.skip('nested group: create group inside group', async ({ page }) => {
     // Build chain: solid → bright → invert → viewer
     const solid = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
-    const inv = await harness(page, 'addNode', 'invert');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
+    const inv = await harness(page, 'addNode', 'curves');
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -33,13 +33,13 @@ test.describe('Group stability', () => {
 
     // Find bright and invert inside the group
     const innerTypes = innerState.nodeTypes as string[];
-    expect(innerTypes).toContain('brightness_contrast');
-    expect(innerTypes).toContain('invert');
+    expect(innerTypes).toContain('gaussian_blur');
+    expect(innerTypes).toContain('curves');
 
     // Find their IDs for nested grouping
     const innerNodeIds = innerState.nodeIds as string[];
-    const innerBright = innerNodeIds.find((_id: string, i: number) => innerTypes[i] === 'brightness_contrast');
-    const innerInvert = innerNodeIds.find((_id: string, i: number) => innerTypes[i] === 'invert');
+    const innerBright = innerNodeIds.find((_id: string, i: number) => innerTypes[i] === 'gaussian_blur');
+    const innerInvert = innerNodeIds.find((_id: string, i: number) => innerTypes[i] === 'curves');
     expect(innerBright).toBeTruthy();
     expect(innerInvert).toBeTruthy();
 
@@ -62,7 +62,7 @@ test.describe('Group stability', () => {
   test('ungroup restores original graph topology', async ({ page }) => {
     // Build: solid → bright → viewer
     const solid = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -100,7 +100,7 @@ test.describe('Group stability', () => {
   test('undo/redo with groups preserves consistency', async ({ page }) => {
     // Build chain
     const solid = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -135,7 +135,7 @@ test.describe('Group stability', () => {
 
   test('renaming a group updates label', async ({ page }) => {
     const solid = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -160,8 +160,8 @@ test.describe('Group stability', () => {
   test('group does not alter rendering output', async ({ page }) => {
     const solid = await harness(page, 'addNode', 'solid_color');
     await harness(page, 'setParam', solid, 'color', { Color: [1.0, 0.0, 0.0, 1.0] });
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
-    await harness(page, 'setParam', bright, 'brightness', { Float: 0.3 });
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
+    await harness(page, 'setParam', bright, 'amount', { Float: 0.3 });
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -185,21 +185,19 @@ test.describe('Group stability', () => {
   // ── Group With Multiple Input Types ────────────────────────────
 
   test('group handles nodes with different input counts', async ({ page }) => {
-    // Build: two solid colors → merge → viewer
-    const solid1 = await harness(page, 'addNode', 'solid_color');
-    await harness(page, 'setParam', solid1, 'color', { Color: [1.0, 0.0, 0.0, 1.0] });
-    const solid2 = await harness(page, 'addNode', 'solid_color');
-    await harness(page, 'setParam', solid2, 'color', { Color: [0.0, 0.0, 1.0, 1.0] });
-    const merge = await harness(page, 'addNode', 'merge');
+    // Build: solid_color (0 image inputs) → gaussian_blur (1 image input) → viewer
+    // This tests grouping nodes with different numbers of connected inputs.
+    const solid = await harness(page, 'addNode', 'solid_color');
+    await harness(page, 'setParam', solid, 'color', { Color: [1.0, 0.0, 0.0, 1.0] });
+    const blur = await harness(page, 'addNode', 'gaussian_blur');
     const viewer = await harness(page, 'addNode', 'viewer');
 
-    await harness(page, 'connect', solid1, 'field', merge, 'A');
-    await harness(page, 'connect', solid2, 'field', merge, 'B');
-    await harness(page, 'connect', merge, 'image', viewer, 'value');
+    await harness(page, 'connect', solid, 'field', blur, 'image');
+    await harness(page, 'connect', blur, 'image', viewer, 'value');
     await harness(page, 'waitForRenderIdle');
 
-    // Group both solids + merge (3 nodes → 1 group)
-    const groupId = await harness(page, 'createGroup', [solid1, solid2, merge], 'MergeGroup');
+    // Group solid + blur (2 nodes → 1 group)
+    const groupId = await harness(page, 'createGroup', [solid, blur], 'ProcessGroup');
     expect(groupId).toBeTruthy();
     await harness(page, 'waitForRenderIdle');
 
@@ -217,7 +215,7 @@ test.describe('Group stability', () => {
 
   test('enter and exit group preserves outer graph state', async ({ page }) => {
     const solid = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -244,7 +242,7 @@ test.describe('Group stability', () => {
 
   test('group export does not throw', async ({ page }) => {
     const solid = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
     const viewer = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid, 'field', bright, 'image');
@@ -287,19 +285,18 @@ test.describe('Group stability', () => {
   // ── Multiple Groups ────────────────────────────────────────────
 
   test('multiple independent groups in same graph', async ({ page }) => {
-    // Build two parallel chains merging into a viewer
+    // Build two parallel chains: solid1 → blur → viewer1, solid2 → curves → viewer2
     const solid1 = await harness(page, 'addNode', 'solid_color');
-    const bright = await harness(page, 'addNode', 'brightness_contrast');
+    const bright = await harness(page, 'addNode', 'gaussian_blur');
     const solid2 = await harness(page, 'addNode', 'solid_color');
-    const inv = await harness(page, 'addNode', 'invert');
-    const merge = await harness(page, 'addNode', 'merge');
-    const viewer = await harness(page, 'addNode', 'viewer');
+    const inv = await harness(page, 'addNode', 'curves');
+    const viewer1 = await harness(page, 'addNode', 'viewer');
+    const viewer2 = await harness(page, 'addNode', 'viewer');
 
     await harness(page, 'connect', solid1, 'field', bright, 'image');
+    await harness(page, 'connect', bright, 'image', viewer1, 'value');
     await harness(page, 'connect', solid2, 'field', inv, 'image');
-    await harness(page, 'connect', bright, 'image', merge, 'A');
-    await harness(page, 'connect', inv, 'image', merge, 'B');
-    await harness(page, 'connect', merge, 'image', viewer, 'value');
+    await harness(page, 'connect', inv, 'image', viewer2, 'value');
     await harness(page, 'waitForRenderIdle');
 
     // Group chain 1: solid1 + bright
@@ -309,7 +306,7 @@ test.describe('Group stability', () => {
 
     // After first group, verify the remaining nodes still exist
     const midState = await harness(page, 'getState') as { nodeCount: number; nodeIds: string[]; nodeTypes: string[] };
-    // Should have 5 nodes: group1, solid2, invert, merge, viewer
+    // Should have 5 nodes: group1, solid2, curves, viewer1, viewer2
     expect(midState.nodeCount).toBe(5);
 
     // Find solid2 and inv by their original IDs (they should be unchanged)
@@ -317,17 +314,17 @@ test.describe('Group stability', () => {
     const invExists = midState.nodeIds.includes(inv as string);
 
     if (solid2Exists && invExists) {
-      // Group chain 2: solid2 + invert
+      // Group chain 2: solid2 + curves
       const group2 = await harness(page, 'createGroup', [solid2, inv], 'Chain2');
       expect(group2).toBeTruthy();
       await harness(page, 'waitForRenderIdle');
 
-      // Should have 4 nodes: group1, group2, merge, viewer
+      // Should have 4 nodes: group1, group2, viewer1, viewer2
       const finalState = await harness(page, 'getState') as { nodeCount: number };
       expect(finalState.nodeCount).toBe(4);
 
       // Rendering should still work
-      const result = await harness(page, 'getViewerResult', viewer);
+      const result = await harness(page, 'getViewerResult', viewer1);
       expect(result).toBeTruthy();
     } else {
       // If original IDs were invalidated, that's a real bug — fail with clear message

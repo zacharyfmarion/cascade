@@ -5,18 +5,20 @@ import { useLayoutStore } from '../store/layoutStore';
 const STORAGE_KEY = 'cascade-layout';
 const VERSION_KEY = 'cascade-layout-version';
 /** Must match LAYOUT_VERSION in layoutStore.ts */
-const CURRENT_VERSION = '2';
+const CURRENT_VERSION = '6';
 
 const createDockviewApiMock = () => {
   const addPanel = vi.fn();
   const clear = vi.fn();
   const toJSON = vi.fn(() => ({ version: 1, panels: [] }));
   const groups = [{ id: 'group-1' }];
+  const getPanel = vi.fn(() => ({ api: { setActive: vi.fn() } }));
   return {
     addPanel,
     clear,
     toJSON,
     groups,
+    getPanel,
   } as unknown as DockviewApi;
 };
 

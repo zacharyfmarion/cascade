@@ -41,9 +41,9 @@ test.describe('Engine initialization', () => {
     // Verify some known node types exist
     const specIds = specs.map((s: { id: string }) => s.id);
     expect(specIds).toContain('solid_color');
-    expect(specIds).toContain('invert');
+    expect(specIds).toContain('curves');
     expect(specIds).toContain('viewer');
-    expect(specIds).toContain('brightness_contrast');
+    expect(specIds).toContain('gaussian_blur');
   });
 });
 

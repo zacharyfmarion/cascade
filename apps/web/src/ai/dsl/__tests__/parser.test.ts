@@ -20,16 +20,16 @@ describe('parseDsl', () => {
   });
 
   it('parses single node with float param', () => {
-    const result = parseDsl('blur1 = GaussianBlur(sigma: 5.0)', mockSpecs);
+    const result = parseDsl('blur1 = GaussianBlur(amount: 5.0)', mockSpecs);
     const node = result.ast?.nodes.get('blur1');
-    expect(node?.params.get('sigma')).toEqual({ type: 'float', value: 5 });
+    expect(node?.params.get('amount')).toEqual({ type: 'float', value: 5 });
   });
 
   it('parses multiple params', () => {
-    const result = parseDsl('grade1 = BrightnessContrast(brightness: 0.5, contrast: -0.2)', mockSpecs);
+    const result = parseDsl('grade1 = GaussianBlur(amount: 0.5, radius: 2.0)', mockSpecs);
     const node = result.ast?.nodes.get('grade1');
-    expect(node?.params.get('brightness')).toEqual({ type: 'float', value: 0.5 });
-    expect(node?.params.get('contrast')).toEqual({ type: 'float', value: -0.2 });
+    expect(node?.params.get('amount')).toEqual({ type: 'float', value: 0.5 });
+    expect(node?.params.get('radius')).toEqual({ type: 'float', value: 2.0 });
   });
 
   it('parses string params', () => {
@@ -136,14 +136,14 @@ describe('parseDsl', () => {
   });
 
   it('strips inline comments', () => {
-    const input = 'blur1 = GaussianBlur(sigma: 5.0) # fast blur';
+    const input = 'blur1 = GaussianBlur(amount: 5.0) # fast blur';
     const result = parseDsl(input, mockSpecs);
     const node = result.ast?.nodes.get('blur1');
-    expect(node?.params.get('sigma')).toEqual({ type: 'float', value: 5 });
+    expect(node?.params.get('amount')).toEqual({ type: 'float', value: 5 });
   });
 
   it('parses muted nodes', () => {
-    const input = '@muted blur1 = GaussianBlur(sigma: 5.0)';
+    const input = '@muted blur1 = GaussianBlur(amount: 5.0)';
     const result = parseDsl(input, mockSpecs);
     const node = result.ast?.nodes.get('blur1');
     expect(node?.muted).toBe(true);
@@ -166,8 +166,8 @@ describe('parseDsl', () => {
   });
 
   it('errors on invalid param value', () => {
-    const result = parseDsl('blur1 = GaussianBlur(sigma: abc)', mockSpecs);
-    expect(result.errors.some((error) => error.message.includes("Invalid value for 'sigma'"))).toBe(true);
+    const result = parseDsl('blur1 = GaussianBlur(amount: abc)', mockSpecs);
+    expect(result.errors.some((error) => error.message.includes("Invalid value for 'amount'"))).toBe(true);
   });
 
   it('errors on invalid palette syntax', () => {
@@ -191,7 +191,7 @@ describe('parseDsl', () => {
   });
 
   it('handles blank lines and mixed whitespace', () => {
-    const input = ['  ', 'blur1 = GaussianBlur( sigma: 5.0 )', '', 'viewer1 = Viewer()  '].join('\n');
+    const input = ['  ', 'blur1 = GaussianBlur( amount: 5.0 )', '', 'viewer1 = Viewer()  '].join('\n');
     const result = parseDsl(input, mockSpecs);
     expect(result.errors).toHaveLength(0);
     expect(result.ast?.nodes.size).toBe(2);

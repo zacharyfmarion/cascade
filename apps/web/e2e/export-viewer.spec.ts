@@ -51,7 +51,7 @@ test.describe('Export and viewer operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 400, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 400, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 700, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -65,7 +65,7 @@ test.describe('Export and viewer operations', () => {
 
     const brightnessSteps = [0.3, 0.5, 0.8];
     for (const value of brightnessSteps) {
-      await harness(page, 'setParam', bcId, 'brightness', { Float: value });
+      await harness(page, 'setParam', bcId, 'amount', { Float: value });
       await harness(page, 'waitForRenderIdle');
       const result = (await harness(page, 'getViewerResult', viewerId)) as {
         hasPixels: boolean; width: number; height: number;
@@ -79,7 +79,7 @@ test.describe('Export and viewer operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 400, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 400, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 700, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -92,7 +92,7 @@ test.describe('Export and viewer operations', () => {
     expect(initial).not.toBeNull();
 
     await harness(page, 'disconnect', viewerId, 'value');
-    const invertId = await harness(page, 'addNode', 'invert', { x: 550, y: 100 });
+    const invertId = await harness(page, 'addNode', 'curves', { x: 550, y: 100 });
     await harness(page, 'connect', bcId, 'image', invertId, 'image');
     await harness(page, 'connect', invertId, 'image', viewerId, 'value');
     await harness(page, 'waitForRenderIdle');
@@ -108,7 +108,7 @@ test.describe('Export and viewer operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 400, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 400, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 700, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -117,7 +117,7 @@ test.describe('Export and viewer operations', () => {
 
     const rapidChanges = [0.1, 0.2, 0.35, 0.6, 0.9];
     for (const value of rapidChanges) {
-      await harness(page, 'setParam', bcId, 'brightness', { Float: value });
+      await harness(page, 'setParam', bcId, 'amount', { Float: value });
     }
 
     await harness(page, 'waitForRenderIdle');
@@ -135,16 +135,16 @@ test.describe('Export and viewer operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 400, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 400, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 700, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
 
     await harness(page, 'editTransaction', [
-      { action: 'setParam', args: [bcId, 'brightness', { Float: 0.25 }] },
-      { action: 'setParam', args: [bcId, 'contrast', { Float: -0.2 }] },
-      { action: 'setParam', args: [bcId, 'brightness', { Float: 0.6 }] },
+      { action: 'setParam', args: [bcId, 'amount', { Float: 0.25 }] },
+      { action: 'setParam', args: [bcId, 'radius', { Float: -0.2 }] },
+      { action: 'setParam', args: [bcId, 'amount', { Float: 0.6 }] },
     ]);
 
     await harness(page, 'waitForRenderIdle');

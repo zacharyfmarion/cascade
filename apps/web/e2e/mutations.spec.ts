@@ -222,7 +222,7 @@ test.describe('Node removal cascade', () => {
     await waitForApp(page);
 
     const sourceId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const middleId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const middleId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 600, y: 100 })) as string;
     await harness(page, 'connect', sourceId, 'field', middleId, 'image');
     await harness(page, 'connect', middleId, 'image', viewerId, 'value');
@@ -274,7 +274,7 @@ test.describe('Node removal cascade', () => {
     await waitForApp(page);
 
     const sourceId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const middleId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const middleId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 600, y: 100 })) as string;
     await harness(page, 'connect', sourceId, 'field', middleId, 'image');
     await harness(page, 'connect', middleId, 'image', viewerId, 'value');

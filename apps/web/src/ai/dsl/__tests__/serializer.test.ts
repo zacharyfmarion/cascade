@@ -31,12 +31,12 @@ describe('serializeGraph', () => {
       makeNodeInstance({
         id: 'node-1',
         typeId: 'gaussian_blur',
-        params: { sigma: { Float: 5.0 } },
-        inputDefaults: { sigma: { Float: 5.0 } },
+        params: { amount: { Float: 5.0 } },
+        inputDefaults: { amount: { Float: 5.0 } },
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur(sigma: 5.0)');
+    expect(output).toBe('blur1 = GaussianBlur(amount: 5.0)');
   });
 
   it('omits params when value matches default', () => {
@@ -46,8 +46,8 @@ describe('serializeGraph', () => {
       makeNodeInstance({
         id: 'node-1',
         typeId: 'gaussian_blur',
-        params: { sigma: { Float: 1.0 } },
-        inputDefaults: { sigma: { Float: 1.0 } },
+        params: { amount: { Float: 0.5 } },
+        inputDefaults: { amount: { Float: 0.5 } },
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
@@ -62,12 +62,12 @@ describe('serializeGraph', () => {
         id: 'node-1',
         typeId: 'gaussian_blur',
         muted: true,
-        params: { sigma: { Float: 5.0 } },
-        inputDefaults: { sigma: { Float: 5.0 } },
+        params: { amount: { Float: 5.0 } },
+        inputDefaults: { amount: { Float: 5.0 } },
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('@muted blur1 = GaussianBlur(sigma: 5.0)');
+    expect(output).toBe('@muted blur1 = GaussianBlur(amount: 5.0)');
   });
 
   it('serializes connections in correct format', () => {
@@ -134,12 +134,12 @@ describe('serializeGraph', () => {
       makeNodeInstance({
         id: 'node-1',
         typeId: 'gaussian_blur',
-        params: { sigma: { Float: 0.9 } },
-        inputDefaults: { sigma: { Float: 0.25 } },
+        params: { amount: { Float: 0.9 } },
+        inputDefaults: { amount: { Float: 0.25 } },
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur(sigma: 0.25)');
+    expect(output).toBe('blur1 = GaussianBlur(amount: 0.25)');
   });
 
   it('does not add blank line when no connections', () => {
@@ -165,12 +165,12 @@ describe('serializeGraph', () => {
       makeNodeInstance({
         id: 'node-1',
         typeId: 'gaussian_blur',
-        params: { sigma: { Float: 5 } },
-        inputDefaults: { sigma: { Float: 5 } },
+        params: { amount: { Float: 5 } },
+        inputDefaults: { amount: { Float: 5 } },
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur(sigma: 5.0)');
+    expect(output).toBe('blur1 = GaussianBlur(amount: 5.0)');
   });
 
   it('serializes palette param', () => {

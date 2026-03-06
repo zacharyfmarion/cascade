@@ -7,7 +7,7 @@ test.describe('Multi-node graph rendering', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 320, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 540, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -26,8 +26,8 @@ test.describe('Multi-node graph rendering', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 140 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 140 })) as string;
-    const invertId = (await harness(page, 'addNode', 'invert', { x: 540, y: 140 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 320, y: 140 })) as string;
+    const invertId = (await harness(page, 'addNode', 'curves', { x: 540, y: 140 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 760, y: 140 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -47,8 +47,8 @@ test.describe('Multi-node graph rendering', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 80, y: 200 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 280, y: 120 })) as string;
-    const invertId = (await harness(page, 'addNode', 'invert', { x: 280, y: 280 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 280, y: 120 })) as string;
+    const invertId = (await harness(page, 'addNode', 'curves', { x: 280, y: 280 })) as string;
     const viewerA = (await harness(page, 'addNode', 'viewer', { x: 520, y: 120 })) as string;
     const viewerB = (await harness(page, 'addNode', 'viewer', { x: 520, y: 280 })) as string;
 
@@ -76,7 +76,7 @@ test.describe('Multi-node graph rendering', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 240 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 240 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 320, y: 240 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 540, y: 240 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -88,7 +88,7 @@ test.describe('Multi-node graph rendering', () => {
     } | null;
     expect(before).not.toBeNull();
 
-    await harness(page, 'setParam', bcId, 'brightness', { type: 'float', value: 0.25 });
+    await harness(page, 'setParam', bcId, 'amount', { type: 'float', value: 0.25 });
     await harness(page, 'waitForRenderIdle');
 
     const after = (await harness(page, 'getViewerResult', viewerId)) as {
@@ -217,7 +217,7 @@ test.describe('Render suspension via editTransaction', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 120, y: 220 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 340, y: 220 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 340, y: 220 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 560, y: 220 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
@@ -225,8 +225,8 @@ test.describe('Render suspension via editTransaction', () => {
     await harness(page, 'waitForRenderIdle');
 
     await harness(page, 'editTransaction', [
-      { action: 'setParam', args: [bcId, 'brightness', { type: 'float', value: 0.4 }] },
-      { action: 'setParam', args: [bcId, 'contrast', { type: 'float', value: -0.2 }] },
+      { action: 'setParam', args: [bcId, 'amount', { type: 'float', value: 0.4 }] },
+      { action: 'setParam', args: [bcId, 'radius', { type: 'float', value: -0.2 }] },
     ]);
 
     const stateAfter = (await harness(page, 'getState')) as { dirty: boolean };

@@ -58,35 +58,35 @@ describe('validator', () => {
 
   it('reports unknown param keys with valid list', () => {
     const node = makeNode('blur', 'GaussianBlur', 'gaussian_blur', {
-      sigme: { type: 'float', value: 1 },
+      amoun: { type: 'float', value: 1 },
     });
     const result = validateAst(makeAst([node], []), mockSpecs);
 
-    expect(result.errors[0]?.message).toContain('Unknown param "sigme"');
-    expect(result.errors[0]?.message).toContain('Valid params: sigma');
+    expect(result.errors[0]?.message).toContain('Unknown param "amoun"');
+    expect(result.errors[0]?.message).toContain('Valid params: amount');
   });
 
   it('reports param type mismatches', () => {
     const node = makeNode('blur', 'GaussianBlur', 'gaussian_blur', {
-      sigma: { type: 'string', value: 'nope' },
+      amount: { type: 'string', value: 'nope' },
     });
     const result = validateAst(makeAst([node], []), mockSpecs);
 
-    expect(result.errors[0]?.message).toContain('Param "sigma" expects number');
+    expect(result.errors[0]?.message).toContain('Param "amount" expects number');
   });
 
   it('reports param values out of range', () => {
     const node = makeNode('blur', 'GaussianBlur', 'gaussian_blur', {
-      sigma: { type: 'float', value: 200 },
+      amount: { type: 'float', value: 200 },
     });
     const result = validateAst(makeAst([node], []), mockSpecs);
 
-    expect(result.errors[0]?.message).toContain('must be between 0 and 100');
+    expect(result.errors[0]?.message).toContain('must be between 0 and 5');
   });
 
   it('accepts valid params', () => {
     const node = makeNode('blur', 'GaussianBlur', 'gaussian_blur', {
-      sigma: { type: 'float', value: 2 },
+      amount: { type: 'float', value: 2 },
     });
     const result = validateAst(makeAst([node], []), mockSpecs);
 
@@ -137,7 +137,7 @@ describe('validator', () => {
   });
 
   it('warns about unconnected nodes', () => {
-    const node = makeNode('orphan', 'Invert', 'invert');
+    const node = makeNode('orphan', 'Curves', 'curves');
     const result = validateAst(makeAst([node], []), mockSpecs);
 
     expect(result.warnings[0]?.message).toBe('Node orphan has no connections');

@@ -7,12 +7,12 @@ test.describe('Save/Load project', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.7 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.7 });
     await harness(page, 'waitForRenderIdle');
 
     const saved = await harness(page, 'saveProject');
@@ -39,12 +39,12 @@ test.describe('Save/Load project', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 120 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 120 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 120 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 120 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.25 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.25 });
     await harness(page, 'waitForRenderIdle');
 
     const saved = await harness(page, 'saveProject');
@@ -78,12 +78,12 @@ test.describe('Save/Load project', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 120, y: 140 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 320, y: 140 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 320, y: 140 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 520, y: 140 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.42 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.42 });
     await harness(page, 'waitForRenderIdle');
 
     const saved = await harness(page, 'saveProject');
@@ -102,12 +102,12 @@ test.describe('Save/Load project', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 140, y: 160 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 340, y: 160 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 340, y: 160 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 540, y: 160 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'connect', bcId, 'image', viewerId, 'value');
-    await harness(page, 'setParam', bcId, 'brightness', { Float: 0.55 });
+    await harness(page, 'setParam', bcId, 'amount', { Float: 0.55 });
     await harness(page, 'waitForRenderIdle');
 
     const saved = await harness(page, 'saveProject');
@@ -126,7 +126,7 @@ test.describe('Save/Load project', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 160, y: 180 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 360, y: 180 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 360, y: 180 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 560, y: 180 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');

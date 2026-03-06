@@ -7,7 +7,7 @@ test.describe('Group operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const brightId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const brightId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', brightId, 'image');
@@ -30,7 +30,7 @@ test.describe('Group operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const brightId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const brightId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', brightId, 'image');
@@ -61,7 +61,7 @@ test.describe('Group operations', () => {
     expect(stateInsideGroup.nodeCount).toBeGreaterThanOrEqual(2);
     const insideTypes = Object.values(stateInsideGroup.nodeTypes);
     expect(insideTypes).toContain('solid_color');
-    expect(insideTypes).toContain('brightness_contrast');
+    expect(insideTypes).toContain('gaussian_blur');
   });
 
   test('exitGroup returns to outer graph', async ({ page }) => {
@@ -69,7 +69,7 @@ test.describe('Group operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const brightId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const brightId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', brightId, 'image');
@@ -109,7 +109,7 @@ test.describe('Group operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const brightId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const brightId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', brightId, 'image');
@@ -128,7 +128,7 @@ test.describe('Group operations', () => {
     expect(stateAfterUndo.nodeCount).toBe(3);
     const nodeTypes = Object.values(stateAfterUndo.nodeTypes);
     expect(nodeTypes).toContain('solid_color');
-    expect(nodeTypes).toContain('brightness_contrast');
+    expect(nodeTypes).toContain('gaussian_blur');
     expect(nodeTypes).toContain('viewer');
   });
 
@@ -137,7 +137,7 @@ test.describe('Group operations', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const brightId = (await harness(page, 'addNode', 'brightness_contrast', { x: 300, y: 100 })) as string;
+    const brightId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 500, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', brightId, 'image');

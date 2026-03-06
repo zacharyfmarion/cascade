@@ -73,13 +73,13 @@ describe('integration: full graph DSL end-to-end', () => {
     it('load image → blur → brightness/contrast → viewer', () => {
       const dsl = [
         'load1 = LoadImage(path: "/photos/sunset.jpg")',
-        'blur1 = GaussianBlur(sigma: 3.5)',
-        'grade1 = BrightnessContrast(brightness: 0.2, contrast: -0.1)',
+        'blur1 = GaussianBlur(amount: 3.5)',
+        'posterize1 = Posterize(levels: 8)',
         'viewer1 = Viewer()',
         '',
         'blur1.image <- load1.image',
-        'grade1.image <- blur1.image',
-        'viewer1.image <- grade1.image',
+        'posterize1.image <- blur1.image',
+        'viewer1.image <- posterize1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -145,7 +145,7 @@ describe('integration: full graph DSL end-to-end', () => {
     it('muted nodes in a pipeline', () => {
       const dsl = [
         'load1 = LoadImage(path: "/photo.jpg")',
-        '@muted blur1 = GaussianBlur(sigma: 5.0)',
+        '@muted blur1 = GaussianBlur(amount: 5.0)',
         'viewer1 = Viewer()',
         '',
         'blur1.image <- load1.image',
@@ -176,16 +176,16 @@ describe('integration: full graph DSL end-to-end', () => {
       const dsl = [
         'load1 = LoadImage(path: "/bg.jpg")',
         'solid1 = SolidColor(color: rgba(1.0, 0.0, 0.0, 0.5), width: 1024, height: 768)',
-        'blur1 = GaussianBlur(sigma: 10.0)',
+        'blur1 = GaussianBlur(amount: 4.0)',
         'blend1 = Blend(mode: "screen", opacity: 0.5)',
-        'grade1 = BrightnessContrast(brightness: 0.1)',
+        'posterize1 = Posterize(levels: 4)',
         'viewer1 = Viewer()',
         '',
         'blur1.image <- load1.image',
         'blend1.base <- blur1.image',
         'blend1.overlay <- solid1.image',
-        'grade1.image <- blend1.image',
-        'viewer1.image <- grade1.image',
+        'posterize1.image <- blend1.image',
+        'viewer1.image <- posterize1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -273,7 +273,7 @@ describe('integration: full graph DSL end-to-end', () => {
 
     it('rejects unknown node type with helpful suggestion', () => {
       // Parser catches unknown types, so validation suggestion comes from there
-      const dsl = 'blur1 = GausianBlur(sigma: 5.0)';
+      const dsl = 'blur1 = GausianBlur(amount: 5.0)';
       const parseResult = parseDsl(dsl, mockSpecs);
       // Parser reports unknown type; validator also catches it if AST is produced
       if (parseResult.errors.length > 0) {

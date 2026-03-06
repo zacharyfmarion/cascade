@@ -314,7 +314,8 @@ impl Node for ColorRampNode {
             display_name: "Color Ramp".to_string(),
             category: "Color".to_string(),
             description: "Map luminance through a color ramp".to_string(),
-            inputs: vec![PortSpec {
+            inputs: vec![
+                PortSpec {
                     name: "image".to_string(),
                     label: "Image".to_string(),
                     ty: ValueType::Image,
@@ -428,7 +429,7 @@ impl Node for ColorRampNode {
                         image.color_space.clone(),
                     )?;
                     let output = if let Some(mask) = ctx.get_optional_input_image("mask") {
-                        crate::mask_utils::apply_mask(&image, &output, mask)?
+                        crate::mask_utils::apply_mask(image, &output, mask)?
                     } else {
                         output
                     };

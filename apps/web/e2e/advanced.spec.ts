@@ -7,8 +7,8 @@ test.describe('Complex topologies', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bc1Id = (await harness(page, 'addNode', 'brightness_contrast', { x: 350, y: 50 })) as string;
-    const bc2Id = (await harness(page, 'addNode', 'brightness_contrast', { x: 350, y: 150 })) as string;
+    const bc1Id = (await harness(page, 'addNode', 'gaussian_blur', { x: 350, y: 50 })) as string;
+    const bc2Id = (await harness(page, 'addNode', 'gaussian_blur', { x: 350, y: 150 })) as string;
     const viewer1Id = (await harness(page, 'addNode', 'viewer', { x: 650, y: 50 })) as string;
     const viewer2Id = (await harness(page, 'addNode', 'viewer', { x: 650, y: 150 })) as string;
 
@@ -63,8 +63,8 @@ test.describe('Complex topologies', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bc1Id = (await harness(page, 'addNode', 'brightness_contrast', { x: 350, y: 100 })) as string;
-    const bc2Id = (await harness(page, 'addNode', 'brightness_contrast', { x: 600, y: 100 })) as string;
+    const bc1Id = (await harness(page, 'addNode', 'gaussian_blur', { x: 350, y: 100 })) as string;
+    const bc2Id = (await harness(page, 'addNode', 'gaussian_blur', { x: 600, y: 100 })) as string;
     const viewerId = (await harness(page, 'addNode', 'viewer', { x: 850, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bc1Id, 'image');
@@ -110,7 +110,7 @@ test.describe('Error recovery', () => {
     await waitForApp(page);
 
     const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
-    const bcId = (await harness(page, 'addNode', 'brightness_contrast', { x: 350, y: 100 })) as string;
+    const bcId = (await harness(page, 'addNode', 'gaussian_blur', { x: 350, y: 100 })) as string;
 
     await harness(page, 'connect', solidId, 'field', bcId, 'image');
     await harness(page, 'waitForRenderIdle');

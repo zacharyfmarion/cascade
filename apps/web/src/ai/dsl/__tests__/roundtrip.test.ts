@@ -122,8 +122,8 @@ describe('DSL roundtrip', () => {
       makeNodeInstance({
         id: 'node-blur',
         typeId: 'gaussian_blur',
-        params: { sigma: { Float: 4.25 } },
-        inputDefaults: { sigma: { Float: 4.25 } },
+        params: { amount: { Float: 4.25 } },
+        inputDefaults: { amount: { Float: 4.25 } },
       })
     );
     nodes.set(
@@ -189,7 +189,7 @@ describe('DSL roundtrip', () => {
     const text = buildGraph(nodes, [], handleMap);
     const parsed = parseDsl(text, mockSpecs);
     expect(parsed.errors).toHaveLength(0);
-    expect(parsed.ast?.nodes.get('blur1')?.params.get('sigma')).toEqual({ type: 'float', value: 4.25 });
+    expect(parsed.ast?.nodes.get('blur1')?.params.get('amount')).toEqual({ type: 'float', value: 4.25 });
     expect(parsed.ast?.nodes.get('solid1')?.params.get('width')).toEqual({ type: 'int', value: 1024 });
     expect(parsed.ast?.nodes.get('load1')?.params.get('path')).toEqual({ type: 'string', value: '/img/a.png' });
     expect(parsed.ast?.nodes.get('thresh1')?.params.get('invert')).toEqual({ type: 'bool', value: true });
