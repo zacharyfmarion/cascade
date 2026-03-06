@@ -149,4 +149,74 @@ test.describe('Save/Load project', () => {
     expect(stateAfterLoad.nodeCount).toBe(stateBefore.nodeCount);
     expect(stateAfterLoad.connectionCount).toBe(stateBefore.connectionCount);
   });
+
+});
+
+test.describe('Project migration', () => {
+  test('loadProject migrates v1.0.0 document successfully', async ({ page }) => {
+    await page.goto('/');
+    await waitForApp(page);
+
+    // Build a project with a connection: solid_color -> viewer
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 100 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 400, y: 100 })) as string;
+    await harness(page, 'connect', solidId, 'field', viewerId, 'value');
+    await harness(page, 'waitForRenderIdle');
+
+    // Save the current project, downgrade to v1.0.0 format, and return as string.
+    // v1.0.0 -> v1.1.0 migration renames viewer input port "image" -> "value".
+    const v1Doc = await page.evaluate(async () => {
+      const store = (window as Record<string, unknown>).__cascadeTest as Record<string, (...args: unknown[]) => unknown>;
+      const rawSaved = await store.saveProject();
+      // saveProject/exportGraph returns raw graph data (no envelope)
+      const graphData = typeof rawSaved === 'string' ? JSON.parse(rawSaved) : rawSaved;
+      // Wrap in a v1.0.0 document envelope to trigger migration
+      const envelope = {
+        cascade: { format_version: '1.0.0' },
+        graph: graphData,
+      };
+      // v1.0.0 -> v1.1.0 migration renames viewer input port "image" -> "value"
+      if (envelope.graph?.connections) {
+        for (const conn of envelope.graph.connections as Array<Record<string, string>>) {
+          if (conn.to_port === 'value') {
+            conn.to_port = 'image';
+          }
+        }
+      }
+      return JSON.stringify(envelope);
+    });
+
+    // Clear and load the v1.0.0 document — should trigger migration
+    await harness(page, 'newProject');
+    await harness(page, 'loadProject', v1Doc);
+    await harness(page, 'waitForRenderIdle');
+
+    // Verify the project loaded successfully with correct node count
+    const state = (await harness(page, 'getState')) as {
+      nodeCount: number;
+      connectionCount: number;
+    };
+    expect(state.nodeCount).toBe(2);
+    expect(state.connectionCount).toBe(1);
+
+    // Verify viewer actually renders (migration reconnected the port)
+    const stateWithIds = (await harness(page, 'getState')) as {
+      nodeIds: string[];
+      nodeTypes: Record<string, string>;
+    };
+    const viewerIds = stateWithIds.nodeIds.filter(
+      (id: string) => stateWithIds.nodeTypes[id] === 'viewer',
+    );
+    let hasPixels = false;
+    for (const id of viewerIds) {
+      const result = (await harness(page, 'getViewerResult', id)) as {
+        hasPixels: boolean;
+      } | null;
+      if (result?.hasPixels) {
+        hasPixels = true;
+        break;
+      }
+    }
+    expect(hasPixels).toBe(true);
+  });
 });

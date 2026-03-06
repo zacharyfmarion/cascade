@@ -4,6 +4,7 @@ import type { Connection, Frame, NodeInstance, ParamValue } from '../../types';
 import { makeEngineError } from '../../../engine/engineError';
 import { createDocumentEnvelope, extractFrames, extractGraphData, getEngine, isTauri, kernel, normalizeParamValue } from '../kernel';
 import type { SerializableGraphData } from '../kernel';
+import { syncAllCommitted } from '../nodeDraftStore';
 
 export interface ProjectSliceState {
   dirty: boolean;
@@ -75,6 +76,7 @@ export const createProjectSlice: StateCreator<
       dirty: false,
       fitViewRequestId: get().fitViewRequestId + 1,
     });
+    syncAllCommitted(newNodes);
 
     get().triggerAllViewers();
   };
@@ -112,6 +114,7 @@ export const createProjectSlice: StateCreator<
         aiNodeStatuses: {},
         aiNodeStale: {},
       });
+      syncAllCommitted(new Map());
     },
 
     saveProject: () => {

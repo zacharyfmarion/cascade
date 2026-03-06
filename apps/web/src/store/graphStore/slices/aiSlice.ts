@@ -48,13 +48,13 @@ export const createAiSlice: StateCreator<
     return false;
   },
 
-  refreshAiNodeStale: () => {
+  refreshAiNodeStale: async () => {
     const eng = getEngine();
     if (!eng.getNodeExecutionState) return;
     const state = get();
     const newStale: Record<string, boolean> = {};
     for (const nodeId of Object.keys(state.aiNodeStatuses)) {
-      const execState = eng.getNodeExecutionState(nodeId);
+      const execState = await Promise.resolve(eng.getNodeExecutionState(nodeId));
       newStale[nodeId] = execState.isStale;
     }
     set({ aiNodeStale: newStale });
@@ -74,7 +74,7 @@ export const createAiSlice: StateCreator<
       }));
       get().renderAllViewersAsync();
     } catch (e) {
-      const execState = eng.getNodeExecutionState?.(nodeId);
+      const execState = await Promise.resolve(eng.getNodeExecutionState?.(nodeId));
       set(state => ({
         aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${execState?.error ?? e}` },
       }));

@@ -8,6 +8,7 @@ import { extractParamValue, createParamValue } from '../../store/types';
 import { NodeSlider } from './NodeSlider';
 import { NodeCheckbox, NodeNumberInput, NodeTextArea } from './NodePrimitives';
 import { linearToSrgbChannel, floatToByte, linearToHex, hexToLinear } from './colorUtils';
+import { useNodeInputDefault } from '../../store/graphStore/nodeDraftStore';
 
 interface BaseNodeProps {
   id: string;
@@ -31,12 +32,15 @@ interface BaseNodeProps {
 const InlineInputControl: React.FC<{
   nodeId: string;
   portSpec: PortSpec;
-  value?: ParamValue;
-}> = ({ nodeId, portSpec, value }) => {
+  committedParams: Record<string, ParamValue>;
+  committedDefaults: Record<string, ParamValue>;
+}> = ({ nodeId, portSpec, committedParams, committedDefaults }) => {
   const setInputDefaultLive = useGraphStore(s => s.setInputDefaultLive);
   const setInputDefaultCommit = useGraphStore(s => s.setInputDefaultCommit);
 
-  const currentValue = value ?? portSpec.default;
+  // Read from draft store — only re-renders when THIS node's THIS port changes
+  const draftValue = useNodeInputDefault(nodeId, portSpec.name, committedParams, committedDefaults);
+  const currentValue = draftValue ?? portSpec.default;
   if (!currentValue) return <span className="node-port__label">{portSpec.label}</span>;
 
   const rawValue = extractParamValue(currentValue as ParamValue);
@@ -178,12 +182,21 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
   const timing = useGraphStore(s => s.nodeTimings.get(id));
   const nodeError = useGraphStore(s => s.nodeErrors.get(id));
   const showTimings = useSettingsStore(s => s.showTimings);
-  const connections = useGraphStore(s => s.connections);
-  const connectedInputs = new Set(
-    connections
-      .filter(c => c.toNode === id)
-      .map(c => c.toPort)
-  );
+  const connectedInputsRef = React.useRef<string[]>([]);
+  const connectedInputs = useGraphStore((s) => {
+    const ports: string[] = [];
+    for (const c of s.connections) {
+      if (c.toNode === id) ports.push(c.toPort);
+    }
+    // Stable reference: only return new array if contents changed
+    const prev = connectedInputsRef.current;
+    if (ports.length === prev.length && ports.every((v, i) => v === prev[i])) {
+      return prev;
+    }
+    connectedInputsRef.current = ports;
+    return ports;
+  });
+  const connectedInputSet = React.useMemo(() => new Set(connectedInputs), [connectedInputs]);
 
   let badge = null;
   if (showTimings && timing !== undefined) {
@@ -246,7 +259,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
 
       <div className="base-node__body">
         {spec.inputs.map((input: PortSpec) => {
-          const isConnected = connectedInputs.has(input.name);
+          const isConnected = connectedInputSet.has(input.name);
           const isInlineable = input.ty === 'Float' || input.ty === 'Int' || input.ty === 'Bool' || input.ty === 'Color' || input.ty === 'String';
           const hasDefault = isInlineable && !isConnected && (input.default != null || data.inputDefaults?.[input.name] != null || data.params?.[input.name] != null);
 
@@ -268,7 +281,8 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
                 <InlineInputControl
                   nodeId={id}
                   portSpec={input}
-                  value={data.inputDefaults?.[input.name] ?? data.params?.[input.name]}
+                  committedParams={data.params ?? {}}
+                  committedDefaults={data.inputDefaults ?? {}}
                 />
               ) : (
                 <span className="node-port__label">{input.label}</span>

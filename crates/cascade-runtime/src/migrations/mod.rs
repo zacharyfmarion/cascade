@@ -69,21 +69,38 @@ static MIGRATIONS: &[Migration] = &[Migration {
     migrate: v1_0_0_to_v1_1_0::migrate,
 }];
 
-/// Extract the format version from a document
+/// Extract the format version from a document.
+/// Supports both the current `"cascade"` key and the legacy `"compositor"` key.
 fn extract_version(doc: &Value) -> Result<String, MigrationError> {
-    doc.get("cascade")
-        .and_then(|comp| comp.get("format_version"))
+    let meta = doc
+        .get("cascade")
+        .or_else(|| doc.get("compositor"))
+        .ok_or_else(|| {
+            MigrationError::InvalidStructure(
+                "Missing cascade (or compositor) envelope field".to_string(),
+            )
+        })?;
+    meta.get("format_version")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| {
             MigrationError::InvalidStructure(
-                "Missing or invalid cascade.format_version field".to_string(),
+                "Missing format_version in envelope".to_string(),
             )
         })
 }
 
-/// Set the format version in a document
+/// Set the format version in a document.
+/// Also normalises the legacy `"compositor"` key to `"cascade"`.
 fn set_version(doc: &mut Value, version: &str) -> Result<(), MigrationError> {
+    // If the doc uses the old "compositor" key, rename it to "cascade"
+    if let Some(obj) = doc.as_object_mut() {
+        if obj.contains_key("compositor") && !obj.contains_key("cascade") {
+            if let Some(val) = obj.remove("compositor") {
+                obj.insert("cascade".to_string(), val);
+            }
+        }
+    }
     if let Some(comp) = doc.get_mut("cascade") {
         if let Some(comp_obj) = comp.as_object_mut() {
             comp_obj.insert(
@@ -470,5 +487,46 @@ mod tests {
             v1_0_0_to_v1_1_0::migrate(&mut doc),
             Err(MigrationError::InvalidStructure(_))
         ));
+    }
+
+    #[test]
+    fn test_extract_version_compositor_key() {
+        let doc = json!({
+            "compositor": {
+                "format_version": "1.0.0"
+            }
+        });
+        assert_eq!(extract_version(&doc).unwrap(), "1.0.0");
+    }
+
+    #[test]
+    fn test_needs_migration_compositor_key() {
+        let doc = json!({
+            "compositor": {
+                "format_version": "1.0.0"
+            }
+        });
+        assert!(needs_migration(&doc));
+    }
+
+    #[test]
+    fn test_migrate_renames_compositor_to_cascade() {
+        let mut doc = json!({
+            "compositor": {
+                "format_version": "1.0.0"
+            },
+            "graph": {
+                "nodes": [{"id": "v1", "type_id": "viewer"}],
+                "connections": [],
+                "group_definitions": []
+            }
+        });
+        migrate_document(&mut doc).unwrap();
+        assert!(doc.get("cascade").is_some());
+        assert!(doc.get("compositor").is_none());
+        assert_eq!(
+            doc["cascade"]["format_version"].as_str().unwrap(),
+            CURRENT_VERSION
+        );
     }
 }

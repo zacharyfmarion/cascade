@@ -1,7 +1,10 @@
+import type { ParamValue } from '../../types';
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import { kernel, cloneEditingStack, getEngine } from '../kernel';
-import type { UndoSnapshot } from '../kernel';
+import type { UndoSnapshot, ParamDeltaSnapshot } from '../kernel';
+import { isParamDelta } from '../kernel';
+import { syncAllCommitted } from '../nodeDraftStore';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { useSettingsStore } from '../../settingsStore';
 
@@ -86,7 +89,61 @@ export const createUndoSlice: StateCreator<
     }
 
     get().triggerAllViewers();
+    syncAllCommitted(get().nodes);
   };
+
+  /**
+   * Restore a lightweight param-delta snapshot.
+   * Sets the old param/inputDefault value in the engine (one Worker call),
+   * restores Zustand state, and re-renders affected viewers.
+   */
+  const restoreParamDelta = async (delta: ParamDeltaSnapshot, valueToApply: ParamValue | undefined) => {
+    const eng = getEngine();
+
+    // Apply the param change in the engine
+    if (valueToApply !== undefined) {
+      if (delta.editType === 'param') {
+        await eng.setParam(delta.nodeId, delta.key, valueToApply);
+      } else {
+        await eng.setInputDefault(delta.nodeId, delta.key, valueToApply);
+      }
+    }
+
+    // Restore Zustand state from the snapshot
+    set({
+      nodes: new Map(delta.nodes),
+      connections: [...delta.connections],
+      frames: new Map(delta.frames),
+      editingStack: cloneEditingStack(delta.editingStack),
+      selectedNodeIds: new Set(),
+      selectedFrameId: null,
+      renderResults: new Map(),
+      canUndo: kernel.undoStack.length > 0,
+      canRedo: kernel.redoStack.length > 0,
+      sequenceInfoMap: new Map(delta.sequenceInfoMap),
+    });
+
+    get().triggerAllViewers();
+    syncAllCommitted(get().nodes);
+  };
+
+  /**
+   * Create a reverse param-delta snapshot (for redo stack when undoing a delta,
+   * or for undo stack when redoing a delta).
+   */
+  const createReverseDelta = (delta: ParamDeltaSnapshot): ParamDeltaSnapshot => ({
+    kind: 'param-delta',
+    editType: delta.editType,
+    nodeId: delta.nodeId,
+    key: delta.key,
+    oldValue: delta.newValue,
+    newValue: delta.oldValue,
+    nodes: new Map(get().nodes),
+    connections: [...get().connections],
+    frames: new Map(get().frames),
+    editingStack: cloneEditingStack(get().editingStack),
+    sequenceInfoMap: new Map(get().sequenceInfoMap),
+  });
 
   // -- public slice ---------------------------------------------------------
 
@@ -121,17 +178,21 @@ export const createUndoSlice: StateCreator<
     undo: () => {
       const snapshot = kernel.undoStack.pop();
       if (!snapshot) return;
-      // Serialize undo/redo operations via a promise chain to prevent
-      // concurrent stack mutations when the user clicks rapidly.
-      // The pop() above is safe outside the lock because JS is single-threaded:
-      // each synchronous call gets its own snapshot before yielding.
+
       kernel.undoLock = kernel.undoLock.then(async () => {
-        const current = await captureSnapshot();
-        kernel.redoStack.push(current);
-        await restoreSnapshot(snapshot);
+        if (isParamDelta(snapshot)) {
+          // Lightweight path: capture reverse delta for redo, then restore
+          const reverseDelta = createReverseDelta(snapshot);
+          kernel.redoStack.push(reverseDelta);
+          await restoreParamDelta(snapshot, snapshot.oldValue);
+        } else {
+          // Full snapshot path (structural edits like add/remove node)
+          const current = await captureSnapshot();
+          kernel.redoStack.push(current);
+          await restoreSnapshot(snapshot);
+        }
       }).catch(() => {
         // Swallow errors to prevent breaking the promise chain.
-        // restoreSnapshot already handles per-node failures internally.
         set({ canUndo: kernel.undoStack.length > 0, canRedo: kernel.redoStack.length > 0 });
       });
     },
@@ -139,10 +200,19 @@ export const createUndoSlice: StateCreator<
     redo: () => {
       const snapshot = kernel.redoStack.pop();
       if (!snapshot) return;
+
       kernel.undoLock = kernel.undoLock.then(async () => {
-        const current = await captureSnapshot();
-        kernel.undoStack.push(current);
-        await restoreSnapshot(snapshot);
+        if (isParamDelta(snapshot)) {
+          // Lightweight path: capture reverse delta for undo, then restore
+          const reverseDelta = createReverseDelta(snapshot);
+          kernel.undoStack.push(reverseDelta);
+          await restoreParamDelta(snapshot, snapshot.oldValue);
+        } else {
+          // Full snapshot path
+          const current = await captureSnapshot();
+          kernel.undoStack.push(current);
+          await restoreSnapshot(snapshot);
+        }
       }).catch(() => {
         set({ canUndo: kernel.undoStack.length > 0, canRedo: kernel.redoStack.length > 0 });
       });

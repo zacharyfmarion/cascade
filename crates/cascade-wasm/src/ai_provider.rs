@@ -7,9 +7,21 @@ mod imp {
     use cascade_core::error::CascadeError;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use wasm_bindgen::prelude::*;
     use wasm_bindgen::JsCast;
     use wasm_bindgen_futures::JsFuture;
     use web_sys::{Headers, Request, RequestInit, Response};
+
+    // Bind the global `fetch` function which works in both Window and Worker scopes
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_name = fetch)]
+        fn global_fetch(request: &Request) -> js_sys::Promise;
+
+        // Access globalThis.location.hostname for environment detection
+        #[wasm_bindgen(js_namespace = globalThis, js_name = "location.hostname", catch)]
+        fn global_hostname() -> Result<String, JsValue>;
+    }
 
     #[derive(Clone)]
     pub struct WasmAiProvider {
@@ -225,8 +237,7 @@ mod imp {
     const WORKER_URL: &str = "https://cascade-api-proxy.compositor-proxy.workers.dev";
 
     fn is_local_dev() -> bool {
-        web_sys::window()
-            .and_then(|w| w.location().hostname().ok())
+        global_hostname()
             .map(|h| h == "localhost" || h == "127.0.0.1")
             .unwrap_or(false)
     }
@@ -248,9 +259,7 @@ mod imp {
     }
 
     async fn fetch_request(request: Request) -> Result<Response, CascadeError> {
-        let window =
-            web_sys::window().ok_or_else(|| CascadeError::Other("No window".to_string()))?;
-        let resp_value = JsFuture::from(window.fetch_with_request(&request))
+        let resp_value = JsFuture::from(global_fetch(&request))
             .await
             .map_err(|e| CascadeError::Other(format!("Fetch failed: {e:?}")))?;
         resp_value

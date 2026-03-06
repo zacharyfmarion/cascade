@@ -7,6 +7,7 @@
  * without fragile UI interactions (dragging ports, etc.).
  */
 import { useGraphStore, getEngine } from '../store/graphStore';
+import { kernel } from '../store/graphStore/kernel';
 import { useLayoutStore } from '../store/layoutStore';
 import type { NodeSpec, ParamValue } from '../store/types';
 
@@ -227,21 +228,40 @@ function createTestHarness(): CascadeTestHarness {
       };
     },
 
-    waitForRenderIdle(): Promise<void> {
-      // Give time for render lock chain to settle
-      return new Promise((resolve) => setTimeout(resolve, 500));
+    async waitForRenderIdle(): Promise<void> {
+      // Wait for the engine scheduler to drain all queued operations
+      const engine = kernel.engine;
+      if (engine?.whenIdle) {
+        await engine.whenIdle();
+      }
+      // Also wait for render lock chain to settle
+      await kernel.renderLock;
+      // Give one extra frame for React to flush state updates
+      await new Promise((resolve) => setTimeout(resolve, 100));
     },
 
-    undo(): void {
+    async undo(): Promise<void> {
       useGraphStore.getState().undo();
+      await kernel.undoLock;
+      // Wait for engine to process the restored graph
+      if (kernel.engine?.whenIdle) {
+        await kernel.engine.whenIdle();
+      }
+      await kernel.renderLock;
     },
 
-    redo(): void {
+    async redo(): Promise<void> {
       useGraphStore.getState().redo();
+      await kernel.undoLock;
+      // Wait for engine to process the restored graph
+      if (kernel.engine?.whenIdle) {
+        await kernel.engine.whenIdle();
+      }
+      await kernel.renderLock;
     },
 
-    newProject(): void {
-      useGraphStore.getState().newProject();
+    async newProject(): Promise<void> {
+      await useGraphStore.getState().newProject();
     },
 
     // --- New methods ---

@@ -2795,6 +2795,17 @@ pub fn needs_migration_json(json_str: &str) -> bool {
         .unwrap_or(true)
 }
 
+/// Standalone type-compatibility check that does not require an Engine instance.
+/// Can be called synchronously on the main thread while the Engine lives in a Worker.
+#[wasm_bindgen(js_name = "types_compatible_standalone")]
+pub fn types_compatible_standalone(from_type: &str, to_type: &str) -> bool {
+    let from: ValueType = serde_json::from_str(&format!("\"{from_type}\""))
+        .unwrap_or(ValueType::Any);
+    let to: ValueType = serde_json::from_str(&format!("\"{to_type}\""))
+        .unwrap_or(ValueType::Any);
+    cascade_core::graph::types_compatible(&from, &to)
+}
+
 fn serialize_engine_error(dto: &EngineErrorDto) -> JsValue {
     serde_wasm_bindgen::to_value(dto).unwrap_or_else(|_| JsValue::from_str(&dto.message))
 }

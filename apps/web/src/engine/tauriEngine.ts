@@ -13,7 +13,7 @@ const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ?
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
 
-const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && 'cascade' in value && 'graph' in value;
+const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && ('cascade' in value || 'compositor' in value) && 'graph' in value;
 
 const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) ? value.graph : value;
 
@@ -88,9 +88,14 @@ export class TauriEngine implements EngineBridge {
     await invoke('set_muted', { nodeId, muted });
   }
 
-  async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, ViewerResult>> {
-    const buf = await invoke<ArrayBuffer>('set_param_and_render', { nodeId, key, value, frame });
-    const results = new Map<string, ViewerResult>();
+  async setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number): Promise<Array<[string, ViewerResult]>> {
+    // For input defaults, set the value and let the caller handle rendering
+    if (mutation.type === 'inputDefault') {
+      await invoke('set_input_default', { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value });
+      return [];
+    }
+    const buf = await invoke<ArrayBuffer>('set_param_and_render', { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame });
+    const results: Array<[string, ViewerResult]> = [];
     if (!buf || buf.byteLength < 4) return results;
 
     const view = new DataView(buf);
@@ -111,7 +116,7 @@ export class TauriEngine implements EngineBridge {
       const pixelLen = width * height * 4;
       const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
       offset += pixelLen;
-      results.set(id, { type: 'image' as const, nodeId: id, width, height, pixels });
+      results.push([id, { type: 'image' as const, nodeId: id, width, height, pixels }]);
     }
     await this.fetchTimings();
     return results;

@@ -34,7 +34,7 @@ export interface RenderSliceState {
 export interface RenderSliceActions {
   triggerRender: (viewerNodeId: string) => void;
   triggerAllViewers: () => void;
-  triggerAffectedViewers: (changedNodeIds: string[]) => void;
+  triggerAffectedViewers: (changedNodeIds: string[]) => void | Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
   pushSequenceFrames: (frame: number) => Promise<void>;
   flushRender: () => Promise<Map<string, EngineError>>;
@@ -60,8 +60,8 @@ export const createRenderSlice: StateCreator<
 > = (set, get) => {
   // -- internal helpers -----------------------------------------------------
 
-  const updateNodeTimings = () => {
-    const timings = getEngine().getLastRenderTimings?.();
+  const updateNodeTimings = async () => {
+    const timings = await Promise.resolve(getEngine().getLastRenderTimings?.());
     if (timings) {
       const prev = get().nodeTimings;
       const merged = new Map(prev);
@@ -91,7 +91,7 @@ export const createRenderSlice: StateCreator<
     }
   };
 
-  const triggerAffectedViewers = (changedNodeIds: string[]) => {
+  const triggerAffectedViewers = async (changedNodeIds: string[]) => {
     if (kernel.renderSuspendCount > 0) {
       kernel.renderNeededWhileSuspended = true;
       return;
@@ -104,15 +104,11 @@ export const createRenderSlice: StateCreator<
     try {
       const affectedSet = new Set<string>();
       for (const nodeId of changedNodeIds) {
-        const viewers = eng.getAffectedViewers(nodeId);
-        // Handle both sync (string[]) and async (Promise<string[]>) returns
-        if (Array.isArray(viewers)) {
-          for (const v of viewers) affectedSet.add(v);
-        } else {
-          // Async path — fall back to all viewers for now
-          triggerAllViewers();
-          return;
-        }
+        const viewersOrPromise = eng.getAffectedViewers(nodeId);
+        const viewers = Array.isArray(viewersOrPromise)
+          ? viewersOrPromise
+          : await viewersOrPromise;
+        for (const v of viewers) affectedSet.add(v);
       }
       for (const viewerId of affectedSet) {
         get().triggerRender(viewerId);

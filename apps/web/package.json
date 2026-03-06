@@ -23,6 +23,7 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@xyflow/react": "^12.10.0",
     "ai": "^6.0.97",
+    "comlink": "^4.4.2",
     "dockview": "^4.13.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.563.0",

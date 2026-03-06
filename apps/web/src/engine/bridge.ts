@@ -92,7 +92,8 @@ export interface EngineBridge {
   setInputDefault(nodeId: string, portName: string, value: ParamValue): Promise<void> | void;
   setPosition(nodeId: string, x: number, y: number): Promise<void> | void;
   setMuted(nodeId: string, muted: boolean): Promise<void> | void;
-  setParamAndRender?(nodeId: string, key: string, value: ParamValue, frame: number): Promise<Map<string, ViewerResult>>;
+  /** Atomic set-value + render for live interactions. Works for both params and input defaults. */
+  setAndRender?(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number): Promise<Array<[string, ViewerResult]>>;
   registerGpuKernel?(manifestJson: string): Promise<NodeSpec> | NodeSpec;
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;
   setDslHandle?(nodeId: string, handle: string): Promise<void> | void;
@@ -126,11 +127,11 @@ export interface EngineBridge {
   addInternalConnection?(groupDefId: string, fromNode: string, fromPort: string, toNode: string, toPort: string): Promise<NodeSpec>;
   removeInternalConnection?(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec>;
   renameGroup?(groupDefId: string, newName: string): Promise<NodeSpec>;
-  getLastRenderTimings?(): Record<string, number>;
+  getLastRenderTimings?(): Record<string, number> | Promise<Record<string, number>>;
   setAiApiKey?(provider: string, key: string): Promise<void> | void;
   isAiConfigured?(): Promise<boolean> | boolean;
   runAiNode?(nodeId: string): Promise<void>;
-  getNodeExecutionState?(nodeId: string): { status: string; isStale: boolean; error: string };
+  getNodeExecutionState?(nodeId: string): { status: string; isStale: boolean; error: string } | Promise<{ status: string; isStale: boolean; error: string }>;
   getColorManagementInfo?(): Promise<ColorManagementInfo> | ColorManagementInfo;
   getViewsForDisplay?(display: string): Promise<string[]> | string[];
   setDisplayView?(display: string, view: string): Promise<void> | void;
@@ -145,4 +146,6 @@ export interface EngineBridge {
   needsMigration?(jsonStr: string): boolean;
   getNodeSpec?(nodeId: string): Promise<NodeSpec> | NodeSpec;
   evaluateBytesOutput?(nodeId: string, portName: string): Promise<Uint8Array> | Uint8Array;
+  /** Wait for all queued engine operations to complete. */
+  whenIdle?(): Promise<void>;
   }

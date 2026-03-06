@@ -34,7 +34,7 @@ const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ?
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
 
-const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && 'cascade' in value && 'graph' in value;
+const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && ('cascade' in value || 'compositor' in value) && 'graph' in value;
 
 const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) ? value.graph : value;
 

@@ -8,6 +8,7 @@ import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue, isConnectableParam } from '../../store/types';
+import { useNodeParams } from '../../store/graphStore/nodeDraftStore';
 
 type NodeData = {
   label: string;
@@ -21,7 +22,8 @@ const isAiCategory = (category: string) => category === 'AI';
 export const ProcessingNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { spec } = data;
-  const params = useGraphStore(s => s.nodes.get(props.id)?.params ?? {});
+  const committedParams = useGraphStore(s => s.nodes.get(props.id)?.params ?? {});
+  const params = useNodeParams(props.id, committedParams);
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);
   const setParam = useGraphStore(s => s.setParam);

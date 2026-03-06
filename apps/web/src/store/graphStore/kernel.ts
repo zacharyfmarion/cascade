@@ -24,10 +24,10 @@ export const kernel = {
   renderGenerations: new Map<string, number>(),
   idlePreviewTimer: null as ReturnType<typeof setTimeout> | null,
   liveRenderGeneration: 0,
-  undoStack: [] as UndoSnapshot[],
-  redoStack: [] as UndoSnapshot[],
+  undoStack: [] as AnyUndoSnapshot[],
+  redoStack: [] as AnyUndoSnapshot[],
   liveRenderRaf: null as number | null,
-  preCommitSnapshot: null as UndoSnapshot | null,
+  preCommitSnapshot: null as AnyUndoSnapshot | null,
   pendingLiveRender: null as (() => void) | null,
   playbackTimeoutId: null as ReturnType<typeof setTimeout> | null,
   playbackAborted: false,
@@ -168,7 +168,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
 const isDocumentEnvelope = (value: unknown): value is { cascade: unknown; graph: unknown } => (
-  isRecord(value) && 'cascade' in value && 'graph' in value
+  isRecord(value) && ('cascade' in value || 'compositor' in value) && 'graph' in value
 );
 
 export const extractGraphData = (value: unknown): SerializableGraphData => {
@@ -242,11 +242,28 @@ export async function createEngine(): Promise<EngineBridge> {
   if (isTauri()) {
     const { tauriEngine } = await import('../../engine/tauriEngine');
     return tauriEngine;
-  } else {
-    const { initWasmEngine, wasmEngine } = await import('../../engine/wasmEngine');
-    await initWasmEngine();
-    return wasmEngine;
   }
+
+  // Use Web Worker by default for non-blocking UI.
+  // Opt out with ?noworker=true in the URL.
+  const noWorker = new URLSearchParams(globalThis.location?.search ?? '').has('noworker');
+  if (!noWorker && typeof Worker !== 'undefined') {
+    try {
+      const { WorkerEngine } = await import('../../engine/workerEngine');
+      const engine = new WorkerEngine();
+      await engine.init();
+      console.info('[Cascade] Engine running in Web Worker');
+      return engine;
+    } catch (err) {
+      console.warn('[Cascade] Worker engine failed, falling back to main-thread engine:', err);
+    }
+  }
+
+  // Fallback: run WASM engine on main thread
+  const { initWasmEngine, wasmEngine } = await import('../../engine/wasmEngine');
+  await initWasmEngine();
+  console.info('[Cascade] Engine running on main thread');
+  return wasmEngine;
 }
 
 export function getEngine(): EngineBridge {
@@ -274,3 +291,27 @@ export interface UndoSnapshot {
 export const isSequenceInfo = (info: SequenceInfo | VideoInfo): info is SequenceInfo => (
   'first_frame' in info && 'last_frame' in info
 );
+
+// ---------------------------------------------------------------------------
+// Param-delta snapshots — lightweight undo for parameter-only edits
+// ---------------------------------------------------------------------------
+
+export interface ParamDeltaSnapshot {
+  kind: 'param-delta';
+  editType: 'param' | 'inputDefault';
+  nodeId: string;
+  key: string;
+  oldValue: ParamValue | undefined;
+  newValue?: ParamValue;
+  /** Pre-edit Zustand state for full restoration */
+  nodes: Map<string, NodeInstance>;
+  connections: Connection[];
+  frames: Map<string, Frame>;
+  editingStack: EditingContext[];
+  sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
+}
+
+export type AnyUndoSnapshot = UndoSnapshot | ParamDeltaSnapshot;
+
+export const isParamDelta = (s: AnyUndoSnapshot): s is ParamDeltaSnapshot =>
+  'kind' in s && s.kind === 'param-delta';
