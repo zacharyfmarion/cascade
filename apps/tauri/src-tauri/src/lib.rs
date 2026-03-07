@@ -443,16 +443,23 @@ fn get_sequence_info(
 
 #[tauri::command]
 fn load_video_file(
-    state: State<'_, EngineState>,
-    node_id: String,
-    path: String,
+    #[allow(unused_variables)] state: State<'_, EngineState>,
+    #[allow(unused_variables)] node_id: String,
+    #[allow(unused_variables)] path: String,
 ) -> Result<String, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    let info = s
-        .engine
-        .load_video_file(&node_id, &path)
-        .map_err(|e| e.to_string())?;
-    serde_json::to_string(&info).map_err(|e| e.to_string())
+    #[cfg(all(feature = "video", target_os = "macos"))]
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        let info = s
+            .engine
+            .load_video_file(&node_id, &path)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&info).map_err(|e| e.to_string())
+    }
+    #[cfg(not(all(feature = "video", target_os = "macos")))]
+    {
+        Err("Video loading is only available on macOS with the video feature".to_string())
+    }
 }
 
 #[tauri::command]
