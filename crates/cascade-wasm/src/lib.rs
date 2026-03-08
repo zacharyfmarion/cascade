@@ -2660,7 +2660,12 @@ impl ViewerResultWasm {
     /// the ~250ms serde overhead of serializing millions of bytes individually.
     fn into_js(self) -> Result<JsValue, JsValue> {
         match self {
-            ViewerResultWasm::Pixels { value_type, width, height, pixels } => {
+            ViewerResultWasm::Pixels {
+                value_type,
+                width,
+                height,
+                pixels,
+            } => {
                 let obj = js_sys::Object::new();
                 js_sys::Reflect::set(&obj, &"type".into(), &value_type.into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
@@ -2670,8 +2675,9 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"pixels".into(), &arr)?;
                 Ok(obj.into())
             }
-            other => serde_wasm_bindgen::to_value(&other)
-                .map_err(|e| JsValue::from_str(&e.to_string())),
+            other => {
+                serde_wasm_bindgen::to_value(&other).map_err(|e| JsValue::from_str(&e.to_string()))
+            }
         }
     }
 }

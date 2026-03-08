@@ -6,7 +6,7 @@
   "scripts": {
     "build:wasm": "yarn build:wasm:st && yarn build:wasm:mt",
     "build:wasm:st": "wasm-pack build ../../crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg",
-    "build:wasm:mt": "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--max-memory=1073741824 -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base' RUSTUP_TOOLCHAIN=nightly CARGO_UNSTABLE_BUILD_STD=std,panic_abort wasm-pack build ../../crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg-threads --features wasm-threads",
+    "build:wasm:mt": "bash ./scripts/build-wasm-mt.sh",
     "prebuild": "yarn build:wasm",
     "predev": "yarn build:wasm",
     "dev": "vite",
