@@ -24,7 +24,7 @@ jobs:
       rust: ${{ steps.code_filter.outputs.rust }}
       frontend: ${{ steps.code_filter.outputs.frontend }}
       e2e: ${{ steps.code_filter.outputs.e2e }}
-      docs_only: ${{ steps.docs_filter.outputs.docs_only }}
+      docs_only: ${{ steps.docs_only.outputs.value }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,17 +58,41 @@ jobs:
               - 'crates/cascade-gpu/**'
               - 'crates/cascade-nodes-std/**'
 
-      - id: docs_filter
-        uses: dorny/paths-filter@v3
-        with:
-          predicate-quantifier: every
-          filters: |
-            docs_only:
-              - '**/*.md'
-              - 'docs/**'
-              - 'reviews/**'
-              - 'implementation-plans/**'
-              - '.github/PULL_REQUEST_TEMPLATE.md'
+      - id: docs_only
+        name: Detect docs-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            mapfile -t changed_files < <(git diff --name-only "origin/${{ github.base_ref }}...$GITHUB_SHA")
+          else
+            before_sha="${{ github.event.before }}"
+            if [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
+              mapfile -t changed_files < <(git ls-tree -r --name-only "$GITHUB_SHA")
+            else
+              mapfile -t changed_files < <(git diff --name-only "$before_sha" "$GITHUB_SHA")
+            fi
+          fi
+
+          docs_only=true
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            docs_only=false
+          fi
+
+          for file in "${changed_files[@]}"; do
+            case "$file" in
+              *.md|docs/*|reviews/*|implementation-plans/*|.github/PULL_REQUEST_TEMPLATE.md)
+                ;;
+              *)
+                docs_only=false
+                break
+                ;;
+            esac
+          done
+
+          echo "value=$docs_only" >> "$GITHUB_OUTPUT"
 
       - name: Summarize selected jobs
         run: |
@@ -80,7 +104,7 @@ jobs:
             echo "| Rust | ${{ steps.code_filter.outputs.rust }} |"
             echo "| Frontend | ${{ steps.code_filter.outputs.frontend }} |"
             echo "| E2E | ${{ steps.code_filter.outputs.e2e }} |"
-            echo "| Docs only | ${{ steps.docs_filter.outputs.docs_only }} |"
+            echo "| Docs only | ${{ steps.docs_only.outputs.value }} |"
             echo ""
             echo "### Jobs to run"
             echo ""
