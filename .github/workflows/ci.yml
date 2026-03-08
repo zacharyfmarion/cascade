@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
@@ -13,8 +17,119 @@ env:
   WORKSPACE_EXCLUDES: --exclude cascade-ocio-sys --exclude cascade-ocio --exclude cascade-tauri
 
 jobs:
+  changes:
+    name: CI Change Detection
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.code_filter.outputs.rust }}
+      frontend: ${{ steps.code_filter.outputs.frontend }}
+      e2e: ${{ steps.code_filter.outputs.e2e }}
+      docs_only: ${{ steps.docs_only.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: code_filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            rust:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.cargo/**'
+              - 'crates/**'
+              - 'apps/tauri/**'
+            frontend:
+              - 'package.json'
+              - 'yarn.lock'
+              - 'apps/web/**'
+              - 'apps/tauri/**'
+              - 'crates/cascade-wasm/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            e2e:
+              - 'apps/web/e2e/**'
+              - 'apps/web/src/**'
+              - 'apps/web/package.json'
+              - 'apps/web/playwright.config.ts'
+              - 'crates/cascade-wasm/**'
+              - 'crates/cascade-core/**'
+              - 'crates/cascade-gpu/**'
+              - 'crates/cascade-nodes-std/**'
+
+      - id: docs_only
+        name: Detect docs-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            mapfile -t changed_files < <(git diff --name-only "origin/${{ github.base_ref }}...$GITHUB_SHA")
+          else
+            before_sha="${{ github.event.before }}"
+            if [ "$before_sha" = "0000000000000000000000000000000000000000" ]; then
+              mapfile -t changed_files < <(git ls-tree -r --name-only "$GITHUB_SHA")
+            else
+              mapfile -t changed_files < <(git diff --name-only "$before_sha" "$GITHUB_SHA")
+            fi
+          fi
+
+          docs_only=true
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            docs_only=false
+          fi
+
+          for file in "${changed_files[@]}"; do
+            case "$file" in
+              *.md|docs/*|reviews/*|implementation-plans/*|.github/PULL_REQUEST_TEMPLATE.md)
+                ;;
+              *)
+                docs_only=false
+                break
+                ;;
+            esac
+          done
+
+          echo "value=$docs_only" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize selected jobs
+        run: |
+          {
+            echo "## CI change detection"
+            echo ""
+            echo "| Scope | Matched |"
+            echo "| --- | --- |"
+            echo "| Rust | ${{ steps.code_filter.outputs.rust }} |"
+            echo "| Frontend | ${{ steps.code_filter.outputs.frontend }} |"
+            echo "| E2E | ${{ steps.code_filter.outputs.e2e }} |"
+            echo "| Docs only | ${{ steps.docs_only.outputs.value }} |"
+            echo ""
+            echo "### Jobs to run"
+            echo ""
+            if [ "${{ steps.code_filter.outputs.rust }}" = "true" ]; then
+              echo "- Rust Check & Test"
+              echo "- Rust Lint (clippy + fmt)"
+              echo "- Benchmarks (compile check)"
+            fi
+            if [ "${{ steps.code_filter.outputs.frontend }}" = "true" ]; then
+              echo "- Frontend Lint & Typecheck"
+            fi
+            if [ "${{ steps.code_filter.outputs.e2e }}" = "true" ]; then
+              echo "- E2E Tests (Playwright)"
+            fi
+            if [ "${{ steps.code_filter.outputs.rust }}" != "true" ] \
+              && [ "${{ steps.code_filter.outputs.frontend }}" != "true" ] \
+              && [ "${{ steps.code_filter.outputs.e2e }}" != "true" ]; then
+              echo "- No heavy CI jobs selected"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   rust-check:
     name: Rust Check & Test
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +146,8 @@ jobs:
 
   rust-lint:
     name: Rust Lint (clippy + fmt)
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +174,8 @@ jobs:
 
   bench-compile:
     name: Benchmarks (compile check)
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +189,8 @@ jobs:
 
   frontend-lint:
     name: Frontend Lint & Typecheck
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -115,8 +236,11 @@ jobs:
 
       - name: Unit tests
         run: yarn test
+
   e2e-test:
     name: E2E Tests (Playwright)
+    needs: changes
+    if: ${{ needs.changes.outputs.e2e == 'true' }}
     runs-on: ubuntu-latest
     defaults:
       run:
