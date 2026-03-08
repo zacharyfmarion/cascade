@@ -9,9 +9,9 @@ import path from 'path';
 
 function wasmHotRebuild(): PluginOption {
   const cratesDir = path.resolve(__dirname, '../../crates');
-const wasmCrate = path.resolve(cratesDir, 'cascade-wasm');
+  const wasmCrate = path.resolve(cratesDir, 'cascade-wasm');
   const stOutDir = path.resolve(__dirname, 'src/wasm-pkg');
-  const mtOutDir = path.resolve(__dirname, 'src/wasm-pkg-threads');
+  const mtBuildScript = path.resolve(__dirname, 'scripts/build-wasm-mt.sh');
 
   let building = false;
   let pendingRebuild = false;
@@ -25,7 +25,7 @@ const wasmCrate = path.resolve(cratesDir, 'cascade-wasm');
     building = true;
 
     const stCmd = `wasm-pack build ${wasmCrate} --target web --out-dir ${stOutDir}`;
-    const mtCmd = `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--max-memory=1073741824 -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base' RUSTUP_TOOLCHAIN=nightly CARGO_UNSTABLE_BUILD_STD=std,panic_abort wasm-pack build ${wasmCrate} --target web --out-dir ${mtOutDir} --features wasm-threads`;
+    const mtCmd = `bash ${mtBuildScript}`;
     server.config.logger.info('\x1b[36m[wasm] Rebuilding (single-threaded)...\x1b[0m');
     const start = Date.now();
 

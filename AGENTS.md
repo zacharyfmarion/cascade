@@ -121,9 +121,11 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 
 ## Implementation plans
 
-When starting a non-trivial feature or change, create a Markdown plan file in `implementation-plans/` (e.g., `implementation-plans/gpu-blur-node.md`). The plan should outline the goal, approach, affected files, and a checklist of steps.
+When starting a non-trivial feature, refactor, or other multi-step architectural change, create a Markdown plan file in `implementation-plans/` (e.g., `implementation-plans/gpu-blur-node.md`). The plan should outline the goal, approach, affected files, and a checklist of steps.
 
-As you work, **mark off progress in the plan file** (using `- [x]` checkboxes) in addition to updating your TODO tool. The plan file serves as a durable, human-readable record of what was done and what remains — it persists across sessions and is visible to other agents and the user, unlike the TODO tool which is ephemeral.
+Do not create an implementation plan for routine bug fixes, CI fixes, formatting-only changes, or other narrow maintenance work unless the user explicitly asks for one.
+
+As you work, **mark off progress in the plan file** (using `- [x]` checkboxes) in addition to updating your TODO tool. The plan file serves as a durable, human-readable record of what was done and what remains; it persists across sessions and is visible to other agents and the user, unlike the TODO tool which is ephemeral.
 
 ## Parallel agents
 
