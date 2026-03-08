@@ -42,14 +42,6 @@
 ## Justification
 - Describe any expected performance impact, tradeoffs, benchmarks, or why performance is unchanged.
 
-# Reviewer guidance
-
-## Areas to review closely
-- 
-
-## Risks and follow-ups
-- 
-
 # UI changes
 
 ## Screenshots or recordings
