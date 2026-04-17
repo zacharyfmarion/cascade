@@ -29,6 +29,11 @@ pub struct InternalNode {
     pub id: String,
     pub type_id: String,
     pub params: HashMap<String, ParamValue>,
+    /// Canvas position of this node inside the group editor.
+    /// Uses `#[serde(default)]` so old files without this field deserialize to (0, 0)
+    /// and the legacy-migration path in each consumer will upgrade them.
+    #[serde(default)]
+    pub position: (f64, f64),
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_data: Option<Vec<u8>>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

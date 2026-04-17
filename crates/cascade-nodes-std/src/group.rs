@@ -407,7 +407,11 @@ impl GroupNode {
             name: conn.from_port.clone(),
             label: conn.from_port.clone(),
             ty: input_port.ty.clone(),
-            ..Default::default()
+            default: input_port.default.clone(),
+            min: input_port.min,
+            max: input_port.max,
+            step: input_port.step,
+            ui_hint: input_port.ui_hint.clone(),
         })
     }
 
@@ -429,7 +433,11 @@ impl GroupNode {
             name: conn.to_port.clone(),
             label: conn.to_port.clone(),
             ty: output_port.ty.clone(),
-            ..Default::default()
+            default: output_port.default.clone(),
+            min: output_port.min,
+            max: output_port.max,
+            step: output_port.step,
+            ui_hint: output_port.ui_hint.clone(),
         })
     }
 
@@ -516,6 +524,7 @@ impl Node for GroupNode {
                         CascadeError::Other("Group input node type mismatch".to_string())
                     })?;
                 group_input.inject_inputs(ctx.inputs.clone())?;
+                state.internal_graph.mark_dirty(self.group_input_id);
 
                 for promo in &self.definition.promotions {
                     if let Some(value) = ctx.params.get(&promo.group_param_key) {
