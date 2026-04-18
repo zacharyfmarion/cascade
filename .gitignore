@@ -40,6 +40,7 @@ apps/tauri/src-tauri/gen/
 *.png
 !apps/web/public/*.png
 !apps/tauri/src-tauri/icons/*.png
+!apps/web/e2e/fixtures/*.png
 
 # Yarn
 .yarn/*

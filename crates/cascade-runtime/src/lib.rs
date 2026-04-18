@@ -1986,11 +1986,10 @@ impl Engine {
             _ => 0,
         };
 
-        let total_frames = if range.step > 0 {
-            (range.end - range.start) / range.step + 1
-        } else {
+        if range.step == 0 {
             return Err(CascadeError::Other("Step must be > 0".to_string()));
-        };
+        }
+        let total_frames = (range.end - range.start) / range.step + 1;
 
         let job_id = format!("job_{}", uuid::Uuid::new_v4());
         let job = Arc::new(RenderJob {
@@ -2169,11 +2168,10 @@ impl Engine {
             _ => 24,
         };
 
-        let total_frames = if range.step > 0 {
-            (range.end - range.start) / range.step + 1
-        } else {
+        if range.step == 0 {
             return Err(CascadeError::Other("Step must be > 0".to_string()));
-        };
+        }
+        let total_frames = (range.end - range.start) / range.step + 1;
 
         let job_id = format!("job_{}", uuid::Uuid::new_v4());
         let job = Arc::new(RenderJob {
