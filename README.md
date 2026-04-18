@@ -1,162 +1,125 @@
 # Cascade
 
-A node-based image processing application inspired by Nuke and Blender's processor. Rust core compiled to WASM for the browser, with a Tauri desktop shell for native performance.
+Cascade is a node-based image processing application built around a Rust graph engine with a React frontend.
+The project is being opened up web-first: the browser app is the primary supported target today, while the Tauri desktop shell is still catching up to feature parity.
 
-A node-based image processor inspired by Nuke and Blender's processor. Rust core compiled to WASM for the browser, with a Tauri desktop shell for native performance.
+## Status
+
+- Web: active development target and the best place to evaluate the project today
+- Desktop: usable for development work, but not yet at parity with the web app
+- AI features: optional, bring-your-own-key integrations for supported providers
+
+This repository is intended for contributors and early adopters who are comfortable working in a fast-moving codebase.
+
+## What Cascade Does
+
+- Builds image processing pipelines as typed node graphs
+- Evaluates graphs through a Rust core shared by web and desktop frontends
+- Renders node controls from backend `NodeSpec` metadata
+- Supports CPU nodes today and GPU-backed execution paths where available
+- Handles still-image workflows, graph editing, playback-oriented nodes, and scripted GPU kernels
 
 ## Architecture
 
-```
+```text
 cascade/
 ├── crates/
-│   ├── cascade-core/          # Graph engine, evaluator, node trait, type system
-│   ├── cascade-nodes-std/     # 34 built-in CPU nodes + Criterion benchmarks
-│   ├── cascade-gpu/           # wgpu compute shader pipeline (GLSL → naga → WGSL)
-│   ├── cascade-ocio/          # OpenColorIO integration (display/view transforms)
-│   ├── cascade-ocio-sys/      # OpenColorIO C FFI bindings (auto-stubs if not installed)
-│   ├── cascade-wasm/          # wasm-bindgen bridge for browser
-│   └── cascade-runtime/       # Native runtime engine (used by Tauri + CLI bench)
-├── crates/
-│   ├── cascade-core/          # Graph engine, evaluator, node trait, type system
-│   ├── cascade-nodes-std/     # 34 built-in CPU nodes + Criterion benchmarks
-│   ├── cascade-gpu/           # wgpu compute shader pipeline (GLSL → naga → WGSL)
-│   ├── cascade-ocio/          # OpenColorIO integration (display/view transforms)
-│   ├── cascade-ocio-sys/      # OpenColorIO C FFI bindings (auto-stubs if not installed)
-│   ├── cascade-wasm/          # wasm-bindgen bridge for browser
-│   └── cascade-runtime/       # Native runtime engine (used by Tauri + CLI bench)
+│   ├── cascade-core/       # Graph engine, evaluator, type system, node traits
+│   ├── cascade-nodes-std/  # Built-in CPU nodes and benchmarks
+│   ├── cascade-gpu/        # wgpu compute pipeline and kernel runtime
+│   ├── cascade-wasm/       # wasm-bindgen bridge used by the web app
+│   ├── cascade-runtime/    # Native runtime used by desktop and CLI tooling
+│   ├── cascade-ocio/       # Optional OpenColorIO integration
+│   ├── cascade-ocio-sys/   # OpenColorIO FFI bindings
+│   └── cascade-video/      # Video I/O support
 ├── apps/
-│   ├── web/                      # React + Vite + @xyflow/react frontend
-│   └── tauri/                    # Tauri v2 desktop app
-└── .github/workflows/ci.yml     # CI: test, lint, bench, frontend checks
+│   ├── web/                # React + Vite + Zustand + React Flow frontend
+│   └── tauri/              # Tauri desktop shell
+├── docs/                   # Architecture and design notes
+└── .github/workflows/ci.yml
 ```
 
-### Core concepts
-
-- **Image format**: f32 RGBA in linear color space. sRGB conversion happens only at I/O boundaries. f16 is used only for GPU upload/readback.
-- **Graph**: SlotMap-based DAG with cycle detection, type-safe connections, and dirty propagation.
-- **Evaluator**: Pull-based from viewer nodes. Per-output caching keyed on `(frame_time, param_revision, upstream_hash)`.
-- **Self-describing nodes**: Each node declares its own inputs, outputs, params, and UI hints via `NodeSpec`. The frontend renders controls automatically — adding a new Rust node requires zero frontend changes.
-- **GPU kernels**: Users write GLSL `process()` functions. Naga transpiles to WGSL. wgpu dispatches compute shaders. JSON manifests declare ports/params.
-- **Color management**: Pluggable `ColorManagement` trait with a builtin sRGB implementation and optional OpenColorIO backend. All compositing happens in linear working space; display/view transforms are applied only at the viewer output. Configure via Settings → Color in the UI.
-
-### Node library (34 CPU + GPU kernels)
-
-| Category | Nodes |
-|----------|-------|
-| Input | LoadImage, LoadImageSequence |
-| Output | Viewer, ExportImage, ExportImageSequence |
-| Color | BrightnessContrast, HueSaturation, Invert, Levels, Curves, ColorBalance, ChannelShuffle, Threshold, Posterize, Gamma |
-| Filter | GaussianBlur, Sharpen, EdgeDetect, Dilate, Erode, Median |
-| Composite | Blend (11 modes), AlphaOver |
-| Transform | Resize, Crop, Flip, Rotate, Translate |
-| Generator | SolidColor, Noise, Gradient, Checkerboard |
-| Matte | Premultiply, Unpremultiply, SetAlpha, ExtractChannel, ChromaKey |
-| GPU | Pixelate, Dither, user-defined via JSON manifests |
-
-## Getting started
+## Web-First Quick Start
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (stable)
-- [Node.js](https://nodejs.org/) 22+
-- [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/) (for browser builds)
-- [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (for desktop builds)
-- [OpenColorIO](https://opencolorio.org/) v2 (for color management in the desktop app)
+- Rust stable via [rustup](https://rustup.rs/)
+- Node.js 22+
+- `wasm-pack`
+- Nightly Rust with `rust-src` if you want the threaded WASM build
 
-### Color management setup (macOS)
-
-The desktop app uses OpenColorIO for color management. Install it and set up an OCIO config:
+### Run The Web App
 
 ```bash
-# Install OpenColorIO
-brew install opencolorio
-
-# Create a config directory and download the ACES CG config
-mkdir -p ~/.config/ocio
-python3 -c "
-import PyOpenColorIO as ocio
-c = ocio.Config.CreateFromBuiltinConfig('cg-config-v2.1.0_aces-v1.3_ocio-v2.3')
-with open('$HOME/.config/ocio/config.ocio', 'w') as f:
-    f.write(c.serialize())
-"
-
-# Add to your shell config (~/.zshrc)
-export OCIO="$HOME/.config/ocio/config.ocio"
-```
-
-The `$OCIO` environment variable tells the desktop app which config to load at startup. If it's not set or OpenColorIO isn't installed, the app falls back to builtin sRGB color management.
-
-You can use any OCIO v2 config — ACES CG is a good default. Studio-specific configs work as well.
-
-### Web (WASM)
-
-```bash
-# Build the WASM bridge
-wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
-
-# Install frontend dependencies and start dev server
-cd apps/web
 yarn install
+cd apps/web
 yarn dev
 ```
 
-The WASM build uses builtin color management only (no OCIO).
+The web app's `predev` hook builds both WASM bundles automatically.
 
-### Desktop (Tauri)
+### Useful Commands
+
+From the repository root:
 
 ```bash
-cd apps/tauri/src-tauri
-cargo tauri dev
+yarn install
+yarn workspace web lint
+yarn workspace web lint:css
+yarn workspace web test
 ```
 
-### AI nodes (Replicate)
-
-AI-powered nodes (Depth Estimate, Inpaint) use the [Replicate](https://replicate.com) API. To enable them locally:
-
-1. Create a Replicate account and get an API token from https://replicate.com/account/api-tokens
-2. Start the dev server (`yarn dev`) — the Vite config proxies `/api/replicate/*` to Replicate's API to avoid browser CORS restrictions
-3. In the app, go to **Settings → AI** and paste your Replicate API token
-4. Add an AI node (e.g. AI Depth Estimate), connect an input image, and click **Run**
-
-The Tauri desktop app calls Replicate directly and does not need the proxy.
-
-### Run tests
+From `apps/web/`:
 
 ```bash
-# Rust tests (all crates)
+yarn build:wasm
+yarn dev
+npx playwright test
+```
+
+From the repository root for Rust validation:
+
+```bash
+cargo check --workspace
 cargo test --workspace
-
-# Frontend lint + typecheck
-cd apps/web
-yarn lint
-npx tsc -b --noEmit
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
 ```
 
-### Run benchmarks
+## Deployment Notes For Web
 
-```bash
-# Criterion benchmarks (cascade-nodes-std)
-cargo bench --package cascade-nodes-std
+- Cascade ships both single-threaded and threaded WASM bundles.
+- Threaded WASM requires `SharedArrayBuffer`, which in practice means serving the app with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`.
+- If those headers are unavailable, the app falls back to the single-threaded engine automatically.
+- The repository's current contributor workflow is strongest for local development and CI. Hosted deployment guidance will continue to evolve as the web release hardens.
 
-# CLI benchmark tool (cascade-runtime)
-cargo run --release --bin cascade-bench -- --input-dir <path-to-frames>
-cargo bench --package cascade-nodes-std
+## AI Integrations
 
-# CLI benchmark tool (cascade-runtime)
-cargo run --release --bin cascade-bench -- --input-dir <path-to-frames>
-```
+AI-powered workflows are optional.
 
-## CI
+- Replicate-backed nodes use a user-supplied API token
+- The AI assistant uses a user-supplied Anthropic API key
+- In the web app, those settings are stored locally in the browser for the current user profile
 
-A single GitHub Actions workflow runs on push to `main` and on PRs:
+If you do not want to use AI features, you can ignore them entirely.
 
-| Job | What it checks |
-|-----|----------------|
-| **Rust Check & Test** | `cargo check --workspace` + `cargo test --workspace` |
-| **Rust Lint** | `cargo clippy` (warnings = errors) + `cargo fmt --check` |
-| **Benchmarks** | `cargo bench --no-run` (compile check only) |
-| **Frontend** | `tsc --noEmit` + `eslint` |
+## Desktop Status
+
+The desktop app remains in the repository because it shares the same core engine and is an active part of the roadmap.
+That said, the web app is the better target for evaluation, contribution, and first release feedback right now.
+
+If you are looking for the most complete experience today, start with [`apps/web`](./apps/web/README.md).
+
+## Contributing
+
+Contributions are welcome.
+Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for setup and workflow guidance.
+
+## Community
+
+Please read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating in discussions or pull requests.
 
 ## License
 
-MIT
+Cascade is released under the MIT License.
+See [LICENSE](./LICENSE) for details.
