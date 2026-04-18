@@ -572,6 +572,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
           onGammaChange={setGamma}
           onResetDisplayControls={handleResetDisplayControls}
           panelWidth={panelWidth}
+          hasError={!!lastError}
       />
       
       {dimensions && hasPixels && (

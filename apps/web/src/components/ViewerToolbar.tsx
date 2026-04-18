@@ -17,6 +17,7 @@ interface ViewerToolbarProps {
   onGammaChange: (gamma: number) => void;
   onResetDisplayControls: () => void;
   panelWidth?: number;
+  hasError?: boolean;
 }
 
 const CHANNELS: { key: 'r' | 'g' | 'b' | 'a'; label: string }[] = [
@@ -41,6 +42,7 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
   onGammaChange,
   onResetDisplayControls,
   panelWidth = Infinity,
+  hasError = false,
 }) => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const showDisplayControls = panelWidth >= 520;
@@ -66,7 +68,7 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
   const presets = [25, 50, 100, 200, 400];
 
   return (
-    <div className="viewer-toolbar">
+    <div className="viewer-toolbar" style={hasError ? { bottom: 44 } : undefined}>
       {/* Zoom controls */}
       <button 
         type="button" 
