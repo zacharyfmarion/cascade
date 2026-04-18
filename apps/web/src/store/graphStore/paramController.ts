@@ -22,6 +22,7 @@
  */
 
 import type { ParamValue } from '../types';
+import { isPixelResult } from '../types';
 import { useSettingsStore } from '../settingsStore';
 import type { GraphState } from './store';
 import {
@@ -183,8 +184,24 @@ function dispatchLiveRender(
       // than showing nothing during a drag. The next render (dispatched
       // below) will update to the freshest value.
       if (results.length > 0) {
-        const newResults = new Map(get().renderResults);
+        const prevResults = get().renderResults;
+        const newResults = new Map(prevResults);
         for (const [vid, r] of results) {
+          // Annotate downscaled live-preview pixel results with original logical
+          // dimensions so the Viewer's dimsChanged check stays false and zoom/pan
+          // is preserved while dragging sliders.
+          if (liveScale < 1 && isPixelResult(r) && r.originalWidth === undefined) {
+            const prev = prevResults.get(vid);
+            if (prev && isPixelResult(prev)) {
+              newResults.set(vid, {
+                ...r,
+                previewScale: liveScale,
+                originalWidth: prev.originalWidth ?? prev.width,
+                originalHeight: prev.originalHeight ?? prev.height,
+              });
+              continue;
+            }
+          }
           newResults.set(vid, r);
         }
         set({ renderResults: newResults, lastError: null });
