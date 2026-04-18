@@ -28,6 +28,7 @@ interface BaseNodeProps {
   headerIcon?: React.ReactNode;
   headerTag?: string;
   onHeaderDoubleClick?: () => void;
+  topContent?: React.ReactNode;
 }
 
 const InlineInputControl: React.FC<{
@@ -173,7 +174,7 @@ const getHeaderBackground = (category: string) => {
 
 export const BaseNode: React.FC<BaseNodeProps> = ({
   id, data, selected, children, minWidth, maxWidth,
-  headerExtra, headerIcon, headerTag, onHeaderDoubleClick,
+  headerExtra, headerIcon, headerTag, onHeaderDoubleClick, topContent,
 }) => {
   const { spec } = data;
   const muted = useGraphStore(s => s.nodes.get(id)?.muted ?? false);
@@ -256,6 +257,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
       </button>
 
       <div className="base-node__body">
+        {topContent}
         {spec.inputs.map((input: PortSpec) => {
           const isConnected = connectedInputSet.has(input.name);
           const isInlineable = input.ty === 'Float' || input.ty === 'Int' || input.ty === 'Bool' || input.ty === 'Color' || input.ty === 'String';

@@ -37,7 +37,7 @@ export interface GraphSliceActions {
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
-  importCustomNodes: (json: string) => Promise<void>;
+  importCustomNodes: (json: string) => Promise<string[]>;
   applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
@@ -736,22 +736,32 @@ export const createGraphSlice: StateCreator<
       await eng.renameGroup(node.typeId, newName);
 
       const specs = await Promise.resolve(eng.listNodeTypes());
-      set({ nodeSpecs: specs });
+
+      // Update editingStack labels so breadcrumb shows new name immediately
+      const editingStack = get().editingStack.map(ctx =>
+        ctx.groupNodeId === groupNodeId ? { ...ctx, label: newName } : ctx
+      );
+
+      set({ nodeSpecs: specs, editingStack });
     },
 
     importCustomNodes: async (json) => {
       const eng = getEngine();
       if (!eng.importCustomNodes) {
         set({ lastError: parseEngineError(new Error('Custom node import not supported by this engine')) });
-        return;
+        return [];
       }
       try {
         const newSpecs = await Promise.resolve(eng.importCustomNodes(json));
         const specs = await Promise.resolve(eng.listNodeTypes());
         set({ nodeSpecs: specs });
-        console.log(`[CustomNodes] Imported ${newSpecs.length} custom node(s)`);
+        const names = newSpecs.map(s => s.display_name).join(', ');
+        get().pushToast('success', 'Custom node imported', names);
+        return newSpecs.map(s => s.id);
       } catch (e) {
         set({ lastError: parseEngineError(e) });
+        get().pushToast('error', 'Import failed', e instanceof Error ? e.message : String(e));
+        return [];
       }
     },
 

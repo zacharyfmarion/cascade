@@ -1,11 +1,13 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { Search, ChevronDown, ChevronRight } from 'lucide-react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { Search, ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
 import type { NodeSpec } from '../store/types';
 import { getNodeIcon, getCategoryIcon } from './nodes/nodeIcons';
 
 export const NodeLibrary: React.FC = () => {
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
+  const importCustomNodes = useGraphStore(s => s.importCustomNodes);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     Input: true,
@@ -46,6 +48,25 @@ export const NodeLibrary: React.FC = () => {
     setExpanded(prev => ({ ...prev, [cat]: !prev[cat] }));
   };
 
+  const handleImportClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      try {
+        const text = await file.text();
+        await importCustomNodes(text);
+      } catch (err) {
+        useGraphStore.getState().pushToast('error', 'Import failed', err instanceof Error ? err.message : String(err));
+      }
+    }
+    // Reset input so the same file can be re-imported
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [importCustomNodes]);
+
   return (
     <div className="panel" style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       <div style={{ padding: '8px', borderBottom: '1px solid var(--border-default)' }}>
@@ -73,6 +94,48 @@ export const NodeLibrary: React.FC = () => {
             }}
           />
         </div>
+      </div>
+
+      <div style={{ padding: '0 8px 8px', borderBottom: '1px solid var(--border-default)' }}>
+        <button
+          type="button"
+          onClick={handleImportClick}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            width: '100%',
+            padding: '6px 12px',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-default)',
+            borderRadius: 4,
+            color: 'var(--text-secondary)',
+            fontSize: '0.8rem',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            transition: 'border-color 0.15s, color 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.borderColor = 'var(--accent-primary)';
+            e.currentTarget.style.color = 'var(--text-primary)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.borderColor = 'var(--border-default)';
+            e.currentTarget.style.color = 'var(--text-secondary)';
+          }}
+        >
+          <Upload size={12} />
+          Import .compnode
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".compnode"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFileChange}
+        />
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>

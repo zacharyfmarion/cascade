@@ -745,27 +745,60 @@ export const NodeCanvas: React.FC = () => {
     edgeReconnectSuccessful.current = true;
   }, [storeDisconnect]);
 
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     // Show 'copy' cursor for image file drops, 'move' for node library drags
     const hasFiles = event.dataTransfer.types.includes('Files');
     event.dataTransfer.dropEffect = hasFiles ? 'copy' : 'move';
+    if (hasFiles) {
+      // Clear any pending leave timer — we're still hovering
+      if (dragLeaveTimer.current) {
+        clearTimeout(dragLeaveTimer.current);
+        dragLeaveTimer.current = null;
+      }
+      setIsDraggingFile(true);
+    }
+  }, []);
+
+  const onDragLeave = useCallback((event: React.DragEvent) => {
+    // Only hide overlay when actually leaving the canvas (not entering a child)
+    if (event.currentTarget.contains(event.relatedTarget as Node)) return;
+    // Debounce to avoid flicker on child boundary crossings
+    if (dragLeaveTimer.current) clearTimeout(dragLeaveTimer.current);
+    dragLeaveTimer.current = setTimeout(() => {
+      setIsDraggingFile(false);
+      dragLeaveTimer.current = null;
+    }, 50);
   }, []);
 
   const onDrop = useCallback(
     async (event: React.DragEvent) => {
       event.preventDefault();
+      setIsDraggingFile(false);
       // Handle image file drops — create a load_image node and load the file
       const files = event.dataTransfer.files;
       if (files.length > 0) {
-        // Handle .compnode file drops — import custom nodes
+        // Handle .compnode file drops — import custom nodes and place on canvas
         const compnodeFiles = Array.from(files).filter(f => f.name.endsWith('.compnode'));
         if (compnodeFiles.length > 0) {
           const importCustomNodes = useGraphStore.getState().importCustomNodes;
+          let offsetIndex = 0;
           for (const file of compnodeFiles) {
             try {
               const text = await file.text();
-              await importCustomNodes(text);
+              const importedIds = await importCustomNodes(text);
+              // Auto-place each imported node type at the drop position
+              for (const typeId of importedIds) {
+                const position = screenToFlowPosition({
+                  x: event.clientX + offsetIndex * 220,
+                  y: event.clientY,
+                });
+                await addNode(typeId, position);
+                offsetIndex++;
+              }
             } catch (e) {
               console.error('[Drop] compnode import failed:', e);
               useGraphStore.getState().pushToast('error', 'Import failed', e instanceof Error ? e.message : String(e));
@@ -1050,8 +1083,9 @@ export const NodeCanvas: React.FC = () => {
   }, [screenToFlowPosition]);
   return (
     <section
-      style={{ width: '100%', height: '100%', background: 'var(--bg-canvas)' }}
+      style={{ width: '100%', height: '100%', background: 'var(--bg-canvas)', position: 'relative' }}
       onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
       onDrop={onDrop}
       aria-label="Node Graph Canvas"
     >
@@ -1127,6 +1161,36 @@ export const NodeCanvas: React.FC = () => {
         />
       )}
 
+      {isDraggingFile && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'var(--bg-overlay, rgba(0,0,0,0.4))',
+            border: '3px dashed var(--accent-primary)',
+            borderRadius: 8,
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            style={{
+              color: 'var(--text-primary)',
+              fontSize: '1.2rem',
+              fontWeight: 600,
+              padding: '12px 24px',
+              background: 'var(--bg-secondary)',
+              borderRadius: 8,
+              border: '1px solid var(--border-default)',
+            }}
+          >
+            Drop to import custom node
+          </div>
+        </div>
+      )}
     </section>
   );
 };

@@ -395,7 +395,7 @@ impl Engine {
         self.collect_group_deps(group_def_id, &mut collected, &mut visited);
 
         let package = NodePackage {
-            version: 1,
+            version: 2,
             cascade_version: env!("CARGO_PKG_VERSION").to_string(),
             exported_at: String::new(),
             nodes: collected,
@@ -663,9 +663,6 @@ impl Engine {
                 max_x = offset_x;
             }
             avg_y += offset_y;
-            let mut params = instance.params.clone();
-            params.insert("__group_offset_x".to_string(), ParamValue::Float(offset_x));
-            params.insert("__group_offset_y".to_string(), ParamValue::Float(offset_y));
             let image_data = if instance.type_id == "load_image" {
                 self.nodes
                     .get(&instance.id)
@@ -677,7 +674,8 @@ impl Engine {
             internal_nodes.push(InternalNode {
                 id: format_node_id(&self.graph, instance.id),
                 type_id: instance.type_id.clone(),
-                params,
+                params: instance.params.clone(),
+                position: (offset_x, offset_y),
                 image_data,
                 input_defaults: instance.input_defaults.clone(),
             });
@@ -686,30 +684,20 @@ impl Engine {
         let node_width = 200.0;
         let padding = 100.0;
 
-        let mut gi_params = HashMap::new();
-        gi_params.insert(
-            "__group_offset_x".to_string(),
-            ParamValue::Float(min_x - node_width - padding),
-        );
-        gi_params.insert("__group_offset_y".to_string(), ParamValue::Float(avg_y));
         internal_nodes.push(InternalNode {
             id: "gi".to_string(),
             type_id: "group_input".to_string(),
-            params: gi_params,
+            params: HashMap::new(),
+            position: (min_x - node_width - padding, avg_y),
             image_data: None,
             input_defaults: HashMap::new(),
         });
 
-        let mut go_params = HashMap::new();
-        go_params.insert(
-            "__group_offset_x".to_string(),
-            ParamValue::Float(max_x + node_width + padding),
-        );
-        go_params.insert("__group_offset_y".to_string(), ParamValue::Float(avg_y));
         internal_nodes.push(InternalNode {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
-            params: go_params,
+            params: HashMap::new(),
+            position: (max_x + node_width + padding, avg_y),
             image_data: None,
             input_defaults: HashMap::new(),
         });
@@ -861,13 +849,18 @@ impl Engine {
                 continue;
             }
 
-            let offset_x = match internal.params.get("__group_offset_x") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
-            };
-            let offset_y = match internal.params.get("__group_offset_y") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
+            let (offset_x, offset_y) = if internal.position != (0.0, 0.0) {
+                internal.position
+            } else {
+                let ox = match internal.params.get("__group_offset_x") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                let oy = match internal.params.get("__group_offset_y") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                (ox, oy)
             };
             let position = (group_position.0 + offset_x, group_position.1 + offset_y);
 
@@ -975,13 +968,18 @@ impl Engine {
 
         let mut nodes = Vec::new();
         for internal in &group_def.internal_graph.nodes {
-            let offset_x = match internal.params.get("__group_offset_x") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
-            };
-            let offset_y = match internal.params.get("__group_offset_y") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
+            let (offset_x, offset_y) = if internal.position != (0.0, 0.0) {
+                internal.position
+            } else {
+                let ox = match internal.params.get("__group_offset_x") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                let oy = match internal.params.get("__group_offset_y") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                (ox, oy)
             };
             let mut params = internal.params.clone();
             params.remove("__group_offset_x");
@@ -1988,11 +1986,10 @@ impl Engine {
             _ => 0,
         };
 
-        let total_frames = if range.step > 0 {
-            (range.end - range.start) / range.step + 1
-        } else {
+        if range.step == 0 {
             return Err(CascadeError::Other("Step must be > 0".to_string()));
-        };
+        }
+        let total_frames = (range.end - range.start) / range.step + 1;
 
         let job_id = format!("job_{}", uuid::Uuid::new_v4());
         let job = Arc::new(RenderJob {
@@ -2171,11 +2168,10 @@ impl Engine {
             _ => 24,
         };
 
-        let total_frames = if range.step > 0 {
-            (range.end - range.start) / range.step + 1
-        } else {
+        if range.step == 0 {
             return Err(CascadeError::Other("Step must be > 0".to_string()));
-        };
+        }
+        let total_frames = (range.end - range.start) / range.step + 1;
 
         let job_id = format!("job_{}", uuid::Uuid::new_v4());
         let job = Arc::new(RenderJob {

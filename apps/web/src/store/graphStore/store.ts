@@ -176,7 +176,7 @@ export interface GraphState {
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
   isInsideGroup: () => boolean;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
-  importCustomNodes: (json: string) => Promise<void>;
+  importCustomNodes: (json: string) => Promise<string[]>;
   applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
   setAiApiKey: (provider: string, key: string) => Promise<void>;

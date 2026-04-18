@@ -364,7 +364,7 @@ impl Engine {
             .collect();
 
         let package = NodePackage {
-            version: 1,
+            version: 2,
             cascade_version: env!("CARGO_PKG_VERSION").to_string(),
             exported_at: String::new(),
             nodes: sanitized_nodes,
@@ -1666,9 +1666,7 @@ impl Engine {
                 max_x = ox;
             }
             avg_y += oy;
-            let mut params = info.params.clone();
-            params.insert("__group_offset_x".to_string(), ParamValue::Float(ox));
-            params.insert("__group_offset_y".to_string(), ParamValue::Float(oy));
+            let params = info.params.clone();
             let image_data = if info.type_id == "load_image" {
                 self.nodes
                     .get(&info.id)
@@ -1680,6 +1678,7 @@ impl Engine {
             int_nodes.push(InternalNode {
                 id: format_node_id(&self.graph, info.id),
                 type_id: info.type_id.clone(),
+                position: (ox, oy),
                 params,
                 image_data,
                 input_defaults: info.input_defaults.clone(),
@@ -1689,30 +1688,20 @@ impl Engine {
         let node_width = 200.0;
         let padding = 100.0;
 
-        let mut gi_params = HashMap::new();
-        gi_params.insert(
-            "__group_offset_x".to_string(),
-            ParamValue::Float(min_x - node_width - padding),
-        );
-        gi_params.insert("__group_offset_y".to_string(), ParamValue::Float(avg_y));
         int_nodes.push(InternalNode {
             id: "gi".to_string(),
             type_id: "group_input".to_string(),
-            params: gi_params,
+            position: (min_x - node_width - padding, avg_y),
+            params: HashMap::new(),
             image_data: None,
             input_defaults: HashMap::new(),
         });
 
-        let mut go_params = HashMap::new();
-        go_params.insert(
-            "__group_offset_x".to_string(),
-            ParamValue::Float(max_x + node_width + padding),
-        );
-        go_params.insert("__group_offset_y".to_string(), ParamValue::Float(avg_y));
         int_nodes.push(InternalNode {
             id: "go".to_string(),
             type_id: "group_output".to_string(),
-            params: go_params,
+            position: (max_x + node_width + padding, avg_y),
+            params: HashMap::new(),
             image_data: None,
             input_defaults: HashMap::new(),
         });
@@ -1886,21 +1875,26 @@ impl Engine {
             let input_defaults = state_entry
                 .map(|state| state.input_defaults.clone())
                 .unwrap_or_else(|| internal.input_defaults.clone());
-            let ox = match params.get("__group_offset_x") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
+            let (ox, oy) = if internal.position != (0.0, 0.0) {
+                internal.position
+            } else {
+                let ox = match params.get("__group_offset_x") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                let oy = match params.get("__group_offset_y") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                (ox, oy)
             };
-            let oy = match params.get("__group_offset_y") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
-            };
+            params.remove("__group_offset_x");
+            params.remove("__group_offset_y");
             let pos = (gpos.0 + ox, gpos.1 + oy);
             let (new_str, _) = self
                 .add_node_internal(&internal.type_id, pos.0, pos.1)
                 .ok_or_else(|| CascadeError::Other("Failed to restore node".to_string()))?;
             let new_id = parse_node_id(&self.uuid_map, &new_str)?;
-            params.remove("__group_offset_x");
-            params.remove("__group_offset_y");
             for (k, v) in &params {
                 self.graph.set_param(new_id, k, v.clone());
             }
@@ -1987,13 +1981,19 @@ impl Engine {
 
         let mut nodes = Vec::new();
         for internal in &gdef.internal_graph.nodes {
-            let ox = match internal.params.get("__group_offset_x") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
-            };
-            let oy = match internal.params.get("__group_offset_y") {
-                Some(ParamValue::Float(v)) => *v,
-                _ => 0.0,
+            // Support legacy format: positions were stored as __group_offset_x/y params.
+            let (ox, oy) = if internal.position != (0.0, 0.0) {
+                internal.position
+            } else {
+                let ox = match internal.params.get("__group_offset_x") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                let oy = match internal.params.get("__group_offset_y") {
+                    Some(ParamValue::Float(v)) => *v,
+                    _ => 0.0,
+                };
+                (ox, oy)
             };
             let mut params = internal.params.clone();
             params.remove("__group_offset_x");

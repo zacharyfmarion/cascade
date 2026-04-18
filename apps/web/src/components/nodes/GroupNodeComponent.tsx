@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { Hexagon } from 'lucide-react';
 import { BaseNode } from './BaseNode';
@@ -18,12 +18,63 @@ export const GroupNodeComponent: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const { spec, params } = data;
   const enterGroup = useGraphStore(s => s.enterGroup);
+  const renameGroup = useGraphStore(s => s.renameGroup);
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);
+
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const handleDoubleClick = useCallback(() => {
     enterGroup(props.id);
   }, [props.id, enterGroup]);
+
+  const handleNameBlur = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    const trimmed = e.target.value.trim();
+    if (trimmed && trimmed !== spec.display_name) {
+      renameGroup(props.id, trimmed);
+    } else {
+      // Reset to current name if empty or unchanged
+      e.target.value = spec.display_name;
+    }
+  }, [spec.display_name, props.id, renameGroup]);
+
+  const handleNameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      nameRef.current?.blur();
+    }
+  }, []);
+
+  const nameInput = (
+    <div
+      className="nopan nodrag"
+      style={{ padding: '4px 8px 6px', borderBottom: '1px solid var(--border-default)' }}
+    >
+      <input
+        ref={nameRef}
+        type="text"
+        className="nopan nodrag"
+        defaultValue={spec.display_name}
+        key={spec.display_name}
+        onBlur={handleNameBlur}
+        onKeyDown={handleNameKeyDown}
+        style={{
+          width: '100%',
+          background: 'var(--bg-primary)',
+          color: 'var(--text-primary)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '3px',
+          padding: '3px 6px',
+          fontSize: '0.8rem',
+          fontFamily: 'inherit',
+          outline: 'none',
+          boxSizing: 'border-box',
+        }}
+        onFocus={e => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; }}
+        onBlurCapture={e => { e.currentTarget.style.borderColor = 'var(--border-default)'; }}
+      />
+    </div>
+  );
 
   return (
     <BaseNode
@@ -32,6 +83,7 @@ export const GroupNodeComponent: React.FC<NodeProps> = (props) => {
       headerIcon={<Hexagon size={12} />}
       headerTag="Group"
       onHeaderDoubleClick={handleDoubleClick}
+      topContent={nameInput}
     >
       <NodeSection>
         {spec.params.filter(p => !isConnectableParam(p)).map(p => {
@@ -71,10 +123,6 @@ export const GroupNodeComponent: React.FC<NodeProps> = (props) => {
           return null;
         })}
       </NodeSection>
-
-      <div className="node-hint">
-        Double-click to edit
-      </div>
     </BaseNode>
   );
 };
