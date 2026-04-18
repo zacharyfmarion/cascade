@@ -190,6 +190,7 @@ fn set_param_and_render(
     key: String,
     value: serde_json::Value,
     frame: u64,
+    preview_scale: Option<f32>,
 ) -> Result<Response, String> {
     let t0 = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -197,7 +198,13 @@ fn set_param_and_render(
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     let results = s
         .engine
-        .set_param_and_render_viewers(&node_id, &key, param_value, frame)
+        .set_param_and_render_viewers_scaled(
+            &node_id,
+            &key,
+            param_value,
+            frame,
+            preview_scale.unwrap_or(1.0),
+        )
         .map_err(|e| e.to_string())?;
     let elapsed = t0.elapsed();
     eprintln!(
@@ -229,6 +236,7 @@ fn set_input_default_and_render(
     port_name: String,
     value: serde_json::Value,
     frame: u64,
+    preview_scale: Option<f32>,
 ) -> Result<Response, String> {
     let t0 = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -236,7 +244,13 @@ fn set_input_default_and_render(
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     let results = s
         .engine
-        .set_input_default_and_render_viewers(&node_id, &port_name, param_value, frame)
+        .set_input_default_and_render_viewers_scaled(
+            &node_id,
+            &port_name,
+            param_value,
+            frame,
+            preview_scale.unwrap_or(1.0),
+        )
         .map_err(|e| e.to_string())?;
     let elapsed = t0.elapsed();
     eprintln!(
