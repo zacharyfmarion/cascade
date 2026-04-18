@@ -82,7 +82,11 @@ function wasmHotRebuild(): PluginOption {
 }
 
 export default defineConfig({
-  plugins: [react(), wasm(), topLevelAwait(), wasmHotRebuild()],
+  plugins: [react(), wasm(), wasmHotRebuild()],
+  worker: {
+    format: 'es',
+    plugins: () => [wasm(), topLevelAwait()],
+  },
   server: {
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
