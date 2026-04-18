@@ -1,73 +1,98 @@
-# React + TypeScript + Vite
+# Cascade Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+`apps/web` contains the browser frontend for Cascade.
+This is the primary supported surface of the project today and the best place to explore, test, and contribute to the application.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- React 19
+- Vite
+- Zustand
+- `@xyflow/react`
+- Rust compiled to WebAssembly through `cascade-wasm`
 
-## React Compiler
+## Prerequisites
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 22+
+- Rust stable
+- `wasm-pack`
+- Nightly Rust with `rust-src` if you want to build the threaded WASM bundle locally
 
-## Expanding the ESLint configuration
+## Local Development
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+From the repository root:
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+yarn install
+cd apps/web
+yarn dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+`yarn dev` runs `predev`, which builds:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+- `src/wasm-pkg/` for the stable single-threaded bundle
+- `src/wasm-pkg-threads/` for the threaded bundle
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Those generated directories are ignored in git and should not be committed.
+
+## Common Commands
+
+```bash
+yarn build:wasm
+yarn lint
+yarn lint:css
+yarn test
+npx tsc -b --noEmit
+npx playwright test
 ```
+
+## Runtime Behavior
+
+- The app prefers a worker-backed threaded WASM engine when cross-origin isolation is available.
+- If the environment does not support threaded WASM, it falls back to a single-threaded engine automatically.
+- In development and preview, Vite is configured to send the headers needed for cross-origin isolation.
+
+## Deployment Notes
+
+If you host the web app yourself and want threaded WASM support, your server needs to send:
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Without those headers, the app still runs, but it uses the single-threaded engine path.
+
+## AI Features
+
+The web app includes optional AI-assisted workflows.
+
+- Replicate API keys enable supported AI nodes
+- Anthropic API keys enable the in-app AI assistant and script-generation helpers
+- Keys are stored locally in browser storage for the current user profile
+
+If you are evaluating the project for open-source use, it is reasonable to ignore AI features entirely and work only with the local graph engine.
+
+## Testing Expectations
+
+Before opening a PR that touches the web app, try to run:
+
+```bash
+yarn lint
+yarn lint:css
+yarn test
+npx playwright test
+```
+
+If your change touches Rust code used by the web app, also run:
+
+```bash
+cargo check --workspace
+cargo test --workspace
+```
+
+## Related Files
+
+- Root overview: [README.md](../../README.md)
+- CI workflow: [.github/workflows/ci.yml](../../.github/workflows/ci.yml)
+- Frontend source: [apps/web/src](./src)
