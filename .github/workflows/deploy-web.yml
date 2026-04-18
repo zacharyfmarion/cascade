@@ -43,8 +43,13 @@ jobs:
       - name: Install dependencies
         run: yarn install --immutable
 
+      - name: Build WASM package
+        working-directory: apps/web
+        run: yarn build:wasm
+
       - name: Build web app
-        run: yarn build:web
+        working-directory: apps/web
+        run: yarn build
 
       - name: Deploy to Cloudflare Pages
         working-directory: apps/web
