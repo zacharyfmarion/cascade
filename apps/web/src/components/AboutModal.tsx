@@ -1,13 +1,16 @@
-import { useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { TbBrandGithub, TbDownload } from 'react-icons/tb';
 import { useSettingsStore } from '../store/settingsStore';
-
-const REPOSITORY_URL = 'https://github.com/zacharyfmarion/cascade';
-const MAC_DOWNLOAD_URL = 'https://github.com/zacharyfmarion/cascade/releases/latest';
+import {
+  APP_VERSION,
+  REPOSITORY_URL,
+  getMacDownloadUrl,
+  type MacArch,
+} from '../constants/release';
 
 export const ABOUT_MODAL_COPY = {
   title: 'Cascade',
-  version: 'v0.1.0',
+  version: `v${APP_VERSION}`,
   description:
     'A node-based image editor that runs entirely in your browser. Inspired by Nuke and Blender.',
   downloadLabel: 'Download Cascade for Mac',
@@ -20,11 +23,42 @@ export const ABOUT_MODAL_LINKS = {
     ariaLabel: 'View GitHub Repository',
   },
   download: {
-    href: MAC_DOWNLOAD_URL,
     title: 'Download Cascade for Mac',
     ariaLabel: 'Download Cascade for Mac',
   },
 } as const;
+
+function detectMacArch(): MacArch {
+  if (!navigator.userAgent.includes('Mac')) return 'aarch64';
+  if (navigator.userAgent.includes('Intel')) return 'x64';
+  return 'aarch64';
+}
+
+function useMacDownloadUrl(): string {
+  const [arch, setArch] = useState<MacArch>(() => detectMacArch());
+
+  useEffect(() => {
+    if (!navigator.userAgent.includes('Mac')) return;
+
+    const uaData = (
+      navigator as Navigator & {
+        userAgentData?: {
+          getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>;
+        };
+      }
+    ).userAgentData;
+
+    if (uaData?.getHighEntropyValues) {
+      void uaData.getHighEntropyValues(['architecture']).then((values) => {
+        if (values.architecture === 'x86') {
+          setArch('x64');
+        }
+      });
+    }
+  }, []);
+
+  return getMacDownloadUrl(arch);
+}
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -133,6 +167,7 @@ function IconLink({ href, title, ariaLabel, children }: IconLinkProps) {
 export function AboutModal() {
   const isOpen = useSettingsStore(s => s.isAboutOpen);
   const close = useSettingsStore(s => s.closeAbout);
+  const downloadUrl = useMacDownloadUrl();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -170,7 +205,11 @@ export function AboutModal() {
           <IconLink {...ABOUT_MODAL_LINKS.github}>
             <TbBrandGithub size={15} aria-hidden="true" />
           </IconLink>
-          <IconLink {...ABOUT_MODAL_LINKS.download}>
+          <IconLink
+            href={downloadUrl}
+            title={ABOUT_MODAL_LINKS.download.title}
+            ariaLabel={ABOUT_MODAL_LINKS.download.ariaLabel}
+          >
             <TbDownload size={15} aria-hidden="true" />
           </IconLink>
         </div>
@@ -200,12 +239,7 @@ export function AboutModal() {
 
         <div style={descriptionStyle}>{ABOUT_MODAL_COPY.description}</div>
 
-        <a
-          href={ABOUT_MODAL_LINKS.download.href}
-          target="_blank"
-          rel="noreferrer"
-          style={primaryLinkStyle}
-        >
+        <a href={downloadUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>
           {ABOUT_MODAL_COPY.downloadLabel}
         </a>
 

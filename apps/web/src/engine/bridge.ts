@@ -108,6 +108,7 @@ export interface EngineBridge {
   loadProject?(path: string): Promise<unknown>;
   getImageData?(nodeId: string): Promise<Uint8Array | null> | Uint8Array | null;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
+  exportImageToPath?(nodeId: string, frame: number, path: string): Promise<void>;
   renderSequence?(nodeId: string): Promise<string>;
   renderVideo?(nodeId: string): Promise<string>;
   cancelJob?(): Promise<void>;

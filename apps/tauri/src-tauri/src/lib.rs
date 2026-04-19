@@ -428,6 +428,21 @@ fn export_image(
 }
 
 #[tauri::command]
+fn export_image_to_path(
+    state: State<'_, EngineState>,
+    node_id: String,
+    frame: u64,
+    path: String,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let (_extension, bytes) = s
+        .engine
+        .render_export(&node_id, frame)
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn set_sequence_directory(
     state: State<'_, EngineState>,
     node_id: String,
@@ -772,6 +787,7 @@ pub fn run() {
             compile_script_node,
             register_gpu_kernel,
             export_image,
+            export_image_to_path,
             set_sequence_directory,
             get_sequence_info,
             load_video_file,
