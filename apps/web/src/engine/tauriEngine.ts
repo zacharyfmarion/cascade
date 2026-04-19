@@ -88,11 +88,11 @@ export class TauriEngine implements EngineBridge {
     await invoke('set_muted', { nodeId, muted });
   }
 
-  async setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number): Promise<Array<[string, ViewerResult]>> {
+  async setAndRender(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number, previewScale?: number): Promise<Array<[string, ViewerResult]>> {
     const cmd = mutation.type === 'param' ? 'set_param_and_render' : 'set_input_default_and_render';
     const args = mutation.type === 'param'
-      ? { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame }
-      : { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value, frame };
+      ? { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame, previewScale }
+      : { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value, frame, previewScale };
     const buf = await invoke<ArrayBuffer>(cmd, args);
     const results: Array<[string, ViewerResult]> = [];
     if (!buf || buf.byteLength < 4) return results;

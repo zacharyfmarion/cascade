@@ -1656,26 +1656,94 @@ impl Engine {
         Ok(info)
     }
 
-    pub fn render_viewer(
+    fn normalize_preview_scale(preview_scale: f32) -> f32 {
+        if !preview_scale.is_finite() || preview_scale <= 0.0 || preview_scale > 1.0 {
+            1.0
+        } else {
+            preview_scale
+        }
+    }
+
+    fn evaluate_viewer_scaled(
         &mut self,
-        viewer_node_id: &str,
+        viewer_id: NodeId,
         frame: u64,
-    ) -> Result<RenderResult, CascadeError> {
-        let id = self.parse_node_id(viewer_node_id)?;
+        preview_scale: f32,
+    ) -> Result<cascade_core::eval::EvalResult, CascadeError> {
         let cm = self.color_management.as_ref();
-        let eval_result = pollster::block_on(self.evaluator.evaluate(
+        pollster::block_on(self.evaluator.evaluate(
             &mut self.graph,
             &self.registry,
             &self.nodes,
-            id,
+            viewer_id,
             "display",
             FrameTime { frame },
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
             &HashMap::new(),
-            1.0,
-        ))?;
+            Self::normalize_preview_scale(preview_scale),
+        ))
+    }
+
+    fn image_to_render_result(&self, image: &Image) -> RenderResult {
+        let pixels = Viewer::image_to_rgba8_with_display(
+            image,
+            self.color_management.as_ref(),
+            &self.active_display,
+            &self.active_view,
+        );
+        RenderResult {
+            width: image.width,
+            height: image.height,
+            pixels,
+        }
+    }
+
+    fn render_viewers_scaled(
+        &mut self,
+        viewer_ids: Vec<NodeId>,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Vec<(String, RenderResult)> {
+        let mut results = Vec::new();
+        let mut merged_timings = HashMap::new();
+
+        for viewer_id in viewer_ids {
+            let viewer_id_str = format_node_id(&self.graph, viewer_id);
+            if let Ok(eval_result) = self.evaluate_viewer_scaled(viewer_id, frame, preview_scale) {
+                for (node_id, duration) in eval_result.node_timings {
+                    merged_timings.insert(
+                        format_node_id(&self.graph, node_id),
+                        duration.as_secs_f64() * 1000.0,
+                    );
+                }
+                if let Value::Image(image) = eval_result.value {
+                    results.push((viewer_id_str, self.image_to_render_result(&image)));
+                }
+            }
+        }
+
+        self.last_timings = merged_timings;
+        results
+    }
+
+    pub fn render_viewer(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<RenderResult, CascadeError> {
+        self.render_viewer_scaled(viewer_node_id, frame, 1.0)
+    }
+
+    pub fn render_viewer_scaled(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<RenderResult, CascadeError> {
+        let id = self.parse_node_id(viewer_node_id)?;
+        let eval_result = self.evaluate_viewer_scaled(id, frame, preview_scale)?;
         self.last_timings = eval_result
             .node_timings
             .into_iter()
@@ -1687,21 +1755,7 @@ impl Engine {
             })
             .collect();
         match eval_result.value {
-            Value::Image(image) => {
-                let width = image.width;
-                let height = image.height;
-                let pixels = Viewer::image_to_rgba8_with_display(
-                    &image,
-                    cm,
-                    &self.active_display,
-                    &self.active_view,
-                );
-                Ok(RenderResult {
-                    width,
-                    height,
-                    pixels,
-                })
-            }
+            Value::Image(image) => Ok(self.image_to_render_result(&image)),
             _ => Err(CascadeError::Other(
                 "Viewer output is not an image".to_string(),
             )),
@@ -1809,62 +1863,21 @@ impl Engine {
         value: ParamValue,
         frame: u64,
     ) -> Result<Vec<(String, RenderResult)>, CascadeError> {
+        self.set_param_and_render_viewers_scaled(node_id, key, value, frame, 1.0)
+    }
+
+    pub fn set_param_and_render_viewers_scaled(
+        &mut self,
+        node_id: &str,
+        key: &str,
+        value: ParamValue,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<Vec<(String, RenderResult)>, CascadeError> {
         let id = self.parse_node_id(node_id)?;
         self.graph.set_param(id, key, value);
-
-        let viewer_ids: Vec<(NodeId, String)> = self
-            .graph
-            .nodes
-            .iter()
-            .filter(|(_, n)| n.type_id == "viewer")
-            .map(|(id, _)| (id, format_node_id(&self.graph, id)))
-            .collect();
-
-        let mut results = Vec::new();
-        let mut merged_timings = HashMap::new();
-        let cm = self.color_management.as_ref();
-        for (vid, vid_str) in viewer_ids {
-            if let Ok(eval_result) = pollster::block_on(self.evaluator.evaluate(
-                &mut self.graph,
-                &self.registry,
-                &self.nodes,
-                vid,
-                "display",
-                FrameTime { frame },
-                cm,
-                self.ai_provider.as_deref(),
-                &self.project_format,
-                &HashMap::new(),
-                1.0,
-            )) {
-                for (nid, duration) in eval_result.node_timings {
-                    merged_timings.insert(
-                        format_node_id(&self.graph, nid),
-                        duration.as_secs_f64() * 1000.0,
-                    );
-                }
-                if let Value::Image(image) = eval_result.value {
-                    let width = image.width;
-                    let height = image.height;
-                    let pixels = Viewer::image_to_rgba8_with_display(
-                        &image,
-                        cm,
-                        &self.active_display,
-                        &self.active_view,
-                    );
-                    results.push((
-                        vid_str,
-                        RenderResult {
-                            width,
-                            height,
-                            pixels,
-                        },
-                    ));
-                }
-            }
-        }
-        self.last_timings = merged_timings;
-        Ok(results)
+        let viewer_ids = self.graph.get_affected_viewers(id);
+        Ok(self.render_viewers_scaled(viewer_ids, frame, preview_scale))
     }
 
     pub fn set_input_default_and_render_viewers(
@@ -1874,62 +1887,21 @@ impl Engine {
         value: ParamValue,
         frame: u64,
     ) -> Result<Vec<(String, RenderResult)>, CascadeError> {
+        self.set_input_default_and_render_viewers_scaled(node_id, port_name, value, frame, 1.0)
+    }
+
+    pub fn set_input_default_and_render_viewers_scaled(
+        &mut self,
+        node_id: &str,
+        port_name: &str,
+        value: ParamValue,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<Vec<(String, RenderResult)>, CascadeError> {
         let id = self.parse_node_id(node_id)?;
         self.graph.set_input_default(id, port_name, value);
-
-        let viewer_ids: Vec<(NodeId, String)> = self
-            .graph
-            .nodes
-            .iter()
-            .filter(|(_, n)| n.type_id == "viewer")
-            .map(|(id, _)| (id, format_node_id(&self.graph, id)))
-            .collect();
-
-        let mut results = Vec::new();
-        let mut merged_timings = HashMap::new();
-        let cm = self.color_management.as_ref();
-        for (vid, vid_str) in viewer_ids {
-            if let Ok(eval_result) = pollster::block_on(self.evaluator.evaluate(
-                &mut self.graph,
-                &self.registry,
-                &self.nodes,
-                vid,
-                "display",
-                FrameTime { frame },
-                cm,
-                self.ai_provider.as_deref(),
-                &self.project_format,
-                &HashMap::new(),
-                1.0,
-            )) {
-                for (nid, duration) in eval_result.node_timings {
-                    merged_timings.insert(
-                        format_node_id(&self.graph, nid),
-                        duration.as_secs_f64() * 1000.0,
-                    );
-                }
-                if let Value::Image(image) = eval_result.value {
-                    let width = image.width;
-                    let height = image.height;
-                    let pixels = Viewer::image_to_rgba8_with_display(
-                        &image,
-                        cm,
-                        &self.active_display,
-                        &self.active_view,
-                    );
-                    results.push((
-                        vid_str,
-                        RenderResult {
-                            width,
-                            height,
-                            pixels,
-                        },
-                    ));
-                }
-            }
-        }
-        self.last_timings = merged_timings;
-        Ok(results)
+        let viewer_ids = self.graph.get_affected_viewers(id);
+        Ok(self.render_viewers_scaled(viewer_ids, frame, preview_scale))
     }
 
     pub fn get_last_render_timings(&self) -> &HashMap<String, f64> {
@@ -2927,6 +2899,75 @@ return pixelated;
             "Output pixel should be snapped to a palette color, got {p:?}"
         );
         println!("Pixelate GROUP E2E test PASSED");
+    }
+
+    #[test]
+    fn test_live_render_preview_scale_only_updates_affected_viewers() {
+        let mut engine = Engine::new();
+
+        let (load_id, _) = engine.add_node("load_image", -300.0, 0.0).unwrap();
+        let (blur_id, _) = engine.add_node("gaussian_blur", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        let (other_load_id, _) = engine.add_node("load_image", -300.0, 200.0).unwrap();
+        let (other_viewer_id, _) = engine.add_node("viewer", 300.0, 200.0).unwrap();
+
+        let png_image = image::RgbaImage::from_fn(100, 80, |x, y| {
+            let r = ((x as f32 / 99.0) * 255.0) as u8;
+            let g = ((y as f32 / 79.0) * 255.0) as u8;
+            image::Rgba([r, g, 64, 255])
+        });
+        let mut png_bytes = Vec::new();
+        png_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode PNG");
+        engine
+            .load_image_data(&load_id, &png_bytes)
+            .expect("load image");
+
+        let other_png_image = image::RgbaImage::from_fn(24, 24, |x, y| {
+            image::Rgba([(x * 10) as u8, (y * 10) as u8, 200, 255])
+        });
+        let mut other_png_bytes = Vec::new();
+        other_png_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut other_png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode other PNG");
+        engine
+            .load_image_data(&other_load_id, &other_png_bytes)
+            .expect("load other image");
+
+        engine
+            .connect(&load_id, "image", &blur_id, "image")
+            .expect("connect load->blur");
+        engine
+            .connect(&blur_id, "image", &viewer_id, "value")
+            .expect("connect blur->viewer");
+        engine
+            .connect(&other_load_id, "image", &other_viewer_id, "value")
+            .expect("connect other load->viewer");
+
+        let live_results = engine
+            .set_param_and_render_viewers_scaled(&blur_id, "sigma", ParamValue::Float(2.0), 0, 0.5)
+            .expect("live render");
+
+        assert_eq!(
+            live_results.len(),
+            1,
+            "only affected viewer should re-render"
+        );
+        let (updated_viewer_id, live_result) = &live_results[0];
+        assert_eq!(updated_viewer_id, &viewer_id);
+        assert_eq!(live_result.width, 50);
+        assert_eq!(live_result.height, 40);
+
+        let committed_result = engine.render_viewer(&viewer_id, 0).expect("full render");
+        assert_eq!(committed_result.width, 100);
+        assert_eq!(committed_result.height, 80);
     }
 
     #[test]
