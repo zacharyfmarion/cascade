@@ -21,4 +21,4 @@ Upgrade the web app's static HTML with stronger title/description/canonical/Open
 - [x] Add crawler assets and share-preview assets
 - [x] Add regression coverage for SEO files
 - [x] Run frontend validation
-- [ ] Prepare git handoff and PR summary
+- [x] Prepare git handoff and PR summary
