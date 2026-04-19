@@ -1,15 +1,15 @@
 # Cascade
 
 Cascade is a node-based image processing application built around a Rust graph engine with a React frontend.
-The project is being opened up web-first: the browser app is the primary supported target today, while the Tauri desktop shell is still catching up to feature parity.
+Cascade ships as both a browser-based editor and a macOS desktop app packaged with Tauri.
 
 ## Status
 
-- Web: active development target and the best place to evaluate the project today
-- Desktop: usable for development work, but not yet at parity with the web app
+- Web: active development target with shared Rust + WASM runtime
+- Desktop: public macOS release with native filesystem access and Tauri shell features
 - AI features: optional, bring-your-own-key integrations for supported providers
 
-This repository is intended for contributors and early adopters who are comfortable working in a fast-moving codebase.
+This repository is intended for contributors and early adopters who are comfortable working in a fast-moving codebase while the product continues to evolve.
 
 ## What Cascade Does
 
@@ -38,6 +38,29 @@ cascade/
 ├── docs/                   # Architecture and design notes
 └── .github/workflows/ci.yml
 ```
+
+## Installation
+
+### Web
+
+The web app remains the fastest way to evaluate Cascade during active development.
+
+### Desktop (macOS)
+
+Install via Homebrew:
+
+```bash
+brew tap zacharyfmarion/homebrew-cascade
+brew install --cask cascade
+```
+
+Or download the latest signed DMG from GitHub Releases:
+
+- Apple Silicon: [Cascade latest for Apple Silicon](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_aarch64.dmg)
+- Intel: [Cascade latest for Intel](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_x64.dmg)
+- Release page: [GitHub Releases](https://github.com/zacharyfmarion/cascade/releases)
+
+Requires macOS 10.15 (Catalina) or later.
 
 ## Web-First Quick Start
 
@@ -105,8 +128,8 @@ If you do not want to use AI features, you can ignore them entirely.
 
 ## Desktop Status
 
-The desktop app remains in the repository because it shares the same core engine and is an active part of the roadmap.
-That said, the web app is the better target for evaluation, contribution, and first release feedback right now.
+The desktop app shares the same Rust core and frontend architecture as the web build, but adds native packaging and filesystem access through Tauri.
+The web app is still the fastest place to iterate on browser-targeted workflows, while the macOS build is the production desktop distribution target.
 
 If you are looking for the most complete experience today, start with [`apps/web`](./apps/web/README.md).
 

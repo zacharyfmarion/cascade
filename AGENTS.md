@@ -88,6 +88,15 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 
 ## Common patterns
 
+### Preparing a release
+
+- Use the repo-local `cascade-release` skill for requests to prepare or publish desktop releases.
+- The release workflow is driven by `scripts/release.sh` with:
+  - `./scripts/release.sh prepare <version>`
+  - `./scripts/release.sh publish <version>`
+- The script defaults to `RELEASE_GITHUB_REPO=zacharyfmarion/cascade` and `RELEASE_REMOTE=cascade` so release work does not depend on `origin`.
+- Release notes should use `### Added`, `### Changed`, and `### Fixed` sections unless the user explicitly wants a different format.
+
 ### Adding a new node
 
 **Default to a GPU kernel node** when the operation is a per-pixel transform (color correction, filters, blending, etc.). GPU nodes are dramatically faster and simpler to write for these cases. Only use a CPU node (`cascade-nodes-std`) when the operation requires complex control flow, full-image random access, or external library calls that can't run in a shader.
