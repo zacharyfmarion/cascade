@@ -199,6 +199,10 @@ export class TauriEngine implements EngineBridge {
     return new Uint8Array(buf);
   }
 
+  async exportImageToPath(nodeId: string, frame: number, path: string): Promise<void> {
+    await invoke('export_image_to_path', { nodeId, frame, path });
+  }
+
   async renderSequence(nodeId: string): Promise<string> {
     return invoke<string>('render_sequence', { nodeId });
   }

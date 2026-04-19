@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { JobProgress } from '../../../engine/bridge';
-import { getEngine, kernel } from '../kernel';
+import { getEngine, isTauri, kernel } from '../kernel';
 import { makeEngineError, parseEngineError } from '../../../engine/engineError';
 
 export interface BatchExportSliceState {
@@ -39,6 +39,25 @@ export const createBatchExportSlice: StateCreator<
     const extension = formatIdx === 1 ? 'jpg' : 'png';
     const mimeType = formatIdx === 1 ? 'image/jpeg' : 'image/png';
 
+    if (isTauri()) {
+      const eng = getEngine();
+      import('@tauri-apps/plugin-dialog').then(({ save }) =>
+        save({
+          filters: [{ name: 'Image', extensions: [extension] }],
+          defaultPath: `export.${extension}`,
+        })
+      ).then(async path => {
+        if (!path) return;
+        if (eng.exportImageToPath) {
+          await eng.exportImageToPath(nodeId, frame, path);
+        }
+      }).catch(e => {
+        console.error('exportImage failed:', e);
+        set({ lastError: parseEngineError(e) });
+      });
+      return;
+    }
+
     getEngine().exportImage(nodeId, frame).then(bytes => {
       const buffer = bytes.buffer instanceof ArrayBuffer
         ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
@@ -58,6 +77,27 @@ export const createBatchExportSlice: StateCreator<
 
   exportExr: async (nodeId) => {
     const eng = getEngine();
+
+    if (isTauri()) {
+      try {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const path = await save({
+          filters: [{ name: 'OpenEXR Image', extensions: ['exr'] }],
+          defaultPath: 'export.exr',
+        });
+        if (!path) return;
+        if (eng.exportImageToPath) {
+          await eng.exportImageToPath(nodeId, get().currentFrame, path);
+        }
+        get().pushToast('success', 'EXR Exported', 'File saved');
+      } catch (e: unknown) {
+        console.error('exportExr failed:', e);
+        set({ lastError: parseEngineError(e) });
+        get().pushToast('error', 'EXR Export Failed', String(e));
+      }
+      return;
+    }
+
     if (!eng.evaluateBytesOutput) {
       console.warn('evaluateBytesOutput not supported by engine');
       return;
