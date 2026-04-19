@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Settings, HelpCircle } from 'lucide-react';
+import { TbBrandGithub, TbDownload } from 'react-icons/tb';
 import { IconButton } from './components/ui/IconButton';
+import { useMacDownloadUrl } from './components/AboutModal';
+import { REPOSITORY_URL } from './constants/release';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
@@ -50,6 +53,7 @@ function Toolbar() {
   const openSettings = useSettingsStore(s => s.openSettings);
   const openShortcuts = useSettingsStore(s => s.openShortcuts);
   const isTauriApp = isTauri();
+  const downloadUrl = useMacDownloadUrl();
 
   return (
     <div className="toolbar">
@@ -59,6 +63,12 @@ function Toolbar() {
         <MenuBar />
       )}
       <div className="toolbar__actions">
+        <IconButton size="sm" title="View on GitHub" tooltipSide="bottom" onClick={() => window.open(REPOSITORY_URL, '_blank', 'noreferrer')}>
+          <TbBrandGithub size={14} />
+        </IconButton>
+        <IconButton size="sm" title="Download Cascade for Mac" tooltipSide="bottom" onClick={() => window.open(downloadUrl, '_blank', 'noreferrer')}>
+          <TbDownload size={14} />
+        </IconButton>
         <IconButton size="sm" title="Keyboard Shortcuts" tooltipSide="bottom" onClick={openShortcuts}>
           <HelpCircle size={14} />
         </IconButton>

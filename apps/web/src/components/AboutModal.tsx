@@ -1,9 +1,7 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { TbBrandGithub, TbDownload } from 'react-icons/tb';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import {
   APP_VERSION,
-  REPOSITORY_URL,
   getMacDownloadUrl,
   type MacArch,
 } from '../constants/release';
@@ -16,25 +14,13 @@ export const ABOUT_MODAL_COPY = {
   downloadLabel: 'Download Cascade for Mac',
 } as const;
 
-export const ABOUT_MODAL_LINKS = {
-  github: {
-    href: REPOSITORY_URL,
-    title: 'View GitHub Repository',
-    ariaLabel: 'View GitHub Repository',
-  },
-  download: {
-    title: 'Download Cascade for Mac',
-    ariaLabel: 'Download Cascade for Mac',
-  },
-} as const;
-
 function detectMacArch(): MacArch {
   if (!navigator.userAgent.includes('Mac')) return 'aarch64';
   if (navigator.userAgent.includes('Intel')) return 'x64';
   return 'aarch64';
 }
 
-function useMacDownloadUrl(): string {
+export function useMacDownloadUrl(): string {
   const [arch, setArch] = useState<MacArch>(() => detectMacArch());
 
   useEffect(() => {
@@ -81,27 +67,6 @@ const dialogStyle: CSSProperties = {
   textAlign: 'center',
 };
 
-const iconActionsStyle: CSSProperties = {
-  position: 'absolute',
-  top: '16px',
-  right: '16px',
-  display: 'flex',
-  gap: '8px',
-};
-
-const iconActionStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '28px',
-  height: '28px',
-  borderRadius: '8px',
-  border: '1px solid var(--border-default)',
-  background: 'var(--bg-tertiary)',
-  color: 'var(--text-secondary)',
-  textDecoration: 'none',
-};
-
 const logoStyle: CSSProperties = {
   width: '72px',
   height: '72px',
@@ -142,28 +107,6 @@ const closeButtonStyle: CSSProperties = {
   fontFamily: 'inherit',
 };
 
-interface IconLinkProps {
-  href: string;
-  title: string;
-  ariaLabel: string;
-  children: ReactNode;
-}
-
-function IconLink({ href, title, ariaLabel, children }: IconLinkProps) {
-  return (
-    <a
-      href={href}
-      aria-label={ariaLabel}
-      title={title}
-      target="_blank"
-      rel="noreferrer"
-      style={iconActionStyle}
-    >
-      {children}
-    </a>
-  );
-}
-
 export function AboutModal() {
   const isOpen = useSettingsStore(s => s.isAboutOpen);
   const close = useSettingsStore(s => s.closeAbout);
@@ -201,19 +144,6 @@ export function AboutModal() {
         onClick={e => e.stopPropagation()}
         onKeyDown={e => e.stopPropagation()}
       >
-        <div style={iconActionsStyle}>
-          <IconLink {...ABOUT_MODAL_LINKS.github}>
-            <TbBrandGithub size={15} aria-hidden="true" />
-          </IconLink>
-          <IconLink
-            href={downloadUrl}
-            title={ABOUT_MODAL_LINKS.download.title}
-            ariaLabel={ABOUT_MODAL_LINKS.download.ariaLabel}
-          >
-            <TbDownload size={15} aria-hidden="true" />
-          </IconLink>
-        </div>
-
         <img src="/favicon.png" alt="Cascade icon" style={logoStyle} />
 
         <div
