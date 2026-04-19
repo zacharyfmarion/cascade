@@ -139,6 +139,12 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
+      - name: Install nightly Rust for threaded WASM
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: wasm32-unknown-unknown
+          components: rust-src
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
@@ -152,6 +158,13 @@ jobs:
 
       - name: Install dependencies
         run: yarn install --immutable
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build WASM packages
+        working-directory: apps/web
+        run: yarn build:wasm
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version '^2' --locked
