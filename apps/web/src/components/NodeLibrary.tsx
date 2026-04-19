@@ -3,6 +3,7 @@ import { Search, ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import { useGraphStore } from '../store/graphStore';
 import type { NodeSpec } from '../store/types';
 import { getNodeIcon, getCategoryIcon } from './nodes/nodeIcons';
+import { IconButton } from './ui/IconButton';
 
 export const NodeLibrary: React.FC = () => {
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
@@ -69,19 +70,20 @@ export const NodeLibrary: React.FC = () => {
 
   return (
     <div className="panel" style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '8px', borderBottom: '1px solid var(--border-default)' }}>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          background: 'var(--bg-primary)', 
+      <div style={{ padding: '8px', borderBottom: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          flex: 1,
+          background: 'var(--bg-primary)',
           border: '1px solid var(--border-default)',
           borderRadius: '4px',
           padding: '4px 8px'
         }}>
           <Search size={14} style={{ color: 'var(--text-muted)', marginRight: '8px', flexShrink: 0 }} />
-          <input 
-            type="text" 
-            placeholder="Search nodes..." 
+          <input
+            type="text"
+            placeholder="Search nodes..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             style={{
@@ -94,40 +96,14 @@ export const NodeLibrary: React.FC = () => {
             }}
           />
         </div>
-      </div>
-
-      <div style={{ padding: '0 8px 8px', borderBottom: '1px solid var(--border-default)' }}>
-        <button
-          type="button"
+        <IconButton
+          size="sm"
+          title="Import custom node"
+          tooltipSide="bottom"
           onClick={handleImportClick}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '6px',
-            width: '100%',
-            padding: '6px 12px',
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 4,
-            color: 'var(--text-secondary)',
-            fontSize: '0.8rem',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            transition: 'border-color 0.15s, color 0.15s',
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.borderColor = 'var(--accent-primary)';
-            e.currentTarget.style.color = 'var(--text-primary)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.borderColor = 'var(--border-default)';
-            e.currentTarget.style.color = 'var(--text-secondary)';
-          }}
         >
-          <Upload size={12} />
-          Import .compnode
-        </button>
+          <Upload size={14} />
+        </IconButton>
         <input
           ref={fileInputRef}
           type="file"

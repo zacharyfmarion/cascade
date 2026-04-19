@@ -8,6 +8,7 @@ import { AboutModal } from './components/AboutModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { MenuBar } from './components/MenuBar';
 import { ToastHost } from './components/ui/ToastHost';
+import { TooltipProvider } from './components/ui/Tooltip';
 import { useGraphStore } from './store/graphStore';
 
 import { useSettingsStore } from './store/settingsStore';
@@ -155,7 +156,7 @@ function App() {
   }
 
   return (
-    <>
+    <TooltipProvider>
       <div className="app-layout" data-testid="app-ready">
         <Toolbar />
         <DockviewReact
@@ -171,7 +172,7 @@ function App() {
       <ShortcutsModal />
       <AboutModal />
       <ToastHost />
-    </>
+    </TooltipProvider>
   );
 }
 
