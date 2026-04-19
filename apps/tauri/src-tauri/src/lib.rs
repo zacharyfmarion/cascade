@@ -364,7 +364,7 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
             .map_err(|e| e.to_string())?;
 
         for (node_id, asset_type, asset_path) in assets {
-            if asset_type == "image" {
+            if asset_type == "image" && !asset_path.is_empty() {
                 let asset_path = project_dir.join(&asset_path);
                 if asset_path.exists() {
                     let bytes = std::fs::read(&asset_path).map_err(|e| e.to_string())?;
