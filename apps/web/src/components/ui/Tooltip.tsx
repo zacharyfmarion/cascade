@@ -30,10 +30,10 @@ export const TooltipContent = forwardRef<
         sideOffset={sideOffset}
         className={['select-none', className].filter(Boolean).join(' ')}
         style={{
-          backgroundColor: 'var(--bg-elevated)',
+          backgroundColor: 'var(--bg-secondary)',
           color: 'var(--text-primary)',
-          border: '1px solid var(--border-secondary)',
-          borderRadius: 'var(--radius-md)',
+          border: '1px solid var(--border-default)',
+          borderRadius: '4px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
           fontSize: '12px',
           lineHeight: '1.4',
@@ -47,8 +47,8 @@ export const TooltipContent = forwardRef<
         {children}
         <RadixTooltip.Arrow
           style={{
-            fill: 'var(--bg-elevated)',
-            filter: 'drop-shadow(0 1px 0 var(--border-secondary))',
+            fill: 'var(--bg-secondary)',
+            filter: 'drop-shadow(0 1px 0 var(--border-default))',
           }}
           width={10}
           height={5}
