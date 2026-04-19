@@ -48,6 +48,7 @@ pub struct AssetReference {
     #[serde(rename = "type")]
     pub asset_type: String,
     pub source: String,
+    #[serde(default)]
     pub path: String,
     #[serde(default)]
     pub original_filename: String,
