@@ -21,7 +21,6 @@
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/react": "^3.0.99",
     "@monaco-editor/react": "^4.7.0",
-    "@radix-ui/react-tooltip": "^1.2.8",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@xyflow/react": "^12.10.0",
