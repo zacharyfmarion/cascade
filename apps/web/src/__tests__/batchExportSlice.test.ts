@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockEngine, resetNodeCounter } from './engineMock';
 
 if (!('window' in globalThis)) {
@@ -30,9 +30,9 @@ const flushPromises = async (ticks = 3) => {
 
 const setTauriMode = (enabled: boolean) => {
   if (enabled) {
-    (window as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   } else {
-    delete (window as Record<string, unknown>).__TAURI_INTERNALS__;
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
   }
 };
 
@@ -43,7 +43,8 @@ beforeEach(async () => {
 
   mockExportImageToPath = vi.fn().mockResolvedValue(undefined);
   mockEngine = createMockEngine();
-  mockEngine.exportImageToPath = mockExportImageToPath;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mockEngine.exportImageToPath = mockExportImageToPath as any;
 
   const mod = await import('../store/graphStore');
   useGraphStore = mod.useGraphStore;
@@ -94,13 +95,17 @@ describe('exportImage — web path (isTauri = false)', () => {
     URL.createObjectURL = vi.fn().mockReturnValue('blob:fake-url');
     URL.revokeObjectURL = vi.fn();
 
-    let capturedAnchor: HTMLAnchorElement | null = null;
+    const downloads: string[] = [];
     const origCreate = document.createElement.bind(document);
     vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       const el = origCreate(tag);
       if (tag === 'a') {
-        capturedAnchor = el as HTMLAnchorElement;
         Object.defineProperty(el, 'click', { value: vi.fn(), writable: true });
+        Object.defineProperty(el, 'download', {
+          get() { return downloads[0] ?? ''; },
+          set(v: string) { downloads[0] = v; },
+          configurable: true,
+        });
       }
       return el;
     });
@@ -109,7 +114,7 @@ describe('exportImage — web path (isTauri = false)', () => {
     useGraphStore.getState().exportImage(id);
     await flushPromises();
 
-    expect(capturedAnchor?.download).toBe('export.png');
+    expect(downloads[0]).toBe('export.png');
     vi.restoreAllMocks();
   });
 
@@ -117,13 +122,17 @@ describe('exportImage — web path (isTauri = false)', () => {
     URL.createObjectURL = vi.fn().mockReturnValue('blob:fake-url');
     URL.revokeObjectURL = vi.fn();
 
-    let capturedAnchor: HTMLAnchorElement | null = null;
+    const downloads: string[] = [];
     const origCreate = document.createElement.bind(document);
     vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       const el = origCreate(tag);
       if (tag === 'a') {
-        capturedAnchor = el as HTMLAnchorElement;
         Object.defineProperty(el, 'click', { value: vi.fn(), writable: true });
+        Object.defineProperty(el, 'download', {
+          get() { return downloads[0] ?? ''; },
+          set(v: string) { downloads[0] = v; },
+          configurable: true,
+        });
       }
       return el;
     });
@@ -132,7 +141,7 @@ describe('exportImage — web path (isTauri = false)', () => {
     useGraphStore.getState().exportImage(id);
     await flushPromises();
 
-    expect(capturedAnchor?.download).toBe('export.jpg');
+    expect(downloads[0]).toBe('export.jpg');
     vi.restoreAllMocks();
   });
 });
