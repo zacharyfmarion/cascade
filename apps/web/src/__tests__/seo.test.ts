@@ -22,7 +22,7 @@ describe('static SEO surface', () => {
   it('ships a production-ready head in index.html', () => {
     const html = readWebFile('index.html');
 
-    expect(html).toContain('<title>Cascade | Node-Based Image Editor for the Browser</title>');
+    expect(html).toContain('<title>Cascade | Repeatable Image Workflows in Your Browser</title>');
     expect(html).toMatch(/<meta\s+name="description"/);
     expect(html).toContain('<link rel="canonical" href="https://cascade-editor.pages.dev/" />');
     expect(html).toContain('max-image-preview:large');
@@ -30,7 +30,7 @@ describe('static SEO surface', () => {
     expect(html).toContain('<meta property="og:image" content="https://cascade-editor.pages.dev/og-image.png" />');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
     expect(html).toContain('<link rel="manifest" href="/site.webmanifest" />');
-    expect(html).toContain('<h1>Node-based image editing for the browser.</h1>');
+    expect(html).toContain('<h1>Create repeatable image workflows in your browser.</h1>');
     expect(html).toContain('JavaScript powers the full interactive editor');
   });
 
