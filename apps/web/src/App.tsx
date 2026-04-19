@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Settings, HelpCircle } from 'lucide-react';
+import { IconButton } from './components/ui/IconButton';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent } from 'dockview';
 import 'dockview/dist/styles/dockview.css';
@@ -58,12 +59,12 @@ function Toolbar() {
         <MenuBar />
       )}
       <div className="toolbar__actions">
-        <button type="button" className="toolbar__btn" onClick={openShortcuts} title="Keyboard Shortcuts">
+        <IconButton size="sm" title="Keyboard Shortcuts" tooltipSide="bottom" onClick={openShortcuts}>
           <HelpCircle size={14} />
-        </button>
-        <button type="button" className="toolbar__btn" onClick={() => openSettings()} title="Settings">
+        </IconButton>
+        <IconButton size="sm" title="Settings" tooltipSide="bottom" onClick={() => openSettings()}>
           <Settings size={14} />
-        </button>
+        </IconButton>
       </div>
     </div>
   );
