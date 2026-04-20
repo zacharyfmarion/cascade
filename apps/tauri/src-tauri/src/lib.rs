@@ -145,6 +145,28 @@ fn load_image_data(
 }
 
 #[tauri::command]
+fn load_palette_data(
+    state: State<'_, EngineState>,
+    request: tauri::ipc::Request,
+) -> Result<String, String> {
+    let node_id = request
+        .headers()
+        .get("x-node-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "Missing x-node-id header".to_string())?
+        .to_string();
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("Expected raw body with palette data".to_string());
+    };
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let colors = s
+        .engine
+        .load_palette_data(&node_id, data)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&colors).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_image_data(state: State<'_, EngineState>, node_id: String) -> Result<Response, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let bytes = s
@@ -746,7 +768,7 @@ fn set_project_format(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut engine = Engine::new();
+    let engine = Engine::new();
 
     #[cfg(feature = "ocio")]
     {
@@ -776,6 +798,7 @@ pub fn run() {
             set_position,
             set_muted,
             load_image_data,
+            load_palette_data,
             get_image_data,
             render_viewer,
             set_param_and_render,
