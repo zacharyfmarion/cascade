@@ -22,7 +22,8 @@ use cascade_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use cascade_nodes_std::input::LoadImage as InputLoadImage;
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
-    register_standard_nodes, GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
+    register_standard_nodes, ColorPaletteNode, GpuScriptDraftNode, GroupNode, LoadImageSequence,
+    Viewer,
 };
 #[cfg(all(feature = "video", target_os = "macos"))]
 use cascade_nodes_std::{srgb_to_linear_lut, LoadVideo};
@@ -1582,6 +1583,27 @@ impl Engine {
             .ok_or_else(|| CascadeError::Other("No image data available".to_string()))
     }
 
+    pub fn load_palette_data(
+        &mut self,
+        node_id: &str,
+        data: &[u8],
+    ) -> Result<Vec<[f64; 4]>, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("Node not found".to_string()))?;
+        let palette_node = node
+            .as_any()
+            .downcast_ref::<ColorPaletteNode>()
+            .ok_or_else(|| CascadeError::Other("Node is not ColorPaletteNode".to_string()))?;
+        let colors = palette_node.load_palette_data(data)?;
+        self.graph
+            .set_param(id, "colors", ParamValue::ColorPalette(colors.clone()));
+        self.graph.mark_dirty(id);
+        Ok(colors)
+    }
+
     pub fn set_sequence_directory(
         &mut self,
         node_id: &str,
@@ -2614,6 +2636,55 @@ mod tests {
         assert_eq!(spec.id, graph_node.type_id);
         let node = engine.nodes.get(&id).unwrap();
         assert!(node.as_any().is::<GpuKernelNode>());
+    }
+
+    #[test]
+    fn test_load_palette_data_updates_color_palette_node_params() {
+        let mut engine = Engine::new();
+        let (node_id, _) = engine.add_node("color_palette", 0.0, 0.0).unwrap();
+
+        let palette_image = image::RgbaImage::from_fn(3, 1, |x, _| match x {
+            0 => image::Rgba([255, 0, 0, 255]),
+            1 => image::Rgba([0, 255, 0, 255]),
+            _ => image::Rgba([0, 0, 255, 255]),
+        });
+        let mut png_bytes = Vec::new();
+        palette_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode palette png");
+
+        let colors = engine
+            .load_palette_data(&node_id, &png_bytes)
+            .expect("load palette data");
+        assert_eq!(colors.len(), 3);
+
+        let id = engine.parse_node_id(&node_id).unwrap();
+        let stored = engine
+            .graph
+            .nodes
+            .get(id)
+            .and_then(|node| node.params.get("colors"));
+        let Some(ParamValue::ColorPalette(stored_colors)) = stored else {
+            panic!("expected colors param to be set on color palette node");
+        };
+        assert_eq!(stored_colors.len(), 3);
+
+        let has_red = stored_colors
+            .iter()
+            .any(|color| color[0] > 0.9 && color[1] < 0.1 && color[2] < 0.1);
+        let has_green = stored_colors
+            .iter()
+            .any(|color| color[0] < 0.1 && color[1] > 0.9 && color[2] < 0.1);
+        let has_blue = stored_colors
+            .iter()
+            .any(|color| color[0] < 0.1 && color[1] < 0.1 && color[2] > 0.9);
+
+        assert!(has_red, "stored palette should contain red");
+        assert!(has_green, "stored palette should contain green");
+        assert!(has_blue, "stored palette should contain blue");
     }
 
     #[test]

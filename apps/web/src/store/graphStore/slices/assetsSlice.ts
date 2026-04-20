@@ -44,7 +44,9 @@ export const createAssetsSlice: StateCreator<
     file.arrayBuffer().then(async buffer => {
       const data = new Uint8Array(buffer);
       const eng = getEngine();
-      if (!eng.loadPaletteData) return;
+      if (!eng.loadPaletteData) {
+        throw new Error('Current engine does not support palette imports');
+      }
       const colors = await eng.loadPaletteData(nodeId, data);
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
