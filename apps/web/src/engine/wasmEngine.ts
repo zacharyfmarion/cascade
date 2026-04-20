@@ -2,6 +2,7 @@ import init, { Engine, needs_migration_json, migrate_document_json } from '../wa
 import type { EngineBridge, AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
+import { decodeViewerResult } from './viewerResult';
 
 /**
  * Convert a tagged ParamValue (e.g. { CurvePoints: [...] }) to the raw form
@@ -340,53 +341,7 @@ export class WasmEngine implements EngineBridge {
         console.warn('[WASM] Failed to get timings:', e);
       }
 
-      if (!raw || typeof raw !== 'object') return null;
-
-      const data = raw as Record<string, unknown>;
-      const type = data.type as string;
-
-      switch (type) {
-        case 'image':
-        case 'mask':
-        case 'field': {
-          const rawPixels = data.pixels;
-          if (!rawPixels || (rawPixels as ArrayLike<number>).length === 0) return null;
-          const pixels = rawPixels instanceof Uint8ClampedArray
-            ? rawPixels
-            : new Uint8ClampedArray(rawPixels as number[]);
-          const r: ViewerResult = {
-            type,
-            nodeId: viewerNodeId,
-            width: data.width as number,
-            height: data.height as number,
-            pixels,
-          };
-          return r;
-        }
-        case 'float':
-        case 'int': {
-          const r: ViewerResult = { type, nodeId: viewerNodeId, value: data.value as number };
-          return r;
-        }
-        case 'bool': {
-          const r: ViewerResult = { type: 'bool', nodeId: viewerNodeId, value: data.value as boolean };
-          return r;
-        }
-        case 'color': {
-          const r: ViewerResult = { type: 'color', nodeId: viewerNodeId, value: data.value as [number, number, number, number] };
-          return r;
-        }
-        case 'string': {
-          const r: ViewerResult = { type: 'string', nodeId: viewerNodeId, value: data.value as string };
-          return r;
-        }
-        case 'none': {
-          const r: ViewerResult = { type: 'none', nodeId: viewerNodeId };
-          return r;
-        }
-        default:
-          return null;
-      }
+      return decodeViewerResult(raw, viewerNodeId);
     });
   }
   exportGraph(): Promise<unknown> {
