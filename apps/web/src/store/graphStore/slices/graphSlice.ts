@@ -7,6 +7,7 @@ import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
 import { pendingImageFiles } from '../../../components/nodes/pendingImageFiles';
+import { hydrateRootGraphFromEngine } from '../hydration';
 
 export interface GraphSliceState {
   nodes: Map<string, NodeInstance>;
@@ -481,70 +482,9 @@ export const createGraphSlice: StateCreator<
       const eng = getEngine();
 
       if (index === 0) {
-        const childContext = stack[index + 1];
-        if (childContext?.savedNodes) {
-          const specs = await Promise.resolve(eng.listNodeTypes());
-          set({
-            editingStack: newStack,
-            nodes: childContext.savedNodes,
-            connections: childContext.savedConnections ?? [],
-            nodeSpecs: specs,
-            selectedNodeIds: new Set(),
-            renderResults: new Map(),
-            fitViewRequestId: get().fitViewRequestId + 1,
-          });
-          get().triggerAllViewers();
-          return;
-        }
-
-        const graphData = await Promise.resolve(eng.exportGraph());
-        const data = extractGraphData(graphData);
-        const specs = await Promise.resolve(eng.listNodeTypes());
-        const newNodes = new Map<string, NodeInstance>();
-        const newConnections: Connection[] = [];
-
-        if (data.nodes) {
-          for (const node of data.nodes) {
-            const spec = specs.find((s: NodeSpec) => s.id === node.type_id);
-            const params: Record<string, ParamValue> = {};
-            if (spec) {
-              spec.params.forEach((p: { key: string; default: ParamValue }) => {
-                params[p.key] = node.params?.[p.key] ?? p.default;
-              });
-            }
-            newNodes.set(node.id, {
-              id: node.id,
-              typeId: node.type_id,
-              params,
-              inputDefaults: node.input_defaults ?? {},
-              position: { x: node.position[0], y: node.position[1] },
-              muted: node.muted ?? false,
-            });
-          }
-        }
-
-        if (data.connections) {
-          for (const conn of data.connections) {
-            newConnections.push({
-              id: crypto.randomUUID(),
-              fromNode: conn.from_node,
-              fromPort: conn.from_port,
-              toNode: conn.to_node,
-              toPort: conn.to_port,
-            });
-          }
-        }
-
-        set({
-          editingStack: newStack,
-          nodes: newNodes,
-          connections: newConnections,
-          nodeSpecs: specs,
-          selectedNodeIds: new Set(),
-          renderResults: new Map(),
-          fitViewRequestId: get().fitViewRequestId + 1,
-        });
-        get().triggerAllViewers();
+        await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
+        set({ editingStack: newStack });
+        return;
       } else {
         const childContext = stack[index + 1];
         if (childContext?.savedNodes) {
