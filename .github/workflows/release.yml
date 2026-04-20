@@ -206,8 +206,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          OUTER_APP="apps/tauri/src-tauri/target/$TARGET_TRIPLE/release/bundle/macos/Cascade.app"
-          DMG_DIR="apps/tauri/src-tauri/target/$TARGET_TRIPLE/release/bundle/dmg"
+          OUTER_APP="target/$TARGET_TRIPLE/release/bundle/macos/Cascade.app"
+          DMG_DIR="target/$TARGET_TRIPLE/release/bundle/dmg"
           DMG_PATH="$DMG_DIR/Cascade_${VERSION}_${{ matrix.arch }}.dmg"
           TEMP_DMG_PATH="$RUNNER_TEMP/Cascade_${VERSION}_${{ matrix.arch }}.dmg"
           STAGING_DIR="$RUNNER_TEMP/dmg-root-${{ matrix.arch }}"
@@ -258,7 +258,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          DMG_PATH=$(find "apps/tauri/src-tauri/target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
+          DMG_PATH=$(find "target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
 
           if [ -z "$DMG_PATH" ]; then
             echo "::error::Missing DMG output for $TARGET_TRIPLE"
@@ -273,7 +273,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          DMG_PATH=$(find "apps/tauri/src-tauri/target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
+          DMG_PATH=$(find "target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
 
           if [ -z "$DMG_PATH" ]; then
             echo "::error::Missing DMG output for $TARGET_TRIPLE"
@@ -318,7 +318,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          DMG_PATH=$(find "apps/tauri/src-tauri/target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
+          DMG_PATH=$(find "target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
           if [ -z "$DMG_PATH" ]; then
             echo "::error::No DMG found for notarization"
             exit 1
@@ -380,7 +380,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          DMG_PATH=$(find "apps/tauri/src-tauri/target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
+          DMG_PATH=$(find "target/$TARGET_TRIPLE/release/bundle/dmg" -name "*.dmg" -type f | head -1)
           if [ -z "$DMG_PATH" ]; then
             echo "::error::No DMG found after build"
             exit 1
