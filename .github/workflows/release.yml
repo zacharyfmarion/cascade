@@ -124,9 +124,6 @@ jobs:
           - runner: 'macos-15'
             rust_target: 'aarch64-apple-darwin'
             arch: 'aarch64'
-          - runner: 'macos-15-intel'
-            rust_target: 'x86_64-apple-darwin'
-            arch: 'x64'
 
     runs-on: ${{ matrix.runner }}
 
@@ -445,9 +442,7 @@ jobs:
         id: hashes
         run: |
           SHA256_ARM=$(cat artifacts/sha256-aarch64/sha256-aarch64.txt)
-          SHA256_INTEL=$(cat artifacts/sha256-x64/sha256-x64.txt)
           echo "sha256_arm=$SHA256_ARM" >> "$GITHUB_OUTPUT"
-          echo "sha256_intel=$SHA256_INTEL" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -456,7 +451,6 @@ jobs:
           body_path: artifacts/release-notes/release-notes.md
           files: |
             artifacts/dmg-aarch64/*.dmg
-            artifacts/dmg-x64/*.dmg
           draft: false
           prerelease: false
 
@@ -465,7 +459,6 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ needs.validate.outputs.version }}
           SHA256_ARM: ${{ steps.hashes.outputs.sha256_arm }}
-          SHA256_INTEL: ${{ steps.hashes.outputs.sha256_intel }}
         run: |
           git clone https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git tap
           cd tap
@@ -473,13 +466,10 @@ jobs:
           mkdir -p Casks
           cat > Casks/cascade.rb << 'CASK_EOF'
           cask "cascade" do
-            arch arm: "aarch64", intel: "x64"
-
             version "VERSION_PLACEHOLDER"
-            sha256 arm:   "SHA256_ARM_PLACEHOLDER",
-                   intel: "SHA256_INTEL_PLACEHOLDER"
+            sha256 "SHA256_ARM_PLACEHOLDER"
 
-            url "https://github.com/zacharyfmarion/cascade/releases/download/v#{version}/Cascade_#{version}_#{arch}.dmg",
+            url "https://github.com/zacharyfmarion/cascade/releases/download/v#{version}/Cascade_#{version}_aarch64.dmg",
                 verified: "github.com/zacharyfmarion/"
 
             name "Cascade"
@@ -498,7 +488,6 @@ jobs:
 
           sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" Casks/cascade.rb
           sed -i "s/SHA256_ARM_PLACEHOLDER/${SHA256_ARM}/g" Casks/cascade.rb
-          sed -i "s/SHA256_INTEL_PLACEHOLDER/${SHA256_INTEL}/g" Casks/cascade.rb
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
