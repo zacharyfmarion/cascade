@@ -1,38 +1,76 @@
-import { useEffect, useState } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
-import { APP_VERSION, HOMEBREW_TAP, RELEASES_URL, getMacDownloadUrl, type MacArch } from '../constants/release';
+import { APP_VERSION } from '../constants/release';
+import { useMacDownloadUrl } from '../hooks/useMacDownloadUrl';
 
-function detectMacArch(): MacArch {
-  if (!navigator.userAgent.includes('Mac')) return 'aarch64';
-  if (navigator.userAgent.includes('Intel')) return 'x64';
-  return 'aarch64';
-}
+export const ABOUT_MODAL_COPY = {
+  title: 'Cascade',
+  version: `v${APP_VERSION}`,
+  description:
+    'A node-based image editor that runs entirely in your browser. Inspired by Nuke and Blender.',
+  downloadLabel: 'Download Cascade for Mac',
+} as const;
 
-function useMacDownloadUrl(): string {
-  const [arch, setArch] = useState<MacArch>(() => detectMacArch());
+const overlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 9999,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'var(--shadow-overlay)',
+};
 
-  useEffect(() => {
-    if (!navigator.userAgent.includes('Mac')) return;
+const dialogStyle: CSSProperties = {
+  position: 'relative',
+  width: 'min(420px, calc(100vw - 32px))',
+  background: 'var(--bg-secondary)',
+  border: '1px solid var(--border-default)',
+  borderRadius: '8px',
+  boxShadow: '0 8px 32px var(--shadow-contextMenu)',
+  padding: '32px',
+  textAlign: 'center',
+};
 
-    const uaData = (
-      navigator as Navigator & {
-        userAgentData?: {
-          getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>;
-        };
-      }
-    ).userAgentData;
+const logoStyle: CSSProperties = {
+  width: '72px',
+  height: '72px',
+  marginBottom: '12px',
+  borderRadius: '16px',
+};
 
-    if (uaData?.getHighEntropyValues) {
-      void uaData.getHighEntropyValues(['architecture']).then((values) => {
-        if (values.architecture === 'x86') {
-          setArch('x64');
-        }
-      });
-    }
-  }, []);
+const descriptionStyle: CSSProperties = {
+  fontSize: '0.9rem',
+  color: 'var(--text-secondary)',
+  lineHeight: 1.5,
+  marginBottom: '24px',
+};
 
-  return getMacDownloadUrl(arch);
-}
+const primaryLinkStyle: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '100%',
+  minHeight: '44px',
+  borderRadius: '6px',
+  background: 'var(--accent-primary)',
+  color: 'var(--text-on-accent)',
+  textDecoration: 'none',
+  fontSize: '0.95rem',
+  fontWeight: 600,
+  marginBottom: '20px',
+};
+
+const closeButtonStyle: CSSProperties = {
+  background: 'var(--bg-surface)',
+  color: 'var(--text-secondary)',
+  border: '1px solid var(--border-default)',
+  borderRadius: '4px',
+  fontSize: '0.8rem',
+  padding: '6px 24px',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
 
 export function AboutModal() {
   const isOpen = useSettingsStore(s => s.isAboutOpen);
@@ -59,42 +97,20 @@ export function AboutModal() {
       role="dialog"
       aria-modal="true"
       aria-label="About Cascade"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--shadow-overlay)',
-      }}
+      style={overlayStyle}
       onClick={close}
-      onKeyDown={e => { if (e.key === 'Escape') close(); }}
+      onKeyDown={e => {
+        if (e.key === 'Escape') close();
+      }}
     >
       <div
         role="document"
-        style={{
-          width: 360,
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-default)',
-          borderRadius: '8px',
-          boxShadow: '0 8px 32px var(--shadow-contextMenu)',
-          padding: '32px',
-          textAlign: 'center',
-        }}
+        style={dialogStyle}
         onClick={e => e.stopPropagation()}
         onKeyDown={e => e.stopPropagation()}
       >
-        <img
-          src="/favicon.png"
-          alt="Cascade icon"
-          style={{
-            width: 64,
-            height: 64,
-            marginBottom: '12px',
-            borderRadius: '12px',
-          }}
-        />
+        <img src="/favicon.png" alt="Cascade icon" style={logoStyle} />
+
         <div
           style={{
             fontSize: '1.2rem',
@@ -103,8 +119,9 @@ export function AboutModal() {
             marginBottom: '4px',
           }}
         >
-          Cascade
+          {ABOUT_MODAL_COPY.title}
         </div>
+
         <div
           style={{
             fontSize: '0.8rem',
@@ -112,79 +129,16 @@ export function AboutModal() {
             marginBottom: '16px',
           }}
         >
-          v{APP_VERSION}
+          {ABOUT_MODAL_COPY.version}
         </div>
-        <div
-          style={{
-            fontSize: '0.8rem',
-            color: 'var(--text-secondary)',
-            lineHeight: 1.5,
-            marginBottom: '16px',
-          }}
-        >
-          A node-based image editor inspired by Nuke and Blender.
-          Rust core with WASM for the browser and Tauri for native desktop.
-        </div>
-        <div
-          style={{
-            display: 'grid',
-            gap: '8px',
-            marginBottom: '16px',
-          }}
-        >
-          <a
-            href={downloadUrl}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              background: 'var(--accent-primary)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--accent-primary)',
-              borderRadius: '4px',
-              fontSize: '0.8rem',
-              padding: '8px 14px',
-              textDecoration: 'none',
-            }}
-          >
-            Download macOS DMG
-          </a>
-          <a
-            href={RELEASES_URL}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              color: 'var(--text-secondary)',
-              fontSize: '0.78rem',
-              textDecoration: 'none',
-            }}
-          >
-            View GitHub releases
-          </a>
-        </div>
-        <div
-          style={{
-            fontSize: '0.75rem',
-            color: 'var(--text-muted)',
-            lineHeight: 1.5,
-            marginBottom: '24px',
-          }}
-        >
-          Homebrew: <code>brew tap {HOMEBREW_TAP} && brew install --cask cascade</code>
-        </div>
-        <button
-          type="button"
-          onClick={close}
-          style={{
-            background: 'var(--bg-surface)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: '4px',
-            fontSize: '0.8rem',
-            padding: '6px 24px',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-          }}
-        >
+
+        <div style={descriptionStyle}>{ABOUT_MODAL_COPY.description}</div>
+
+        <a href={downloadUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>
+          {ABOUT_MODAL_COPY.downloadLabel}
+        </a>
+
+        <button type="button" onClick={close} style={closeButtonStyle}>
           Close
         </button>
       </div>
