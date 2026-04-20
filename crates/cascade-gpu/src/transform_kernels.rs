@@ -180,21 +180,35 @@ pub fn builtin_gpu_transform_2d_manifest() -> KernelManifest {
 
     if (filter == 0) {
         ivec2 nearest = ivec2(round(src));
-        nearest = clamp(nearest, ivec2(0), img_size - 1);
+        if (nearest.x < 0 || nearest.y < 0 || nearest.x >= img_size.x || nearest.y >= img_size.y) {
+            return vec4(0.0);
+        }
         return imageLoad(u_input, nearest);
     }
 
     // Bilinear sampling helper
     vec2 f = fract(src);
     ivec2 p = ivec2(floor(src));
-    ivec2 p00 = clamp(p, ivec2(0), img_size - 1);
-    ivec2 p10 = clamp(p + ivec2(1, 0), ivec2(0), img_size - 1);
-    ivec2 p01 = clamp(p + ivec2(0, 1), ivec2(0), img_size - 1);
-    ivec2 p11 = clamp(p + ivec2(1, 1), ivec2(0), img_size - 1);
-    vec4 c00 = imageLoad(u_input, p00);
-    vec4 c10 = imageLoad(u_input, p10);
-    vec4 c01 = imageLoad(u_input, p01);
-    vec4 c11 = imageLoad(u_input, p11);
+    ivec2 p00 = p;
+    ivec2 p10 = p + ivec2(1, 0);
+    ivec2 p01 = p + ivec2(0, 1);
+    ivec2 p11 = p + ivec2(1, 1);
+    vec4 c00 = vec4(0.0);
+    vec4 c10 = vec4(0.0);
+    vec4 c01 = vec4(0.0);
+    vec4 c11 = vec4(0.0);
+    if (p00.x >= 0 && p00.y >= 0 && p00.x < img_size.x && p00.y < img_size.y) {
+        c00 = imageLoad(u_input, p00);
+    }
+    if (p10.x >= 0 && p10.y >= 0 && p10.x < img_size.x && p10.y < img_size.y) {
+        c10 = imageLoad(u_input, p10);
+    }
+    if (p01.x >= 0 && p01.y >= 0 && p01.x < img_size.x && p01.y < img_size.y) {
+        c01 = imageLoad(u_input, p01);
+    }
+    if (p11.x >= 0 && p11.y >= 0 && p11.x < img_size.x && p11.y < img_size.y) {
+        c11 = imageLoad(u_input, p11);
+    }
     vec4 result = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
     return result;
 "#
