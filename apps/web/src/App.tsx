@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Settings, HelpCircle } from 'lucide-react';
 import { TbBrandGithub, TbDownload } from 'react-icons/tb';
 import { IconButton } from './components/ui/IconButton';
-import { useMacDownloadUrl } from './components/AboutModal';
+import { useMacDownloadUrl } from './hooks/useMacDownloadUrl';
 import { REPOSITORY_URL } from './constants/release';
 import { DockviewReact } from 'dockview';
 import type { DockviewReadyEvent } from 'dockview';

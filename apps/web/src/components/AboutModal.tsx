@@ -1,10 +1,7 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
-import {
-  APP_VERSION,
-  getMacDownloadUrl,
-  type MacArch,
-} from '../constants/release';
+import { APP_VERSION } from '../constants/release';
+import { useMacDownloadUrl } from '../hooks/useMacDownloadUrl';
 
 export const ABOUT_MODAL_COPY = {
   title: 'Cascade',
@@ -13,38 +10,6 @@ export const ABOUT_MODAL_COPY = {
     'A node-based image editor that runs entirely in your browser. Inspired by Nuke and Blender.',
   downloadLabel: 'Download Cascade for Mac',
 } as const;
-
-function detectMacArch(): MacArch {
-  if (!navigator.userAgent.includes('Mac')) return 'aarch64';
-  if (navigator.userAgent.includes('Intel')) return 'x64';
-  return 'aarch64';
-}
-
-export function useMacDownloadUrl(): string {
-  const [arch, setArch] = useState<MacArch>(() => detectMacArch());
-
-  useEffect(() => {
-    if (!navigator.userAgent.includes('Mac')) return;
-
-    const uaData = (
-      navigator as Navigator & {
-        userAgentData?: {
-          getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>;
-        };
-      }
-    ).userAgentData;
-
-    if (uaData?.getHighEntropyValues) {
-      void uaData.getHighEntropyValues(['architecture']).then((values) => {
-        if (values.architecture === 'x86') {
-          setArch('x64');
-        }
-      });
-    }
-  }, []);
-
-  return getMacDownloadUrl(arch);
-}
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
