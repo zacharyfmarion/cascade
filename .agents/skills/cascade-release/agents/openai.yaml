@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Cascade Release'
+  short_description: 'Prepare and publish Cascade releases'
+  default_prompt: 'Use $cascade-release to prepare or publish a Cascade release with a well-formatted changelog.'

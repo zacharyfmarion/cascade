@@ -4,32 +4,233 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <title>Cascade — Node-Based Image Editor</title>
-    <meta name="description" content="A node-based image editor inspired by Nuke and Blender. Powered by a Rust core with WASM for the browser and Tauri for native desktop." />
-    <meta name="keywords" content="image editor, node-based, compositing, Nuke, Blender, Rust, WASM, image processing" />
+    <title>Cascade — Free node-based image editor for the browser</title>
+    <meta
+      name="description"
+      content="Cascade is a free node-based image editor that runs in your browser. Wire nodes together to build reusable editing pipelines, then apply them to any image."
+    />
+    <meta
+      name="keywords"
+      content="node-based image editor, browser image editor, free image editing, image pipeline, compositing"
+    />
     <meta name="author" content="Cascade" />
+    <meta name="application-name" content="Cascade" />
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <link rel="canonical" href="https://cascade-editor.pages.dev/" />
+    <link rel="manifest" href="/site.webmanifest" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Cascade — Node-Based Image Editor" />
-    <meta property="og:description" content="A node-based image editor inspired by Nuke and Blender. Powered by a Rust core with WASM for the browser and Tauri for native desktop." />
-    <meta property="og:image" content="/favicon.png" />
-
+    <meta property="og:url" content="https://cascade-editor.pages.dev/" />
+    <meta property="og:site_name" content="Cascade" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content="Cascade — Free node-based image editor for the browser" />
+    <meta
+      property="og:description"
+      content="A free node-based image editor that runs in your browser. Build a pipeline once, apply it to any image."
+    />
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Cascade — Node-Based Image Editor" />
-    <meta name="twitter:description" content="A node-based image editor inspired by Nuke and Blender. Powered by a Rust core with WASM for the browser and Tauri for native desktop." />
-    <meta name="twitter:image" content="/favicon.png" />
+    <meta name="twitter:title" content="Cascade — Free node-based image editor for the browser" />
+    <meta
+      name="twitter:description"
+      content="A free node-based image editor that runs in your browser. Build a pipeline once, apply it to any image."
+    />
 
     <!-- Favicon -->
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="apple-touch-icon" href="/favicon.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
 
     <!-- Theme -->
     <meta name="theme-color" content="#0a1929" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Cascade",
+        "applicationCategory": "MultimediaApplication",
+        "applicationSubCategory": "Image workflow editor",
+        "operatingSystem": "Web Browser, macOS",
+        "softwareVersion": "0.1.0",
+        "description": "Cascade is a free node-based image editor that runs in your browser. Wire nodes together to build reusable editing pipelines, then apply them to any image.",
+        "url": "https://cascade-editor.pages.dev/",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "codeRepository": "https://github.com/zacharyfmarion/cascade",
+        "license": "https://github.com/zacharyfmarion/cascade/blob/main/LICENSE",
+        "sameAs": [
+          "https://github.com/zacharyfmarion/cascade"
+        ],
+        "featureList": [
+          "Node-based image editing and compositing",
+          "Reusable pipelines that apply to any image",
+          "Runs free in any modern browser, no account required",
+          "Desktop app available for offline use"
+        ]
+      }
+    </script>
+
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(63, 100, 140, 0.28), transparent 34rem),
+          linear-gradient(180deg, #0a1520 0%, #071018 100%);
+        color: #f4f7fb;
+      }
+
+      .seo-shell {
+        max-width: 64rem;
+        margin: 0 auto;
+        padding: 5rem 1.5rem 4rem;
+      }
+
+      .seo-shell__eyebrow {
+        margin: 0 0 0.75rem;
+        color: #8db7ff;
+        font-size: 0.95rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .seo-shell h1 {
+        margin: 0;
+        max-width: 14ch;
+        font-size: clamp(2.5rem, 6vw, 4.75rem);
+        line-height: 0.95;
+        letter-spacing: -0.04em;
+      }
+
+      .seo-shell__lede {
+        max-width: 52rem;
+        margin: 1.5rem 0 0;
+        font-size: 1.15rem;
+        line-height: 1.7;
+        color: #d4dfec;
+      }
+
+      .seo-shell__grid {
+        display: grid;
+        gap: 1rem;
+        margin-top: 2rem;
+        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+      }
+
+      .seo-shell__card {
+        padding: 1rem 1.1rem;
+        border: 1px solid rgba(141, 183, 255, 0.18);
+        border-radius: 1rem;
+        background: rgba(10, 21, 32, 0.72);
+        backdrop-filter: blur(8px);
+      }
+
+      .seo-shell__card h2 {
+        margin: 0 0 0.45rem;
+        font-size: 1rem;
+      }
+
+      .seo-shell__card p,
+      .seo-shell__list,
+      .seo-shell__footnote {
+        margin: 0;
+        line-height: 1.6;
+        color: #c3d2e2;
+      }
+
+      .seo-shell__list {
+        padding-left: 1.1rem;
+      }
+
+      .seo-shell__links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.9rem;
+        margin-top: 2rem;
+      }
+
+      .seo-shell__link {
+        color: #f4f7fb;
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .seo-shell__link:hover,
+      .seo-shell__link:focus-visible {
+        text-decoration: underline;
+      }
+
+      .seo-shell__footnote {
+        margin-top: 1rem;
+        font-size: 0.95rem;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="seo-shell">
+        <p class="seo-shell__eyebrow">Cascade</p>
+        <h1>Node-based image editing, free in your browser.</h1>
+        <p class="seo-shell__lede">
+          Cascade is a free node-based image editor that runs entirely in your browser. Wire together nodes to
+          build an editing pipeline, then reuse it on any image — no installs, no account needed.
+        </p>
+
+        <div class="seo-shell__grid">
+          <section class="seo-shell__card" aria-labelledby="seo-feature-1">
+            <h2 id="seo-feature-1">Build once, reuse on any image</h2>
+            <p>Connect nodes into a pipeline for a color grade, a cleanup pass, or a compositing effect. Save it and run it on any image, any time.</p>
+          </section>
+          <section class="seo-shell__card" aria-labelledby="seo-feature-2">
+            <h2 id="seo-feature-2">Fast to iterate</h2>
+            <p>Swap an input, tweak a parameter, and see the result immediately. No exporting or re-importing between steps.</p>
+          </section>
+          <section class="seo-shell__card" aria-labelledby="seo-feature-3">
+            <h2 id="seo-feature-3">Nothing to install</h2>
+            <p>Open a tab and start editing. A desktop app is also available if you prefer working offline.</p>
+          </section>
+        </div>
+
+        <section class="seo-shell__card" aria-labelledby="seo-capabilities" style="margin-top: 1rem;">
+          <h2 id="seo-capabilities">What it does</h2>
+          <ul class="seo-shell__list">
+            <li>Node-based image editing and compositing</li>
+            <li>Reusable pipelines you can apply to any image</li>
+            <li>Runs free in any modern browser, no account required</li>
+            <li>Desktop app available for offline use</li>
+          </ul>
+        </section>
+
+        <div class="seo-shell__links">
+          <a class="seo-shell__link" href="https://github.com/zacharyfmarion/cascade">View the source on GitHub</a>
+          <a class="seo-shell__link" href="https://cascade-editor.pages.dev/">Launch the web app</a>
+        </div>
+
+        <p class="seo-shell__footnote">
+          JavaScript powers the full interactive editor. If the app shell does not load, this page still describes the
+          project for crawlers, link previews, and no-script browsers.
+        </p>
+      </main>
+    </div>
+    <noscript>
+      <p style="padding: 0 1.5rem 2rem; color: #d4dfec;">
+        JavaScript is required to run the full Cascade editor, but the project source and documentation are available on
+        GitHub.
+      </p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

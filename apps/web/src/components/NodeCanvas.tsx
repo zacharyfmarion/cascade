@@ -1187,7 +1187,7 @@ export const NodeCanvas: React.FC = () => {
               border: '1px solid var(--border-default)',
             }}
           >
-            Drop to import custom node
+            Drop media or a custom node
           </div>
         </div>
       )}
