@@ -1,49 +1,57 @@
-# Cascade
+<p align="center">
+  <img src="apps/tauri/src-tauri/icons/128x128.png" alt="Cascade" width="128" height="128">
+</p>
 
-Cascade is a node-based image processing application built around a Rust graph engine with a React frontend.
-Cascade ships as both a browser-based editor and a macOS desktop app packaged with Tauri.
+<h1 align="center">Cascade</h1>
 
-## Status
+<p align="center">
+  <strong>Node-based image processing for the web and desktop</strong>
+</p>
 
-- Web: active development target with shared Rust + WASM runtime
-- Desktop: public macOS release with native filesystem access and Tauri shell features
-- AI features: optional, bring-your-own-key integrations for supported providers
+<p align="center">
+  <a href="https://cascade-editor.pages.dev"><img src="https://img.shields.io/badge/Web-Try_Now-brightgreen.svg" alt="Try Now"></a>
+  <img src="https://img.shields.io/github/v/release/zacharyfmarion/cascade?display_name=tag" alt="Latest Release">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
+  <img src="https://img.shields.io/badge/Tauri-2.0-24C8DB.svg" alt="Tauri">
+  <img src="https://img.shields.io/badge/React-18-61DAFB.svg" alt="React">
+  <img src="https://img.shields.io/badge/Rust-stable-f74c00.svg" alt="Rust">
+</p>
 
-This repository is intended for contributors and early adopters who are comfortable working in a fast-moving codebase while the product continues to evolve.
+---
 
-## What Cascade Does
+## 🔩 What It Is
 
-- Builds image processing pipelines as typed node graphs
-- Evaluates graphs through a Rust core shared by web and desktop frontends
-- Renders node controls from backend `NodeSpec` metadata
-- Supports CPU nodes today and GPU-backed execution paths where available
-- Handles still-image workflows, graph editing, playback-oriented nodes, and scripted GPU kernels
+Cascade is a free node-based image editor. Wire nodes together to build reusable editing pipelines, then apply them to any image. It runs entirely in your browser — no install needed — and ships as a macOS desktop app for users who want native filesystem access.
 
-## Architecture
+## ✨ Features
 
-```text
-cascade/
-├── crates/
-│   ├── cascade-core/       # Graph engine, evaluator, type system, node traits
-│   ├── cascade-nodes-std/  # Built-in CPU nodes and benchmarks
-│   ├── cascade-gpu/        # wgpu compute pipeline and kernel runtime
-│   ├── cascade-wasm/       # wasm-bindgen bridge used by the web app
-│   ├── cascade-runtime/    # Native runtime used by desktop and CLI tooling
-│   ├── cascade-ocio/       # Optional OpenColorIO integration
-│   ├── cascade-ocio-sys/   # OpenColorIO FFI bindings
-│   └── cascade-video/      # Video I/O support
-├── apps/
-│   ├── web/                # React + Vite + Zustand + React Flow frontend
-│   └── tauri/              # Tauri desktop shell
-├── docs/                   # Architecture and design notes
-└── .github/workflows/ci.yml
-```
+### Graph Editor
+- **Visual node graph** — Connect typed inputs and outputs; cycles are rejected and dirty propagation flows downstream automatically
+- **Type-checked connections** — The engine enforces connection types at the graph level, not just in the UI
+- **GPU-accelerated nodes** — Per-pixel transforms run as wgpu compute shaders via GLSL kernel manifests; CPU fallback when GPU is unavailable
 
-## Installation
+### Image Processing
+- **Built-in nodes** — Color correction, blending, filters, resize, alpha compositing, sRGB conversion, and more
+- **Linear color pipeline** — All processing in linear f32 RGBA; sRGB conversion only at I/O boundaries
+- **Scripted GPU kernels** — Register custom GLSL kernels via JSON manifests without writing Rust
+
+### AI Integrations
+- **Replicate-backed nodes** — Use Replicate models as processing nodes with a user-supplied API token
+- **AI assistant** — In-app assistant powered by a user-supplied Anthropic API key
+- All AI features are optional and bring-your-own-key; ignore them entirely if you do not need them
+
+### Platform
+- **Web** — Runs in the browser via WebAssembly; ships both single-threaded and threaded WASM bundles
+- **Desktop (macOS)** — Native app via Tauri with filesystem access, native packaging, and Tauri shell features
+- **Shared core** — Web and desktop targets share the same Rust engine
+
+## 📦 Installation
 
 ### Web
 
-The web app remains the fastest way to evaluate Cascade during active development.
+The web app is the fastest way to evaluate Cascade. No installation required — the engine runs via WebAssembly in your browser.
+
+**Deployment note:** The threaded WASM bundle requires `SharedArrayBuffer`, which means serving the app with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`. Without those headers the app falls back to the single-threaded engine automatically.
 
 ### Desktop (macOS)
 
@@ -54,95 +62,42 @@ brew tap zacharyfmarion/homebrew-cascade
 brew install --cask cascade
 ```
 
-Or download the latest signed DMG from GitHub Releases:
+Or download the latest signed DMG from [GitHub Releases](https://github.com/zacharyfmarion/cascade/releases):
 
-- Apple Silicon: [Cascade latest for Apple Silicon](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_aarch64.dmg)
-- Intel: [Cascade latest for Intel](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_x64.dmg)
-- Release page: [GitHub Releases](https://github.com/zacharyfmarion/cascade/releases)
+- [Apple Silicon DMG](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_aarch64.dmg)
+- [Intel DMG](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_x64.dmg)
 
 Requires macOS 10.15 (Catalina) or later.
 
-## Web-First Quick Start
+### Development
 
-### Prerequisites
+Local setup, build commands, and contributor-facing references live in [CONTRIBUTING.md](./CONTRIBUTING.md) and [AGENTS.md](./AGENTS.md).
 
-- Rust stable via [rustup](https://rustup.rs/)
-- Node.js 22+
-- `wasm-pack`
-- Nightly Rust with `rust-src` if you want the threaded WASM build
+## 🤝 Contributing
 
-### Run The Web App
+Contributions are welcome! Please:
 
-```bash
-yarn install
-cd apps/web
-yarn dev
-```
+1. Check existing issues or create a new one to discuss your idea
+2. Fork the repository and create a feature branch
+3. Follow the code style (`cargo fmt` for Rust, ESLint for TypeScript)
+4. Update documentation as needed
+5. Submit a pull request
 
-The web app's `predev` hook builds both WASM bundles automatically.
+For detailed development guidelines, see [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md). Please also read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating in discussions or pull requests.
 
-### Useful Commands
+## 📄 License
 
-From the repository root:
+Cascade is released under the MIT License. See [LICENSE](./LICENSE) for details.
 
-```bash
-yarn install
-yarn workspace web lint
-yarn workspace web lint:css
-yarn workspace web test
-```
+## 🙏 Acknowledgments
 
-From `apps/web/`:
+Built with:
 
-```bash
-yarn build:wasm
-yarn dev
-npx playwright test
-```
-
-From the repository root for Rust validation:
-
-```bash
-cargo check --workspace
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-```
-
-## Deployment Notes For Web
-
-- Cascade ships both single-threaded and threaded WASM bundles.
-- Threaded WASM requires `SharedArrayBuffer`, which in practice means serving the app with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`.
-- If those headers are unavailable, the app falls back to the single-threaded engine automatically.
-- The repository's current contributor workflow is strongest for local development and CI. Hosted deployment guidance will continue to evolve as the web release hardens.
-
-## AI Integrations
-
-AI-powered workflows are optional.
-
-- Replicate-backed nodes use a user-supplied API token
-- The AI assistant uses a user-supplied Anthropic API key
-- In the web app, those settings are stored locally in the browser for the current user profile
-
-If you do not want to use AI features, you can ignore them entirely.
-
-## Desktop Status
-
-The desktop app shares the same Rust core and frontend architecture as the web build, but adds native packaging and filesystem access through Tauri.
-The web app is still the fastest place to iterate on browser-targeted workflows, while the macOS build is the production desktop distribution target.
-
-If you are looking for the most complete experience today, start with [`apps/web`](./apps/web/README.md).
-
-## Contributing
-
-Contributions are welcome.
-Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for setup and workflow guidance.
-
-## Community
-
-Please read [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md) before participating in discussions or pull requests.
-
-## License
-
-Cascade is released under the MIT License.
-See [LICENSE](./LICENSE) for details.
+- [Tauri](https://tauri.app/) — Rust-powered desktop framework
+- [React](https://react.dev/) — UI framework
+- [React Flow](https://reactflow.dev/) — Node graph UI
+- [wgpu](https://wgpu.rs/) — GPU compute pipeline
+- [Rayon](https://github.com/rayon-rs/rayon) — CPU parallelism
+- [Zustand](https://github.com/pmndrs/zustand) — Frontend state management
+- [wasm-bindgen](https://github.com/rustwasm/wasm-bindgen) — WebAssembly bridge
+- [Vite](https://vitejs.dev/) — Frontend build tooling
