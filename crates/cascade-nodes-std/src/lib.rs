@@ -1864,4 +1864,285 @@ mod tests {
         assert_eq!(dw_x, 100, "data window x offset");
         assert_eq!(dw_y, 100, "data window y offset");
     }
+
+    // ── Preview-scale helpers ────────────────────────────────────────────────
+
+    /// Evaluate a node with a single image input at the given preview scale.
+    fn eval_image_node_scaled(
+        node: &dyn Node,
+        input: Image,
+        params: HashMap<String, ParamValue>,
+        preview_scale: f32,
+    ) -> Image {
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(input));
+        let cm = BuiltinColorManagement::new();
+        let format = Format::hd();
+        let ctx = EvalContext {
+            inputs,
+            extra_inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+            preview_scale,
+        };
+        let result = block_on(node.evaluate(&ctx)).unwrap();
+        match result.get("image").unwrap() {
+            Value::Image(img) => img.clone(),
+            other => panic!("expected Value::Image, got {:?}", other.value_type()),
+        }
+    }
+
+    /// Horizontal gradient image: R = G = B = x / (w-1), A = 1.0.
+    fn make_gradient_image(w: u32, h: u32) -> Image {
+        let data: Vec<f32> = (0..h)
+            .flat_map(|_y| {
+                (0..w).flat_map(|x| {
+                    let v = x as f32 / (w as f32 - 1.0).max(1.0);
+                    [v, v, v, 1.0f32]
+                })
+            })
+            .collect();
+        Image::from_f32_data(w, h, data).unwrap()
+    }
+
+    /// Max absolute pixel difference between two same-size images.
+    fn max_pixel_diff(a: &Image, b: &Image) -> f32 {
+        assert_eq!(a.width, b.width);
+        assert_eq!(a.height, b.height);
+        a.data
+            .iter()
+            .zip(b.data.iter())
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
+    }
+
+    // ── GaussianBlur preview-scale tests ────────────────────────────────────
+
+    #[test]
+    fn test_gaussian_blur_uniform_unchanged_at_preview_scale() {
+        let node = GaussianBlur::new();
+        let img = make_test_image(100, 100, [0.4, 0.6, 0.2, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("sigma".to_string(), ParamValue::Float(15.0));
+        let result = eval_image_node_scaled(&node, img, params, 0.5);
+        let center = &result.data[((50 * 100 + 50) * 4)..((50 * 100 + 50) * 4 + 4)];
+        assert!(
+            approx_eq(center[0], 0.4) && approx_eq(center[1], 0.6) && approx_eq(center[2], 0.2),
+            "blur of uniform image should be unchanged, got {:?}",
+            center
+        );
+    }
+
+    #[test]
+    fn test_gaussian_blur_zero_sigma_passthrough_at_preview_scale() {
+        let node = GaussianBlur::new();
+        let img = make_gradient_image(50, 50);
+        let mut params = HashMap::new();
+        params.insert("sigma".to_string(), ParamValue::Float(0.0));
+
+        let result_full = eval_image_node_scaled(&node, img.clone(), params.clone(), 1.0);
+        let result_preview = eval_image_node_scaled(&node, img.clone(), params, 0.5);
+        assert_eq!(
+            max_pixel_diff(&result_full, &img),
+            0.0,
+            "zero sigma full-res should be identity"
+        );
+        assert_eq!(
+            max_pixel_diff(&result_preview, &img),
+            0.0,
+            "zero sigma preview should be identity"
+        );
+    }
+
+    #[test]
+    fn test_gaussian_blur_preview_scale_matches_fullres() {
+        // blur(full) downscaled ≈ downscale(full) then blur at half sigma
+        let node = GaussianBlur::new();
+        let full_img = make_gradient_image(200, 100);
+        let mut params = HashMap::new();
+        params.insert("sigma".to_string(), ParamValue::Float(20.0));
+
+        let full_blurred = eval_image_node_scaled(&node, full_img.clone(), params.clone(), 1.0);
+        let full_blurred_downscaled =
+            crate::transform::resize_nearest(&full_blurred, 100, 50).unwrap();
+
+        let preview_img = crate::transform::resize_nearest(&full_img, 100, 50).unwrap();
+        let preview_blurred = eval_image_node_scaled(&node, preview_img, params, 0.5);
+
+        let diff = max_pixel_diff(&full_blurred_downscaled, &preview_blurred);
+        assert!(
+            diff < 0.07,
+            "preview blur should approximate full-res blur (diff={diff:.4})"
+        );
+    }
+
+    // ── Dilate/Erode/Median radius-scaling tests ─────────────────────────────
+
+    #[test]
+    fn test_dilate_radius_scales_with_preview() {
+        // Single white pixel at center; Dilate with radius=4 at full-res should expand more
+        // than Dilate with radius=4 at 0.5x scale (which uses radius=2 internally).
+        let node = Dilate::new();
+        let size = 100u32;
+        let cx = (size / 2) as usize;
+        let cy = (size / 2) as usize;
+        let mut data = vec![0.0f32; (size * size * 4) as usize];
+        let idx = (cy * size as usize + cx) * 4;
+        data[idx] = 1.0;
+        data[idx + 1] = 1.0;
+        data[idx + 2] = 1.0;
+        data[idx + 3] = 1.0;
+        let img = Image::from_f32_data(size, size, data).unwrap();
+
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(4));
+
+        let full = eval_image_node_scaled(&node, img.clone(), params.clone(), 1.0);
+        let preview = eval_image_node_scaled(&node, img, params, 0.5);
+
+        // At distance 3 from center: full-res (radius=4) should be white, preview (radius=2) black
+        let check_pixel = |result: &Image, dx: i32, dy: i32| -> bool {
+            let x = (cx as i32 + dx) as usize;
+            let y = (cy as i32 + dy) as usize;
+            let idx = (y * size as usize + x) * 4;
+            result.data[idx] > 0.5
+        };
+        assert!(
+            check_pixel(&full, 3, 0),
+            "full-res dilate radius=4 should reach 3px away"
+        );
+        assert!(
+            !check_pixel(&preview, 3, 0),
+            "preview dilate scaled radius=2 should not reach 3px"
+        );
+    }
+
+    #[test]
+    fn test_erode_radius_scales_with_preview() {
+        // White 10x10 center on a black 30x30 background. Erode shrinks the white region
+        // inward: radius=4 shrinks by 4px each side, radius=2 (preview 0.5x) by 2px.
+        // Pixel (13,13) is 3px inside the white region boundary (which starts at x=10).
+        // After erode radius=4: shrinks to (14,14)..(15,15) -> pixel (13,13) is black.
+        // After erode radius=2: shrinks to (12,12)..(17,17) -> pixel (13,13) is white.
+        let node = Erode::new();
+        let size = 30u32;
+        let mut data = vec![0.0f32; (size * size * 4) as usize];
+        for y in 10u32..20 {
+            for x in 10u32..20 {
+                let idx = ((y * size + x) * 4) as usize;
+                data[idx] = 1.0;
+                data[idx + 1] = 1.0;
+                data[idx + 2] = 1.0;
+                data[idx + 3] = 1.0;
+            }
+        }
+        let img = Image::from_f32_data(size, size, data).unwrap();
+
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(4));
+
+        let full = eval_image_node_scaled(&node, img.clone(), params.clone(), 1.0);
+        let preview = eval_image_node_scaled(&node, img, params, 0.5);
+
+        let px_full = full.data[(13 * size as usize + 13) * 4];
+        let px_preview = preview.data[(13 * size as usize + 13) * 4];
+        assert!(
+            px_full < 0.5,
+            "full-res erode radius=4 should erode 3px from edge"
+        );
+        assert!(
+            px_preview > 0.5,
+            "preview erode radius=2 should not reach 3px from edge"
+        );
+    }
+
+    #[test]
+    fn test_median_radius_scales_with_preview() {
+        // Median on a uniform image should be unchanged at any scale.
+        let node = Median::new();
+        let img = make_test_image(40, 40, [0.5, 0.3, 0.7, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("radius".to_string(), ParamValue::Int(3));
+
+        let result_full = eval_image_node_scaled(&node, img.clone(), params.clone(), 1.0);
+        let result_preview = eval_image_node_scaled(&node, img.clone(), params, 0.5);
+
+        assert!(
+            approx_eq(result_full.data[0], 0.5),
+            "median full uniform unchanged"
+        );
+        assert!(
+            approx_eq(result_preview.data[0], 0.5),
+            "median preview uniform unchanged"
+        );
+    }
+
+    // ── Directional blur ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_directional_blur_preview_scale_matches_fullres() {
+        let node = DirectionalBlur::new();
+        let full_img = make_gradient_image(200, 100);
+        let mut params = HashMap::new();
+        params.insert("length".to_string(), ParamValue::Float(30.0));
+        params.insert("angle".to_string(), ParamValue::Float(0.0));
+
+        let full_blurred = eval_image_node_scaled(&node, full_img.clone(), params.clone(), 1.0);
+        let full_blurred_downscaled =
+            crate::transform::resize_nearest(&full_blurred, 100, 50).unwrap();
+
+        let preview_img = crate::transform::resize_nearest(&full_img, 100, 50).unwrap();
+        let preview_blurred = eval_image_node_scaled(&node, preview_img, params, 0.5);
+
+        let diff = max_pixel_diff(&full_blurred_downscaled, &preview_blurred);
+        assert!(
+            diff < 0.1,
+            "preview directional blur should approximate full-res (diff={diff:.4})"
+        );
+    }
+
+    // ── Sharpen ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sharpen_uniform_unchanged_at_preview_scale() {
+        let node = Sharpen::new();
+        let img = make_test_image(60, 60, [0.5, 0.5, 0.5, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("amount".to_string(), ParamValue::Float(1.0));
+        params.insert("radius".to_string(), ParamValue::Float(5.0));
+        let result = eval_image_node_scaled(&node, img, params, 0.5);
+        assert!(
+            approx_eq(result.data[0], 0.5),
+            "sharpen of uniform should be unchanged"
+        );
+    }
+
+    // ── Glow ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_glow_below_threshold_passthrough() {
+        // Dark image below threshold should pass through unchanged at any preview scale.
+        let node = Glow::new();
+        let img = make_test_image(40, 40, [0.1, 0.1, 0.1, 1.0]);
+        let mut params = HashMap::new();
+        params.insert("threshold".to_string(), ParamValue::Float(0.8));
+        params.insert("radius".to_string(), ParamValue::Float(20.0));
+        params.insert("intensity".to_string(), ParamValue::Float(1.0));
+
+        let result_full = eval_image_node_scaled(&node, img.clone(), params.clone(), 1.0);
+        let result_preview = eval_image_node_scaled(&node, img, params, 0.5);
+
+        assert!(
+            approx_eq(result_full.data[0], 0.1),
+            "glow below threshold full"
+        );
+        assert!(
+            approx_eq(result_preview.data[0], 0.1),
+            "glow below threshold preview"
+        );
+    }
 }

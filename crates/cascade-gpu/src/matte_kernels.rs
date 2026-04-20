@@ -25,6 +25,7 @@ pub fn builtin_premultiply_manifest() -> KernelManifest {
         .trim()
         .to_string(),
         supports_mask: false,
+        pixel_space_params: vec![],
     }
 }
 
@@ -57,6 +58,7 @@ pub fn builtin_unpremultiply_manifest() -> KernelManifest {
         .trim()
         .to_string(),
         supports_mask: false,
+        pixel_space_params: vec![],
     }
 }
 
@@ -443,6 +445,7 @@ pub fn builtin_set_alpha_manifest() -> KernelManifest {
         .trim()
         .to_string(),
         supports_mask: false,
+        pixel_space_params: vec![],
     }
 }
 
@@ -496,6 +499,7 @@ pub fn builtin_extract_channel_manifest() -> KernelManifest {
         .trim()
         .to_string(),
         supports_mask: false,
+        pixel_space_params: vec![],
     }
 }
 

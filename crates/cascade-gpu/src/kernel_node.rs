@@ -21,6 +21,7 @@ pub struct GpuKernelNode {
     wgsl_source: String,
     context: Arc<GpuContext>,
     optional_inputs: Vec<String>,
+    pixel_space_params: Vec<String>,
 }
 
 // SAFETY: Single-threaded on wasm32. See GpuContext safety comment.
@@ -51,6 +52,7 @@ impl GpuKernelNode {
             wgsl_source: wgsl,
             context,
             optional_inputs,
+            pixel_space_params: manifest.pixel_space_params,
         })
     }
 
@@ -163,6 +165,11 @@ impl GpuKernelNode {
                 .cloned()
                 .or_else(|| default_param_value(param));
             let value = value.ok_or_else(|| CascadeError::MissingParam(param.key.clone()))?;
+            let value = if self.pixel_space_params.contains(&param.key) {
+                scale_param_by_preview(value, ctx.preview_scale)
+            } else {
+                value
+            };
             bytes.extend_from_slice(&param_value_bytes(&param.ty, &value)?);
             total_scalars += 1;
         }
@@ -559,6 +566,22 @@ fn collect_image_inputs<'a>(
         }
     }
     Ok(out)
+}
+
+/// Scale a float param value by `preview_scale`. Int params are rounded after scaling
+/// with a minimum of 1. Other param types are returned unchanged.
+fn scale_param_by_preview(value: ParamValue, preview_scale: f32) -> ParamValue {
+    if preview_scale >= 1.0 {
+        return value;
+    }
+    match value {
+        ParamValue::Float(v) => ParamValue::Float(v * preview_scale as f64),
+        ParamValue::Int(v) => {
+            let scaled = (v as f32 * preview_scale).round() as i64;
+            ParamValue::Int(scaled.max(1))
+        }
+        other => other,
+    }
 }
 
 fn default_param_value(param: &ParamSpec) -> Option<ParamValue> {

@@ -115,6 +115,14 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
 2. The GLSL `process(vec4 color, vec2 uv, ivec2 pixel)` function returns the output color
 3. Register via `Engine::register_gpu_kernel(json)` or place JSON in `kernels/` directory
 
+#### Preview scaling
+
+If a node has parameters expressed in pixel units (blur radius, translation offset, filter size),
+multiply them by `ctx.preview_scale` before use — otherwise the node will produce different results
+during preview (which runs at reduced resolution) vs. commit. See `GaussianBlur` (`filter.rs`) and
+`Dilate` (`filter_ops.rs`) for the CPU pattern. For GPU kernel nodes, list pixel-space params in
+`KernelManifest.pixel_space_params` — the executor scales them automatically.
+
 ### Modifying the frontend
 
 - Node rendering is automatic from `NodeSpec`. Only create custom node components when you need special UI (e.g., image preview, inline canvas).

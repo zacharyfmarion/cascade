@@ -214,6 +214,7 @@ pub fn builtin_gpu_transform_2d_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        pixel_space_params: vec!["translate_x".to_string(), "translate_y".to_string()],
         ..KernelManifest::default()
     }
 }
@@ -239,5 +240,34 @@ mod tests {
     #[test]
     fn test_transform_2d_manifest_transpiles() {
         assert_manifest_transpiles(builtin_gpu_transform_2d_manifest());
+    }
+
+    #[test]
+    fn test_transform_2d_pixel_space_params() {
+        let manifest = builtin_gpu_transform_2d_manifest();
+        assert!(
+            manifest
+                .pixel_space_params
+                .contains(&"translate_x".to_string()),
+            "translate_x must be in pixel_space_params"
+        );
+        assert!(
+            manifest
+                .pixel_space_params
+                .contains(&"translate_y".to_string()),
+            "translate_y must be in pixel_space_params"
+        );
+        assert!(
+            !manifest.pixel_space_params.contains(&"rotate".to_string()),
+            "rotate (degrees) must not be in pixel_space_params"
+        );
+        assert!(
+            !manifest.pixel_space_params.contains(&"scale_x".to_string()),
+            "scale_x (multiplier) must not be in pixel_space_params"
+        );
+        assert!(
+            !manifest.pixel_space_params.contains(&"scale_y".to_string()),
+            "scale_y (multiplier) must not be in pixel_space_params"
+        );
     }
 }

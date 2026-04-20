@@ -105,7 +105,10 @@ impl Node for GpuKuwaharaNode {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let variation = ctx.get_param_int("variation")?.clamp(0, 1) as i32;
-            let size = ctx.get_param_int("size")?.clamp(1, 100) as i32;
+            let size_raw = ctx.get_param_int("size")?;
+            let size = ((size_raw as f32 * ctx.preview_scale).round() as i64)
+                .max(1)
+                .clamp(1, 100) as i32;
 
             let width = image.width;
             let height = image.height;

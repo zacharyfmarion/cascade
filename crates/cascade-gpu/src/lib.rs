@@ -606,6 +606,7 @@ mod tests {
             params: vec![],
             kernel: "return color;".to_string(),
             supports_mask,
+            pixel_space_params: vec![],
         }
     }
 

@@ -15,6 +15,11 @@ pub struct KernelManifest {
     pub kernel: String,
     #[serde(default = "default_true")]
     pub supports_mask: bool,
+    /// Param keys whose values are in pixel units. The GPU kernel executor multiplies these
+    /// by `ctx.preview_scale` before writing the uniform buffer so preview renders match
+    /// full-res commits proportionally.
+    #[serde(default)]
+    pub pixel_space_params: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -33,6 +38,7 @@ impl Default for KernelManifest {
             params: Vec::new(),
             kernel: String::new(),
             supports_mask: true,
+            pixel_space_params: Vec::new(),
         }
     }
 }
@@ -359,6 +365,7 @@ pub fn builtin_pixelate_manifest() -> KernelManifest {
         .trim()
         .to_string(),
         supports_mask: false,
+        pixel_space_params: vec!["pixel_size".to_string()],
     }
 }
 
