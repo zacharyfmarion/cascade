@@ -6,6 +6,10 @@ import * as Comlink from 'comlink';
 import type { AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
 import { extractParamValue } from '../store/types';
+import {
+  collectViewerResultTransferables,
+  decodeViewerResult,
+} from './viewerResult';
 
 function paramValueToWasm(value: ParamValue): unknown {
   if ('Float' in value) return value.Float;
@@ -327,8 +331,6 @@ const engineAPI = {
         const rawResult = useScaled
           ? await eng2.render_viewer_scaled(viewerId, BigInt(frame), scale)
           : await eng.render_viewer(viewerId, BigInt(frame));
-        if (!rawResult || typeof rawResult !== 'object') continue;
-
         // Extract timings
         try {
           const timingsRaw = eng.get_last_render_timings();
@@ -345,53 +347,16 @@ const engineAPI = {
           console.warn('[WASM] Failed to get timings:', e);
         }
 
-        const data = rawResult as Record<string, unknown>;
-        const type = data.type as string;
-
-        switch (type) {
-          case 'image':
-          case 'mask':
-          case 'field': {
-            const rawPixels = data.pixels;
-            if (!rawPixels || (rawPixels as ArrayLike<number>).length === 0) continue;
-            // pixels may be Uint8ClampedArray (fast path) or number[] (serde fallback)
-            const pixels = rawPixels instanceof Uint8ClampedArray
-              ? rawPixels
-              : new Uint8ClampedArray(rawPixels as number[]);
-            results.push([viewerId, {
-              type: type as 'image' | 'mask' | 'field',
-              nodeId: viewerId,
-              width: data.width as number,
-              height: data.height as number,
-              pixels,
-            }]);
-            break;
-          }
-          case 'float':
-          case 'int':
-            results.push([viewerId, { type, nodeId: viewerId, value: data.value as number }]);
-            break;
-          case 'bool':
-            results.push([viewerId, { type: 'bool', nodeId: viewerId, value: data.value as boolean }]);
-            break;
-          case 'color':
-            results.push([viewerId, { type: 'color', nodeId: viewerId, value: data.value as [number, number, number, number] }]);
-            break;
-          case 'string':
-            results.push([viewerId, { type: 'string', nodeId: viewerId, value: data.value as string }]);
-            break;
-          case 'none':
-            results.push([viewerId, { type: 'none', nodeId: viewerId }]);
-            break;
+        const result = decodeViewerResult(rawResult, viewerId, { copyPixels: true });
+        if (result) {
+          results.push([viewerId, result]);
         }
       }
 
       // Transfer pixel buffers for zero-copy
       const transferables: ArrayBuffer[] = [];
       for (const [, r] of results) {
-        if ('pixels' in r && r.pixels) {
-          transferables.push(r.pixels.buffer as ArrayBuffer);
-        }
+        transferables.push(...collectViewerResultTransferables(r));
       }
       if (transferables.length > 0) {
         return Comlink.transfer(results, transferables);
@@ -446,53 +411,19 @@ const engineAPI = {
         console.warn('[WASM] Failed to get timings:', e);
       }
 
-      if (!raw || typeof raw !== 'object') return null;
-
-      const data = raw as Record<string, unknown>;
-      const type = data.type as string;
-
-      switch (type) {
-        case 'image':
-        case 'mask':
-        case 'field': {
-          const rawPixels = data.pixels;
-          if (!rawPixels || (rawPixels as ArrayLike<number>).length === 0) return null;
-          const pixels = rawPixels instanceof Uint8ClampedArray
-            ? rawPixels
-            : new Uint8ClampedArray(rawPixels as number[]);
-          const r = {
-            type: type as 'image' | 'mask' | 'field',
-            nodeId: viewerNodeId,
-            width: data.width as number,
-            height: data.height as number,
-            pixels,
-          };
-      return Comlink.transfer(r, [pixels.buffer]);
-        }
-        case 'float':
-        case 'int': {
-          const r: ViewerResult = { type, nodeId: viewerNodeId, value: data.value as number };
-          return r;
-        }
-        case 'bool': {
-          const r: ViewerResult = { type: 'bool', nodeId: viewerNodeId, value: data.value as boolean };
-          return r;
-        }
-        case 'color': {
-          const r: ViewerResult = { type: 'color', nodeId: viewerNodeId, value: data.value as [number, number, number, number] };
-          return r;
-        }
-        case 'string': {
-          const r: ViewerResult = { type: 'string', nodeId: viewerNodeId, value: data.value as string };
-          return r;
-        }
-        case 'none': {
-          const r: ViewerResult = { type: 'none', nodeId: viewerNodeId };
-          return r;
-        }
-        default:
-          return null;
+      // Comlink throws "Unserializable return value" if a worker result is not
+      // cloneable/transferable, so we normalize image payloads to a fresh buffer first.
+      const result = decodeViewerResult(raw, viewerNodeId, { copyPixels: true });
+      if (!result) {
+        return null;
       }
+
+      const transferables = collectViewerResultTransferables(result);
+      if (transferables.length > 0) {
+        return Comlink.transfer(result, transferables);
+      }
+
+      return result;
     });
   },
 
