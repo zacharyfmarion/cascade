@@ -92,6 +92,14 @@ cargo fmt --all -- --check
 
 Note: `cascade-ocio-sys`, `cascade-ocio`, and `cascade-tauri` require system libraries not available in all environments — always exclude them unless you have confirmed the relevant libraries are installed.
 
+**CI blind spot — Tauri must be verified locally.** CI excludes `cascade-tauri`, so compilation errors in `apps/tauri/src-tauri/` are invisible to CI and will only surface when running `yarn dev:desktop` locally. If your change touches any crate that `cascade-tauri` depends on (e.g. `cascade-core`, `cascade-gpu`, `cascade-nodes-std`, `cascade-runtime`), you **must** also run:
+
+```bash
+cargo check -p cascade-tauri
+```
+
+before opening the PR. Do not skip this step — it is not covered by CI.
+
 ### Frontend (when `apps/web/` changed)
 
 ```bash

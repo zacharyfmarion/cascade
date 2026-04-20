@@ -768,7 +768,7 @@ fn set_project_format(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let engine = Engine::new();
+    let mut engine = Engine::new();
 
     #[cfg(feature = "ocio")]
     {
