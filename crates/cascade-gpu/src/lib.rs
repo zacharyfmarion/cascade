@@ -135,7 +135,73 @@ mod tests {
     use super::*;
     use crate::manifest::builtin_pixelate_manifest;
     use crate::transpile::glsl_to_wgsl;
-    use cascade_core::types::Format;
+    use cascade_core::node::{EvalContext, Node};
+    use cascade_core::types::{Format, FrameTime, Image, ParamValue, Value};
+    use std::collections::HashMap;
+
+    fn make_column_test_image() -> Image {
+        let mut data = Vec::new();
+        let columns = [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+        ];
+
+        for _ in 0..4u32 {
+            for color in columns {
+                data.extend_from_slice(&color);
+            }
+        }
+
+        Image::from_f32_data(4, 4, data).expect("column test image")
+    }
+
+    fn eval_transform_2d(translate_x: f64, translate_y: f64, filter: i64) -> Option<Image> {
+        let ctx = match GpuContext::new() {
+            Ok(ctx) => Arc::new(ctx),
+            Err(e) => {
+                println!("GPU not available, skipping: {e}");
+                return None;
+            }
+        };
+
+        let manifest = builtin_gpu_transform_2d_manifest();
+        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
+            .expect("Should create Transform 2D node");
+
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(make_column_test_image()));
+
+        let mut params = HashMap::new();
+        params.insert("translate_x".to_string(), ParamValue::Float(translate_x));
+        params.insert("translate_y".to_string(), ParamValue::Float(translate_y));
+        params.insert("rotate".to_string(), ParamValue::Float(0.0));
+        params.insert("scale_x".to_string(), ParamValue::Float(1.0));
+        params.insert("scale_y".to_string(), ParamValue::Float(1.0));
+        params.insert("filter".to_string(), ParamValue::Int(filter));
+
+        let cm = cascade_core::color::BuiltinColorManagement::new();
+        let format = Format::from_dimensions(4, 4);
+        let eval_ctx = EvalContext {
+            inputs,
+            extra_inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+            preview_scale: 1.0,
+        };
+
+        let result =
+            pollster::block_on(node.evaluate(&eval_ctx)).expect("Transform 2D evaluation failed");
+        match result.get("image").expect("Transform 2D output") {
+            Value::Image(image) => Some(image.clone()),
+            other => panic!("Expected image output, got {:?}", other.value_type()),
+        }
+    }
 
     #[test]
     fn test_pixelate_glsl_builds() {
@@ -293,10 +359,6 @@ mod tests {
         }
         let image = cascade_core::types::Image::from_f32_data(4, 4, data).unwrap();
 
-        use cascade_core::node::EvalContext;
-        use cascade_core::types::{FrameTime, Value};
-        use std::collections::HashMap;
-
         let mut inputs = HashMap::new();
         inputs.insert("image".to_string(), Value::Image(image.clone()));
         let params = HashMap::new();
@@ -315,7 +377,6 @@ mod tests {
             preview_scale: 1.0,
         };
 
-        use cascade_core::node::Node;
         let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Evaluate should succeed");
         let output = result.get("image").expect("Should have image output");
         match output {
@@ -351,10 +412,6 @@ mod tests {
 
     #[test]
     fn test_pixelate_kernel_e2e() {
-        use cascade_core::node::{EvalContext, Node};
-        use cascade_core::types::{FrameTime, ParamValue, Value};
-        use std::collections::HashMap;
-
         let ctx = match GpuContext::new() {
             Ok(ctx) => Arc::new(ctx),
             Err(e) => {
@@ -413,10 +470,6 @@ mod tests {
 
     #[test]
     fn test_pixelate_with_optional_palette_missing() {
-        use cascade_core::node::{EvalContext, Node};
-        use cascade_core::types::{FrameTime, ParamValue, Value};
-        use std::collections::HashMap;
-
         let ctx = match GpuContext::new() {
             Ok(ctx) => Arc::new(ctx),
             Err(e) => {
@@ -475,6 +528,59 @@ mod tests {
             }
             _ => panic!("Expected image output"),
         }
+    }
+
+    #[test]
+    fn test_transform_2d_translate_left_exposes_transparent_right_edge() {
+        let Some(out_img) = eval_transform_2d(-1.0, 0.0, 0) else {
+            return;
+        };
+
+        assert_eq!(out_img.get_pixel_f32(0, 0), [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out_img.get_pixel_f32(1, 0), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(out_img.get_pixel_f32(2, 0), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(out_img.get_pixel_f32(3, 0), [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_transform_2d_translate_right_exposes_transparent_left_edge() {
+        let Some(out_img) = eval_transform_2d(1.0, 0.0, 0) else {
+            return;
+        };
+
+        assert_eq!(out_img.get_pixel_f32(0, 0), [0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(out_img.get_pixel_f32(1, 0), [1.0, 0.0, 0.0, 1.0]);
+        assert_eq!(out_img.get_pixel_f32(2, 0), [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(out_img.get_pixel_f32(3, 0), [0.0, 0.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_transform_2d_bilinear_translation_fades_into_transparent_edge() {
+        let Some(out_img) = eval_transform_2d(-0.5, 0.0, 1) else {
+            return;
+        };
+        let edge = out_img.get_pixel_f32(3, 0);
+
+        assert!(
+            (edge[0] - 0.5).abs() < 0.01,
+            "expected half-strength white at edge, got red={}",
+            edge[0]
+        );
+        assert!(
+            (edge[1] - 0.5).abs() < 0.01,
+            "expected half-strength white at edge, got green={}",
+            edge[1]
+        );
+        assert!(
+            (edge[2] - 0.5).abs() < 0.01,
+            "expected half-strength white at edge, got blue={}",
+            edge[2]
+        );
+        assert!(
+            (edge[3] - 0.5).abs() < 0.01,
+            "expected half alpha at edge, got alpha={}",
+            edge[3]
+        );
     }
 
     // ── Mask support tests ─────────────────────────────────────────
