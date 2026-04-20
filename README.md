@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://cascade-editor.pages.dev"><img src="https://img.shields.io/badge/Web-Try_Now-brightgreen.svg" alt="Try Now"></a>
   <img src="https://img.shields.io/github/v/release/zacharyfmarion/cascade?display_name=tag" alt="Latest Release">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Tauri-2.0-24C8DB.svg" alt="Tauri">
@@ -16,17 +17,11 @@
   <img src="https://img.shields.io/badge/Rust-stable-f74c00.svg" alt="Rust">
 </p>
 
-> **Desktop:** Install the macOS app via [Homebrew](#desktop-macos) or download the [latest DMG](https://github.com/zacharyfmarion/cascade/releases/latest). Requires macOS 10.15 (Catalina) or later.
->
-> **Web:** The browser app runs the same Rust core via WebAssembly — no install needed. The web app is still the fastest place to iterate; the macOS build is the production desktop distribution target.
->
-> This repository is intended for contributors and early adopters comfortable working in a fast-moving codebase.
-
 ---
 
 ## 🔩 What It Is
 
-Cascade is a node-based image processing application. Build image pipelines by connecting typed nodes in a visual graph. The Rust graph engine evaluates nodes in dependency order, with per-pixel operations parallelized by Rayon (CPU) or accelerated by wgpu compute shaders (GPU). The same engine runs in the browser via WebAssembly and in the macOS desktop app via Tauri.
+Cascade is a free node-based image editor. Wire nodes together to build reusable editing pipelines, then apply them to any image. It runs entirely in your browser — no install needed — and ships as a macOS desktop app for users who want native filesystem access.
 
 ## ✨ Features
 
