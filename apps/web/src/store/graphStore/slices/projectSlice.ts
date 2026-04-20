@@ -1,9 +1,10 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { Connection, Frame, NodeInstance, ParamValue } from '../../types';
+import type { Frame } from '../../types';
+import { parseEngineError } from '../../../engine/engineError';
 import { makeEngineError } from '../../../engine/engineError';
-import { createDocumentEnvelope, extractFrames, extractGraphData, getEngine, isTauri, kernel, normalizeParamValue } from '../kernel';
-import type { SerializableGraphData } from '../kernel';
+import { createDocumentEnvelope, extractFrames, extractGraphData, getEngine, isTauri, kernel } from '../kernel';
+import { hydrateRootGraphFromEngine } from '../hydration';
 import { syncAllCommitted } from '../nodeDraftStore';
 
 export interface ProjectSliceState {
@@ -25,60 +26,39 @@ export const createProjectSlice: StateCreator<
   [],
   ProjectSlice
 > = (set, get) => {
-  const applyGraphData = (graphData: SerializableGraphData) => {
-    const newNodes = new Map<string, NodeInstance>();
-    const newConnections: Connection[] = [];
-
-    if (Array.isArray(graphData.nodes)) {
-      for (const node of graphData.nodes) {
-        const spec = get().nodeSpecs.find(s => s.id === node.type_id);
-        const params: Record<string, ParamValue> = {};
-        if (spec) {
-          spec.params.forEach(p => {
-            const rawValue = node.params?.[p.key] ?? p.default;
-            params[p.key] = normalizeParamValue(rawValue as ParamValue);
-          });
-        } else if (node.params) {
-          Object.assign(params, node.params);
-        }
-        const [x, y] = node.position;
-        newNodes.set(node.id, {
-          id: node.id,
-          typeId: node.type_id,
-          params,
-          inputDefaults: node.input_defaults ?? {},
-          position: { x, y },
-          muted: node.muted ?? false,
-        });
-      }
+  const stopPlayback = () => {
+    kernel.playbackAborted = true;
+    if (kernel.playbackTimeoutId !== null) {
+      clearTimeout(kernel.playbackTimeoutId);
+      kernel.playbackTimeoutId = null;
     }
+  };
 
-    if (Array.isArray(graphData.connections)) {
-      for (const conn of graphData.connections) {
-        newConnections.push({
-          id: crypto.randomUUID(),
-          fromNode: conn.from_node,
-          fromPort: conn.from_port,
-          toNode: conn.to_node,
-          toPort: conn.to_port,
-        });
-      }
-    }
+  const resetProjectRuntimeState = (frames: Map<string, Frame>) => {
+    kernel.undoStack.length = 0;
+    kernel.redoStack.length = 0;
+    stopPlayback();
 
     set({
-      nodes: newNodes,
-      connections: newConnections,
-      selectedNodeIds: new Set(),
-      frames: new Map(),
+      frames,
       selectedFrameId: null,
-      renderResults: new Map(),
-      editingStack: [{ id: 'root', label: 'Root' }],
-      dirty: false,
-      fitViewRequestId: get().fitViewRequestId + 1,
+      lastError: null,
+      hasSequenceNodes: false,
+      sequenceLength: 0,
+      sequenceStart: 0,
+      sequenceInfoMap: new Map(),
+      canUndo: false,
+      canRedo: false,
+      currentFrame: 0,
+      isPlaying: false,
+      playbackFps: null,
+      nodeTimings: new Map(),
+      nodeErrors: new Map(),
+      renderProgress: null,
+      isRendering: false,
+      aiNodeStatuses: {},
+      aiNodeStale: {},
     });
-    syncAllCommitted(newNodes);
-
-    get().triggerAllViewers();
   };
 
   return {
@@ -92,12 +72,14 @@ export const createProjectSlice: StateCreator<
       } else {
         await eng.importGraph(emptyGraph);
       }
+      stopPlayback();
       kernel.undoStack.length = 0;
       kernel.redoStack.length = 0;
       set({
         nodes: new Map(),
         connections: [],
         selectedNodeIds: new Set(),
+        nodeSpecsById: new Map(),
         frames: new Map(),
         selectedFrameId: null,
         renderResults: new Map(),
@@ -110,7 +92,11 @@ export const createProjectSlice: StateCreator<
         canRedo: false,
         currentFrame: 0,
         isPlaying: false,
+        playbackFps: null,
         nodeTimings: new Map(),
+        nodeErrors: new Map(),
+        renderProgress: null,
+        isRendering: false,
         aiNodeStatuses: {},
         aiNodeStale: {},
       });
@@ -169,53 +155,68 @@ export const createProjectSlice: StateCreator<
           multiple: false,
         }).then(async path => {
           if (typeof path === 'string') {
-            const loaded = await eng.loadProject?.(path);
-            const graphData = extractGraphData(loaded);
-            applyGraphData(graphData);
-            const framesData = extractFrames(loaded);
-            const frameMap = new Map<string, Frame>();
-            for (const frame of framesData) {
-              frameMap.set(frame.id, frame);
+            try {
+              const loaded = await eng.loadProject?.(path);
+              await hydrateRootGraphFromEngine(set, get, { resetFrames: true });
+              const framesData = extractFrames(loaded);
+              const frameMap = new Map<string, Frame>();
+              for (const frame of framesData) {
+                frameMap.set(frame.id, frame);
+              }
+              resetProjectRuntimeState(frameMap);
+            } catch (e) {
+              const error = parseEngineError(e);
+              set({ lastError: error });
+              get().pushToast('error', 'Project load failed', error.message);
             }
-            set({ frames: frameMap });
           }
         });
       });
     },
 
     loadProject: (file) => {
-      file.text().then(async text => {
-        let data = JSON.parse(text);
-        const eng = getEngine();
-
-        if (eng?.needsMigration) {
+      void file.text()
+        .then(async text => {
           try {
-            if (eng.needsMigration(text)) {
-              const migratedJson = eng.migrateDocument!(text);
+            let data = JSON.parse(text);
+            const eng = getEngine();
+
+            if (eng?.needsMigration?.(text)) {
+              if (!eng.migrateDocument) {
+                throw makeEngineError('Project migration is required but not supported by this engine', 'MIGRATION_UNSUPPORTED', 'io');
+              }
+
+              const migratedJson = eng.migrateDocument(text);
               data = JSON.parse(migratedJson);
               console.info('[Migration] Project upgraded to latest format');
             }
+
+            const graphData = extractGraphData(data);
+
+            if (eng.importDocument) {
+              await eng.importDocument(data);
+            } else {
+              await eng.importGraph(graphData);
+            }
+
+            await hydrateRootGraphFromEngine(set, get, { resetFrames: true });
+            const framesData = extractFrames(data);
+            const frameMap = new Map<string, Frame>();
+            for (const frame of framesData) {
+              frameMap.set(frame.id, frame);
+            }
+            resetProjectRuntimeState(frameMap);
           } catch (e) {
-            console.warn('[Migration] Migration failed, loading original:', e);
+            const error = parseEngineError(e);
+            set({ lastError: error });
+            get().pushToast('error', 'Project load failed', error.message);
           }
-        }
-
-        const graphData = extractGraphData(data);
-
-        if (eng.importDocument) {
-          await eng.importDocument(data);
-        } else {
-          await eng.importGraph(graphData);
-        }
-
-        applyGraphData(graphData);
-        const framesData = extractFrames(data);
-        const frameMap = new Map<string, Frame>();
-        for (const frame of framesData) {
-          frameMap.set(frame.id, frame);
-        }
-        set({ frames: frameMap });
-      });
+        })
+        .catch(e => {
+          const error = parseEngineError(e);
+          set({ lastError: error });
+          get().pushToast('error', 'Project load failed', error.message);
+        });
     },
   };
 };

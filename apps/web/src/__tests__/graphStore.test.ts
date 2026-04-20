@@ -26,7 +26,10 @@ const createInitialState = () => ({
   nodes: new Map<string, NodeInstance>(),
   connections: [] as Connection[],
   selectedNodeIds: new Set<string>(),
+  frames: new Map(),
+  selectedFrameId: null,
   nodeSpecs: [] as NodeSpec[],
+  nodeSpecsById: new Map<string, NodeSpec>(),
   engineReady: false,
   renderResults: new Map(),
   lastError: null,
@@ -45,6 +48,7 @@ const createInitialState = () => ({
   fps: useSettingsStore.getState().defaultFps,
   loopPlayback: useSettingsStore.getState().loopPlayback,
   playbackFps: null as number | null,
+  toasts: [],
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
@@ -436,6 +440,136 @@ describe('graphStore helper behaviors', () => {
       ...internalGraph.outputs,
       { name: addInputPort, label: '+', ty: 'Image' },
     ] as PortSpec[]);
+  });
+});
+
+describe('graphStore project hydration', () => {
+  const customGroupSpec: NodeSpec = {
+    id: 'group::user_loaded_group',
+    display_name: 'Loaded Group',
+    category: 'Group',
+    description: 'A hydrated custom group',
+    inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [],
+  };
+
+  it('loadProject refreshes custom group specs from the engine and clears stale per-instance specs', async () => {
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'group-node',
+          type_id: customGroupSpec.id,
+          position: [12, 24],
+          params: {},
+          input_defaults: {},
+        },
+      ],
+      connections: [],
+    };
+
+    mockEngine.importDocument = vi.fn(async () => {
+      mockEngine.exportGraph = () => loadedGraph;
+      mockEngine.listNodeTypes = () => [...NODE_SPECS, customGroupSpec];
+    });
+
+    useGraphStore.setState({
+      nodeSpecsById: new Map([['stale-node', NODE_SPECS[0]]]),
+    });
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.1.0' },
+        graph: loadedGraph,
+        frames: [],
+      }),
+    ], 'custom-group.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.nodes.get('group-node')?.typeId).toBe(customGroupSpec.id);
+    expect(state.nodeSpecs.some(spec => spec.id === customGroupSpec.id)).toBe(true);
+    expect(state.nodeSpecsById.size).toBe(0);
+  });
+
+  it('loadProject preserves the current graph on invalid JSON', async () => {
+    const baselineId = await useGraphStore.getState().addNode('gaussian_blur', { x: 5, y: 5 });
+
+    const file = new File(['{invalid'], 'broken.casc', { type: 'application/json' });
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(5);
+
+    const state = useGraphStore.getState();
+    expect(state.nodes.has(baselineId)).toBe(true);
+    expect(state.lastError).not.toBeNull();
+    expect(state.toasts[0]?.title).toBe('Project load failed');
+  });
+
+  it('loadProject aborts when migration fails and preserves the current graph', async () => {
+    const baselineId = await useGraphStore.getState().addNode('gaussian_blur', { x: 10, y: 10 });
+
+    mockEngine.needsMigration = () => true;
+    mockEngine.migrateDocument = () => {
+      throw new Error('Migration exploded');
+    };
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.0.0' },
+        graph: { nodes: [], connections: [] },
+      }),
+    ], 'needs-migration.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(5);
+
+    const state = useGraphStore.getState();
+    expect(state.nodes.has(baselineId)).toBe(true);
+    expect(state.lastError?.message).toContain('Migration exploded');
+    expect(state.toasts[0]?.title).toBe('Project load failed');
+  });
+
+  it('loadProject fails fast when refreshed specs still cannot resolve a node type', async () => {
+    const baselineId = await useGraphStore.getState().addNode('gaussian_blur', { x: 20, y: 20 });
+    const unresolvedGraph = {
+      nodes: [
+        {
+          id: 'missing-node',
+          type_id: 'group::missing_after_load',
+          position: [0, 0],
+          params: {},
+          input_defaults: {},
+        },
+      ],
+      connections: [],
+    };
+
+    mockEngine.importDocument = vi.fn(async () => {
+      mockEngine.exportGraph = () => unresolvedGraph;
+      mockEngine.listNodeTypes = () => NODE_SPECS;
+      mockEngine.getNodeSpec = undefined;
+    });
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.1.0' },
+        graph: unresolvedGraph,
+        frames: [],
+      }),
+    ], 'missing-type.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.nodes.has(baselineId)).toBe(true);
+    expect(state.nodes.has('missing-node')).toBe(false);
+    expect(state.lastError?.code).toBe('UNKNOWN_NODE_TYPE');
+    expect(state.lastError?.message).toContain('group::missing_after_load');
+    expect(state.toasts[0]?.title).toBe('Project load failed');
   });
 });
 

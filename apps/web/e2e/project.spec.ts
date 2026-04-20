@@ -97,6 +97,52 @@ test.describe('Save/Load project', () => {
     expect(result?.hasPixels).toBe(true);
   });
 
+  test('loadProject rehydrates custom group nodes before rendering them', async ({ page }) => {
+    await page.goto('/');
+    await waitForApp(page);
+
+    const solidId = (await harness(page, 'addNode', 'solid_color', { x: 100, y: 120 })) as string;
+    const blurId = (await harness(page, 'addNode', 'gaussian_blur', { x: 300, y: 120 })) as string;
+    const viewerId = (await harness(page, 'addNode', 'viewer', { x: 520, y: 120 })) as string;
+
+    await harness(page, 'connect', solidId, 'field', blurId, 'image');
+    await harness(page, 'connect', blurId, 'image', viewerId, 'value');
+    const groupNodeId = (await harness(page, 'createGroup', [solidId, blurId], 'Hydration Group')) as string;
+    expect(groupNodeId).toBeTruthy();
+    await harness(page, 'waitForRenderIdle');
+
+    const saved = await harness(page, 'saveProject');
+    await harness(page, 'newProject');
+    await harness(page, 'loadProject', saved);
+    await harness(page, 'waitForRenderIdle');
+
+    const stateAfterLoad = (await harness(page, 'getState')) as {
+      nodeIds: string[];
+      nodeTypes: Record<string, string>;
+    };
+    const reloadedGroupId = stateAfterLoad.nodeIds.find(
+      (id: string) => String(stateAfterLoad.nodeTypes[id]).startsWith('group::user_'),
+    );
+    expect(reloadedGroupId).toBeTruthy();
+
+    await expect(page.locator('.base-node__title', { hasText: 'Hydration Group' }).first()).toBeVisible();
+    await expect(page.getByText(/^group::user_/)).toHaveCount(0);
+
+    await harness(page, 'enterGroup', reloadedGroupId);
+    const stack = (await harness(page, 'getEditingStack')) as Array<{ label: string }>;
+    expect(stack.map(entry => entry.label)).toContain('Hydration Group');
+
+    await harness(page, 'exitGroup');
+    await harness(page, 'waitForRenderIdle');
+
+    const viewerResult = (await harness(page, 'getViewerResult', viewerId)) as {
+      hasPixels: boolean;
+      width: number;
+      height: number;
+    } | null;
+    expect(viewerResult?.hasPixels).toBe(true);
+  });
+
   test('newProject then loadProject resets dirty flag correctly', async ({ page }) => {
     await page.goto('/');
     await waitForApp(page);

@@ -107,8 +107,17 @@ export const NodeCanvas: React.FC = () => {
         }
       }
     }
+    for (const node of nodesStore.values()) {
+      const instanceSpec = nodeSpecsById.get(node.id);
+      if (!instanceSpec || node.typeId in types) continue;
+      if (node.typeId.startsWith('group::')) {
+        types[node.typeId] = GroupNodeComponent;
+      } else {
+        types[node.typeId] = ProcessingNode;
+      }
+    }
     return types;
-  }, [nodeSpecs]);
+  }, [nodeSpecs, nodeSpecsById, nodesStore]);
 
   const addNode = useGraphStore(s => s.addNode);
   const storeConnect = useGraphStore(s => s.connect);
