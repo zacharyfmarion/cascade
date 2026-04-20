@@ -77,7 +77,7 @@ impl Node for Sharpen {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let amount = ctx.get_param_float("amount")? as f32;
-            let radius = ctx.get_param_float("radius")? as f32;
+            let radius = ctx.get_param_float("radius")? as f32 * ctx.preview_scale;
             let amount = amount.clamp(0.0, 5.0);
             let radius = radius.clamp(0.0, 20.0);
 
@@ -215,7 +215,10 @@ impl Node for Dilate {
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let radius = ctx.get_param_int("radius")?.clamp(1, 50) as usize;
+            let radius_raw = ctx.get_param_int("radius")?;
+            let radius = ((radius_raw as f32 * ctx.preview_scale).round() as i64)
+                .max(1)
+                .clamp(1, 50) as usize;
             let w = image.width as usize;
             let h = image.height as usize;
             if w == 0 || h == 0 {
@@ -323,7 +326,10 @@ impl Node for Erode {
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let radius = ctx.get_param_int("radius")?.clamp(1, 50) as usize;
+            let radius_raw = ctx.get_param_int("radius")?;
+            let radius = ((radius_raw as f32 * ctx.preview_scale).round() as i64)
+                .max(1)
+                .clamp(1, 50) as usize;
             let w = image.width as usize;
             let h = image.height as usize;
             if w == 0 || h == 0 {
@@ -431,7 +437,10 @@ impl Node for Median {
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let radius = ctx.get_param_int("radius")?.clamp(1, 10) as usize;
+            let radius_raw = ctx.get_param_int("radius")?;
+            let radius = ((radius_raw as f32 * ctx.preview_scale).round() as i64)
+                .max(1)
+                .clamp(1, 10) as usize;
             let w = image.width as usize;
             let h = image.height as usize;
             if w == 0 || h == 0 {
@@ -583,7 +592,7 @@ impl Node for Glow {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
             let threshold = ctx.get_param_float("threshold")? as f32;
-            let radius = ctx.get_param_float("radius")? as f32;
+            let radius = ctx.get_param_float("radius")? as f32 * ctx.preview_scale;
             let intensity = ctx.get_param_float("intensity")? as f32;
             let w = image.width as usize;
             let h = image.height as usize;
@@ -895,7 +904,8 @@ impl Node for DirectionalBlur {
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let length = (ctx.get_param_float("length")? as f32).clamp(0.0, 200.0);
+            let length =
+                (ctx.get_param_float("length")? as f32 * ctx.preview_scale).clamp(0.0, 200.0);
             let angle_deg = (ctx.get_param_float("angle")? as f32).clamp(-180.0, 180.0);
 
             if length < 0.5 {

@@ -62,7 +62,7 @@ impl Node for GaussianBlur {
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let image = ctx.get_input_image("image")?;
-            let sigma = ctx.get_param_float("sigma")? as f32;
+            let sigma = ctx.get_param_float("sigma")? as f32 * ctx.preview_scale;
 
             if sigma < 0.1 {
                 let output = image.clone();
