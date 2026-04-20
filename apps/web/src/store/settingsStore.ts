@@ -28,6 +28,8 @@ interface SettingsState {
   setShowMinimap: (show: boolean) => void;
   showTimings: boolean;
   setShowTimings: (show: boolean) => void;
+  analyticsEnabled: boolean;
+  setAnalyticsEnabled: (enabled: boolean) => void;
 
   // --- Performance ---
   livePreviewScale: number;  // 0.25, 0.5, 0.75, 1.0
@@ -66,6 +68,7 @@ const DEFAULT_SETTINGS = {
   gridSize: 15,
   showMinimap: false,
   showTimings: false,
+  analyticsEnabled: true,
   livePreviewScale: 0.3,
   previewIdleDelay: 300,
   maxUndoSteps: 50,
@@ -78,7 +81,7 @@ const DEFAULT_SETTINGS = {
   projectHeight: 1080,
 };
 
-function loadSettings() {
+export function loadSettings() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
@@ -101,6 +104,7 @@ export const useSettingsStore = create<SettingsState>()(
           gridSize,
           showMinimap,
           showTimings,
+          analyticsEnabled,
           livePreviewScale,
           previewIdleDelay,
           maxUndoSteps,
@@ -119,6 +123,7 @@ export const useSettingsStore = create<SettingsState>()(
             gridSize,
             showMinimap,
             showTimings,
+            analyticsEnabled,
             livePreviewScale,
             previewIdleDelay,
             maxUndoSteps,
@@ -157,9 +162,12 @@ export const useSettingsStore = create<SettingsState>()(
         
         showMinimap: initial.showMinimap,
         setShowMinimap: (show) => { set({ showMinimap: show }); save(); },
-        
+
         showTimings: initial.showTimings,
         setShowTimings: (show) => { set({ showTimings: show }); save(); },
+
+        analyticsEnabled: initial.analyticsEnabled,
+        setAnalyticsEnabled: (enabled) => { set({ analyticsEnabled: enabled }); save(); },
 
         livePreviewScale: initial.livePreviewScale,
         setLivePreviewScale: (scale) => { set({ livePreviewScale: scale }); save(); },

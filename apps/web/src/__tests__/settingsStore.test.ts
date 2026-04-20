@@ -6,6 +6,7 @@ const DEFAULT_SETTINGS = {
   gridSize: 15,
   showMinimap: false,
   showTimings: false,
+  analyticsEnabled: true,
   livePreviewScale: 0.5,
   previewIdleDelay: 300,
   defaultFps: 24,
@@ -36,6 +37,7 @@ describe('settingsStore', () => {
     expect(state.gridSize).toBe(DEFAULT_SETTINGS.gridSize);
     expect(state.showMinimap).toBe(DEFAULT_SETTINGS.showMinimap);
     expect(state.showTimings).toBe(DEFAULT_SETTINGS.showTimings);
+    expect(state.analyticsEnabled).toBe(DEFAULT_SETTINGS.analyticsEnabled);
     expect(state.livePreviewScale).toBe(DEFAULT_SETTINGS.livePreviewScale);
     expect(state.previewIdleDelay).toBe(DEFAULT_SETTINGS.previewIdleDelay);
     expect(state.defaultFps).toBe(DEFAULT_SETTINGS.defaultFps);
@@ -64,6 +66,12 @@ describe('settingsStore', () => {
     useSettingsStore.getState().setShowTimings(true);
     expect(useSettingsStore.getState().showTimings).toBe(true);
     expect(getSavedSettings()?.showTimings).toBe(true);
+  });
+
+  it('setAnalyticsEnabled updates state and persists', () => {
+    useSettingsStore.getState().setAnalyticsEnabled(false);
+    expect(useSettingsStore.getState().analyticsEnabled).toBe(false);
+    expect(getSavedSettings()?.analyticsEnabled).toBe(false);
   });
 
   it('setLivePreviewScale updates state and persists', () => {

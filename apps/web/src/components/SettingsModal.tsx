@@ -5,7 +5,7 @@ import { useLayoutStore } from '../store/layoutStore';
 import { useGraphStore } from '../store/graphStore';
 import type { CascadeTheme } from '../themes/types';
 
-type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'color' | 'ai';
+type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'privacy' | 'color' | 'ai';
 
 function isTauri(): boolean {
   return '__TAURI_INTERNALS__' in window;
@@ -17,6 +17,7 @@ const ALL_TAB_LABELS: { key: Tab; label: string; tauriOnly?: boolean }[] = [
   { key: 'canvas', label: 'Canvas' },
   { key: 'performance', label: 'Performance' },
   { key: 'playback', label: 'Playback' },
+  { key: 'privacy', label: 'Privacy' },
   { key: 'color', label: 'Color', tauriOnly: true },
   { key: 'ai', label: 'AI' },
 ];
@@ -29,6 +30,7 @@ const sectionDescriptions: Record<Tab, string> = {
   canvas: 'Configure node canvas behavior and display options.',
   performance: 'Tune preview rendering performance for your hardware.',
   playback: 'Set default playback behavior for image sequences.',
+  privacy: 'Control anonymous product analytics collection for this device.',
   color: 'Configure display color space and view transform for the viewer.',
   ai: 'Configure API keys for AI-powered nodes and the AI assistant.',
 };
@@ -375,6 +377,31 @@ function PlaybackTab() {
   );
 }
 
+function PrivacyTab() {
+  const analyticsEnabled = useSettingsStore(s => s.analyticsEnabled);
+  const setAnalyticsEnabled = useSettingsStore(s => s.setAnalyticsEnabled);
+
+  return (
+    <div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
+        Cascade can send anonymous product analytics to PostHog so we can understand DAUs, core workflow usage, and graph-building behavior without collecting graph parameter values, prompts, keys, or file paths.
+      </div>
+      <label style={rowStyle}>
+        <span style={{ color: 'var(--text-secondary)' }}>Enable Anonymous Analytics</span>
+        <input
+          type="checkbox"
+          checked={analyticsEnabled}
+          onChange={e => setAnalyticsEnabled(e.target.checked)}
+          style={{ accentColor: 'var(--accent-primary)' }}
+        />
+      </label>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '12px', lineHeight: 1.5 }}>
+        Current high-signal events include app open plus structural node graph actions such as adding nodes, removing nodes, connecting nodes, disconnecting nodes, muting nodes, and linking nodes to the viewer.
+      </div>
+    </div>
+  );
+}
+
 function ColorTab() {
   const colorManagement = useGraphStore(s => s.colorManagement);
   const setDisplayView = useGraphStore(s => s.setDisplayView);
@@ -692,6 +719,7 @@ const TAB_COMPONENTS: Record<Tab, React.FC> = {
   canvas: CanvasTab,
   performance: PerformanceTab,
   playback: PlaybackTab,
+  privacy: PrivacyTab,
   color: ColorTab,
   ai: AiTab,
 };
