@@ -157,7 +157,7 @@ export function useNodeParam(
     [store, key, committed],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -183,7 +183,7 @@ export function useNodeParams(
     [store, committed],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -207,7 +207,7 @@ export function useNodeInputDefault(
     [store, portName, committedParams, committedDefaults],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -230,5 +230,5 @@ export function useNodeInputDefaults(
     [store, committedDefaults],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
