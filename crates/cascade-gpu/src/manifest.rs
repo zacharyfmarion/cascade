@@ -369,6 +369,31 @@ pub fn builtin_pixelate_manifest() -> KernelManifest {
     }
 }
 
+pub fn gpu_script_passthrough_manifest(type_id: &str) -> KernelManifest {
+    KernelManifest {
+        id: type_id.to_string(),
+        display_name: "GPU Script".to_string(),
+        category: "GPU".to_string(),
+        description: "Custom GPU shader node".to_string(),
+        inputs: vec![ManifestPort {
+            name: "image".to_string(),
+            label: "Image".to_string(),
+            ty: "Image".to_string(),
+            optional: false,
+        }],
+        outputs: vec![ManifestPort {
+            name: "image".to_string(),
+            label: "Image".to_string(),
+            ty: "Image".to_string(),
+            optional: false,
+        }],
+        params: vec![],
+        kernel: "return color;".to_string(),
+        supports_mask: true,
+        pixel_space_params: vec![],
+    }
+}
+
 fn parse_value_type(value: &str) -> Result<ValueType, String> {
     match value {
         "Image" => Ok(ValueType::Image),

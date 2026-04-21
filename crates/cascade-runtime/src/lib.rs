@@ -18,7 +18,9 @@ use cascade_core::group::{
 use cascade_core::node::{Node, NodeRegistry};
 pub use cascade_core::types::{Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value};
 use cascade_gpu::kernel_node::GpuKernelNode;
-use cascade_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
+use cascade_gpu::{
+    gpu_script_passthrough_manifest, register_gpu_nodes, GpuContext, KernelManifest,
+};
 use cascade_nodes_std::input::LoadImage as InputLoadImage;
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
@@ -36,6 +38,24 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub use document::*;
+
+const GPU_SCRIPT_MANIFEST_PARAM_KEY: &str = "__script_manifest";
+
+fn serialize_gpu_script_manifest(manifest: &KernelManifest) -> Result<String, String> {
+    serde_json::to_string(manifest).map_err(|e| e.to_string())
+}
+
+fn extract_gpu_script_manifest(
+    type_id: &str,
+    params: &HashMap<String, ParamValue>,
+) -> Option<KernelManifest> {
+    let ParamValue::String(manifest_json) = params.get(GPU_SCRIPT_MANIFEST_PARAM_KEY)? else {
+        return None;
+    };
+    let mut manifest: KernelManifest = serde_json::from_str(manifest_json).ok()?;
+    manifest.id = type_id.to_string();
+    Some(manifest)
+}
 
 pub struct Engine {
     graph: Graph,
@@ -1315,6 +1335,7 @@ impl Engine {
 
         let mut manifest = manifest;
         manifest.id = type_id.clone();
+        let manifest_json = serialize_gpu_script_manifest(&manifest)?;
 
         let gpu_context = self
             .gpu_context
@@ -1340,6 +1361,11 @@ impl Engine {
         self.nodes.insert(id, Arc::new(compiled_node));
 
         self.graph.prune_connections_for_node(id, &self.registry);
+        self.graph.set_param(
+            id,
+            GPU_SCRIPT_MANIFEST_PARAM_KEY,
+            ParamValue::String(manifest_json),
+        );
 
         self.graph.mark_dirty(id);
 
@@ -1398,6 +1424,12 @@ impl Engine {
             .collect()
     }
 
+    pub fn get_node_spec(&self, node_id: &str) -> Result<NodeSpec, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self.nodes.get(&id).ok_or(CascadeError::NodeNotFound(id))?;
+        Ok(node.spec())
+    }
+
     pub fn gpu_context(&self) -> Option<Arc<GpuContext>> {
         self.gpu_context.clone()
     }
@@ -1446,23 +1478,68 @@ impl Engine {
             return Ok((uuid, type_id.to_string()));
         }
 
-        let actual_type_id = if type_id == "gpu_script" {
+        let (actual_type_id, prepared_node, manifest_to_store) = if type_id == "gpu_script" {
             let uuid = format!("gpu_script::{}", Uuid::new_v4());
-            let uid = uuid.clone();
-            Arc::make_mut(&mut self.registry)
-                .register_or_replace(&uuid, move || Arc::new(GpuScriptDraftNode::new(&uid)));
-            uuid
+            if let Some(gpu_context) = self.gpu_context.clone() {
+                let manifest = gpu_script_passthrough_manifest(&uuid);
+                match GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()) {
+                    Ok(compiled_node) => {
+                        let manifest_for_factory = manifest.clone();
+                        let gpu_ctx = gpu_context.clone();
+                        Arc::make_mut(&mut self.registry).register_or_replace(&uuid, move || {
+                            Arc::new(
+                                GpuKernelNode::from_manifest(
+                                    manifest_for_factory.clone(),
+                                    gpu_ctx.clone(),
+                                )
+                                .expect("GPU node factory: manifest was pre-validated"),
+                            )
+                        });
+                        (
+                            uuid,
+                            Some(Arc::new(compiled_node) as Arc<dyn Node>),
+                            Some(manifest),
+                        )
+                    }
+                    Err(_) => {
+                        let uid = uuid.clone();
+                        Arc::make_mut(&mut self.registry).register_or_replace(&uuid, move || {
+                            Arc::new(GpuScriptDraftNode::new(&uid))
+                        });
+                        (uuid, None, None)
+                    }
+                }
+            } else {
+                let uid = uuid.clone();
+                Arc::make_mut(&mut self.registry)
+                    .register_or_replace(&uuid, move || Arc::new(GpuScriptDraftNode::new(&uid)));
+                (uuid, None, None)
+            }
         } else {
-            type_id.to_string()
+            (type_id.to_string(), None, None)
         };
 
         let node_id = self.graph.add_node(&actual_type_id);
         self.graph.set_position(node_id, x, y);
-        let node = self
-            .registry
-            .create(&actual_type_id)
-            .ok_or_else(|| CascadeError::Other(format!("Unknown node type: {actual_type_id}")))?;
+        let node = if let Some(node) = prepared_node {
+            node
+        } else {
+            self.registry.create(&actual_type_id).ok_or_else(|| {
+                CascadeError::Other(format!("Unknown node type: {actual_type_id}"))
+            })?
+        };
         self.nodes.insert(node_id, node);
+        if let Some(manifest) = manifest_to_store {
+            let manifest_json =
+                serialize_gpu_script_manifest(&manifest).map_err(CascadeError::Other)?;
+            self.kernel_manifests
+                .insert(actual_type_id.clone(), manifest.clone());
+            self.graph.set_param(
+                node_id,
+                GPU_SCRIPT_MANIFEST_PARAM_KEY,
+                ParamValue::String(manifest_json),
+            );
+        }
         let uuid = self.register_uuid_for_node(node_id);
         Ok((uuid, actual_type_id))
     }
@@ -2385,7 +2462,13 @@ impl Engine {
     pub fn export_document(&self) -> CascadeDocument {
         let graph = self.export_graph();
 
-        let used_type_ids: HashSet<&str> = graph.nodes.iter().map(|n| n.type_id.as_str()).collect();
+        let mut used_type_ids: HashSet<&str> =
+            graph.nodes.iter().map(|n| n.type_id.as_str()).collect();
+        for group_def in &graph.group_definitions {
+            for node in &group_def.internal_graph.nodes {
+                used_type_ids.insert(node.type_id.as_str());
+            }
+        }
         let mut scripts = HashMap::new();
         for (type_id, manifest) in &self.kernel_manifests {
             if used_type_ids.contains(type_id.as_str()) {
@@ -2434,22 +2517,56 @@ impl Engine {
         self.uuid_map.clear();
         self.kernel_manifests.clear();
 
+        let mut gpu_script_manifests: HashMap<String, Option<KernelManifest>> = HashMap::new();
+        for def in &data.group_definitions {
+            for node in &def.internal_graph.nodes {
+                if node.type_id.starts_with("gpu_script::") {
+                    gpu_script_manifests
+                        .entry(node.type_id.clone())
+                        .or_insert_with(|| {
+                            extract_gpu_script_manifest(&node.type_id, &node.params)
+                        });
+                }
+            }
+        }
+        for node in &data.nodes {
+            if node.type_id.starts_with("gpu_script::") {
+                gpu_script_manifests
+                    .entry(node.type_id.clone())
+                    .or_insert_with(|| extract_gpu_script_manifest(&node.type_id, &node.params));
+            }
+        }
+        for (type_id, manifest) in gpu_script_manifests {
+            if let (Some(gpu_context), Some(manifest)) =
+                (self.gpu_context.clone(), manifest.clone())
+            {
+                if GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()).is_ok() {
+                    let manifest_for_factory = manifest.clone();
+                    let gpu_ctx = gpu_context.clone();
+                    Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+                        Arc::new(
+                            GpuKernelNode::from_manifest(
+                                manifest_for_factory.clone(),
+                                gpu_ctx.clone(),
+                            )
+                            .expect("GPU node factory: manifest was pre-validated"),
+                        )
+                    });
+                    self.kernel_manifests.insert(type_id.clone(), manifest);
+                    continue;
+                }
+            }
+            let uid = type_id.clone();
+            Arc::make_mut(&mut self.registry)
+                .register_or_replace(&type_id, move || Arc::new(GpuScriptDraftNode::new(&uid)));
+        }
+
         self.group_definitions.retain(|_, def| def.is_builtin);
         for def in data.group_definitions {
             self.register_group(def).map_err(CascadeError::Other)?;
         }
 
         let mut id_map = HashMap::new();
-        for node in &data.nodes {
-            if node.type_id.starts_with("gpu_script::")
-                && self.registry.get_spec(&node.type_id).is_none()
-            {
-                let uid = node.type_id.clone();
-                Arc::make_mut(&mut self.registry).register_or_replace(&node.type_id, move || {
-                    Arc::new(GpuScriptDraftNode::new(&uid))
-                });
-            }
-        }
         for node in &data.nodes {
             let new_id = self.graph.add_node(&node.type_id);
             self.graph
@@ -2607,6 +2724,17 @@ mod tests {
         assert!(node.type_id.starts_with("gpu_script::"));
         let spec = engine.registry.get_spec(&node.type_id).unwrap();
         assert_eq!(spec.display_name, "GPU Script");
+        if engine.gpu_context().is_some() {
+            let stored_manifest = node.params.get(GPU_SCRIPT_MANIFEST_PARAM_KEY);
+            let Some(ParamValue::String(manifest_json)) = stored_manifest else {
+                panic!("expected passthrough manifest to be stored for gpu script node");
+            };
+            let manifest: KernelManifest =
+                serde_json::from_str(manifest_json).expect("valid manifest json");
+            assert_eq!(manifest.kernel, "return color;");
+            let instance = engine.nodes.get(&id).expect("gpu script node instance");
+            assert!(instance.as_any().is::<GpuKernelNode>());
+        }
     }
 
     #[test]
@@ -2634,8 +2762,52 @@ mod tests {
             .expect("compile");
         let graph_node = engine.graph.nodes.get(id).unwrap();
         assert_eq!(spec.id, graph_node.type_id);
+        let stored_manifest = graph_node.params.get(GPU_SCRIPT_MANIFEST_PARAM_KEY);
+        let Some(ParamValue::String(stored_manifest)) = stored_manifest else {
+            panic!("expected compiled manifest to be stored on gpu script node");
+        };
+        let stored_manifest: KernelManifest =
+            serde_json::from_str(stored_manifest).expect("valid stored manifest");
+        assert_eq!(stored_manifest.id, graph_node.type_id);
         let node = engine.nodes.get(&id).unwrap();
         assert!(node.as_any().is::<GpuKernelNode>());
+    }
+
+    #[test]
+    fn test_export_document_includes_grouped_gpu_script_manifest() {
+        let mut engine = Engine::new();
+        if engine.gpu_context().is_none() {
+            return;
+        }
+
+        let (script_node_id, actual_type_id) = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let create_result = engine
+            .create_group_from_nodes(&[&script_node_id], "GPU Script Group")
+            .expect("create group");
+
+        let document = engine.export_document();
+        assert!(
+            document.scripts.contains_key(&actual_type_id),
+            "grouped gpu script manifest should be exported with the document",
+        );
+        assert!(
+            document
+                .graph
+                .nodes
+                .iter()
+                .all(|node| node.type_id != actual_type_id),
+            "the gpu script should only exist inside the exported group definition",
+        );
+        assert!(
+            document.graph.group_definitions.iter().any(|def| def.id
+                == create_result.group_definition_id
+                && def
+                    .internal_graph
+                    .nodes
+                    .iter()
+                    .any(|node| node.type_id == actual_type_id)),
+            "exported group definition should still reference the gpu script type",
+        );
     }
 
     #[test]

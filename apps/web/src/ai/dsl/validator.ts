@@ -137,6 +137,15 @@ const expectedLabelForParam = (paramSpec: ParamSpec): string => {
 const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationError[]) => {
   const validKeys = spec.params.map(param => param.key);
   for (const [paramKey, paramValue] of node.params.entries()) {
+    if (node.nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
+      if (paramValue.type !== 'string') {
+        addError(errors, {
+          line: node.line,
+          message: `Line ${node.line}: Param "script" expects string, got "${dslValueLabel(paramValue)}"`,
+        });
+      }
+      continue;
+    }
     const paramSpec = getParamSpec(spec, paramKey);
     if (!paramSpec) {
       addError(errors, {

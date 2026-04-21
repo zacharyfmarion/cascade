@@ -1,6 +1,7 @@
 import type { DslAst, DslConnection, DslNode, DslParamValue, DslSourceMap, DslSourceSpan } from './types';
 import { pascalToSnake, labelToSnake, snakeToLabel } from './types';
-import type { NodeSpec, ParamSpec } from '../../store/types';
+import type { NodeInstance, NodeSpec, ParamSpec } from '../../store/types';
+import type { HandleMap } from './handleMap';
 
 interface ParseError {
   line: number;
@@ -14,25 +15,59 @@ export interface ParseResult {
   sourceMap?: DslSourceMap;
 }
 
-const NODE_REGEX = /^(@muted\s+)?([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\((.*)\)$/;
+const NODE_REGEX = /^(@muted\s+)?([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\(([\s\S]*)\)$/;
 const CONNECTION_REGEX = /^([a-z][a-z0-9_]*)\.([\w]+)\s*<-\s*([a-z][a-z0-9_]*)\.([\w]+)$/;
 
+type StringMode = 'none' | 'double' | 'triple';
+
+type ScanState = {
+  stringMode: StringMode;
+  escaped: boolean;
+};
+
+export interface ParseContext {
+  currentNodes?: Map<string, NodeInstance>;
+  handleMap?: HandleMap;
+}
+
+const advanceScanner = (text: string, index: number, state: ScanState): { nextIndex: number; state: ScanState } => {
+  if (state.stringMode === 'triple') {
+    if (text.startsWith('"""', index)) {
+      return { nextIndex: index + 3, state: { stringMode: 'none', escaped: false } };
+    }
+    return { nextIndex: index + 1, state: { stringMode: 'triple', escaped: false } };
+  }
+
+  const char = text[index];
+  if (state.stringMode === 'double') {
+    if (char === '\\' && !state.escaped) {
+      return { nextIndex: index + 1, state: { stringMode: 'double', escaped: true } };
+    }
+    if (char === '"' && !state.escaped) {
+      return { nextIndex: index + 1, state: { stringMode: 'none', escaped: false } };
+    }
+    return { nextIndex: index + 1, state: { stringMode: 'double', escaped: false } };
+  }
+
+  if (text.startsWith('"""', index)) {
+    return { nextIndex: index + 3, state: { stringMode: 'triple', escaped: false } };
+  }
+  if (char === '"') {
+    return { nextIndex: index + 1, state: { stringMode: 'double', escaped: false } };
+  }
+  return { nextIndex: index + 1, state };
+};
+
 const stripInlineComment = (line: string): string => {
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < line.length; i += 1) {
+  let state: ScanState = { stringMode: 'none', escaped: false };
+  for (let i = 0; i < line.length;) {
     const char = line[i];
-    if (char === '\\' && !escaped) {
-      escaped = true;
-      continue;
-    }
-    if (char === '"' && !escaped) {
-      inString = !inString;
-    }
-    escaped = false;
-    if (!inString && char === '#' && i > 0 && line[i - 1] === ' ') {
+    if (state.stringMode === 'none' && char === '#' && i > 0 && line[i - 1] === ' ') {
       return line.slice(0, i - 1).trimEnd();
     }
+    const next = advanceScanner(line, i, state);
+    state = next.state;
+    i = next.nextIndex;
   }
   return line;
 };
@@ -40,35 +75,28 @@ const stripInlineComment = (line: string): string => {
 export const splitTopLevelParams = (paramStr: string): string[] => {
   const parts: string[] = [];
   let depth = 0;
-  let inString = false;
-  let escaped = false;
+  let state: ScanState = { stringMode: 'none', escaped: false };
   let current = '';
 
-  for (let i = 0; i < paramStr.length; i += 1) {
+  for (let i = 0; i < paramStr.length;) {
     const char = paramStr[i];
-    if (char === '\\' && !escaped) {
-      escaped = true;
-      current += char;
-      continue;
-    }
-    if (char === '"' && !escaped) {
-      inString = !inString;
-    }
-    escaped = false;
-
-    if (!inString) {
+    if (state.stringMode === 'none') {
       if (char === '(' || char === '[') depth += 1;
       if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
     }
 
-    if (!inString && depth === 0 && char === ',') {
+    if (state.stringMode === 'none' && depth === 0 && char === ',') {
       const trimmed = current.trim();
       if (trimmed.length > 0) parts.push(trimmed);
       current = '';
+      i += 1;
       continue;
     }
 
-    current += char;
+    const next = advanceScanner(paramStr, i, state);
+    current += paramStr.slice(i, next.nextIndex);
+    state = next.state;
+    i = next.nextIndex;
   }
 
   const trimmed = current.trim();
@@ -78,25 +106,19 @@ export const splitTopLevelParams = (paramStr: string): string[] => {
 
 const splitKeyValue = (entry: string): { key: string; value: string } | null => {
   let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < entry.length; i += 1) {
+  let state: ScanState = { stringMode: 'none', escaped: false };
+  for (let i = 0; i < entry.length;) {
     const char = entry[i];
-    if (char === '\\' && !escaped) {
-      escaped = true;
-      continue;
-    }
-    if (char === '"' && !escaped) {
-      inString = !inString;
-    }
-    escaped = false;
-    if (!inString) {
+    if (state.stringMode === 'none') {
       if (char === '(' || char === '[') depth += 1;
       if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
     }
-    if (!inString && depth === 0 && char === ':') {
+    if (state.stringMode === 'none' && depth === 0 && char === ':') {
       return { key: entry.slice(0, i).trim(), value: entry.slice(i + 1).trim() };
     }
+    const next = advanceScanner(entry, i, state);
+    state = next.state;
+    i = next.nextIndex;
   }
   return null;
 };
@@ -263,7 +285,21 @@ const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | nul
       return null;
     }
     case 'String': {
-      const value = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
+      if (trimmed.startsWith('"""') && trimmed.endsWith('"""')) {
+        let value = trimmed.slice(3, -3);
+        if (value.startsWith('\n')) value = value.slice(1);
+        if (value.endsWith('\n')) value = value.slice(0, -1);
+        return { type: 'string', value };
+      }
+      const value = trimmed.startsWith('"') && trimmed.endsWith('"')
+        ? (() => {
+            try {
+              return JSON.parse(trimmed) as string;
+            } catch {
+              return trimmed.slice(1, -1);
+            }
+          })()
+        : trimmed;
       return { type: 'string', value };
     }
     case 'Color': {
@@ -296,15 +332,14 @@ export const joinContinuationLines = (input: string): LogicalLine[] => {
   let buffer = '';
   let startLine = 1;
   let depth = 0; // tracks ( and [ nesting
-  let inString = false;
-  let escaped = false;
+  let state: ScanState = { stringMode: 'none', escaped: false };
 
   for (let i = 0; i < rawLines.length; i += 1) {
     const raw = rawLines[i];
     const trimmed = raw.trim();
 
     // Outside a continuation: skip blank lines and full-line comments
-    if (depth === 0 && !inString && buffer === '') {
+    if (depth === 0 && state.stringMode === 'none' && buffer === '') {
       if (!trimmed || trimmed.startsWith('#')) {
         result.push({ text: raw, startLine: i + 1 });
         continue;
@@ -316,33 +351,32 @@ export const joinContinuationLines = (input: string): LogicalLine[] => {
       startLine = i + 1;
       buffer = trimmed;
     } else {
-      // Inside continuation: strip inline comments on continuation lines,
-      // collapse whitespace
-      const stripped = stripInlineComment(raw).trim();
-      if (stripped) {
-        buffer += ' ' + stripped;
+      if (state.stringMode === 'triple') {
+        buffer += `\n${raw}`;
+      } else {
+        // Inside continuation: strip inline comments on continuation lines,
+        // collapse whitespace
+        const stripped = stripInlineComment(raw).trim();
+        if (stripped) {
+          buffer += ' ' + stripped;
+        }
       }
     }
 
     // Scan the current raw line to update depth/string state
-    for (let j = 0; j < raw.length; j += 1) {
+    for (let j = 0; j < raw.length;) {
       const char = raw[j];
-      if (char === '\\' && !escaped) {
-        escaped = true;
-        continue;
-      }
-      if (char === '"' && !escaped) {
-        inString = !inString;
-      }
-      escaped = false;
-      if (!inString) {
+      if (state.stringMode === 'none') {
         if (char === '(' || char === '[') depth += 1;
         if (char === ')' || char === ']') depth = Math.max(0, depth - 1);
       }
+      const next = advanceScanner(raw, j, state);
+      state = next.state;
+      j = next.nextIndex;
     }
 
     // If balanced, emit the logical line
-    if (depth === 0 && !inString) {
+    if (depth === 0 && state.stringMode === 'none') {
       result.push({ text: buffer, startLine });
       buffer = '';
     }
@@ -356,7 +390,7 @@ export const joinContinuationLines = (input: string): LogicalLine[] => {
   return result;
 };
 
-export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
+export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult {
   const errors: ParseError[] = [];
   const nodes = new Map<string, DslNode>();
   const connections: DslConnection[] = [];
@@ -386,9 +420,16 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
       }
 
       const baseId = pascalToSnake(nodeType);
+      const existingGpuScriptTypeId = (() => {
+        if (baseId !== 'gpu_script') return null;
+        const nodeId = context?.handleMap?.getNodeId(handle);
+        const typeId = nodeId ? context?.currentNodes?.get(nodeId)?.typeId : undefined;
+        return typeId?.startsWith('gpu_script::') ? typeId : null;
+      })();
       // Try gpu_kernel:: prefix first (most nodes are GPU kernels now)
       const gpuId = `gpu_kernel::${baseId}`;
-      const nodeTypeId = specById.has(gpuId) ? gpuId : baseId;
+      const nodeTypeId = existingGpuScriptTypeId
+        ?? (specById.has(gpuId) ? gpuId : baseId);
       const spec = specById.get(nodeTypeId);
       if (!spec) {
         errors.push({ line: lineNumber, message: `Unknown node type '${nodeType}'` });
@@ -405,6 +446,22 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[]): ParseResult {
           continue;
         }
         const paramSpec = paramSpecByKey.get(pair.key);
+        if (!paramSpec && nodeTypeId.startsWith('gpu_script') && pair.key === 'script') {
+          const parsedScript = parseParamValue({
+            key: 'script',
+            label: 'Script',
+            ty: 'String',
+            default: { String: '' },
+            ui_hint: { type: 'TextArea' },
+            promotable: false,
+          }, pair.value);
+          if (!parsedScript) {
+            errors.push({ line: lineNumber, message: `Invalid value for 'script'. Expected a multiline or quoted string.` });
+            continue;
+          }
+          params.set(pair.key, parsedScript);
+          continue;
+        }
         if (!paramSpec) {
           errors.push({ line: lineNumber, message: `Unknown param '${pair.key}' on ${nodeType}` });
           continue;

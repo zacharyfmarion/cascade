@@ -102,7 +102,19 @@ export const createAiSlice: StateCreator<
         specs.push(spec);
       }
 
-      set({ nodeSpecs: specs, dirty: true });
+      const newNodes = new Map(get().nodes);
+      const currentNode = newNodes.get(nodeId);
+      if (currentNode) {
+        newNodes.set(nodeId, {
+          ...currentNode,
+          params: {
+            ...currentNode.params,
+            __script_manifest: { String: manifestJson },
+          },
+        });
+      }
+
+      set({ nodeSpecs: specs, nodes: newNodes, dirty: true });
       get().triggerAffectedViewers([nodeId]);
       return spec;
     } catch (error) {

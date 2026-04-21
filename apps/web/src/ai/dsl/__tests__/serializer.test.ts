@@ -3,11 +3,24 @@ import { serializeGraph, type SerializerInput } from '../serializer';
 import { HandleMap } from '../handleMap';
 import type { Connection, NodeInstance } from '../../../store/types';
 import { makeNodeInstance, mockSpecs } from './helpers';
+import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../../gpuScript';
 
 const buildInput = (nodes: Map<string, NodeInstance>, connections: Connection[], handleMap = new HandleMap()): SerializerInput => ({
   nodes,
   connections,
   nodeSpecs: mockSpecs,
+  handleMap,
+});
+
+const buildInputWithSpecs = (
+  nodes: Map<string, NodeInstance>,
+  connections: Connection[],
+  nodeSpecs: SerializerInput['nodeSpecs'],
+  handleMap = new HandleMap(),
+): SerializerInput => ({
+  nodes,
+  connections,
+  nodeSpecs,
   handleMap,
 });
 
@@ -256,6 +269,30 @@ describe('serializeGraph', () => {
     );
     const output = serializeGraph(buildInput(nodes, []));
     expect(output).toBe('blend1 = Blend(mode: "screen")');
+  });
+
+  it('serializes gpu script source as a multiline string', () => {
+    const manifest = {
+      ...buildDefaultGpuScriptManifest('gpu_script::demo'),
+      kernel: 'float gain = 1.2;\nreturn vec4(color.rgb * gain, color.a);',
+    };
+    const specs = [...mockSpecs, buildGpuScriptNodeSpec(manifest)];
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('gpu-node', makeNodeInstance({
+      id: 'gpu-node',
+      typeId: 'gpu_script::demo',
+      params: {
+        __script_manifest: { String: JSON.stringify(manifest) },
+      },
+    }));
+    const handleMap = new HandleMap();
+    handleMap.set('gpu1', 'gpu-node');
+
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], specs, handleMap));
+    expect(output).toContain('gpu1 = GpuScript(');
+    expect(output).toContain('script: """');
+    expect(output).toContain('float gain = 1.2;');
+    expect(output).toContain('return vec4(color.rgb * gain, color.a);');
   });
 
   it('serializes default dropdown value (omitted from output)', () => {

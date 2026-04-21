@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
+import { buildDefaultGpuScriptManifest } from '../ai/gpuScript';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -440,6 +441,38 @@ describe('graphStore helper behaviors', () => {
       ...internalGraph.outputs,
       { name: addInputPort, label: '+', ty: 'Image' },
     ] as PortSpec[]);
+  });
+
+  it('enterGroup reconstructs gpu script specs from stored manifest params', async () => {
+    const manifest = buildDefaultGpuScriptManifest('gpu_script::group_test');
+    const internalGraph: GroupInternalGraph = {
+      groupDefId: 'group::gpu-script-test',
+      name: 'GPU Script Group',
+      nodes: [
+        {
+          id: 'gpu-inner',
+          typeId: 'gpu_script::group_test',
+          position: { x: 0, y: 0 },
+          params: { __script_manifest: { String: JSON.stringify(manifest) } },
+          inputDefaults: {},
+        },
+      ],
+      connections: [],
+      inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+
+    mockEngine.getGroupInternalGraph = async () => internalGraph;
+    const groupNodeId = await useGraphStore.getState().addNode('group::test', { x: 0, y: 0 });
+    await useGraphStore.getState().enterGroup(groupNodeId);
+
+    const state = useGraphStore.getState();
+    const gpuSpec = state.nodeSpecs.find(s => s.id === 'gpu_script::group_test');
+    expect(gpuSpec).toBeDefined();
+    expect(gpuSpec?.inputs.some(port => port.name === 'mask')).toBe(true);
+    expect(state.nodes.get('gpu-inner')?.params.__script_manifest).toEqual({
+      String: JSON.stringify(manifest),
+    } as ParamValue);
   });
 });
 

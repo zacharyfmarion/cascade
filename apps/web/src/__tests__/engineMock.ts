@@ -1,7 +1,17 @@
 import type { EngineBridge, AddNodeResult, NodeInterfaceChange } from '../engine/bridge';
 import type { NodeSpec, ParamValue, ViewerResult } from '../store/types';
+import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec, parseGpuScriptManifestJson } from '../ai/gpuScript';
 
 const NODE_SPECS: NodeSpec[] = [
+  {
+    id: 'gpu_script',
+    display_name: 'GPU Script',
+    category: 'GPU',
+    description: 'Custom GPU shader node. Write GLSL and compile to run.',
+    inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [],
+  },
   {
     id: 'load_image',
     display_name: 'Load Image',
@@ -148,6 +158,7 @@ export function createMockEngine(): EngineBridge & {
 
     addNode: (typeId: string, _x: number, _y: number): AddNodeResult => {
       const id = `node-${++nodeCounter}`;
+      const actualTypeId = typeId === 'gpu_script' ? `gpu_script::mock_${nodeCounter}` : typeId;
       const spec = NODE_SPECS.find(s => s.id === typeId);
       const params: Record<string, ParamValue> = {};
       if (spec) {
@@ -155,8 +166,11 @@ export function createMockEngine(): EngineBridge & {
           params[p.key] = p.default;
         }
       }
-      nodes.set(id, { typeId, params });
-      return { id, typeId };
+      if (actualTypeId.startsWith('gpu_script::')) {
+        params.__script_manifest = { String: JSON.stringify(buildDefaultGpuScriptManifest(actualTypeId)) };
+      }
+      nodes.set(id, { typeId: actualTypeId, params });
+      return { id, typeId: actualTypeId };
     },
 
     removeNode: (nodeId: string) => {
@@ -189,6 +203,29 @@ export function createMockEngine(): EngineBridge & {
     setPosition: () => {},
 
     setMuted: () => {},
+
+    compileScriptNode: async (nodeId: string, manifestJson: string): Promise<NodeSpec> => {
+      const node = nodes.get(nodeId);
+      if (!node) throw new Error('Node not found');
+      const manifest = parseGpuScriptManifestJson(manifestJson);
+      if (!manifest) throw new Error('Invalid manifest');
+      node.params.__script_manifest = { String: manifestJson };
+      return buildGpuScriptNodeSpec({ ...manifest, id: node.typeId });
+    },
+
+    getNodeSpec: async (nodeId: string): Promise<NodeSpec> => {
+      const node = nodes.get(nodeId);
+      if (!node) throw new Error('Node not found');
+      if (node.typeId.startsWith('gpu_script::')) {
+        const manifestValue = node.params.__script_manifest;
+        const manifestJson = manifestValue && 'String' in manifestValue ? manifestValue.String : null;
+        const manifest = parseGpuScriptManifestJson(manifestJson) ?? buildDefaultGpuScriptManifest(node.typeId);
+        return buildGpuScriptNodeSpec({ ...manifest, id: node.typeId });
+      }
+      const spec = NODE_SPECS.find(s => s.id === node.typeId);
+      if (!spec) throw new Error(`Unknown node type: ${node.typeId}`);
+      return spec;
+    },
 
     loadImageData: (nodeId: string, data: Uint8Array): NodeInterfaceChange => {
       imageDataStore.set(nodeId, data);

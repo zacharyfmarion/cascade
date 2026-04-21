@@ -45,7 +45,9 @@ use crate::utility_kernels::{
 };
 
 pub use crate::context::GpuContext;
-pub use crate::manifest::{KernelManifest, ManifestParam, ManifestPort};
+pub use crate::manifest::{
+    gpu_script_passthrough_manifest, KernelManifest, ManifestParam, ManifestPort,
+};
 
 fn register_kernel_node(
     registry: &mut NodeRegistry,

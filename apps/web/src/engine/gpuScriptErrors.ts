@@ -1,3 +1,19 @@
+const extractErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === 'string') return record.message;
+    if (typeof record.error === 'string') return record.error;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+  return String(error);
+};
+
 const extractLineNumber = (message: string): number | null => {
   const lineMatch = message.match(/\bline\s+(\d+)\b/i);
   if (lineMatch) return Number(lineMatch[1]);
@@ -36,7 +52,7 @@ const formatSourceSnippet = (kernel: string, lineNumber: number): string | null 
 };
 
 export const formatGpuScriptCompileError = (error: unknown, manifestJson?: string): string => {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = extractErrorMessage(error);
   const lineNumber = extractLineNumber(message);
   const kernel = extractKernel(manifestJson);
   const snippet = lineNumber && kernel ? formatSourceSnippet(kernel, lineNumber) : null;

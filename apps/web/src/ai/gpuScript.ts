@@ -1,3 +1,5 @@
+import type { NodeSpec, ParamDefault, ParamSpec, PortSpec } from '../store/types';
+
 export type ScriptPort = { name: string; label: string; ty: string };
 
 export type ScriptParam = {
@@ -24,6 +26,7 @@ export type GlslManifest = {
     ui?: string;
   }>;
   kernel: string;
+  supports_mask?: boolean;
 };
 
 export type GpuScriptManifest = {
@@ -44,6 +47,7 @@ export type GpuScriptManifest = {
     ui: string;
   }>;
   kernel: string;
+  supports_mask: boolean;
 };
 
 export const GPU_SCRIPT_SYSTEM_PROMPT = `You are a GLSL compute shader expert. You generate GPU kernel code for a Cascade image editor.
@@ -160,6 +164,7 @@ export const buildGpuScriptManifest = (
   outputs: ScriptPort[],
   params: ScriptParam[],
   kernel: string,
+  supportsMask = true,
 ): GpuScriptManifest => ({
   id: typeId,
   display_name: 'GPU Script',
@@ -178,6 +183,7 @@ export const buildGpuScriptManifest = (
     ui: param.ty === 'Bool' ? 'Checkbox' : param.ty === 'Int' ? 'NumberInput' : 'Slider',
   })),
   kernel,
+  supports_mask: supportsMask,
 });
 
 export const buildGpuScriptManifestFromGlsl = (typeId: string, manifest: GlslManifest): GpuScriptManifest => {
@@ -191,5 +197,91 @@ export const buildGpuScriptManifestFromGlsl = (typeId: string, manifest: GlslMan
     step: param.step,
   }));
 
-  return buildGpuScriptManifest(typeId, manifest.inputs, manifest.outputs, params, manifest.kernel);
+  return buildGpuScriptManifest(
+    typeId,
+    manifest.inputs,
+    manifest.outputs,
+    params,
+    manifest.kernel,
+    manifest.supports_mask ?? true,
+  );
+};
+
+export const buildDefaultGpuScriptManifest = (typeId: string): GpuScriptManifest =>
+  buildGpuScriptManifest(
+    typeId,
+    [{ name: 'image', label: 'Image', ty: 'Image' }],
+    [{ name: 'image', label: 'Image', ty: 'Image' }],
+    [],
+    'return color;',
+    true,
+  );
+
+export const parseGpuScriptManifestJson = (manifestJson?: string | null): GpuScriptManifest | null => {
+  if (!manifestJson) return null;
+  try {
+    const parsed = JSON.parse(manifestJson) as Partial<GpuScriptManifest>;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!Array.isArray(parsed.inputs) || !Array.isArray(parsed.outputs) || !Array.isArray(parsed.params)) {
+      return null;
+    }
+    if (typeof parsed.kernel !== 'string') return null;
+    return {
+      id: typeof parsed.id === 'string' ? parsed.id : 'gpu_script',
+      display_name: typeof parsed.display_name === 'string' ? parsed.display_name : 'GPU Script',
+      category: typeof parsed.category === 'string' ? parsed.category : 'GPU',
+      description: typeof parsed.description === 'string' ? parsed.description : 'Custom GPU shader node',
+      inputs: parsed.inputs as ScriptPort[],
+      outputs: parsed.outputs as ScriptPort[],
+      params: parsed.params as GpuScriptManifest['params'],
+      kernel: parsed.kernel,
+      supports_mask: parsed.supports_mask ?? true,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildParamDefault = (param: GpuScriptManifest['params'][number]): ParamDefault =>
+  param.type === 'Bool'
+    ? { Bool: Boolean(param.default) }
+    : param.type === 'Int'
+      ? { Int: Math.round(Number(param.default)) }
+      : { Float: Number(param.default) };
+
+const buildParamSpec = (param: GpuScriptManifest['params'][number]): ParamSpec => ({
+  key: param.key,
+  label: param.label,
+  ty: param.type as ParamSpec['ty'],
+  default: buildParamDefault(param),
+  min: param.min,
+  max: param.max,
+  step: param.step,
+  ui_hint: { type: param.ui === 'Checkbox' ? 'Checkbox' : param.ui === 'NumberInput' ? 'NumberInput' : 'Slider' },
+  promotable: true,
+});
+
+export const buildGpuScriptNodeSpec = (manifest: GpuScriptManifest): NodeSpec => {
+  const inputs: PortSpec[] = manifest.inputs.map((port) => ({
+    name: port.name,
+    label: port.label,
+    ty: port.ty as PortSpec['ty'],
+  }));
+  if (manifest.supports_mask) {
+    inputs.push({ name: 'mask', label: 'Mask', ty: 'Mask' });
+  }
+
+  return {
+    id: manifest.id,
+    display_name: manifest.display_name,
+    category: manifest.category,
+    description: manifest.description,
+    inputs,
+    outputs: manifest.outputs.map((port) => ({
+      name: port.name,
+      label: port.label,
+      ty: port.ty as PortSpec['ty'],
+    })),
+    params: manifest.params.map(buildParamSpec),
+  };
 };

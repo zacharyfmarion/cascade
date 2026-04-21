@@ -29,9 +29,10 @@ function getCurrentDsl(): string {
 
 
 function getCurrentAst(): DslAst {
-  const { nodeSpecs } = useGraphStore.getState();
+  const { nodeSpecs, nodes } = useGraphStore.getState();
   const dslText = getCurrentDsl();
-  const result = parseDsl(dslText, nodeSpecs);
+  const handleMap = getSharedHandleMap();
+  const result = parseDsl(dslText, nodeSpecs, { currentNodes: nodes, handleMap });
 
   return result.ast ?? { nodes: new Map(), connections: [] };
 }
@@ -217,16 +218,6 @@ const toolExecutors = {
 
     try {
       await store.compileScriptNode(nodeId, manifestJson);
-      const nodes = useGraphStore.getState().nodes;
-      const current = nodes.get(nodeId);
-      if (current) {
-        const updated = new Map(nodes);
-        updated.set(nodeId, {
-          ...current,
-          params: { ...current.params, __script_manifest: { String: manifestJson } },
-        });
-        useGraphStore.setState({ nodes: updated });
-      }
       return {
         success: true,
         node_id: nodeId,
@@ -292,11 +283,11 @@ const toolExecutors = {
 
 
 async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
-  const { nodeSpecs } = useGraphStore.getState();
+  const { nodeSpecs, nodes } = useGraphStore.getState();
   const handleMap = getSharedHandleMap();
 
 
-  const parseResult = parseDsl(newDsl, nodeSpecs);
+  const parseResult = parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
   if (parseResult.errors.length > 0) {
     return {
       success: false,

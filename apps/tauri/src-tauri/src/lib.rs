@@ -423,6 +423,16 @@ fn compile_script_node(
 }
 
 #[tauri::command]
+fn get_node_spec(state: State<'_, EngineState>, node_id: String) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let spec = s
+        .engine
+        .get_node_spec(&node_id)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&spec).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn register_gpu_kernel(
     state: State<'_, EngineState>,
     manifest_json: String,
@@ -808,6 +818,7 @@ pub fn run() {
             save_project,
             load_project,
             compile_script_node,
+            get_node_spec,
             register_gpu_kernel,
             export_image,
             export_image_to_path,

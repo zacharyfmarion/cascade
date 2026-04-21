@@ -1,6 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useGraphStore } from '../store/graphStore';
-import { buildGpuScriptManifest, generateGlslKernel } from '../ai/gpuScript';
+import { useSettingsStore } from '../store/settingsStore';
+import {
+  buildGpuScriptManifest,
+  generateGlslKernel,
+  parseGpuScriptManifestJson,
+} from '../ai/gpuScript';
 
 interface ScriptEditorState {
   inputs: Array<{ id: string; name: string; label: string; ty: string }>;
@@ -16,6 +21,7 @@ interface ScriptEditorState {
     step?: number;
   }>;
   kernel: string;
+  supportsMask: boolean;
   compileStatus: 'idle' | 'compiling' | 'success' | 'error';
   compileError: string | null;
 }
@@ -25,6 +31,7 @@ const DEFAULT_STATE: ScriptEditorState = {
   outputs: [{ id: 'out_0', name: 'image', label: 'Image', ty: 'Image' }],
   params: [],
   kernel: 'return color;',
+  supportsMask: true,
   compileStatus: 'idle',
   compileError: null,
 };
@@ -183,44 +190,44 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
   const compileScriptNode = useGraphStore(s => s.compileScriptNode);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const nodeParams = useGraphStore(s => s.nodes.get(nodeId)?.params);
-  const [apiKey, setApiKey] = useState('');
+  const apiKey = useSettingsStore(s => s.anthropicApiKey);
+  const setApiKey = useSettingsStore(s => s.setAnthropicApiKey);
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
-
-  useEffect(() => {
-  const storedKey = localStorage.getItem('cascade_anthropic_api_key');
-    if (storedKey) setApiKey(storedKey);
-  }, []);
   
   const [state, setState] = useState<ScriptEditorState>(() => {
     const savedManifest = nodeParams?.['__script_manifest'];
     if (savedManifest && 'String' in (savedManifest as Record<string, unknown>)) {
-      try {
-        const manifest = JSON.parse((savedManifest as { String: string }).String);
+      const manifest = parseGpuScriptManifestJson((savedManifest as { String: string }).String);
+      if (manifest) {
         return {
-          inputs: (manifest.inputs ?? []).map((p: { name: string; label: string; ty: string }, i: number) => ({
+          inputs: manifest.inputs.map((p, i) => ({
             id: `in_${i}`, name: p.name, label: p.label, ty: p.ty,
           })),
-          outputs: (manifest.outputs ?? []).map((p: { name: string; label: string; ty: string }, i: number) => ({
+          outputs: manifest.outputs.map((p, i) => ({
             id: `out_${i}`, name: p.name, label: p.label, ty: p.ty,
           })),
-          params: (manifest.params ?? []).map((p: { key: string; label: string; type: string; default: number | boolean; min?: number; max?: number; step?: number }, i: number) => ({
+          params: manifest.params.map((p, i) => ({
             id: `p_${i}`, key: p.key, label: p.label, ty: p.type,
             default: p.default, min: p.min, max: p.max, step: p.step,
           })),
-          kernel: manifest.kernel ?? 'return color;',
+          kernel: manifest.kernel,
+          supportsMask: manifest.supports_mask,
           compileStatus: 'success' as const,
           compileError: null,
         };
-      } catch { /* fall through */ }
+      }
     }
 
     const spec = nodeSpecs.find(s => s.id === typeId);
     if (spec) {
+        const supportsMask = spec.inputs.some((p) => p.name === 'mask' && p.ty === 'Mask');
         return {
-            inputs: spec.inputs.map((p, i) => ({ id: `in_${i}`, name: p.name, label: p.label, ty: p.ty })),
+            inputs: spec.inputs
+              .filter((p) => !(p.name === 'mask' && p.ty === 'Mask'))
+              .map((p, i) => ({ id: `in_${i}`, name: p.name, label: p.label, ty: p.ty })),
             outputs: spec.outputs.map((p, i) => ({ id: `out_${i}`, name: p.name, label: p.label, ty: p.ty })),
             params: spec.params.map((p, i) => {
                 let def: number | boolean = 0;
@@ -240,6 +247,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
                 };
             }),
             kernel: 'return color;',
+            supportsMask,
             compileStatus: 'idle',
             compileError: null
         };
@@ -257,19 +265,10 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
         state.outputs,
         state.params,
         state.kernel,
+        state.supportsMask,
       );
       const manifestJson = JSON.stringify(manifest);
       await compileScriptNode(nodeId, manifestJson);
-      const nodes = useGraphStore.getState().nodes;
-      const node = nodes.get(nodeId);
-      if (node) {
-        const updated = new Map(nodes);
-        updated.set(nodeId, {
-          ...node,
-          params: { ...node.params, __script_manifest: { String: manifestJson } },
-        });
-        useGraphStore.setState({ nodes: updated });
-      }
       setState(s => ({ ...s, compileStatus: 'success' }));
     } catch (e) {
       setState(s => ({ 
@@ -312,6 +311,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
           step: param.step,
         })),
         kernel: manifest.kernel,
+        supportsMask: manifest.supports_mask ?? true,
         compileStatus: 'idle',
         compileError: null,
       }));
@@ -588,6 +588,24 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
           </PortCard>
         ))}
 
+        <SectionHeader>Node Options</SectionHeader>
+        <label style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: '0.8rem',
+          cursor: 'pointer',
+          marginBottom: '12px',
+        }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Enable mask input</span>
+          <input
+            type="checkbox"
+            checked={state.supportsMask}
+            onChange={(e) => setState(s => ({ ...s, supportsMask: e.target.checked }))}
+            style={{ accentColor: 'var(--accent-primary)' }}
+          />
+        </label>
+
         <SectionHeader>GLSL Kernel (body of process)</SectionHeader>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', fontFamily: 'monospace', background: 'var(--bg-surface)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
           <div><span style={{color: 'var(--accent-primary)'}}>u_input</span> : readonly image2D</div>
@@ -669,10 +687,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
                 type="password"
                 value={apiKey}
                 onChange={e => {
-                    const nextKey = e.target.value;
-                    setApiKey(nextKey);
-    if (nextKey) localStorage.setItem('cascade_anthropic_api_key', nextKey);
-    else localStorage.removeItem('cascade_anthropic_api_key');
+                    setApiKey(e.target.value);
                 }}
                 placeholder="sk-ant-..."
                 />
