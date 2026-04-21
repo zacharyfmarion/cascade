@@ -5,6 +5,8 @@ import type { NodeInterfaceChange } from '../../../engine/bridge';
 import { parseEngineError } from '../../../engine/engineError';
 import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
+import { getNodeCategory, getPortType } from '../../../analytics/nodeGraph';
+import { trackAnalyticsEvent } from '../../../analytics/runtime';
 import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
 import {
   buildDefaultGpuScriptManifest,
@@ -134,6 +136,12 @@ export const createGraphSlice: StateCreator<
       if (actualTypeId === 'load_image_sequence') {
         get().recomputeSequenceState();
       }
+
+      trackAnalyticsEvent('node added', {
+        node_type_id: actualTypeId,
+        category: getNodeCategory(get().nodeSpecs, actualTypeId),
+      });
+
       return result.id;
     },
 
@@ -191,6 +199,13 @@ export const createGraphSlice: StateCreator<
       }
 
       get().triggerAffectedViewers(Array.from(affectedNodeIds));
+
+      if (removedNode) {
+        trackAnalyticsEvent('node removed', {
+          node_type_id: removedNode.typeId,
+          category: getNodeCategory(get().nodeSpecs, removedNode.typeId),
+        });
+      }
     },
 
     connect: async (fromNode, fromPort, toNode, toPort) => {
@@ -252,6 +267,15 @@ export const createGraphSlice: StateCreator<
             nodeSpecs: withGroupIOSpecs(specs, updatedGraph),
           }));
           get().triggerAffectedViewers([fromNode, toNode]);
+
+          const fromNodeType = get().nodes.get(fromNode)?.typeId ?? 'Unknown';
+          const toNodeType = get().nodes.get(toNode)?.typeId ?? 'Unknown';
+          trackAnalyticsEvent('nodes connected', {
+            from_node_type: fromNodeType,
+            to_node_type: toNodeType,
+            from_port_type: getPortType(get().nodeSpecs, fromNodeType, resolvedFromPort, 'outputs'),
+            to_port_type: getPortType(get().nodeSpecs, toNodeType, resolvedToPort, 'inputs'),
+          });
           return;
         }
         await eng.addInternalConnection(ctx.groupDefId!, fromNode, fromPort, toNode, toPort);
@@ -275,6 +299,15 @@ export const createGraphSlice: StateCreator<
         set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
       }
       get().triggerAffectedViewers([fromNode, toNode]);
+
+      const fromNodeType = get().nodes.get(fromNode)?.typeId ?? 'Unknown';
+      const toNodeType = get().nodes.get(toNode)?.typeId ?? 'Unknown';
+      trackAnalyticsEvent('nodes connected', {
+        from_node_type: fromNodeType,
+        to_node_type: toNodeType,
+        from_port_type: getPortType(get().nodeSpecs, fromNodeType, fromPort, 'outputs'),
+        to_port_type: getPortType(get().nodeSpecs, toNodeType, toPort, 'inputs'),
+      });
     },
 
     disconnect: async (connectionId) => {
@@ -309,6 +342,7 @@ export const createGraphSlice: StateCreator<
           set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
         }
         get().triggerAffectedViewers([conn.fromNode, conn.toNode]);
+        trackAnalyticsEvent('nodes disconnected');
       }
     },
 
@@ -406,6 +440,16 @@ export const createGraphSlice: StateCreator<
       set({ nodes: newNodes });
 
       get().triggerAffectedViewers([...selectedIds]);
+
+      for (const id of selectedIds) {
+        const node = newNodes.get(id);
+        if (!node) continue;
+
+        trackAnalyticsEvent('node muted', {
+          node_type_id: node.typeId,
+          muted: newMuted,
+        });
+      }
     },
 
     isInsideGroup: () => {
