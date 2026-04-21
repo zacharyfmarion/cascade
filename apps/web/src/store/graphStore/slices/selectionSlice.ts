@@ -1,5 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
+import { trackAnalyticsEvent } from '../../../analytics/runtime';
 
 export interface SelectionSliceState {
   selectedNodeIds: Set<string>;
@@ -43,6 +44,7 @@ export const createSelectionSlice: StateCreator<
 
     // Find an existing viewer node
     let viewerNodeId: string | null = null;
+    let viewerCreated = false;
     for (const [id, node] of nodes) {
       if (node.typeId === 'viewer') {
         viewerNodeId = id;
@@ -68,6 +70,7 @@ export const createSelectionSlice: StateCreator<
       const viewerY = avgY;
 
       viewerNodeId = await get().addNode('viewer', { x: viewerX, y: viewerY });
+      viewerCreated = true;
     }
 
     // Re-read connections from current state (addNode may have mutated)
@@ -83,5 +86,10 @@ export const createSelectionSlice: StateCreator<
 
     // Connect the clicked node's output to the viewer's input
     await get().connect(nodeId, output.name, viewerNodeId, 'value');
+
+    trackAnalyticsEvent('node linked to viewer', {
+      source_node_type: clickedNode.typeId,
+      viewer_created: viewerCreated,
+    });
   },
 });

@@ -10,12 +10,17 @@ if (!('window' in globalThis)) {
 let mockEngine = createMockEngine();
 let addOutputPort: string;
 let addInputPort: string;
+const trackAnalyticsEvent = vi.fn();
 
 vi.mock('../engine/wasmEngine', () => ({
   initWasmEngine: vi.fn(),
   get wasmEngine() {
     return mockEngine;
   },
+}));
+
+vi.mock('../analytics/runtime', () => ({
+  trackAnalyticsEvent,
 }));
 
 type GraphStore = typeof import('../store/graphStore')['useGraphStore'];
@@ -65,6 +70,7 @@ const flushPromises = async (ticks = 1) => {
 beforeEach(async () => {
   vi.resetModules();
   mockEngine = createMockEngine();
+  trackAnalyticsEvent.mockClear();
   const mod = await import('../store/graphStore');
   useGraphStore = mod.useGraphStore;
   addOutputPort = mod.ADD_OUTPUT_PORT;
@@ -245,6 +251,81 @@ describe('graphStore selection', () => {
     const id2 = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
     useGraphStore.getState().setSelectedNodes([id1, id2]);
     expect(useGraphStore.getState().selectedNodeIds).toEqual(new Set([id1, id2]));
+  });
+
+  it('linkToViewer captures analytics and reports when it creates a viewer', async () => {
+    const sourceId = await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
+
+    trackAnalyticsEvent.mockClear();
+    await useGraphStore.getState().linkToViewer(sourceId);
+
+    expect(trackAnalyticsEvent).toHaveBeenCalledWith('node linked to viewer', {
+      source_node_type: 'curves',
+      viewer_created: true,
+    });
+  });
+});
+
+describe('graphStore analytics', () => {
+  it('captures node added analytics with node category', async () => {
+    await useGraphStore.getState().addNode('curves', { x: 0, y: 0 });
+
+    expect(trackAnalyticsEvent).toHaveBeenCalledWith('node added', {
+      node_type_id: 'curves',
+      category: 'Color',
+    });
+  });
+
+  it('captures node removed analytics with node category', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+
+    trackAnalyticsEvent.mockClear();
+    await useGraphStore.getState().removeNode(nodeId);
+
+    expect(trackAnalyticsEvent).toHaveBeenCalledWith('node removed', {
+      node_type_id: 'gaussian_blur',
+      category: 'Filter',
+    });
+  });
+
+  it('captures nodes connected analytics with node and port types', async () => {
+    const fromId = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const toId = await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+
+    trackAnalyticsEvent.mockClear();
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+
+    expect(trackAnalyticsEvent).toHaveBeenCalledWith('nodes connected', {
+      from_node_type: 'load_image',
+      to_node_type: 'viewer',
+      from_port_type: 'Image',
+      to_port_type: 'Image',
+    });
+  });
+
+  it('captures nodes disconnected analytics', async () => {
+    const fromId = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const toId = await useGraphStore.getState().addNode('viewer', { x: 1, y: 1 });
+    await useGraphStore.getState().connect(fromId, 'image', toId, 'image');
+    const connectionId = useGraphStore.getState().connections[0].id;
+
+    trackAnalyticsEvent.mockClear();
+    await useGraphStore.getState().disconnect(connectionId);
+
+    expect(trackAnalyticsEvent).toHaveBeenCalledWith('nodes disconnected');
+  });
+
+  it('captures node muted analytics for each toggled node', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    useGraphStore.getState().selectNode(nodeId);
+
+    trackAnalyticsEvent.mockClear();
+    await useGraphStore.getState().toggleMuteSelected();
+
+    expect(trackAnalyticsEvent).toHaveBeenCalledWith('node muted', {
+      node_type_id: 'gaussian_blur',
+      muted: true,
+    });
   });
 });
 
