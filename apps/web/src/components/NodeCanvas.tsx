@@ -87,6 +87,7 @@ import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 import { shortcutDispatcher } from '../shortcuts/dispatcher';
 import type { ParamValue } from '../store/types';
+import { findClosestEdge, findEdgeInsertionPlan } from './edgeInsertion';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
@@ -158,6 +159,26 @@ export const NodeCanvas: React.FC = () => {
   const onCleanupNodes = useCallback(() => {
     autoLayoutGraph(getMeasuredNodeSizes());
   }, [getMeasuredNodeSizes]);
+
+  const getInsertionPlanAtPosition = useCallback((
+    position: { x: number; y: number },
+    typeId: string,
+    draggedNodeId?: string,
+  ) => {
+    const state = useGraphStore.getState();
+    const nodeSpec = state.nodeSpecs.find(spec => spec.id === typeId) ?? null;
+    const closestEdge = findClosestEdge(position, getEdges(), getNodes());
+
+    return findEdgeInsertionPlan({
+      edge: closestEdge,
+      nodeSpec,
+      graphNodes: state.nodes,
+      nodeSpecs: state.nodeSpecs,
+      connections: state.connections,
+      typesCompatible,
+      draggedNodeId,
+    });
+  }, [getEdges, getNodes]);
 
   const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
   const [flowEdges, setFlowEdges] = useState<FlowEdge[]>([]);
@@ -544,13 +565,38 @@ export const NodeCanvas: React.FC = () => {
     }
   }, [setPosition, getNodes]);
 
-  const onNodeDragStop = useCallback((_event: React.MouseEvent, _node: FlowNode, draggedNodes: FlowNode[]) => {
+  const onNodeDragStop = useCallback(async (_event: React.MouseEvent, _node: FlowNode, draggedNodes: FlowNode[]) => {
     for (const n of draggedNodes) {
       if (n.id.startsWith('frame__')) {
         useGraphStore.getState().updateFrame(n.id.slice(7), { position: n.position });
       } else {
         // Final position sync
         setPosition(n.id, n.position);
+
+        if (draggedNodes.length === 1) {
+          const graphNode = useGraphStore.getState().nodes.get(n.id);
+          const insertionPlan = graphNode
+            ? getInsertionPlanAtPosition(n.position, graphNode.typeId, n.id)
+            : null;
+
+          if (insertionPlan) {
+            try {
+              if (insertionPlan.replacedIncomingConnectionId) {
+                await storeDisconnect(insertionPlan.replacedIncomingConnectionId);
+              }
+              await storeDisconnect(insertionPlan.edge.id);
+              await storeConnect(insertionPlan.edge.source, insertionPlan.edge.sourceHandle!, n.id, insertionPlan.inputPort.name);
+              await storeConnect(n.id, insertionPlan.outputPort.name, insertionPlan.edge.target, insertionPlan.edge.targetHandle!);
+            } catch (e) {
+              console.error('[NodeDrag] Auto-insert failed:', e);
+              useGraphStore.getState().pushToast(
+                'error',
+                'Auto-insert failed',
+                e instanceof Error ? e.message : String(e),
+              );
+            }
+          }
+        }
 
         // Refit frames that contain this node (expand or shrink to fit)
         const flowNodeList = getNodes();
@@ -630,7 +676,7 @@ export const NodeCanvas: React.FC = () => {
       if (!fn.id.startsWith('frame__')) return fn;
       return { ...fn, data: { ...fn.data, dropTarget: false } };
     }));
-  }, [setPosition, getNodes]);
+  }, [setPosition, getNodes, getInsertionPlanAtPosition, storeConnect, storeDisconnect]);
   const onNodesChange = useCallback((changes: NodeChange[]) => {
     const removals = changes.filter(c => c.type === 'remove');
     const nonRemovals = changes.filter(c => c.type !== 'remove');
@@ -840,68 +886,17 @@ export const NodeCanvas: React.FC = () => {
         x: event.clientX,
         y: event.clientY,
       });
-      const edges = getEdges();
-      const nodes = getNodes();
-      const state = useGraphStore.getState();
-      const HIT_SLOP = 50;
-      let closestEdge: FlowEdge | null = null;
-      let minDistance = HIT_SLOP;
-      for (const edge of edges) {
-        const sourceNode = nodes.find(n => n.id === edge.source);
-        const targetNode = nodes.find(n => n.id === edge.target);
-        if (!sourceNode || !targetNode) continue;
-        const sW = sourceNode.measured?.width ?? 150;
-        const sH = sourceNode.measured?.height ?? 50;
-        const tH = targetNode.measured?.height ?? 50;
-        const sx = sourceNode.position.x + sW;
-        const sy = sourceNode.position.y + sH / 2;
-        const tx = targetNode.position.x;
-        const ty = targetNode.position.y + tH / 2;
-        const A = position.x - sx;
-        const B = position.y - sy;
-        const C = tx - sx;
-        const D = ty - sy;
-        const dot = A * C + B * D;
-        const lenSq = C * C + D * D;
-        let param = -1;
-        if (lenSq !== 0) param = dot / lenSq;
-        let nearX: number, nearY: number;
-        if (param < 0) { nearX = sx; nearY = sy; }
-        else if (param > 1) { nearX = tx; nearY = ty; }
-        else { nearX = sx + param * C; nearY = sy + param * D; }
-        const dx = position.x - nearX;
-        const dy = position.y - nearY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestEdge = edge;
-        }
-      }
-      if (closestEdge && closestEdge.sourceHandle && closestEdge.targetHandle) {
-        const newNodeSpec = state.nodeSpecs.find(s => s.id === typeId);
-        const srcStoreNode = state.nodes.get(closestEdge.source);
-        const tgtStoreNode = state.nodes.get(closestEdge.target);
-        const srcSpec = srcStoreNode ? state.nodeSpecs.find(s => s.id === srcStoreNode.typeId) : null;
-        const tgtSpec = tgtStoreNode ? state.nodeSpecs.find(s => s.id === tgtStoreNode.typeId) : null;
-        if (newNodeSpec && srcSpec && tgtSpec) {
-          const srcOutPort = srcSpec.outputs.find(o => o.name === closestEdge!.sourceHandle);
-          const tgtInPort = tgtSpec.inputs.find(i => i.name === closestEdge!.targetHandle);
-          if (srcOutPort && tgtInPort) {
-            const matchingInput = newNodeSpec.inputs.find(i => typesCompatible(srcOutPort.ty, i.ty));
-             const matchingOutput = newNodeSpec.outputs.find(o => typesCompatible(o.ty, tgtInPort.ty));
-            if (matchingInput && matchingOutput) {
-              try {
-                const newId = await addNode(typeId, position);
-                await storeDisconnect(closestEdge.id);
-                await storeConnect(closestEdge.source, closestEdge.sourceHandle, newId, matchingInput.name);
-                await storeConnect(newId, matchingOutput.name, closestEdge.target, closestEdge.targetHandle);
-                return;
-              } catch (e) {
-                console.error('[Drop] Auto-insert failed:', e);
-                useGraphStore.getState().pushToast('error', 'Auto-insert failed', e instanceof Error ? e.message : String(e));
-              }
-            }
-          }
+      const insertionPlan = getInsertionPlanAtPosition(position, typeId);
+      if (insertionPlan) {
+        try {
+          const newId = await addNode(typeId, position);
+          await storeDisconnect(insertionPlan.edge.id);
+          await storeConnect(insertionPlan.edge.source, insertionPlan.edge.sourceHandle!, newId, insertionPlan.inputPort.name);
+          await storeConnect(newId, insertionPlan.outputPort.name, insertionPlan.edge.target, insertionPlan.edge.targetHandle!);
+          return;
+        } catch (e) {
+          console.error('[Drop] Auto-insert failed:', e);
+          useGraphStore.getState().pushToast('error', 'Auto-insert failed', e instanceof Error ? e.message : String(e));
         }
       }
       addNode(typeId, position).catch(e => {
@@ -909,7 +904,7 @@ export const NodeCanvas: React.FC = () => {
         useGraphStore.getState().pushToast('error', 'Failed to add node', e instanceof Error ? e.message : String(e));
       });
     },
-    [addNode, screenToFlowPosition, getNodes, getEdges, storeConnect, storeDisconnect]
+    [addNode, screenToFlowPosition, getInsertionPlanAtPosition, storeConnect, storeDisconnect]
   );
 
   const copySelected = useCallback((cut: boolean) => {
