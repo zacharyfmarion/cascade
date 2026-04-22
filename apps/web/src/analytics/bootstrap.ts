@@ -1,4 +1,10 @@
 import { APP_VERSION } from '../constants/release';
+import {
+  recordAnalyticsCapture,
+  recordAnalyticsDebug,
+  syncAnalyticsDebugDistinctId,
+  updateAnalyticsBootstrap,
+} from './debug';
 import { scrubAndFilterEvent, sanitizeAnalyticsProperties } from './sanitize';
 import { getOrCreateStableId } from './stableId';
 
@@ -42,12 +48,30 @@ export function initializePostHog(
   const key = resolvedEnv.VITE_PUBLIC_POSTHOG_KEY;
   const host = resolvedEnv.VITE_PUBLIC_POSTHOG_HOST;
 
+  updateAnalyticsBootstrap({
+    analyticsEnabled: options.analyticsEnabled,
+    initAttempted: true,
+    keyPresent: Boolean(key),
+    hostPresent: Boolean(host),
+    host: host ?? null,
+  });
+
   if (!key || !host) {
+    recordAnalyticsDebug('bootstrap.init.skipped', {
+      reason: 'missing-env',
+      keyPresent: Boolean(key),
+      hostPresent: Boolean(host),
+    });
     if (resolvedEnv.DEV) {
       console.info('[analytics] PostHog disabled: missing VITE_PUBLIC_POSTHOG_KEY or VITE_PUBLIC_POSTHOG_HOST');
     }
     return false;
   }
+
+  recordAnalyticsDebug('bootstrap.init.start', {
+    analyticsEnabled: options.analyticsEnabled,
+    host,
+  });
 
   client.init(key, {
     api_host: host,
@@ -65,13 +89,19 @@ export function initializePostHog(
     before_send: scrubAndFilterEvent,
   });
 
+  updateAnalyticsBootstrap({
+    initialized: true,
+  });
+
   client.register(getBootstrapSharedProperties(options));
 
   if (options.analyticsEnabled) {
     client.opt_in_capturing({ captureEventName: false });
     client.identify(getOrCreateStableId());
+    syncAnalyticsDebugDistinctId();
   } else {
     client.opt_out_capturing();
+    syncAnalyticsDebugDistinctId();
   }
 
   return true;
@@ -81,5 +111,7 @@ export function captureAppOpened(
   client: Pick<PostHogClientLike, 'capture'>,
   options: BootstrapOptions
 ) {
-  client.capture('app opened', getBootstrapSharedProperties(options));
+  const properties = getBootstrapSharedProperties(options);
+  recordAnalyticsCapture('bootstrap.captureAppOpened', 'app opened', properties, true);
+  client.capture('app opened', properties);
 }

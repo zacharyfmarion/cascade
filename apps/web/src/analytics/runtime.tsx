@@ -3,6 +3,12 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { usePostHog } from '@posthog/react';
 import { APP_VERSION } from '../constants/release';
 import { useSettingsStore } from '../store/settingsStore';
+import {
+  recordAnalyticsCapture,
+  recordAnalyticsDebug,
+  syncAnalyticsDebugDistinctId,
+  updateAnalyticsBootstrap,
+} from './debug';
 import { sanitizeAnalyticsProperties } from './sanitize';
 import { clearStableId, getOrCreateStableId } from './stableId';
 
@@ -48,22 +54,29 @@ export function createAnalyticsApi(options: {
 
   return {
     track: (eventName, properties) => {
+      const sanitizedProperties = sanitizeAnalyticsProperties({
+        ...sharedProperties,
+        ...properties,
+      });
+      const allowed = Boolean(client) && analyticsEnabled;
+
+      recordAnalyticsCapture('runtime.track', eventName, sanitizedProperties, allowed);
       if (!client || !analyticsEnabled) return;
 
-      client.capture(
-        eventName,
-        sanitizeAnalyticsProperties({
-          ...sharedProperties,
-          ...properties,
-        })
-      );
+      client.capture(eventName, sanitizedProperties);
     },
     setAnalyticsEnabled: (enabled, runtimeOptions) => {
+      recordAnalyticsDebug('runtime.setAnalyticsEnabled.called', {
+        enabled,
+        capturePreferenceChange: runtimeOptions?.capturePreferenceChange ?? false,
+        hasClient: Boolean(client),
+      });
       if (!client) return;
 
       if (enabled) {
         client.opt_in_capturing({ captureEventName: false });
         client.identify(getOrCreateStableId());
+        syncAnalyticsDebugDistinctId();
 
         if (runtimeOptions?.capturePreferenceChange) {
           client.capture(
@@ -88,6 +101,7 @@ export function createAnalyticsApi(options: {
         }
 
         clearStableId();
+        syncAnalyticsDebugDistinctId();
         client.reset();
         client.opt_out_capturing();
       }
@@ -113,13 +127,21 @@ export function AnalyticsRuntimeProvider({ children }: { children: ReactNode }) 
   });
 
   useLayoutEffect(() => {
+    recordAnalyticsDebug('runtime.provider.bound', {
+      hasPosthog: Boolean(posthog),
+      analyticsEnabled,
+      sharedProperties,
+    });
+    updateAnalyticsBootstrap({
+      analyticsEnabled,
+    });
     runtimeAnalytics = analytics;
     return () => {
       if (runtimeAnalytics === analytics) {
         runtimeAnalytics = NOOP_ANALYTICS;
       }
     };
-  }, [analytics]);
+  }, [analytics, analyticsEnabled, posthog, sharedProperties]);
 
   useLayoutEffect(() => {
     if (!posthog) return;
@@ -145,6 +167,10 @@ export function AnalyticsRuntimeProvider({ children }: { children: ReactNode }) 
 }
 
 export function trackAnalyticsEvent(eventName: string, properties?: Record<string, unknown>) {
+  recordAnalyticsDebug('runtime.trackAnalyticsEvent.called', {
+    eventName,
+    properties,
+  });
   runtimeAnalytics.track(eventName, properties);
 }
 
