@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+import type { AnalyticsDebugGlobal } from './analytics/debug';
 
 interface ImportMetaEnv {
   readonly VITE_PUBLIC_POSTHOG_KEY?: string;
@@ -7,4 +8,8 @@ interface ImportMetaEnv {
 
 interface ImportMeta {
   readonly env: ImportMetaEnv;
+}
+
+interface Window {
+  __CASCADE_ANALYTICS_DEBUG__?: AnalyticsDebugGlobal;
 }
