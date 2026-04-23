@@ -138,7 +138,9 @@ mod tests {
     use crate::manifest::builtin_pixelate_manifest;
     use crate::transpile::glsl_to_wgsl;
     use cascade_core::node::{EvalContext, Node};
-    use cascade_core::types::{Format, FrameTime, Image, ParamValue, Value};
+    use cascade_core::types::{
+        Format, FrameTime, Image, ParamDefault, ParamValue, UiHint, Value, ValueType,
+    };
     use std::collections::HashMap;
 
     fn make_column_test_image() -> Image {
@@ -236,6 +238,71 @@ mod tests {
     }
 
     #[test]
+    fn test_manifest_scalar_inputs_expose_control_metadata() {
+        let manifest = KernelManifest {
+            id: "gpu_script::controls".to_string(),
+            display_name: "GPU Script".to_string(),
+            category: "GPU".to_string(),
+            description: "test".to_string(),
+            inputs: vec![
+                manifest::ManifestPort {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: "Image".to_string(),
+                    optional: false,
+                    ..Default::default()
+                },
+                manifest::ManifestPort {
+                    name: "amount".to_string(),
+                    label: "Amount".to_string(),
+                    ty: "Float".to_string(),
+                    default: Some(serde_json::Value::from(0.75)),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui: Some("Slider".to_string()),
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![manifest::ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+                optional: false,
+                ..Default::default()
+            }],
+            params: vec![],
+            kernel: "return color * amount;".to_string(),
+            supports_mask: false,
+            ..KernelManifest::default()
+        };
+
+        let spec = manifest.to_node_spec().expect("Spec should build");
+        let image = spec
+            .inputs
+            .iter()
+            .find(|input| input.name == "image")
+            .unwrap();
+        assert_eq!(image.ty, ValueType::Image);
+        assert!(image.default.is_none());
+        assert!(image.min.is_none());
+        assert!(image.ui_hint.is_none());
+
+        let amount = spec
+            .inputs
+            .iter()
+            .find(|input| input.name == "amount")
+            .unwrap();
+        assert_eq!(amount.ty, ValueType::Float);
+        assert!(matches!(amount.default, Some(ParamDefault::Float(value)) if value == 0.75));
+        assert_eq!(amount.min, Some(0.0));
+        assert_eq!(amount.max, Some(1.0));
+        assert_eq!(amount.step, Some(0.01));
+        assert!(matches!(amount.ui_hint, Some(UiHint::Slider)));
+        assert!(spec.params.is_empty());
+    }
+
+    #[test]
     fn test_simple_kernel_transpile() {
         let manifest = KernelManifest {
             id: "invert_gpu".to_string(),
@@ -247,12 +314,14 @@ mod tests {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             outputs: vec![manifest::ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             params: vec![manifest::ManifestParam {
                 key: "strength".to_string(),
@@ -291,12 +360,14 @@ mod tests {
                         label: "Image".to_string(),
                         ty: "Image".to_string(),
                         optional: false,
+                        ..Default::default()
                     }],
                     outputs: vec![manifest::ManifestPort {
                         name: "image".to_string(),
                         label: "Image".to_string(),
                         ty: "Image".to_string(),
                         optional: false,
+                        ..Default::default()
                     }],
                     params: vec![],
                     kernel: "return color;".to_string(),
@@ -334,12 +405,14 @@ mod tests {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             outputs: vec![manifest::ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             params: vec![],
             kernel: "return color;".to_string(),
@@ -598,12 +671,14 @@ mod tests {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             outputs: vec![manifest::ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             params: vec![],
             kernel: "return color;".to_string(),

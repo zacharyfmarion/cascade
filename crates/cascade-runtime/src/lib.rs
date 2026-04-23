@@ -16,7 +16,9 @@ use cascade_core::group::{
     SerializableInternalGraph,
 };
 use cascade_core::node::{Node, NodeRegistry};
-pub use cascade_core::types::{Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value};
+pub use cascade_core::types::{
+    Format, FrameTime, Image, NodeSpec, ParamDefault, ParamValue, PortSpec, Value, ValueType,
+};
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{
     gpu_script_passthrough_manifest, register_gpu_nodes, GpuContext, KernelManifest,
@@ -2701,12 +2703,14 @@ mod tests {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             outputs: vec![ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             params: vec![],
             kernel: "return color;".to_string(),
@@ -2771,6 +2775,70 @@ mod tests {
         assert_eq!(stored_manifest.id, graph_node.type_id);
         let node = engine.nodes.get(&id).unwrap();
         assert!(node.as_any().is::<GpuKernelNode>());
+    }
+
+    #[test]
+    fn test_gpu_script_compile_accepts_scalar_input_uniform() {
+        let mut engine = Engine::new();
+        if engine.gpu_context().is_none() {
+            return;
+        }
+
+        let (node_id, _) = engine.add_node("gpu_script", 0.0, 0.0).unwrap();
+        let manifest = KernelManifest {
+            id: "scalar_input".to_string(),
+            display_name: "Scalar Input".to_string(),
+            category: "GPU".to_string(),
+            description: "Scalar uniform input".to_string(),
+            inputs: vec![
+                ManifestPort {
+                    name: "image".to_string(),
+                    label: "Image".to_string(),
+                    ty: "Image".to_string(),
+                    optional: false,
+                    ..Default::default()
+                },
+                ManifestPort {
+                    name: "amount".to_string(),
+                    label: "Amount".to_string(),
+                    ty: "Float".to_string(),
+                    default: Some(serde_json::Value::from(0.5)),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(0.01),
+                    ui: Some("Slider".to_string()),
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![ManifestPort {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: "Image".to_string(),
+                optional: false,
+                ..Default::default()
+            }],
+            params: vec![],
+            kernel: "return vec4(color.rgb * amount, color.a);".to_string(),
+            supports_mask: false,
+            ..KernelManifest::default()
+        };
+        let manifest_json = serde_json::to_string(&manifest).expect("manifest json");
+
+        let spec = engine
+            .compile_script_node(&node_id, &manifest_json)
+            .expect("compile scalar input script");
+        let amount = spec
+            .inputs
+            .iter()
+            .find(|input| input.name == "amount")
+            .expect("amount input should be exposed");
+        assert_eq!(amount.ty, ValueType::Float);
+        assert!(matches!(
+            amount.default,
+            Some(ParamDefault::Float(value)) if value == 0.5
+        ));
+        assert_eq!(amount.min, Some(0.0));
+        assert!(spec.params.is_empty());
     }
 
     #[test]
@@ -2880,12 +2948,14 @@ mod tests {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             outputs: vec![ManifestPort {
                 name: "image".to_string(),
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             }],
             params: vec![ManifestParam {
                 key: "pixel_size".to_string(),

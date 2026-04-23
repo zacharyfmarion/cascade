@@ -130,16 +130,19 @@ vec4 process(vec4 color, vec2 uv, ivec2 pixel)
 Available globals:
 - \`u_input\` : readonly image2D for the primary input (use \`imageLoad(u_input, pixel)\`)
 - Additional image inputs are bound as \`u_<name>\` (readonly image2D)
-- Params are exposed directly by name (float/int/bool only)
+- Scalar input controls are exposed directly by name (Float/Int/Bool only)
 - Helpers: \`float bayer8(int x, int y)\`, \`float luminance(vec4 c)\`
 
 ### Manifest Fields
 \`\`\`
 {
   id,
-  inputs: [{name, label, ty}],
+  inputs: [
+    {name, label, ty},
+    {name, label, ty: "Float"|"Int"|"Bool", default, min, max, step, ui}
+  ],
   outputs: [{name, label, ty}],
-  params: [{key, label, type, default, min, max, step}],
+  params: [],
   kernel: "GLSL body",
   supports_mask: true
 }
@@ -147,7 +150,8 @@ Available globals:
 
 ### Editing Existing GPU Script Nodes
 - Existing GPU Script nodes may use runtime type ids like \`gpu_script::abc123\`, but they all use the \`GpuScript\` editing model.
-- Call \`get_gpu_script_manifest\` before editing an existing GPU Script node so you can preserve its current ports, params, kernel, and \`supports_mask\` setting unless the user asked to change them.
+- Call \`get_gpu_script_manifest\` before editing an existing GPU Script node so you can preserve its current ports, scalar controls, kernel, and \`supports_mask\` setting unless the user asked to change them.
+- Use \`inputs\` for both image/mask ports and user controls. New manifests should keep \`params: []\`; legacy params can be migrated to scalar inputs.
 - In the DSL, GPU Script nodes expose a special \`script\` field for editing the GLSL body. Use triple-quoted multiline strings for non-trivial kernels.
 - The \`mask\` input is implicit: it exists when \`supports_mask\` is true.
 

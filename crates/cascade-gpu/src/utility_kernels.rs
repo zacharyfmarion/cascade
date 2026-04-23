@@ -11,12 +11,14 @@ pub fn builtin_map_range_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -100,12 +102,14 @@ pub fn builtin_vignette_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -169,12 +173,14 @@ pub fn builtin_gpu_two_color_map_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -268,12 +274,14 @@ pub fn builtin_edge_detect_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "strength".to_string(),
@@ -319,12 +327,14 @@ pub fn builtin_lens_distortion_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {

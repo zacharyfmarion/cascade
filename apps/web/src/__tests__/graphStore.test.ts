@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
-import { buildDefaultGpuScriptManifest } from '../ai/gpuScript';
+import { buildDefaultGpuScriptManifest, buildGpuScriptManifest } from '../ai/gpuScript';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -554,6 +554,43 @@ describe('graphStore helper behaviors', () => {
     expect(state.nodes.get('gpu-inner')?.params.__script_manifest).toEqual({
       String: JSON.stringify(manifest),
     } as ParamValue);
+  });
+
+  it('compileScriptNode updates specs and scalar input defaults', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gpu_script', { x: 0, y: 0 });
+    const node = useGraphStore.getState().nodes.get(nodeId);
+    expect(node?.typeId.startsWith('gpu_script::')).toBe(true);
+    await useGraphStore.getState().setInputDefault(nodeId, 'old_control', { Float: 9 } as ParamValue);
+
+    const manifest = buildGpuScriptManifest(
+      node?.typeId ?? 'gpu_script::mock',
+      [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'amount', label: 'Amount', ty: 'Float', default: 0.75, min: 0, max: 1, step: 0.01 },
+      ],
+      [{ name: 'image', label: 'Image', ty: 'Image' }],
+      [],
+      'return vec4(color.rgb * amount, color.a);',
+      true,
+    );
+
+    const spec = await useGraphStore.getState().compileScriptNode(nodeId, JSON.stringify(manifest));
+    const state = useGraphStore.getState();
+    const storedSpec = state.nodeSpecs.find(s => s.id === spec.id);
+    const amountPort = storedSpec?.inputs.find(input => input.name === 'amount');
+
+    expect(amountPort).toMatchObject({
+      name: 'amount',
+      label: 'Amount',
+      ty: 'Float',
+      default: { Float: 0.75 },
+      min: 0,
+      max: 1,
+      step: 0.01,
+      ui_hint: { type: 'Slider' },
+    });
+    expect(state.nodes.get(nodeId)?.inputDefaults.amount).toEqual({ Float: 0.75 } as ParamValue);
+    expect(state.nodes.get(nodeId)?.inputDefaults.old_control).toBeUndefined();
   });
 });
 

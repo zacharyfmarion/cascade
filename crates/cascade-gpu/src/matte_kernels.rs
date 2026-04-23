@@ -11,12 +11,14 @@ pub fn builtin_premultiply_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![],
         kernel: r#"
@@ -40,12 +42,14 @@ pub fn builtin_unpremultiply_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![],
         kernel: r#"
@@ -73,12 +77,14 @@ pub fn builtin_chroma_key_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -161,12 +167,14 @@ pub fn builtin_despill_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -267,12 +275,14 @@ pub fn builtin_luminance_key_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -360,12 +370,14 @@ pub fn builtin_difference_matte_manifest() -> KernelManifest {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "clean_plate".to_string(),
                 label: "Clean Plate".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -373,6 +385,7 @@ pub fn builtin_difference_matte_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -423,12 +436,14 @@ pub fn builtin_set_alpha_manifest() -> KernelManifest {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "alpha_source".to_string(),
                 label: "Alpha Source".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -436,6 +451,7 @@ pub fn builtin_set_alpha_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![],
         kernel: r#"
@@ -460,12 +476,14 @@ pub fn builtin_extract_channel_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "channel".to_string(),

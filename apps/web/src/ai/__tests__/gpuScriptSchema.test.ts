@@ -33,6 +33,8 @@ describe('GPU script AI schema', () => {
 
     const editingNotes = result.editing_notes as string[];
     expect(editingNotes.some((note) => note.includes('get_gpu_script_manifest'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('Scalar controls'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('params: []'))).toBe(true);
   });
 
   it('tells the AI about multiline GPU-script editing in the system prompt', () => {
@@ -42,5 +44,7 @@ describe('GPU script AI schema', () => {
     expect(prompt).toContain('supports_mask');
     expect(prompt).toContain('get_gpu_script_manifest');
     expect(prompt).toContain('GpuScript');
+    expect(prompt).toContain('Scalar input controls');
+    expect(prompt).toContain('params: []');
   });
 });

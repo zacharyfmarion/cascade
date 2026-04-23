@@ -123,15 +123,17 @@ function buildGpuScriptSchema(specs: NodeSpec[], requestedType: string): Record<
       available_globals: [
         'u_input: readonly image2D for the primary input',
         'Additional image inputs are bound as u_<name>',
-        'Params are available directly by name',
+        'Float/Int/Bool input controls are uniforms available directly by name',
         'Helpers: bayer8(int x, int y), luminance(vec4 c)',
       ],
     },
     editing_notes: [
       'Existing GPU Script nodes often use runtime type ids like gpu_script::<uuid>, but they all share the GpuScript editing model.',
-      'To inspect the current kernel, ports, params, and supports_mask for a specific node, call get_gpu_script_manifest with the node handle or id before editing.',
+      'Use input ports for both image/mask inputs and scalar controls. Scalar controls are Float, Int, or Bool inputs with default/min/max/step/ui metadata.',
+      'New or edited GPU Script manifests should keep params: []; legacy params may be migrated into scalar inputs.',
+      'To inspect the current kernel, ports, scalar controls, and supports_mask for a specific node, call get_gpu_script_manifest with the node handle or id before editing.',
       'When editing through the DSL, the special script field updates the GLSL body and recompiles the node.',
-      'If you change ports, params, or mask support, preserve the existing interface unless the user explicitly asked for interface changes.',
+      'If you change ports, scalar controls, or mask support, preserve the existing interface unless the user explicitly asked for interface changes.',
     ],
   };
 }

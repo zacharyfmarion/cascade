@@ -11,12 +11,14 @@ pub fn builtin_invert_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![],
         kernel: r#"
@@ -39,12 +41,14 @@ pub fn builtin_brightness_contrast_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -93,12 +97,14 @@ pub fn builtin_hue_saturation_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -212,12 +218,14 @@ pub fn builtin_gamma_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "gamma".to_string(),
@@ -251,12 +259,14 @@ pub fn builtin_threshold_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "threshold".to_string(),
@@ -291,12 +301,14 @@ pub fn builtin_posterize_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "levels".to_string(),
@@ -331,12 +343,14 @@ pub fn builtin_white_balance_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -389,12 +403,14 @@ pub fn builtin_clamp_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {

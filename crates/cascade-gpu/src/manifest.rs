@@ -43,13 +43,25 @@ impl Default for KernelManifest {
     }
 }
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Default)]
 pub struct ManifestPort {
     pub name: String,
     pub label: String,
     pub ty: String,
     #[serde(default)]
     pub optional: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -72,15 +84,7 @@ impl KernelManifest {
         let mut inputs = self
             .inputs
             .iter()
-            .map(|port| {
-                let ty = parse_value_type(&port.ty)?;
-                Ok(PortSpec {
-                    name: port.name.clone(),
-                    label: port.label.clone(),
-                    ty,
-                    ..Default::default()
-                })
-            })
+            .map(build_port_spec)
             .collect::<Result<Vec<_>, String>>()?;
 
         if self.supports_mask {
@@ -95,15 +99,7 @@ impl KernelManifest {
         let outputs = self
             .outputs
             .iter()
-            .map(|port| {
-                let ty = parse_value_type(&port.ty)?;
-                Ok(PortSpec {
-                    name: port.name.clone(),
-                    label: port.label.clone(),
-                    ty,
-                    ..Default::default()
-                })
-            })
+            .map(build_port_spec)
             .collect::<Result<Vec<_>, String>>()?;
 
         let params = self
@@ -219,12 +215,14 @@ pub fn builtin_pixelate_manifest() -> KernelManifest {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "palette".to_string(),
                 label: "Palette".to_string(),
                 ty: "Image".to_string(),
                 optional: true,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -232,6 +230,7 @@ pub fn builtin_pixelate_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -380,18 +379,48 @@ pub fn gpu_script_passthrough_manifest(type_id: &str) -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![],
         kernel: "return color;".to_string(),
         supports_mask: true,
         pixel_space_params: vec![],
     }
+}
+
+fn build_port_spec(port: &ManifestPort) -> Result<PortSpec, String> {
+    let ty = parse_value_type(&port.ty)?;
+    let is_scalar = matches_scalar_type(&port.ty);
+    let default = if is_scalar {
+        Some(match port.default.as_ref() {
+            Some(default) => parse_param_default(default, &ty)?,
+            None => default_scalar_value(&ty)?,
+        })
+    } else {
+        None
+    };
+
+    Ok(PortSpec {
+        name: port.name.clone(),
+        label: port.label.clone(),
+        ty: ty.clone(),
+        default,
+        min: if is_scalar { port.min } else { None },
+        max: if is_scalar { port.max } else { None },
+        step: if is_scalar { port.step } else { None },
+        ui_hint: if is_scalar {
+            Some(parse_ui_hint(port.ui.as_deref(), &ty, &port.options))
+        } else {
+            None
+        },
+    })
 }
 
 fn parse_value_type(value: &str) -> Result<ValueType, String> {
@@ -457,6 +486,15 @@ fn parse_param_default(
             .map(ParamDefault::Color)
             .ok_or_else(|| "Expected color default".to_string()),
         _ => Err("Unsupported param default type".to_string()),
+    }
+}
+
+fn default_scalar_value(ty: &ValueType) -> Result<ParamDefault, String> {
+    match ty {
+        ValueType::Float => Ok(ParamDefault::Float(0.0)),
+        ValueType::Int => Ok(ParamDefault::Int(0)),
+        ValueType::Bool => Ok(ParamDefault::Bool(false)),
+        _ => Err("Unsupported scalar input default type".to_string()),
     }
 }
 
