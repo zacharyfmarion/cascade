@@ -17,7 +17,8 @@ use cascade_core::group::{
 };
 use cascade_core::node::{Node, NodeRegistry};
 pub use cascade_core::types::{
-    Format, FrameTime, Image, NodeSpec, ParamDefault, ParamValue, PortSpec, Value, ValueType,
+    Format, FrameTime, Image, NodeSpec, ParamDefault, ParamValue, PortSpec, RuntimeSurface,
+    UiNodeSpec, Value, ValueType,
 };
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{

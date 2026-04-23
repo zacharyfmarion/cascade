@@ -1,5 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
+import { getAuthoringNodeSpecs } from '../platform/features';
+import { getRuntimeSurface } from '../platform/runtime';
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import type { NodeSpec, ParamSpec, PortSpec } from '../store/types';
@@ -35,6 +37,11 @@ function getCurrentAst(): DslAst {
   const result = parseDsl(dslText, nodeSpecs, { currentNodes: nodes, handleMap });
 
   return result.ast ?? { nodes: new Map(), connections: [] };
+}
+
+function getAuthoringSpecs(): NodeSpec[] {
+  const { nodeSpecs } = useGraphStore.getState();
+  return getAuthoringNodeSpecs(nodeSpecs, getRuntimeSurface());
 }
 
 
@@ -234,7 +241,7 @@ const toolExecutors = {
 
   list_node_types: async (_args: ListNodeTypesArgs) => {
     void _args;
-    const specs = useGraphStore.getState().nodeSpecs;
+    const specs = getAuthoringSpecs();
     const groups: Record<string, string[]> = {};
     for (const s of specs) {
       const cat = s.category || 'Other';
@@ -250,7 +257,7 @@ const toolExecutors = {
   },
 
   get_node_schema: async ({ node_type }: GetNodeSchemaArgs) => {
-    const specs = useGraphStore.getState().nodeSpecs;
+    const specs = getAuthoringSpecs();
     const typeId = pascalToSnake(node_type);
     if (typeId === 'gpu_script' || typeId.startsWith('gpu_script::')) {
       return buildGpuScriptSchema(specs, node_type);

@@ -99,6 +99,25 @@ const NODE_SPECS: NodeSpec[] = [
     ],
   },
   {
+    id: 'load_video',
+    display_name: 'Load Video',
+    category: 'Input',
+    description: 'Load a video file',
+    inputs: [],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [
+      {
+        key: 'file_path',
+        label: 'File Path',
+        ty: 'String',
+        default: { String: '' },
+        ui_hint: { type: 'Hidden' },
+        promotable: false,
+      },
+    ],
+    supported_surfaces: ['desktop'],
+  },
+  {
     id: 'export_image',
     display_name: 'Export Image',
     category: 'Output',
@@ -115,6 +134,16 @@ const NODE_SPECS: NodeSpec[] = [
         promotable: true,
       },
     ],
+  },
+  {
+    id: 'export_video',
+    display_name: 'Export Video',
+    category: 'Output',
+    description: 'Export rendered frames as an encoded video file',
+    inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    outputs: [{ name: 'display', label: 'Display', ty: 'Image' }],
+    params: [],
+    supported_surfaces: ['desktop'],
   },
   {
     id: 'ai_depth_estimate',

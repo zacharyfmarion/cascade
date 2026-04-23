@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import { getAuthoringNodeSpecs } from '../platform/features';
+import { getRuntimeSurface } from '../platform/runtime';
 import type { NodeSpec } from '../store/types';
 import { useGraphStore } from '../store/graphStore';
 
@@ -208,6 +210,7 @@ const AddNodeMenu: React.FC<{
   nodeSpecs: NodeSpec[];
   onAddNode: (typeId: string) => void;
 }> = ({ nodeSpecs, onAddNode }) => {
+  const runtimeSurface = getRuntimeSurface();
   const [search, setSearch] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -218,15 +221,16 @@ const AddNodeMenu: React.FC<{
   const groupedNodes = useMemo(() => {
     const groups: Record<string, NodeSpec[]> = {};
     const lowerSearch = search.toLowerCase();
+    const authoringNodeSpecs = getAuthoringNodeSpecs(nodeSpecs, runtimeSurface);
 
-    nodeSpecs.forEach(spec => {
+    authoringNodeSpecs.forEach(spec => {
       if (lowerSearch && !spec.display_name.toLowerCase().includes(lowerSearch)) return;
       if (!groups[spec.category]) groups[spec.category] = [];
       groups[spec.category].push(spec);
     });
 
     return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [nodeSpecs, search]);
+  }, [nodeSpecs, runtimeSurface, search]);
 
   return (
     <>

@@ -1,3 +1,6 @@
+import { getRuntimeSurface } from '../platform/runtime';
+
+
 const STORAGE_KEY = 'cascade-analytics-debug';
 const MAX_ENTRIES = 200;
 const MAX_CAPTURES = 100;
@@ -89,10 +92,6 @@ function getStorageItem(key: string) {
   } catch {
     return null;
   }
-}
-
-function getRuntimeSurface() {
-  return '__TAURI_INTERNALS__' in getGlobalScope() ? 'desktop' : 'web';
 }
 
 function toDebugValue(value: unknown, depth = 0): DebugValue {

@@ -1,5 +1,10 @@
 const SENSITIVE_KEY_PATTERN = /api[_-]?key|token|secret|password|prompt|content|path|file/i;
 
+// PostHog uses 'token' inside event.properties to authenticate batch requests.
+// We must restore it after sanitizing, even though it matches SENSITIVE_KEY_PATTERN.
+const POSTHOG_INTERNAL_PROPERTY_KEYS = new Set(['token']);
+
+
 type AnalyticsValue =
   | string
   | number
@@ -59,8 +64,17 @@ export function sanitizeAnalyticsProperties(
 export function scrubAndFilterEvent<T extends PostHogEventLike | null | undefined>(event: T) {
   if (!event) return event ?? null;
 
+  const sanitized = sanitizeAnalyticsProperties(event.properties ?? {});
+
+  for (const key of POSTHOG_INTERNAL_PROPERTY_KEYS) {
+    const value = event.properties?.[key];
+    if (typeof value === 'string' && value.trim()) {
+      sanitized[key] = value;
+    }
+  }
+
   return {
     ...event,
-    properties: sanitizeAnalyticsProperties(event.properties ?? {}),
+    properties: sanitized,
   };
 }

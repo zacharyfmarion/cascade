@@ -8,6 +8,7 @@ import {
   NodeStatus,
 } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
+import { isDesktopRuntime } from '../../platform/runtime';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
@@ -60,7 +61,7 @@ export const LoadImageSequenceNode: React.FC<NodeProps> = (props) => {
   const setSequenceDirectory = useGraphStore(s => s.setSequenceDirectory);
   const setSequenceFiles = useGraphStore(s => s.setSequenceFiles);
   const isRendering = useGraphStore(s => s.isRendering);
-  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const isTauri = isDesktopRuntime();
 
   const directory = params['directory'] ? String(extractParamValue(params['directory'])) : '';
   const pattern = params['pattern'] ? String(extractParamValue(params['pattern'])) : '';

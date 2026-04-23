@@ -2,7 +2,7 @@ mod menu;
 
 use cascade_runtime::{
     migrations, AssetReference, CascadeDocument, Engine, NodeSpec, PortSpec, RenderResult,
-    SerializableGraph,
+    SerializableGraph, UiNodeSpec,
 };
 use std::sync::Mutex;
 use std::time::Instant;
@@ -18,7 +18,12 @@ type EngineState = Mutex<AppState>;
 #[tauri::command]
 fn list_node_types(state: State<'_, EngineState>) -> Result<String, String> {
     let engine = state.lock().map_err(|e| e.to_string())?;
-    let specs = engine.engine.list_node_types();
+    let specs: Vec<UiNodeSpec> = engine
+        .engine
+        .list_node_types()
+        .into_iter()
+        .map(UiNodeSpec::from)
+        .collect();
     serde_json::to_string(&specs).map_err(|e| e.to_string())
 }
 

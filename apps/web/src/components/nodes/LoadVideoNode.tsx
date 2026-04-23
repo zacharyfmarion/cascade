@@ -2,11 +2,14 @@ import React, { useCallback, useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import {
+  NodeBadge,
   NodeButton,
   NodeInfoRow,
   NodeSection,
   NodeStatus,
 } from './NodePrimitives';
+import { getUnsupportedNodeMessage, isNodeSupportedOnSurface } from '../../platform/features';
+import { getRuntimeSurface } from '../../platform/runtime';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
@@ -22,14 +25,19 @@ const VIDEO_EXTENSIONS = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'];
 
 export const LoadVideoNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
+  const { spec } = data;
   const loadVideoFile = useGraphStore(s => s.loadVideoFile);
   const isRendering = useGraphStore(s => s.isRendering);
+  const runtimeSurface = getRuntimeSurface();
+  const isSupported = isNodeSupportedOnSurface(spec, runtimeSurface);
+  const unsupportedMessage = getUnsupportedNodeMessage(spec, runtimeSurface);
 
   const [loading, setLoading] = useState(false);
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
   const handleBrowse = useCallback(async () => {
+    if (!isSupported) return;
     try {
       setLoading(true);
       const { open } = await import('@tauri-apps/plugin-dialog');
@@ -61,7 +69,7 @@ export const LoadVideoNode: React.FC<NodeProps> = (props) => {
     } finally {
       setLoading(false);
     }
-  }, [props.id, loadVideoFile]);
+  }, [isSupported, props.id, loadVideoFile]);
 
   const hasVideo = videoInfo !== null;
 
@@ -70,12 +78,14 @@ export const LoadVideoNode: React.FC<NodeProps> = (props) => {
       <NodeSection>
         <NodeButton
           onClick={handleBrowse}
-          disabled={loading || isRendering}
+          disabled={!isSupported || loading || isRendering}
           fullWidth
         >
           {loading ? 'Loading...' : isRendering ? 'Rendering...' : 'Browse Video'}
         </NodeButton>
       </NodeSection>
+
+      {!isSupported && <NodeBadge>Desktop only</NodeBadge>}
 
       {hasVideo ? (
         <NodeSection spaced>
@@ -85,6 +95,8 @@ export const LoadVideoNode: React.FC<NodeProps> = (props) => {
           <NodeInfoRow label="Frames" value={String(videoInfo.frame_count)} mono />
           <NodeInfoRow label="Duration" value={`${videoInfo.duration_secs.toFixed(2)}s`} mono />
         </NodeSection>
+      ) : !isSupported && unsupportedMessage ? (
+        <NodeStatus variant="info">{unsupportedMessage}</NodeStatus>
       ) : (
         <NodeStatus variant="info">No video loaded</NodeStatus>
       )}
