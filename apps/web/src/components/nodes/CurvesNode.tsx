@@ -5,6 +5,7 @@ import { NodeSection } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { CurveEditor } from './CurveEditor';
 import { useGraphStore } from '../../store/graphStore';
+import { useNodeParams } from '../../store/graphStore/nodeDraftStore';
 import type { NodeSpec, ParamValue, CurvePoint } from '../../store/types';
 
 type NodeData = {
@@ -38,7 +39,8 @@ function getCurvePoints(params: Record<string, ParamValue>, key: string): CurveP
 
 export const CurvesNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
-  const { params } = data;
+  const committedParams = useGraphStore(s => s.nodes.get(props.id)?.params ?? data.params);
+  const params = useNodeParams(props.id, committedParams);
   const setParam = useGraphStore(s => s.setParam);
   const setParamLive = useGraphStore(s => s.setParamLive);
   const setParamCommit = useGraphStore(s => s.setParamCommit);

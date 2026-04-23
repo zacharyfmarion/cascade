@@ -10,6 +10,7 @@ import { Breadcrumbs } from '../Breadcrumbs';
 import { AiAssistant } from '../AiAssistant';
 import { DslEditor } from '../DslEditor';
 import { shortcutDispatcher } from '../../shortcuts/dispatcher';
+import { withPanelErrorBoundary } from '../ErrorBoundary';
 
 const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
   const [aiOpen, setAiOpen] = useState(false);
@@ -40,12 +41,12 @@ const DslEditorPanel: React.FC<IDockviewPanelProps> = () => <DslEditor />;
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const panelComponents: Record<string, React.FC<IDockviewPanelProps>> = {
-  'node-canvas': NodeCanvasPanel,
-  'node-library': NodeLibraryPanel,
-  'inspector': InspectorPanel,
-  'viewer': ViewerPanel,
-  'timeline': TimelinePanel,
-  'dsl-editor': DslEditorPanel,
+  'node-canvas': withPanelErrorBoundary(NodeCanvasPanel, 'node-canvas', 'Node Editor'),
+  'node-library': withPanelErrorBoundary(NodeLibraryPanel, 'node-library', 'Node Library'),
+  'inspector': withPanelErrorBoundary(InspectorPanel, 'inspector', 'Inspector'),
+  'viewer': withPanelErrorBoundary(ViewerPanel, 'viewer', 'Viewer'),
+  'timeline': withPanelErrorBoundary(TimelinePanel, 'timeline', 'Timeline'),
+  'dsl-editor': withPanelErrorBoundary(DslEditorPanel, 'dsl-editor', 'DSL'),
 };
 
 export interface PanelTypeInfo {

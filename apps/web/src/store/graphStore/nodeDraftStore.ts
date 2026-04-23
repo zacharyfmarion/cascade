@@ -22,7 +22,7 @@
  */
 
 import { createStore, type StoreApi } from 'zustand';
-import { useSyncExternalStore, useCallback } from 'react';
+import { useSyncExternalStore, useCallback, useRef } from 'react';
 import type { ParamValue } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -133,6 +133,11 @@ export function getDraftValues(
   };
 }
 
+function hasValues(values: Record<string, ParamValue>): boolean {
+  for (const _key in values) return true;
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // React hooks
 // ---------------------------------------------------------------------------
@@ -157,7 +162,7 @@ export function useNodeParam(
     [store, key, committed],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -170,20 +175,34 @@ export function useNodeParams(
   committed: Record<string, ParamValue>,
 ): Record<string, ParamValue> {
   const store = getOrCreateDraftStore(nodeId);
+  const snapshotRef = useRef<{
+    committed: Record<string, ParamValue>;
+    draft: Record<string, ParamValue>;
+    value: Record<string, ParamValue>;
+  } | null>(null);
 
   // Memoize the merged result to maintain reference stability
   const getSnapshot = useCallback(
     () => {
       const s = store.getState();
-      if (Object.keys(s.draft).length === 0) {
+      if (!hasValues(s.draft)) {
+        snapshotRef.current = null;
         return committed;
       }
-      return { ...committed, ...s.draft };
+      if (
+        snapshotRef.current?.committed === committed &&
+        snapshotRef.current.draft === s.draft
+      ) {
+        return snapshotRef.current.value;
+      }
+      const value = { ...committed, ...s.draft };
+      snapshotRef.current = { committed, draft: s.draft, value };
+      return value;
     },
     [store, committed],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -207,7 +226,7 @@ export function useNodeInputDefault(
     [store, portName, committedParams, committedDefaults],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }
 
 /**
@@ -218,17 +237,35 @@ export function useNodeInputDefaults(
   committedDefaults: Record<string, ParamValue>,
 ): Record<string, ParamValue> {
   const store = getOrCreateDraftStore(nodeId);
+  const snapshotRef = useRef<{
+    committedDefaults: Record<string, ParamValue>;
+    draftDefaults: Record<string, ParamValue>;
+    value: Record<string, ParamValue>;
+  } | null>(null);
 
   const getSnapshot = useCallback(
     () => {
       const s = store.getState();
-      if (Object.keys(s.draftDefaults).length === 0) {
+      if (!hasValues(s.draftDefaults)) {
+        snapshotRef.current = null;
         return committedDefaults;
       }
-      return { ...committedDefaults, ...s.draftDefaults };
+      if (
+        snapshotRef.current?.committedDefaults === committedDefaults &&
+        snapshotRef.current.draftDefaults === s.draftDefaults
+      ) {
+        return snapshotRef.current.value;
+      }
+      const value = { ...committedDefaults, ...s.draftDefaults };
+      snapshotRef.current = {
+        committedDefaults,
+        draftDefaults: s.draftDefaults,
+        value,
+      };
+      return value;
     },
     [store, committedDefaults],
   );
 
-  return useSyncExternalStore(store.subscribe, getSnapshot);
+  return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 }

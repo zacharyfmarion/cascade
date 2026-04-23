@@ -40,23 +40,24 @@ import { GroupNodeComponent } from './nodes/GroupNodeComponent';
 import { ColorPaletteNode } from './nodes/ColorPaletteNode';
 import { CurvesNode } from './nodes/CurvesNode';
 import { FrameNode } from './nodes/FrameNode';
+import { withNodeErrorBoundary } from './ErrorBoundary';
 
 const SPECIAL_NODE_TYPES: NodeTypes = {
-  load_image: ImageInputNode,
-  load_image_sequence: LoadImageSequenceNode,
-  load_video: LoadVideoNode,
-  load_image_batch: LoadImageBatchNode,
-  viewer: ViewerNode,
-  export_image: ExportImageNode,
-  export_image_sequence: ExportImageSequenceNode,
-  export_video: ExportVideoNode,
-  export_image_batch: ExportImageBatchNode,
-  color_ramp: ColorRampNode,
-  color_palette: ColorPaletteNode,
-  curves: CurvesNode,
-  group_input: GroupInputNode,
-  group_output: GroupOutputNode,
-  frame: FrameNode,
+  load_image: withNodeErrorBoundary(ImageInputNode, 'load_image'),
+  load_image_sequence: withNodeErrorBoundary(LoadImageSequenceNode, 'load_image_sequence'),
+  load_video: withNodeErrorBoundary(LoadVideoNode, 'load_video'),
+  load_image_batch: withNodeErrorBoundary(LoadImageBatchNode, 'load_image_batch'),
+  viewer: withNodeErrorBoundary(ViewerNode, 'viewer'),
+  export_image: withNodeErrorBoundary(ExportImageNode, 'export_image'),
+  export_image_sequence: withNodeErrorBoundary(ExportImageSequenceNode, 'export_image_sequence'),
+  export_video: withNodeErrorBoundary(ExportVideoNode, 'export_video'),
+  export_image_batch: withNodeErrorBoundary(ExportImageBatchNode, 'export_image_batch'),
+  color_ramp: withNodeErrorBoundary(ColorRampNode, 'color_ramp'),
+  color_palette: withNodeErrorBoundary(ColorPaletteNode, 'color_palette'),
+  curves: withNodeErrorBoundary(CurvesNode, 'curves'),
+  group_input: withNodeErrorBoundary(GroupInputNode, 'group_input'),
+  group_output: withNodeErrorBoundary(GroupOutputNode, 'group_output'),
+  frame: withNodeErrorBoundary(FrameNode, 'frame'),
 };
 
 const PORT_COLORS: Record<string, string> = {
@@ -101,9 +102,9 @@ export const NodeCanvas: React.FC = () => {
     for (const spec of nodeSpecs) {
       if (!(spec.id in types)) {
         if (spec.id.startsWith('group::')) {
-          types[spec.id] = GroupNodeComponent;
+          types[spec.id] = withNodeErrorBoundary(GroupNodeComponent, spec.id);
         } else {
-          types[spec.id] = ProcessingNode;
+          types[spec.id] = withNodeErrorBoundary(ProcessingNode, spec.id);
         }
       }
     }
@@ -111,9 +112,9 @@ export const NodeCanvas: React.FC = () => {
       const instanceSpec = nodeSpecsById.get(node.id);
       if (!instanceSpec || node.typeId in types) continue;
       if (node.typeId.startsWith('group::')) {
-        types[node.typeId] = GroupNodeComponent;
+        types[node.typeId] = withNodeErrorBoundary(GroupNodeComponent, node.typeId);
       } else {
-        types[node.typeId] = ProcessingNode;
+        types[node.typeId] = withNodeErrorBoundary(ProcessingNode, node.typeId);
       }
     }
     return types;
