@@ -265,8 +265,7 @@ impl Engine {
             .collect();
         // Use serde_json + js_sys::JSON::parse to correctly handle #[serde(flatten)]
         // which serde_wasm_bindgen::to_value does not serialize correctly.
-        let json =
-            serde_json::to_string(&specs).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let json = serde_json::to_string(&specs).map_err(|e| JsValue::from_str(&e.to_string()))?;
         js_sys::JSON::parse(&json).map_err(|e| JsValue::from_str(&format!("{e:?}")))
     }
 
