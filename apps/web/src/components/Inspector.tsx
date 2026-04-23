@@ -8,6 +8,7 @@ import { ColorRampEditor } from './ColorRampEditor';
 import { CurveEditor } from './nodes/CurveEditor';
 import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec, ValueType } from '../store/types';
 import { createParamValue, extractParamValue, isConnectableParam } from '../store/types';
+import { useNodeParams } from '../store/graphStore/nodeDraftStore';
 
 const ParamControl: React.FC<{
   nodeId: string;
@@ -173,6 +174,8 @@ const ParamControl: React.FC<{
             <CurveEditor
               points={pts}
               onChange={(newPts) => onChange(paramSpec.key, { CurvePoints: newPts })}
+              onChangeLive={(newPts) => onLive(paramSpec.key, { CurvePoints: newPts })}
+              onChangeCommit={(newPts) => onCommit(paramSpec.key, { CurvePoints: newPts })}
               width={280}
               height={200}
             />
@@ -282,13 +285,44 @@ const GroupNameEditor: React.FC<{
   );
 };
 
+export const NodeInspectorParams: React.FC<{
+  nodeId: string;
+  spec: NodeSpec;
+  committedParams: Record<string, ParamValue>;
+}> = ({ nodeId, spec, committedParams }) => {
+  const setParam = useGraphStore(s => s.setParam);
+  const setParamLive = useGraphStore(s => s.setParamLive);
+  const setParamCommit = useGraphStore(s => s.setParamCommit);
+  const params = useNodeParams(nodeId, committedParams);
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: '16px' }}>
+      {spec.params
+        .filter(p => !isConnectableParam(p))
+        .map(p => (
+          <ParamControl
+            key={p.key}
+            nodeId={nodeId}
+            paramSpec={p}
+            value={params[p.key] || p.default}
+            onLive={(key, val) => setParamLive(nodeId, key, val)}
+            onCommit={(key, val) => setParamCommit(nodeId, key, val)}
+            onChange={(key, val) => setParam(nodeId, key, val)}
+          />
+        ))}
+      {spec.params.filter(p => !isConnectableParam(p)).length === 0 && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+          No parameters
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const Inspector: React.FC = () => {
   const selectedNodeIds = useGraphStore(s => s.selectedNodeIds);
   const nodes = useGraphStore(s => s.nodes);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
-  const setParam = useGraphStore(s => s.setParam);
-  const setParamLive = useGraphStore(s => s.setParamLive);
-  const setParamCommit = useGraphStore(s => s.setParamCommit);
   const enterGroup = useGraphStore(s => s.enterGroup);
   const renameGroup = useGraphStore(s => s.renameGroup);
   const editingStack = useGraphStore(s => s.editingStack);
@@ -448,26 +482,13 @@ export const Inspector: React.FC = () => {
           </div>
         )}
 
-        <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: '16px' }}>
-          {spec.params
-            .filter(p => !isConnectableParam(p))
-            .map(p => (
-            <ParamControl
-              key={p.key}
-              nodeId={selectedNode.id}
-              paramSpec={p}
-              value={selectedNode.params[p.key] || p.default}
-              onLive={(key, val) => setParamLive(selectedNode.id, key, val)}
-              onCommit={(key, val) => setParamCommit(selectedNode.id, key, val)}
-              onChange={(key, val) => setParam(selectedNode.id, key, val)}
-            />
-          ))}
-          {spec.params.filter(p => !isConnectableParam(p)).length === 0 && !isGroupIO && (
-            <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-              No parameters
-            </div>
-          )}
-        </div>
+        {!isGroupIO && (
+          <NodeInspectorParams
+            nodeId={selectedNode.id}
+            spec={spec}
+            committedParams={selectedNode.params}
+          />
+        )}
 
 
       </div>
