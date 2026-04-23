@@ -1,13 +1,10 @@
 import { useEffect } from 'react';
+import { isDesktopRuntime } from '../platform/runtime';
 import { handleMenuAction } from './menuDefinition';
-
-function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
-}
 
 export function useTauriMenuListener(): void {
   useEffect(() => {
-    if (!isTauri()) return;
+    if (!isDesktopRuntime()) return;
 
     let unlisten: (() => void) | null = null;
 

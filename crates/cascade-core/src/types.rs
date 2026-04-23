@@ -804,6 +804,38 @@ pub struct NodeSpec {
     pub params: Vec<ParamSpec>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimeSurface {
+    Web,
+    Desktop,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiNodeSpec {
+    #[serde(flatten)]
+    pub spec: NodeSpec,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supported_surfaces: Vec<RuntimeSurface>,
+}
+
+pub fn supported_surfaces_for_node_type(type_id: &str) -> Vec<RuntimeSurface> {
+    match type_id {
+        "load_video" | "export_video" => vec![RuntimeSurface::Desktop],
+        _ => Vec::new(),
+    }
+}
+
+impl From<NodeSpec> for UiNodeSpec {
+    fn from(spec: NodeSpec) -> Self {
+        let supported_surfaces = supported_surfaces_for_node_type(&spec.id);
+        Self {
+            spec,
+            supported_surfaces,
+        }
+    }
+}
+
 impl NodeSpec {
     pub fn all_inputs(&self) -> Vec<PortSpec> {
         let mut all = self.inputs.clone();
@@ -846,6 +878,35 @@ impl NodeSpec {
                     | UiHint::ColorPicker
                     | UiHint::TextArea
             )
+    }
+}
+
+#[cfg(test)]
+mod ui_node_spec_tests {
+    use super::*;
+
+    fn test_node_spec(id: &str) -> NodeSpec {
+        NodeSpec {
+            id: id.to_string(),
+            display_name: "Test".to_string(),
+            category: "Input".to_string(),
+            description: "Test node".to_string(),
+            inputs: vec![],
+            outputs: vec![],
+            params: vec![],
+        }
+    }
+
+    #[test]
+    fn ui_node_spec_marks_desktop_only_video_nodes() {
+        let spec = UiNodeSpec::from(test_node_spec("load_video"));
+        assert_eq!(spec.supported_surfaces, vec![RuntimeSurface::Desktop]);
+    }
+
+    #[test]
+    fn ui_node_spec_leaves_standard_nodes_surface_agnostic() {
+        let spec = UiNodeSpec::from(test_node_spec("viewer"));
+        assert!(spec.supported_surfaces.is_empty());
     }
 }
 

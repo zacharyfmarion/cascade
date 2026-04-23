@@ -15,7 +15,7 @@ use cascade_core::group::{
 };
 use cascade_core::node::{Node, NodeRegistry};
 use cascade_core::types::{
-    ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, Value, ValueType,
+    ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, UiNodeSpec, Value, ValueType,
 };
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{GpuContext, KernelManifest};
@@ -260,7 +260,7 @@ impl Engine {
             .map(|spec| {
                 let mut spec = spec.clone();
                 spec.inputs = spec.all_inputs();
-                spec
+                UiNodeSpec::from(spec)
             })
             .collect();
         serde_wasm_bindgen::to_value(&specs).map_err(|e| JsValue::from_str(&e.to_string()))

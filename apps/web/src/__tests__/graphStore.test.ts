@@ -12,6 +12,14 @@ let addOutputPort: string;
 let addInputPort: string;
 const trackAnalyticsEvent = vi.fn();
 
+const setTauriMode = (enabled: boolean) => {
+  if (enabled) {
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+  } else {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+  }
+};
+
 vi.mock('../engine/wasmEngine', () => ({
   initWasmEngine: vi.fn(),
   get wasmEngine() {
@@ -69,6 +77,7 @@ const flushPromises = async (ticks = 1) => {
 
 beforeEach(async () => {
   vi.resetModules();
+  setTauriMode(false);
   mockEngine = createMockEngine();
   trackAnalyticsEvent.mockClear();
   const mod = await import('../store/graphStore');
@@ -116,6 +125,25 @@ describe('graphStore node CRUD', () => {
     const node = useGraphStore.getState().nodes.get(id);
     expect(node?.params.amount).toEqual({ Float: 0.5 } as ParamValue);
     expect(node?.params.radius).toEqual({ Float: 1.0 } as ParamValue);
+  });
+
+  it('addNode rejects desktop-only nodes on web and stores a structured error', async () => {
+    await expect(
+      useGraphStore.getState().addNode('load_video', { x: 0, y: 0 }),
+    ).rejects.toMatchObject({
+      code: 'UNSUPPORTED_PLATFORM',
+      domain: 'runtime',
+    });
+
+    expect(useGraphStore.getState().lastError?.message).toBe('Load Video is only available in the desktop app.');
+  });
+
+  it('addNode allows desktop-only nodes in the desktop runtime', async () => {
+    setTauriMode(true);
+
+    const id = await useGraphStore.getState().addNode('load_video', { x: 0, y: 0 });
+
+    expect(useGraphStore.getState().nodes.get(id)?.typeId).toBe('load_video');
   });
 
   it('removeNode deletes the node from the map', async () => {

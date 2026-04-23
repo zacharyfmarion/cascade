@@ -13,6 +13,8 @@ import { ShortcutsModal } from './components/ShortcutsModal';
 import { MenuBar } from './components/MenuBar';
 import { ToastHost } from './components/ui/ToastHost';
 import { TooltipProvider } from './components/ui/Tooltip';
+import { isFeatureVisible } from './platform/features';
+import { getRuntimeSurface } from './platform/runtime';
 import { useGraphStore } from './store/graphStore';
 
 import { useSettingsStore } from './store/settingsStore';
@@ -44,15 +46,12 @@ function useBeforeUnload() {
   }, [dirty]);
 }
 
-
-function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
-}
-
 function Toolbar() {
   const openSettings = useSettingsStore(s => s.openSettings);
   const openShortcuts = useSettingsStore(s => s.openShortcuts);
-  const isTauriApp = isTauri();
+  const runtimeSurface = getRuntimeSurface();
+  const isTauriApp = runtimeSurface === 'desktop';
+  const showDownloadCta = isFeatureVisible('macDownloadCta', runtimeSurface);
   const downloadUrl = useMacDownloadUrl();
 
   return (
@@ -66,9 +65,11 @@ function Toolbar() {
         <IconButton size="sm" title="View on GitHub" tooltipSide="bottom" onClick={() => window.open(REPOSITORY_URL, '_blank', 'noreferrer')}>
           <TbBrandGithub size={14} />
         </IconButton>
-        <IconButton size="sm" title="Download Cascade for Mac" tooltipSide="bottom" onClick={() => window.open(downloadUrl, '_blank', 'noreferrer')}>
-          <TbDownload size={14} />
-        </IconButton>
+        {showDownloadCta && (
+          <IconButton size="sm" title="Download Cascade for Mac" tooltipSide="bottom" onClick={() => window.open(downloadUrl, '_blank', 'noreferrer')}>
+            <TbDownload size={14} />
+          </IconButton>
+        )}
         <IconButton size="sm" title="Keyboard Shortcuts" tooltipSide="bottom" onClick={openShortcuts}>
           <HelpCircle size={14} />
         </IconButton>

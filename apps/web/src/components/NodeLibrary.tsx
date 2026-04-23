@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Search, ChevronDown, ChevronRight, Upload } from 'lucide-react';
+import { getAuthoringNodeSpecs } from '../platform/features';
+import { getRuntimeSurface } from '../platform/runtime';
 import { useGraphStore } from '../store/graphStore';
 import type { NodeSpec } from '../store/types';
 import { getNodeIcon, getCategoryIcon } from './nodes/nodeIcons';
@@ -8,6 +10,7 @@ import { IconButton } from './ui/IconButton';
 export const NodeLibrary: React.FC = () => {
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const importCustomNodes = useGraphStore(s => s.importCustomNodes);
+  const runtimeSurface = getRuntimeSurface();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
@@ -23,16 +26,21 @@ export const NodeLibrary: React.FC = () => {
     Utility: true,
   });
 
+  const authoringNodeSpecs = useMemo(
+    () => getAuthoringNodeSpecs(nodeSpecs, runtimeSurface),
+    [nodeSpecs, runtimeSurface],
+  );
+
   const grouped = useMemo(() => {
     const groups: Record<string, NodeSpec[]> = {};
-    nodeSpecs.forEach(spec => {
+    authoringNodeSpecs.forEach(spec => {
       if (!groups[spec.category]) groups[spec.category] = [];
       if (spec.display_name.toLowerCase().includes(search.toLowerCase())) {
         groups[spec.category].push(spec);
       }
     });
     return groups;
-  }, [nodeSpecs, search]);
+  }, [authoringNodeSpecs, search]);
 
   const addNode = useGraphStore(s => s.addNode);
 

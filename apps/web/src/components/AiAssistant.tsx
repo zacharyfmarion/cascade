@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import { isToolUIPart, getToolName } from 'ai';
+import { getAuthoringNodeSpecs } from '../platform/features';
+import { getRuntimeSurface } from '../platform/runtime';
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { createCascadeTransport } from '../ai/transport';
@@ -37,13 +39,18 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
   const model = useSettingsStore(s => s.aiAssistantModel);
   const openSettings = useSettingsStore(s => s.openSettings);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
+  const runtimeSurface = getRuntimeSurface();
+  const authoringNodeSpecs = useMemo(
+    () => getAuthoringNodeSpecs(nodeSpecs, runtimeSurface),
+    [nodeSpecs, runtimeSurface],
+  );
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const transport = useMemo(() => {
     if (!apiKey) return null;
-  return createCascadeTransport(apiKey, model, nodeSpecs);
-  }, [apiKey, model, nodeSpecs]);
+    return createCascadeTransport(apiKey, model, authoringNodeSpecs);
+  }, [apiKey, model, authoringNodeSpecs]);
 
   const { messages, sendMessage, status, stop, error } = useChat({
     transport: transport ?? undefined,

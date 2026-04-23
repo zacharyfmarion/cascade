@@ -1,4 +1,5 @@
 import { APP_VERSION } from '../constants/release';
+import { getRuntimeSurface } from '../platform/runtime';
 import {
   recordAnalyticsCapture,
   recordAnalyticsDebug,
@@ -25,10 +26,6 @@ interface PostHogEnvironment {
   VITE_PUBLIC_POSTHOG_KEY?: string;
   VITE_PUBLIC_POSTHOG_HOST?: string;
   DEV?: boolean;
-}
-
-function getRuntimeSurface() {
-  return '__TAURI_INTERNALS__' in window ? 'desktop' : 'web';
 }
 
 export function getBootstrapSharedProperties(options: BootstrapOptions) {

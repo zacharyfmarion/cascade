@@ -2,7 +2,9 @@ import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { Connection, EditingContext, NodeInstance, NodeSpec, ParamValue, PortSpec } from '../../types';
 import type { NodeInterfaceChange } from '../../../engine/bridge';
-import { parseEngineError } from '../../../engine/engineError';
+import { getUnsupportedNodeMessage, isNodeSupportedOnSurface } from '../../../platform/features';
+import { getRuntimeSurface } from '../../../platform/runtime';
+import { makeEngineError, parseEngineError } from '../../../engine/engineError';
 import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { getNodeCategory, getPortType } from '../../../analytics/nodeGraph';
@@ -72,6 +74,19 @@ export const createGraphSlice: StateCreator<
     editingStack: [{ id: 'root', label: 'Root', groupNodeId: null }],
 
     addNode: async (typeId, position, initialFile?: File) => {
+      const runtimeSurface = getRuntimeSurface();
+      const requestedSpec = get().nodeSpecs.find(s => s.id === typeId);
+      if (requestedSpec && !isNodeSupportedOnSurface(requestedSpec, runtimeSurface)) {
+        const error = makeEngineError(
+          getUnsupportedNodeMessage(requestedSpec, runtimeSurface)
+            ?? `${requestedSpec.display_name} is not available on ${runtimeSurface}.`,
+          'UNSUPPORTED_PLATFORM',
+          'runtime',
+        );
+        set({ lastError: error });
+        throw error;
+      }
+
       await get().pushUndo();
       tagUiOrigin();
 
