@@ -112,6 +112,22 @@ describe('settingsStore', () => {
     expect(useSettingsStore.getState().isAboutOpen).toBe(false);
   });
 
+  it('openAiAssistant, closeAiAssistant, and toggleAiAssistant manage the assistant panel state', () => {
+    expect(useSettingsStore.getState().isAiAssistantOpen).toBe(false);
+
+    useSettingsStore.getState().openAiAssistant();
+    expect(useSettingsStore.getState().isAiAssistantOpen).toBe(true);
+
+    useSettingsStore.getState().toggleAiAssistant();
+    expect(useSettingsStore.getState().isAiAssistantOpen).toBe(false);
+
+    useSettingsStore.getState().toggleAiAssistant();
+    expect(useSettingsStore.getState().isAiAssistantOpen).toBe(true);
+
+    useSettingsStore.getState().closeAiAssistant();
+    expect(useSettingsStore.getState().isAiAssistantOpen).toBe(false);
+  });
+
   it('loads saved settings from localStorage on init', async () => {
     const saved = { ...DEFAULT_SETTINGS, gridSize: 42, showMinimap: true };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));

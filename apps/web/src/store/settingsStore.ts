@@ -16,6 +16,11 @@ interface SettingsState {
   openShortcuts: () => void;
   closeShortcuts: () => void;
 
+  isAiAssistantOpen: boolean;
+  openAiAssistant: () => void;
+  closeAiAssistant: () => void;
+  toggleAiAssistant: () => void;
+
   // --- Appearance ---
   // (Theme is in themeStore already — just reference it from the Appearance tab UI)
 
@@ -153,6 +158,11 @@ export const useSettingsStore = create<SettingsState>()(
         isShortcutsOpen: false,
         openShortcuts: () => set({ isShortcutsOpen: true }),
         closeShortcuts: () => set({ isShortcutsOpen: false }),
+
+        isAiAssistantOpen: false,
+        openAiAssistant: () => set({ isAiAssistantOpen: true }),
+        closeAiAssistant: () => set({ isAiAssistantOpen: false }),
+        toggleAiAssistant: () => set((state) => ({ isAiAssistantOpen: !state.isAiAssistantOpen })),
 
         snapToGrid: initial.snapToGrid,
         setSnapToGrid: (snap) => { set({ snapToGrid: snap }); save(); },

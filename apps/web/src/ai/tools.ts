@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
-import type { NodeSpec, ParamSpec } from '../store/types';
+import type { NodeSpec, ParamSpec, PortSpec } from '../store/types';
 import { serializeGraph } from './dsl/serializer';
 import { parseDsl } from './dsl/parser';
 import { validateAst } from './dsl/validator';
@@ -12,7 +12,7 @@ import { captureViewerThumbnail } from './viewerSnapshot';
 import { snakeToPascal, labelToSnake, pascalToSnake } from './dsl/types';
 import type { DslAst } from './dsl/types';
 import { getSharedHandleMap } from './dsl/instance';
-import { buildGpuScriptManifestFromGlsl, generateGlslKernel } from './gpuScript';
+import { buildDefaultGpuScriptManifest, buildGpuScriptManifestFromGlsl, buildGpuScriptNodeSpec, generateGlslKernel } from './gpuScript';
 
 export { resetSharedHandleMap as resetHandleMap } from './dsl/instance';
 
@@ -69,6 +69,71 @@ function formatParamSpec(p: ParamSpec): Record<string, unknown> {
     desc.type = 'Dropdown';
   }
   return desc;
+}
+
+function formatPortSpec(port: PortSpec): Record<string, unknown> {
+  const desc: Record<string, unknown> = {
+    name: port.name,
+    type: port.ty,
+  };
+  if (port.label && port.label !== port.name) desc.label = port.label;
+  if (port.default !== undefined) desc.default = port.default;
+  if (port.min !== undefined) desc.min = port.min;
+  if (port.max !== undefined) desc.max = port.max;
+  if (port.step !== undefined) desc.step = port.step;
+  return desc;
+}
+
+function isGpuScriptSpec(spec: NodeSpec): boolean {
+  return spec.id === 'gpu_script' || spec.id.startsWith('gpu_script::');
+}
+
+function buildGpuScriptSchema(specs: NodeSpec[], requestedType: string): Record<string, unknown> {
+  const requestedTypeId = pascalToSnake(requestedType);
+  const spec = specs.find((candidate) => candidate.id === requestedTypeId)
+    ?? specs.find(isGpuScriptSpec)
+    ?? buildGpuScriptNodeSpec(buildDefaultGpuScriptManifest('gpu_script'));
+  const supportsMask = spec.inputs.some((input) => input.name === 'mask' && input.ty === 'Mask');
+
+  return {
+    type: 'GpuScript',
+    runtime_type: spec.id,
+    category: spec.category,
+    description: spec.description,
+    params: spec.params.map(formatParamSpec),
+    inputs: spec.inputs.map(formatPortSpec),
+    outputs: spec.outputs.map(formatPortSpec),
+    editable_fields: [
+      {
+        key: 'script',
+        type: 'String',
+        multiline: true,
+        dsl_syntax: 'Use a triple-quoted multiline string, e.g. script: """\\nfloat gain = 1.2;\\nreturn vec4(color.rgb * gain, color.a);\\n"""',
+        description: 'Editable GLSL body for process(vec4 color, vec2 uv, ivec2 pixel). Provide only the body, not the full shader.',
+      },
+      {
+        key: 'supports_mask',
+        type: 'Bool',
+        current_value: supportsMask,
+        description: 'Controls whether the implicit Mask input is exposed on the node interface.',
+      },
+    ],
+    glsl_context: {
+      signature: 'vec4 process(vec4 color, vec2 uv, ivec2 pixel)',
+      available_globals: [
+        'u_input: readonly image2D for the primary input',
+        'Additional image inputs are bound as u_<name>',
+        'Params are available directly by name',
+        'Helpers: bayer8(int x, int y), luminance(vec4 c)',
+      ],
+    },
+    editing_notes: [
+      'Existing GPU Script nodes often use runtime type ids like gpu_script::<uuid>, but they all share the GpuScript editing model.',
+      'To inspect the current kernel, ports, params, and supports_mask for a specific node, call get_gpu_script_manifest with the node handle or id before editing.',
+      'When editing through the DSL, the special script field updates the GLSL body and recompiles the node.',
+      'If you change ports, params, or mask support, preserve the existing interface unless the user explicitly asked for interface changes.',
+    ],
+  };
 }
 
 // ─── Tool schemas ────────────────────────────────────────────────
@@ -172,8 +237,12 @@ const toolExecutors = {
     for (const s of specs) {
       const cat = s.category || 'Other';
       if (!groups[cat]) groups[cat] = [];
+      const normalizedType = isGpuScriptSpec(s) ? 'GpuScript' : snakeToPascal(s.id);
       const desc = s.description ? ` — ${s.description}` : '';
-      groups[cat].push(`${snakeToPascal(s.id)}${desc}`);
+      const entry = `${normalizedType}${desc}`;
+      if (!groups[cat].includes(entry)) {
+        groups[cat].push(entry);
+      }
     }
     return groups;
   },
@@ -181,6 +250,9 @@ const toolExecutors = {
   get_node_schema: async ({ node_type }: GetNodeSchemaArgs) => {
     const specs = useGraphStore.getState().nodeSpecs;
     const typeId = pascalToSnake(node_type);
+    if (typeId === 'gpu_script' || typeId.startsWith('gpu_script::')) {
+      return buildGpuScriptSchema(specs, node_type);
+    }
     const spec = specs.find((s: NodeSpec) => s.id === typeId);
     if (!spec) {
       return { error: `Unknown node type: ${node_type}` };

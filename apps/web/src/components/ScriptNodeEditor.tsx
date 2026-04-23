@@ -3,7 +3,6 @@ import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import {
   buildGpuScriptManifest,
-  generateGlslKernel,
   parseGpuScriptManifestJson,
 } from '../ai/gpuScript';
 
@@ -190,12 +189,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
   const compileScriptNode = useGraphStore(s => s.compileScriptNode);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const nodeParams = useGraphStore(s => s.nodes.get(nodeId)?.params);
-  const apiKey = useSettingsStore(s => s.anthropicApiKey);
-  const setApiKey = useSettingsStore(s => s.setAnthropicApiKey);
-  const [apiKeyVisible, setApiKeyVisible] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  const openAiAssistant = useSettingsStore(s => s.openAiAssistant);
   
   const [state, setState] = useState<ScriptEditorState>(() => {
     const savedManifest = nodeParams?.['__script_manifest'];
@@ -279,49 +273,6 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
     }
   };
 
-  const handleGenerate = async () => {
-    if (!apiKey || aiGenerating) return;
-    setAiGenerating(true);
-    setAiError(null);
-
-    try {
-      const manifest = await generateGlslKernel(aiPrompt, apiKey);
-      setState(s => ({
-        ...s,
-        inputs: manifest.inputs.map((input, i) => ({
-          id: `in_${i}_${crypto.randomUUID()}`,
-          name: input.name,
-          label: input.label,
-          ty: input.ty,
-        })),
-        outputs: manifest.outputs.map((output, i) => ({
-          id: `out_${i}_${crypto.randomUUID()}`,
-          name: output.name,
-          label: output.label,
-          ty: output.ty,
-        })),
-        params: manifest.params.map((param, i) => ({
-          id: `p_${i}_${crypto.randomUUID()}`,
-          key: param.key,
-          label: param.label,
-          ty: param.type,
-          default: param.default,
-          min: param.min,
-          max: param.max,
-          step: param.step,
-        })),
-        kernel: manifest.kernel,
-        supportsMask: manifest.supports_mask ?? true,
-        compileStatus: 'idle',
-        compileError: null,
-      }));
-    } catch (error) {
-      setAiError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAiGenerating(false);
-    }
-  };
-
   return (
     <div className="panel" style={{ width: '100%', height: '100%', overflowY: 'auto' }}>
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -330,6 +281,22 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
             {state.compileStatus === 'success' && <span style={{ color: 'var(--accent-primary)', fontSize: '0.7rem', fontWeight: 600 }}>Compiled</span>}
             {state.compileStatus === 'error' && <span style={{ color: 'var(--status-error-bright)', fontSize: '0.7rem', fontWeight: 600 }}>Error</span>}
             {state.compileStatus === 'compiling' && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Compiling...</span>}
+            <button
+              type="button"
+              onClick={openAiAssistant}
+              style={{
+                background: 'var(--bg-surface)',
+                color: 'var(--accent-primary)',
+                border: '1px solid var(--accent-primary)',
+                borderRadius: '999px',
+                padding: '4px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              ✦ Edit With AI
+            </button>
         </div>
       </div>
 
@@ -667,79 +634,6 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
                 fontFamily: 'monospace'
             }}>
               <strong>Error:</strong> {state.compileError}
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: '32px', borderTop: '1px solid var(--border-default)', paddingTop: '24px' }}>
-          <SectionHeader action={
-            <IconButton onClick={() => setApiKeyVisible(v => !v)} title={apiKeyVisible ? 'Hide API key' : 'Show API key'}>
-              {apiKeyVisible ? 'Hide' : 'Show'}
-            </IconButton>
-          }>
-            AI Generation
-          </SectionHeader>
-          
-          {apiKeyVisible && (
-            <div style={{ marginBottom: '12px' }}>
-                <Label>Anthropic API Key</Label>
-                <TextInput
-                type="password"
-                value={apiKey}
-                onChange={e => {
-                    setApiKey(e.target.value);
-                }}
-                placeholder="sk-ant-..."
-                />
-            </div>
-          )}
-          
-          <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
-            {!apiKey && (
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--bg-surface)', padding: '8px', borderRadius: '4px' }}>
-                    Set your Anthropic API key to enable AI generation
-                </div>
-            )}
-            <textarea
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-              placeholder="Describe the effect you want (e.g. 'VHS glitch effect with chromatic aberration')..."
-              style={{
-                width: '100%',
-                minHeight: '80px',
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-default)',
-                borderRadius: '4px',
-                padding: '8px',
-                color: 'var(--text-primary)',
-                fontSize: '0.85rem',
-                resize: 'vertical',
-                outline: 'none'
-              }}
-            />
-            <button
-              type="button"
-              disabled={!apiKey || aiGenerating}
-              title={!apiKey ? 'Add API key to enable' : undefined}
-              onClick={handleGenerate}
-              style={{
-                background: aiGenerating || !apiKey ? 'var(--bg-tertiary)' : 'var(--bg-surface)',
-                color: aiGenerating || !apiKey ? 'var(--text-muted)' : 'var(--accent-primary)',
-                border: '1px solid var(--accent-primary)',
-                borderRadius: '4px',
-                padding: '8px 12px',
-                cursor: aiGenerating || !apiKey ? 'not-allowed' : 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                opacity: aiGenerating || !apiKey ? 0.5 : 1
-              }}
-            >
-              {aiGenerating ? 'Generating...' : '✨ Generate GLSL'}
-            </button>
-          </div>
-          {aiError && (
-            <div style={{ marginTop: '8px', color: 'var(--status-error-bright)', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
-              {aiError}
             </div>
           )}
         </div>

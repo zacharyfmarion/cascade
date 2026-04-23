@@ -11,23 +11,25 @@ import { AiAssistant } from '../AiAssistant';
 import { DslEditor } from '../DslEditor';
 import { shortcutDispatcher } from '../../shortcuts/dispatcher';
 import { withPanelErrorBoundary } from '../ErrorBoundary';
+import { useSettingsStore } from '../../store/settingsStore';
 
 const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
-  const [aiOpen, setAiOpen] = useState(false);
+  const aiOpen = useSettingsStore(s => s.isAiAssistantOpen);
+  const toggleAiAssistant = useSettingsStore(s => s.toggleAiAssistant);
 
   useEffect(() => {
     const unregister = shortcutDispatcher.register('ui.toggleAi', () => {
-      setAiOpen(prev => !prev);
+      toggleAiAssistant();
     });
     return unregister;
-  }, []);
+  }, [toggleAiAssistant]);
 
   return (
     <ReactFlowProvider>
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         <Breadcrumbs />
         <NodeCanvas />
-        <AiAssistant isOpen={aiOpen} onToggle={() => setAiOpen(prev => !prev)} />
+        <AiAssistant isOpen={aiOpen} onToggle={toggleAiAssistant} />
       </div>
     </ReactFlowProvider>
   );
