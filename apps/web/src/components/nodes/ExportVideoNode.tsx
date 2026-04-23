@@ -11,6 +11,8 @@ import {
   NodeSection,
   NodeDisabledOverlay,
 } from './NodePrimitives';
+import { getUnsupportedNodeMessage, isNodeSupportedOnSurface } from '../../platform/features';
+import { getRuntimeSurface } from '../../platform/runtime';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
@@ -35,7 +37,9 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
   const sequenceLength = useGraphStore(s => s.sequenceLength);
   const hasSequenceNodes = useGraphStore(s => s.hasSequenceNodes);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const runtimeSurface = getRuntimeSurface();
+  const isSupported = isNodeSupportedOnSurface(spec, runtimeSurface);
+  const unsupportedMessage = getUnsupportedNodeMessage(spec, runtimeSurface);
   const prevSeqRef = useRef<{ start: number; end: number } | null>(null);
 
   const [browsing, setBrowsing] = useState(false);
@@ -58,7 +62,7 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
 
   const codecSpec = spec.params.find(p => p.key === 'codec');
 
-  const isValid = outputPath.length > 0 && startFrame <= endFrame && step > 0;
+  const isValid = isSupported && outputPath.length > 0 && startFrame <= endFrame && step > 0;
 
   const progressPercent = renderProgress
     ? Math.round((renderProgress.current_frame / Math.max(renderProgress.total_frames, 1)) * 100)
@@ -79,7 +83,7 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
   }, [result]);
 
   const handleBrowse = useCallback(async () => {
-    if (!isTauri) return;
+    if (!isSupported) return;
     try {
       setBrowsing(true);
       const { save } = await import('@tauri-apps/plugin-dialog');
@@ -96,7 +100,7 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
     } finally {
       setBrowsing(false);
     }
-  }, [isTauri, props.id, setParam]);
+  }, [isSupported, props.id, setParam]);
 
   const handleRender = useCallback(() => {
     if (!isValid) return;
@@ -126,7 +130,7 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
       <NodeSection label="Output" spaced>
         <NodeButton
           onClick={handleBrowse}
-          disabled={!isTauri || browsing || isRendering}
+          disabled={!isSupported || browsing || isRendering}
           variant="secondary"
           fullWidth
         >
@@ -136,7 +140,8 @@ export const ExportVideoNode: React.FC<NodeProps> = (props) => {
         {outputPath && <div className="node-filepath">{outputPath}</div>}
       </NodeSection>
 
-      {!isTauri && <NodeBadge>Desktop only</NodeBadge>}
+      {!isSupported && <NodeBadge>Desktop only</NodeBadge>}
+      {!isSupported && unsupportedMessage && <NodeStatus variant="info">{unsupportedMessage}</NodeStatus>}
 
       {isRendering ? (
         <NodeSection spaced>

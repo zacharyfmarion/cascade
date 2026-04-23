@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { isDesktopRuntime } from '../platform/runtime';
 import { useSettingsStore } from '../store/settingsStore';
 import { useThemeStore } from '../store/themeStore';
 import { useLayoutStore } from '../store/layoutStore';
@@ -6,10 +7,6 @@ import { useGraphStore } from '../store/graphStore';
 import type { CascadeTheme } from '../themes/types';
 
 type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'privacy' | 'color' | 'ai';
-
-function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
-}
 
 const ALL_TAB_LABELS: { key: Tab; label: string; tauriOnly?: boolean }[] = [
   { key: 'project', label: 'Project' },
@@ -22,7 +19,7 @@ const ALL_TAB_LABELS: { key: Tab; label: string; tauriOnly?: boolean }[] = [
   { key: 'ai', label: 'AI' },
 ];
 
-const TAB_LABELS = ALL_TAB_LABELS.filter(t => !t.tauriOnly || isTauri());
+const TAB_LABELS = ALL_TAB_LABELS.filter(t => !t.tauriOnly || isDesktopRuntime());
 
 const sectionDescriptions: Record<Tab, string> = {
   project: 'Set project resolution and format.',

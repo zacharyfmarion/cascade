@@ -1,3 +1,5 @@
+import type { RuntimeSurface } from '../platform/runtime';
+
 export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field' | 'String' | 'Any';
 
 export interface ColorStop {
@@ -64,6 +66,7 @@ export interface NodeSpec {
   inputs: PortSpec[];
   outputs: PortSpec[];
   params: ParamSpec[];
+  supported_surfaces?: RuntimeSurface[];
 }
 
 export type ParamValue =

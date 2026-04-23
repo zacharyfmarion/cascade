@@ -10,6 +10,7 @@ import {
   NodeSection,
   NodeDisabledOverlay,
 } from './NodePrimitives';
+import { isDesktopRuntime } from '../../platform/runtime';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
@@ -34,7 +35,7 @@ export const ExportImageSequenceNode: React.FC<NodeProps> = (props) => {
   const sequenceLength = useGraphStore(s => s.sequenceLength);
   const hasSequenceNodes = useGraphStore(s => s.hasSequenceNodes);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const isTauri = isDesktopRuntime();
   const prevSeqRef = useRef<{ start: number; end: number } | null>(null);
 
   const [browsing, setBrowsing] = useState(false);

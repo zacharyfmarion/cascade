@@ -16,7 +16,9 @@ use cascade_core::group::{
     SerializableInternalGraph,
 };
 use cascade_core::node::{Node, NodeRegistry};
-pub use cascade_core::types::{Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, Value};
+pub use cascade_core::types::{
+    Format, FrameTime, Image, NodeSpec, ParamValue, PortSpec, RuntimeSurface, UiNodeSpec, Value,
+};
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{register_gpu_nodes, GpuContext, KernelManifest};
 use cascade_nodes_std::input::LoadImage as InputLoadImage;

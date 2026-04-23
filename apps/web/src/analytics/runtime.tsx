@@ -2,6 +2,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { usePostHog } from '@posthog/react';
 import { APP_VERSION } from '../constants/release';
+import { getRuntimeSurface } from '../platform/runtime';
 import { useSettingsStore } from '../store/settingsStore';
 import {
   recordAnalyticsCapture,
@@ -32,10 +33,6 @@ const NOOP_ANALYTICS: AnalyticsApi = {
 };
 
 let runtimeAnalytics: AnalyticsApi = NOOP_ANALYTICS;
-
-function getRuntimeSurface() {
-  return '__TAURI_INTERNALS__' in window ? 'desktop' : 'web';
-}
 
 function createSharedProperties(analyticsEnabled: boolean) {
   return sanitizeAnalyticsProperties({

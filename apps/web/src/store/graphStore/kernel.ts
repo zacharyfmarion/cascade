@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import { isPixelResult } from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
+import { isDesktopRuntime } from '../../platform/runtime';
 import { useSettingsStore } from '../settingsStore';
 
 export const DEFAULT_FRAME_COLOR = 'purple';
@@ -238,7 +239,7 @@ export const createDocumentEnvelope = (graph: unknown) => ({
 });
 
 export function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
+  return isDesktopRuntime();
 }
 
 export async function createEngine(): Promise<EngineBridge> {

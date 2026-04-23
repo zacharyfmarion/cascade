@@ -1,6 +1,7 @@
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLayoutStore } from '../store/layoutStore';
+import { isDesktopRuntime } from '../platform/runtime';
 import type { WorkspacePreset } from '../store/layoutStore';
 import { isTextInputFocused } from '../shortcuts/focusDetection';
 
@@ -29,12 +30,6 @@ export type MenuDef = {
   label: string;
   items: MenuItemDef[];
 };
-
-// ── Platform detection ──────────────────────────────────────────
-
-function isTauri(): boolean {
-  return '__TAURI_INTERNALS__' in window;
-}
 
 function modKey(): string {
   const isMac =
@@ -107,7 +102,7 @@ export function handleMenuAction(id: string): void {
       graphStore.saveProject();
       break;
     case 'file.open':
-      if (isTauri() && graphStore.loadProjectFromPath) {
+      if (isDesktopRuntime() && graphStore.loadProjectFromPath) {
         graphStore.loadProjectFromPath();
       } else {
         document.getElementById('menu-file-input')?.click();

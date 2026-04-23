@@ -2,6 +2,8 @@ import { useEffect, type CSSProperties } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import { APP_VERSION } from '../constants/release';
 import { useMacDownloadUrl } from '../hooks/useMacDownloadUrl';
+import { isFeatureVisible } from '../platform/features';
+import { getRuntimeSurface } from '../platform/runtime';
 
 export const ABOUT_MODAL_COPY = {
   title: 'Cascade',
@@ -75,6 +77,8 @@ const closeButtonStyle: CSSProperties = {
 export function AboutModal() {
   const isOpen = useSettingsStore(s => s.isAboutOpen);
   const close = useSettingsStore(s => s.closeAbout);
+  const runtimeSurface = getRuntimeSurface();
+  const showDownloadCta = isFeatureVisible('macDownloadCta', runtimeSurface);
   const downloadUrl = useMacDownloadUrl();
 
   useEffect(() => {
@@ -134,9 +138,11 @@ export function AboutModal() {
 
         <div style={descriptionStyle}>{ABOUT_MODAL_COPY.description}</div>
 
-        <a href={downloadUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>
-          {ABOUT_MODAL_COPY.downloadLabel}
-        </a>
+        {showDownloadCta && (
+          <a href={downloadUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>
+            {ABOUT_MODAL_COPY.downloadLabel}
+          </a>
+        )}
 
         <button type="button" onClick={close} style={closeButtonStyle}>
           Close
