@@ -2539,6 +2539,40 @@ impl Engine {
                     .or_insert_with(|| extract_gpu_script_manifest(&node.type_id, &node.params));
             }
         }
+
+        // For gpu_script nodes without a stored manifest (old saves), collect the port names
+        // referenced in connections so we can build a permissive draft spec that lets the
+        // project load without PortNotFound errors.
+        let node_type_by_uuid: HashMap<String, String> = data
+            .nodes
+            .iter()
+            .map(|n| (n.id.clone(), n.type_id.clone()))
+            .collect();
+        let mut draft_extra_inputs: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut draft_extra_outputs: HashMap<String, HashSet<String>> = HashMap::new();
+        for conn in &data.connections {
+            if let Some(type_id) = node_type_by_uuid.get(&conn.to_node) {
+                if type_id.starts_with("gpu_script::") {
+                    if gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none() {
+                        draft_extra_inputs
+                            .entry(type_id.clone())
+                            .or_default()
+                            .insert(conn.to_port.clone());
+                    }
+                }
+            }
+            if let Some(type_id) = node_type_by_uuid.get(&conn.from_node) {
+                if type_id.starts_with("gpu_script::") {
+                    if gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none() {
+                        draft_extra_outputs
+                            .entry(type_id.clone())
+                            .or_default()
+                            .insert(conn.from_port.clone());
+                    }
+                }
+            }
+        }
+
         for (type_id, manifest) in gpu_script_manifests {
             if let (Some(gpu_context), Some(manifest)) =
                 (self.gpu_context.clone(), manifest.clone())
@@ -2559,9 +2593,36 @@ impl Engine {
                     continue;
                 }
             }
+            // No manifest available — build a draft spec that includes any ports referenced by
+            // existing connections so the project loads without PortNotFound errors.
             let uid = type_id.clone();
-            Arc::make_mut(&mut self.registry)
-                .register_or_replace(&type_id, move || Arc::new(GpuScriptDraftNode::new(&uid)));
+            let extra_inputs = draft_extra_inputs.remove(&type_id).unwrap_or_default();
+            let extra_outputs = draft_extra_outputs.remove(&type_id).unwrap_or_default();
+            Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+                let base = GpuScriptDraftNode::new(&uid);
+                let mut spec = base.spec();
+                for port_name in &extra_inputs {
+                    if !spec.inputs.iter().any(|p| &p.name == port_name) {
+                        spec.inputs.push(PortSpec {
+                            name: port_name.clone(),
+                            label: port_name.clone(),
+                            ty: ValueType::Any,
+                            ..Default::default()
+                        });
+                    }
+                }
+                for port_name in &extra_outputs {
+                    if !spec.outputs.iter().any(|p| &p.name == port_name) {
+                        spec.outputs.push(PortSpec {
+                            name: port_name.clone(),
+                            label: port_name.clone(),
+                            ty: ValueType::Any,
+                            ..Default::default()
+                        });
+                    }
+                }
+                Arc::new(GpuScriptDraftNode::with_spec(spec))
+            });
         }
 
         self.group_definitions.retain(|_, def| def.is_builtin);
