@@ -60,6 +60,11 @@ async function buildRootGraphState(
         const rawValue = node.params?.[param.key] ?? param.default;
         params[param.key] = normalizeParamValue(rawValue as ParamValue);
       });
+      // __script_manifest is an internal hidden param not declared in the spec.
+      // Preserve it so ScriptNodeEditor can show the saved GLSL after project load.
+      if (node.type_id.startsWith('gpu_script::') && node.params?.['__script_manifest']) {
+        params['__script_manifest'] = normalizeParamValue(node.params['__script_manifest'] as ParamValue);
+      }
 
       const [x, y] = node.position;
       newNodes.set(node.id, {

@@ -2,6 +2,14 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 use tauri::{App, Emitter};
 
 pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
+    let app_about = PredefinedMenuItem::about(app, None, None)?;
+    let app_quit = PredefinedMenuItem::quit(app, None)?;
+    let app_menu = SubmenuBuilder::new(app, "Cascade")
+        .item(&app_about)
+        .separator()
+        .item(&app_quit)
+        .build()?;
+
     let file_save = MenuItemBuilder::with_id("file.save", "Save Project")
         .accelerator("CmdOrCtrl+S")
         .build(app)?;
@@ -67,7 +75,7 @@ pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let help_menu = SubmenuBuilder::new(app, "Help").item(&help_about).build()?;
 
     let menu = MenuBuilder::new(app)
-        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&app_menu)
         .item(&file_menu)
         .item(&edit_menu)
         .item(&view_menu)

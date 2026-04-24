@@ -636,8 +636,7 @@ impl Engine {
                         node_type: to_instance.type_id.clone(),
                         port_name: conn.to_port.clone(),
                     })?;
-                let base_name = format!("{}_{}", to_instance.type_id, conn.to_port);
-                let port_name = unique_port_name(&base_name, &mut input_name_counts);
+                let port_name = unique_port_name(&conn.to_port, &mut input_name_counts);
                 incoming.push(IncomingBoundary {
                     external_from: conn.from_node,
                     external_from_port: conn.from_port.clone(),
@@ -668,8 +667,7 @@ impl Engine {
                         node_type: from_instance.type_id.clone(),
                         port_name: conn.from_port.clone(),
                     })?;
-                let base_name = format!("{}_{}", from_instance.type_id, conn.from_port);
-                let port_name = unique_port_name(&base_name, &mut output_name_counts);
+                let port_name = unique_port_name(&conn.from_port, &mut output_name_counts);
                 outgoing.push(OutgoingBoundary {
                     external_to: conn.to_node,
                     external_to_port: conn.to_port.clone(),
@@ -2511,11 +2509,14 @@ impl Engine {
     }
 
     pub fn import_document(&mut self, document: CascadeDocument) -> Result<(), CascadeError> {
+        // Pre-register kernels from the document's scripts section so that nodes whose
+        // params pre-date the __script_manifest storage format can still load. Compilation
+        // errors for individual scripts are silently skipped here — import_graph has its own
+        // graceful draft-node fallback that covers those cases without failing the load.
         for entry in document.scripts.values() {
-            let manifest_json = serde_json::to_string(&entry.manifest)
-                .map_err(|e| CascadeError::Other(e.to_string()))?;
-            self.register_gpu_kernel(&manifest_json)
-                .map_err(CascadeError::Other)?;
+            if let Ok(manifest_json) = serde_json::to_string(&entry.manifest) {
+                let _ = self.register_gpu_kernel(&manifest_json);
+            }
         }
         self.import_graph(document.graph)
     }

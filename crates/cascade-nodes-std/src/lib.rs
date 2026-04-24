@@ -37,7 +37,7 @@ pub use group::{GroupInputNode, GroupNode, GroupOutputNode};
 pub use input::{
     srgb_to_linear_lut, LoadImage, LoadImageBatch, LoadImageSequence, LoadVideo, SequenceInfo,
 };
-pub use matte::{ChromaKey, CombineRgba, EdgeBlur, MatteExpand, MatteShrink, SeparateRgba};
+pub use matte::{CombineRgba, EdgeBlur, MatteExpand, MatteShrink, SeparateRgba};
 pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, SaveExr, Viewer};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
@@ -112,7 +112,6 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("uv_map", || Arc::new(UVMap::new()));
 
     // Matte
-    registry.register("chroma_key", || Arc::new(ChromaKey::new()));
     registry.register("edge_blur", || Arc::new(EdgeBlur::new()));
     registry.register("matte_expand", || Arc::new(MatteExpand::new()));
     registry.register("matte_shrink", || Arc::new(MatteShrink::new()));

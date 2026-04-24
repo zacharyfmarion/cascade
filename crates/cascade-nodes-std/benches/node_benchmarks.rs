@@ -486,32 +486,6 @@ fn bench_generator_shape(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_matte_chroma_key(c: &mut Criterion) {
-    let mut group = c.benchmark_group("matte_chroma_key");
-    for size in STANDARD_SIZES {
-        let image = create_test_image(size, size);
-        let node = ChromaKey::new();
-        let mut inputs = HashMap::new();
-        inputs.insert("image".to_string(), Value::Image(image));
-        let mut params = HashMap::new();
-        params.insert(
-            "key_color".to_string(),
-            ParamValue::Color([0.0, 1.0, 0.0, 1.0]),
-        );
-        params.insert("tolerance".to_string(), ParamValue::Float(0.3));
-        params.insert("softness".to_string(), ParamValue::Float(0.1));
-        let ctx = make_context(inputs, &params);
-
-        group.throughput(Throughput::Elements((size * size) as u64));
-        group.bench_with_input(BenchmarkId::new("size", size), &ctx, |b, ctx| {
-            b.iter(|| {
-                black_box(pollster::block_on(node.evaluate(ctx)).unwrap());
-            });
-        });
-    }
-    group.finish();
-}
-
 fn bench_utility_math(c: &mut Criterion) {
     let mut group = c.benchmark_group("utility_math");
     for size in STANDARD_SIZES {
@@ -597,8 +571,6 @@ criterion_group!(
     bench_generator_shape
 );
 
-criterion_group!(matte_benches, bench_matte_chroma_key);
-
 criterion_group!(utility_benches, bench_utility_math);
 
 criterion_group!(
@@ -612,7 +584,6 @@ criterion_main!(
     filter_benches,
     transform_benches,
     generator_benches,
-    matte_benches,
     utility_benches,
     conversion_benches
 );
