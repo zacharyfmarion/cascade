@@ -418,7 +418,7 @@ function ColorTab() {
   const setOcioActiveView = useSettingsStore(s => s.setOcioActiveView);
 
   const [availableViews, setAvailableViews] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -437,7 +437,7 @@ function ColorTab() {
     : 'Builtin (linear sRGB)';
 
   const applyOcio = async (source: 'env' | 'file', path?: string) => {
-    setLoading(true);
+    setApplying(true);
     setError(null);
     try {
       if (source === 'env') {
@@ -450,13 +450,13 @@ function ColorTab() {
       setError(String(e));
       setOcioEnabled(false);
     } finally {
-      setLoading(false);
+      setApplying(false);
     }
   };
 
   const handleToggle = async (checked: boolean) => {
     if (!checked) {
-      setLoading(true);
+      setApplying(true);
       setError(null);
       try {
         await resetColorManagement();
@@ -464,7 +464,7 @@ function ColorTab() {
       } catch (e) {
         setError(String(e));
       } finally {
-        setLoading(false);
+        setApplying(false);
       }
       return;
     }
@@ -530,8 +530,8 @@ function ColorTab() {
     borderRadius: '3px',
     fontSize: '0.75rem',
     padding: '3px 8px',
-    cursor: loading ? 'not-allowed' : 'pointer',
-    opacity: loading ? 0.6 : 1,
+    cursor: applying ? 'not-allowed' : 'pointer',
+    opacity: applying ? 0.6 : 1,
   };
 
   return (
@@ -541,12 +541,15 @@ function ColorTab() {
         <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{statusLine}</span>
       </div>
 
-      <label style={{ ...rowStyle, cursor: loading ? 'not-allowed' : 'pointer' }}>
-        <span style={{ color: 'var(--text-secondary)' }}>Enable OCIO</span>
+      <label style={{ ...rowStyle, cursor: applying ? 'not-allowed' : 'pointer' }}>
+        <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          Enable OCIO
+          {applying && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Applying…</span>}
+        </span>
         <input
           type="checkbox"
-          checked={ocioEnabled && isOcioLoaded}
-          disabled={loading || (ocioConfigSource === 'file' && !ocioConfigPath && !ocioEnabled)}
+          checked={applying || (ocioEnabled && isOcioLoaded)}
+          disabled={applying || (ocioConfigSource === 'file' && !ocioConfigPath && !ocioEnabled)}
           onChange={e => handleToggle(e.target.checked)}
         />
       </label>
@@ -557,7 +560,7 @@ function ColorTab() {
           value={ocioConfigSource}
           onChange={e => handleSourceChange(e.target.value as 'env' | 'file')}
           style={selectStyle}
-          disabled={loading}
+          disabled={applying}
         >
           <option value="env">$OCIO environment variable</option>
           <option value="file">Config file</option>
@@ -579,7 +582,7 @@ function ColorTab() {
           }}>
             {ocioConfigPath ? ocioConfigPath.split('/').pop() : 'No file selected'}
           </span>
-          <button type="button" style={smallButtonStyle} disabled={loading} onClick={handleBrowse}>
+          <button type="button" style={smallButtonStyle} disabled={applying} onClick={handleBrowse}>
             Browse…
           </button>
         </div>
