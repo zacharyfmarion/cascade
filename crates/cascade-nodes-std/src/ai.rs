@@ -9,6 +9,8 @@ use std::collections::HashMap;
 
 const DEPTH_ANYTHING_V2_VERSION: &str =
     "b239ea33cff32bb7abb5db39ffe9a09c14cbc2894331d1ef66fe096eed88ebd4";
+const GPT_IMAGE_2_MODEL_NAME: &str = "GPT Image 2";
+const GPT_IMAGE_2_MODEL_ID: &str = "openai/gpt-image-2";
 
 pub struct AiDepthEstimate;
 
@@ -698,6 +700,73 @@ impl AiGenerateImage {
     /// Reference image port names in connection order.
     const REF_PORTS: [&str; 4] = ["ref_1", "ref_2", "ref_3", "ref_4"];
 }
+
+fn validate_gpt_image_2_aspect_ratio(aspect_ratio: &str) -> Result<(), CascadeError> {
+    match aspect_ratio {
+        "1:1" | "3:2" | "2:3" => Ok(()),
+        _ => Err(CascadeError::Other(format!(
+            "{GPT_IMAGE_2_MODEL_NAME} supports aspect ratios 1:1, 3:2, and 2:3; got {aspect_ratio}"
+        ))),
+    }
+}
+
+fn configure_generate_image_request(
+    model_name: &str,
+    aspect_ratio: &str,
+    ref_uris: Vec<String>,
+    guidance: f64,
+    input: &mut HashMap<String, cascade_core::ai::AiInputValue>,
+) -> Result<&'static str, CascadeError> {
+    let model_id = match model_name {
+        GPT_IMAGE_2_MODEL_NAME => {
+            validate_gpt_image_2_aspect_ratio(aspect_ratio)?;
+            if !ref_uris.is_empty() {
+                input.insert("input_images".to_string(), ref_uris.into());
+            }
+            input.insert("quality".to_string(), "auto".into());
+            input.insert("output_format".to_string(), "png".into());
+            GPT_IMAGE_2_MODEL_ID
+        }
+        "FLUX Kontext" => {
+            // Kontext accepts a single input_image + prompt.
+            // Uses match_input_image aspect ratio when a ref is connected.
+            if let Some(uri) = ref_uris.first() {
+                input.insert("input_image".to_string(), uri.clone().into());
+                input.insert(
+                    "aspect_ratio".to_string(),
+                    "match_input_image".to_string().into(),
+                );
+            }
+            input.insert("guidance".to_string(), guidance.into());
+            "black-forest-labs/flux-kontext-dev"
+        }
+        "Gemini 2.5 Flash" | "Nano Banana Pro" | "Nano Banana 2" => {
+            // Gemini / Nano Banana models accept image_input as an array of URIs.
+            if !ref_uris.is_empty() {
+                input.insert("image_input".to_string(), ref_uris.into());
+            }
+            match model_name {
+                "Nano Banana Pro" => "google/nano-banana-pro",
+                "Nano Banana 2" => "google/nano-banana-2",
+                _ => "google/gemini-2.5-flash-image",
+            }
+        }
+        _ => {
+            // Text-only models: FLUX 1.1 Pro, Ultra, Schnell, etc.
+            // Reference images are silently ignored for models that don't support them.
+            match model_name {
+                "FLUX 1.1 Pro" => "black-forest-labs/flux-1.1-pro",
+                "FLUX 1.1 Pro Ultra" => "black-forest-labs/flux-1.1-pro-ultra",
+                "FLUX Schnell" => "black-forest-labs/flux-schnell",
+                "Seedream 4.5" => "bytedance/seedream-4.5",
+                "Ideogram v3" => "ideogram-ai/ideogram-v3-balanced",
+                _ => "black-forest-labs/flux-1.1-pro",
+            }
+        }
+    };
+    Ok(model_id)
+}
+
 impl Node for AiGenerateImage {
     fn spec(&self) -> NodeSpec {
         NodeSpec {
@@ -755,11 +824,12 @@ impl Node for AiGenerateImage {
                     key: "model".to_string(),
                     label: "Model".to_string(),
                     ty: ValueType::Float,
-                    default: ParamDefault::String("Nano Banana 2".to_string()),
+                    default: ParamDefault::String(GPT_IMAGE_2_MODEL_NAME.to_string()),
                     min: None,
                     max: None,
                     step: None,
                     ui_hint: UiHint::Dropdown(vec![
+                        GPT_IMAGE_2_MODEL_NAME.to_string(),
                         "Nano Banana 2".to_string(),
                         "Nano Banana Pro".to_string(),
                         "Gemini 2.5 Flash".to_string(),
@@ -782,6 +852,8 @@ impl Node for AiGenerateImage {
                     step: None,
                     ui_hint: UiHint::Dropdown(vec![
                         "1:1".to_string(),
+                        "3:2".to_string(),
+                        "2:3".to_string(),
                         "4:3".to_string(),
                         "3:4".to_string(),
                         "16:9".to_string(),
@@ -831,52 +903,22 @@ impl Node for AiGenerateImage {
                     "Prompt is required for AI Generate Image".to_string(),
                 ));
             }
-            let model_name = ctx.get_param_string("model").unwrap_or("Nano Banana 2");
+            let model_name = ctx
+                .get_param_string("model")
+                .unwrap_or(GPT_IMAGE_2_MODEL_NAME);
             let aspect_ratio = ctx.get_param_string("aspect_ratio").unwrap_or("1:1");
             let ref_uris = collect_reference_image_uris(ctx, &Self::REF_PORTS)?;
             let mut input = HashMap::new();
             input.insert("prompt".to_string(), prompt.into());
             input.insert("aspect_ratio".to_string(), aspect_ratio.to_string().into());
-            // Build model-specific payload
-            let model_id = match model_name {
-                "FLUX Kontext" => {
-                    // Kontext accepts a single input_image + prompt.
-                    // Uses match_input_image aspect ratio when a ref is connected.
-                    if let Some(uri) = ref_uris.first() {
-                        input.insert("input_image".to_string(), uri.clone().into());
-                        input.insert(
-                            "aspect_ratio".to_string(),
-                            "match_input_image".to_string().into(),
-                        );
-                    }
-                    let guidance = ctx.get_param_float("guidance").unwrap_or(2.5);
-                    input.insert("guidance".to_string(), guidance.into());
-                    "black-forest-labs/flux-kontext-dev"
-                }
-                "Gemini 2.5 Flash" | "Nano Banana Pro" | "Nano Banana 2" => {
-                    // Gemini / Nano Banana models accept image_input as an array of URIs.
-                    if !ref_uris.is_empty() {
-                        input.insert("image_input".to_string(), ref_uris.into());
-                    }
-                    match model_name {
-                        "Nano Banana Pro" => "google/nano-banana-pro",
-                        "Nano Banana 2" => "google/nano-banana-2",
-                        _ => "google/gemini-2.5-flash-image",
-                    }
-                }
-                _ => {
-                    // Text-only models: FLUX 1.1 Pro, Ultra, Schnell, etc.
-                    // Reference images are silently ignored for models that don't support them.
-                    match model_name {
-                        "FLUX 1.1 Pro" => "black-forest-labs/flux-1.1-pro",
-                        "FLUX 1.1 Pro Ultra" => "black-forest-labs/flux-1.1-pro-ultra",
-                        "FLUX Schnell" => "black-forest-labs/flux-schnell",
-                        "Seedream 4.5" => "bytedance/seedream-4.5",
-                        "Ideogram v3" => "ideogram-ai/ideogram-v3-balanced",
-                        _ => "black-forest-labs/flux-1.1-pro",
-                    }
-                }
-            };
+            let guidance = ctx.get_param_float("guidance").unwrap_or(2.5);
+            let model_id = configure_generate_image_request(
+                model_name,
+                aspect_ratio,
+                ref_uris,
+                guidance,
+                &mut input,
+            )?;
             let request = AiPredictionRequest {
                 version: String::new(),
                 model: Some(model_id.to_string()),
@@ -905,5 +947,94 @@ impl Node for AiGenerateImage {
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cascade_core::ai::AiInputValue;
+
+    fn string_input<'a>(input: &'a HashMap<String, AiInputValue>, key: &str) -> Option<&'a str> {
+        match input.get(key) {
+            Some(AiInputValue::String(value)) => Some(value.as_str()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn generate_image_defaults_to_gpt_image_2() {
+        let spec = AiGenerateImage::new().spec();
+        let model_param = spec
+            .params
+            .iter()
+            .find(|param| param.key == "model")
+            .expect("model param should exist");
+
+        match &model_param.default {
+            ParamDefault::String(default) => assert_eq!(default, GPT_IMAGE_2_MODEL_NAME),
+            _ => panic!("model default should be a string"),
+        }
+
+        match &model_param.ui_hint {
+            UiHint::Dropdown(options) => {
+                assert_eq!(
+                    options.first().map(String::as_str),
+                    Some(GPT_IMAGE_2_MODEL_NAME)
+                );
+                assert!(options
+                    .iter()
+                    .any(|option| option == GPT_IMAGE_2_MODEL_NAME));
+            }
+            _ => panic!("model param should be a dropdown"),
+        }
+    }
+
+    #[test]
+    fn gpt_image_2_payload_uses_input_images_and_png_output() {
+        let mut input = HashMap::new();
+        input.insert("prompt".to_string(), "Make a product mockup".into());
+        input.insert("aspect_ratio".to_string(), "3:2".into());
+
+        let model_id = configure_generate_image_request(
+            GPT_IMAGE_2_MODEL_NAME,
+            "3:2",
+            vec!["data:image/png;base64,aaa".to_string()],
+            2.5,
+            &mut input,
+        )
+        .expect("GPT Image 2 payload should be valid");
+
+        assert_eq!(model_id, GPT_IMAGE_2_MODEL_ID);
+        assert_eq!(string_input(&input, "quality"), Some("auto"));
+        assert_eq!(string_input(&input, "output_format"), Some("png"));
+        assert!(!input.contains_key("image_input"));
+
+        match input.get("input_images") {
+            Some(AiInputValue::StringList(images)) => {
+                assert_eq!(images, &vec!["data:image/png;base64,aaa".to_string()]);
+            }
+            _ => panic!("GPT Image 2 references should use input_images"),
+        }
+    }
+
+    #[test]
+    fn gpt_image_2_rejects_unsupported_aspect_ratios() {
+        let mut input = HashMap::new();
+        input.insert("prompt".to_string(), "Make a poster".into());
+        input.insert("aspect_ratio".to_string(), "16:9".into());
+
+        let err = configure_generate_image_request(
+            GPT_IMAGE_2_MODEL_NAME,
+            "16:9",
+            Vec::new(),
+            2.5,
+            &mut input,
+        )
+        .expect_err("unsupported aspect ratio should fail before calling Replicate");
+
+        assert!(err
+            .to_string()
+            .contains("supports aspect ratios 1:1, 3:2, and 2:3"));
     }
 }
