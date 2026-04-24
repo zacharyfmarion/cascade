@@ -1,33 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useGraphStore } from '../store/graphStore';
-import { buildGpuScriptManifest, generateGlslKernel } from '../ai/gpuScript';
-
-interface ScriptEditorState {
-  inputs: Array<{ id: string; name: string; label: string; ty: string }>;
-  outputs: Array<{ id: string; name: string; label: string; ty: string }>;
-  params: Array<{
-    id: string;
-    key: string;
-    label: string;
-    ty: string;
-    default: number | boolean;
-    min?: number;
-    max?: number;
-    step?: number;
-  }>;
-  kernel: string;
-  compileStatus: 'idle' | 'compiling' | 'success' | 'error';
-  compileError: string | null;
-}
-
-const DEFAULT_STATE: ScriptEditorState = {
-  inputs: [{ id: 'in_0', name: 'image', label: 'Image', ty: 'Image' }],
-  outputs: [{ id: 'out_0', name: 'image', label: 'Image', ty: 'Image' }],
-  params: [],
-  kernel: 'return color;',
-  compileStatus: 'idle',
-  compileError: null,
-};
+import { useSettingsStore } from '../store/settingsStore';
+import {
+  buildGpuScriptManifest,
+  isScalarScriptType,
+} from '../ai/gpuScript';
+import {
+  createScriptEditorInitialState,
+  makeId,
+  sanitizeScalarPort,
+  scalarDefault,
+  uiHintForType,
+  type ScriptDraftPort,
+  type ScriptEditorState,
+} from './scriptNodeEditorModel';
 
 const SectionHeader: React.FC<{ children: React.ReactNode; action?: React.ReactNode }> = ({ children, action }) => (
   <div style={{
@@ -106,7 +92,7 @@ const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = 
       onMouseEnter={e => { e.currentTarget.style.color = 'var(--status-error-bright)'; }}
       onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
     >
-      ×
+      x
     </button>
     <div style={{ marginRight: '16px' }}>
       {children}
@@ -178,147 +164,87 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) 
   />
 );
 
+const uniqueName = (base: string, ports: ScriptDraftPort[]): string => {
+  const existing = new Set(ports.map(port => port.name));
+  if (!existing.has(base)) return base;
+  let index = 2;
+  while (existing.has(`${base}_${index}`)) index += 1;
+  return `${base}_${index}`;
+};
+
+const numberValue = (value: number | boolean | undefined): string =>
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : '';
 
 export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({ nodeId, typeId }) => {
   const compileScriptNode = useGraphStore(s => s.compileScriptNode);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const nodeParams = useGraphStore(s => s.nodes.get(nodeId)?.params);
-  const [apiKey, setApiKey] = useState('');
-  const [apiKeyVisible, setApiKeyVisible] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
+  const openAiAssistant = useSettingsStore(s => s.openAiAssistant);
+  const manifestJson = nodeParams?.__script_manifest && 'String' in nodeParams.__script_manifest
+    ? nodeParams.__script_manifest.String
+    : null;
+  const spec = useMemo(() => nodeSpecs.find(s => s.id === typeId), [nodeSpecs, typeId]);
+
+  const [state, setState] = useState<ScriptEditorState>(() => createScriptEditorInitialState(typeId, manifestJson, spec));
 
   useEffect(() => {
-  const storedKey = localStorage.getItem('cascade_anthropic_api_key');
-    if (storedKey) setApiKey(storedKey);
-  }, []);
-  
-  const [state, setState] = useState<ScriptEditorState>(() => {
-    const savedManifest = nodeParams?.['__script_manifest'];
-    if (savedManifest && 'String' in (savedManifest as Record<string, unknown>)) {
-      try {
-        const manifest = JSON.parse((savedManifest as { String: string }).String);
-        return {
-          inputs: (manifest.inputs ?? []).map((p: { name: string; label: string; ty: string }, i: number) => ({
-            id: `in_${i}`, name: p.name, label: p.label, ty: p.ty,
-          })),
-          outputs: (manifest.outputs ?? []).map((p: { name: string; label: string; ty: string }, i: number) => ({
-            id: `out_${i}`, name: p.name, label: p.label, ty: p.ty,
-          })),
-          params: (manifest.params ?? []).map((p: { key: string; label: string; type: string; default: number | boolean; min?: number; max?: number; step?: number }, i: number) => ({
-            id: `p_${i}`, key: p.key, label: p.label, ty: p.type,
-            default: p.default, min: p.min, max: p.max, step: p.step,
-          })),
-          kernel: manifest.kernel ?? 'return color;',
-          compileStatus: 'success' as const,
-          compileError: null,
-        };
-      } catch { /* fall through */ }
-    }
+    setState(createScriptEditorInitialState(typeId, manifestJson, spec));
+  }, [nodeId, typeId, manifestJson, spec]);
 
-    const spec = nodeSpecs.find(s => s.id === typeId);
-    if (spec) {
-        return {
-            inputs: spec.inputs.map((p, i) => ({ id: `in_${i}`, name: p.name, label: p.label, ty: p.ty })),
-            outputs: spec.outputs.map((p, i) => ({ id: `out_${i}`, name: p.name, label: p.label, ty: p.ty })),
-            params: spec.params.map((p, i) => {
-                let def: number | boolean = 0;
-                if ('Float' in p.default) def = p.default.Float;
-                else if ('Int' in p.default) def = p.default.Int;
-                else if ('Bool' in p.default) def = p.default.Bool;
+  const markDraft = (update: (draft: ScriptEditorState) => ScriptEditorState): void => {
+    setState(current => ({
+      ...update(current),
+      compileStatus: current.compileStatus === 'compiling' ? 'compiling' : 'idle',
+      compileError: null,
+    }));
+  };
 
-                return {
-                    id: `p_${i}`,
-                    key: p.key,
-                    label: p.label,
-                    ty: p.ty,
-                    default: def,
-                    min: p.min,
-                    max: p.max,
-                    step: p.step
-                };
-            }),
-            kernel: 'return color;',
-            compileStatus: 'idle',
-            compileError: null
-        };
-    }
-    return DEFAULT_STATE;
-  });
+  const updateInput = (idx: number, changes: Partial<ScriptDraftPort>) => {
+    markDraft(current => {
+      const inputs = current.inputs.map((input, i) => {
+        if (i !== idx) return input;
+        const next = sanitizeScalarPort({ ...input, ...changes });
+        if (changes.ty && isScalarScriptType(changes.ty) && !isScalarScriptType(input.ty)) {
+          next.default = scalarDefault(changes.ty);
+          next.ui = uiHintForType(changes.ty);
+          next.min = changes.ty === 'Bool' ? undefined : 0;
+          next.max = changes.ty === 'Bool' ? undefined : 1;
+          next.step = changes.ty === 'Int' ? 1 : changes.ty === 'Float' ? 0.01 : undefined;
+        }
+        return next;
+      });
+      return { ...current, inputs };
+    });
+  };
+
+  const updateOutput = (idx: number, changes: Partial<ScriptDraftPort>) => {
+    markDraft(current => ({
+      ...current,
+      outputs: current.outputs.map((output, i) => i === idx ? { ...output, ...changes } : output),
+    }));
+  };
 
   const handleCompile = async () => {
     setState(s => ({ ...s, compileStatus: 'compiling', compileError: null }));
-    
+
     try {
       const manifest = buildGpuScriptManifest(
         typeId,
-        state.inputs,
-        state.outputs,
-        state.params,
+        state.inputs.map(({ id: _id, ...input }) => input),
+        state.outputs.map(({ id: _id, ...output }) => output),
+        [],
         state.kernel,
+        state.supportsMask,
       );
-      const manifestJson = JSON.stringify(manifest);
-      await compileScriptNode(nodeId, manifestJson);
-      const nodes = useGraphStore.getState().nodes;
-      const node = nodes.get(nodeId);
-      if (node) {
-        const updated = new Map(nodes);
-        updated.set(nodeId, {
-          ...node,
-          params: { ...node.params, __script_manifest: { String: manifestJson } },
-        });
-        useGraphStore.setState({ nodes: updated });
-      }
+      const nextManifestJson = JSON.stringify(manifest);
+      await compileScriptNode(nodeId, nextManifestJson);
       setState(s => ({ ...s, compileStatus: 'success' }));
     } catch (e) {
-      setState(s => ({ 
-        ...s, 
-        compileStatus: 'error', 
-        compileError: e instanceof Error ? e.message : String(e) 
-      }));
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (!apiKey || aiGenerating) return;
-    setAiGenerating(true);
-    setAiError(null);
-
-    try {
-      const manifest = await generateGlslKernel(aiPrompt, apiKey);
       setState(s => ({
         ...s,
-        inputs: manifest.inputs.map((input, i) => ({
-          id: `in_${i}_${crypto.randomUUID()}`,
-          name: input.name,
-          label: input.label,
-          ty: input.ty,
-        })),
-        outputs: manifest.outputs.map((output, i) => ({
-          id: `out_${i}_${crypto.randomUUID()}`,
-          name: output.name,
-          label: output.label,
-          ty: output.ty,
-        })),
-        params: manifest.params.map((param, i) => ({
-          id: `p_${i}_${crypto.randomUUID()}`,
-          key: param.key,
-          label: param.label,
-          ty: param.type,
-          default: param.default,
-          min: param.min,
-          max: param.max,
-          step: param.step,
-        })),
-        kernel: manifest.kernel,
-        compileStatus: 'idle',
-        compileError: null,
+        compileStatus: 'error',
+        compileError: e instanceof Error ? e.message : String(e)
       }));
-    } catch (error) {
-      setAiError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAiGenerating(false);
     }
   };
 
@@ -327,277 +253,231 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>GPU Script</span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {state.compileStatus === 'success' && <span style={{ color: 'var(--accent-primary)', fontSize: '0.7rem', fontWeight: 600 }}>Compiled</span>}
-            {state.compileStatus === 'error' && <span style={{ color: 'var(--status-error-bright)', fontSize: '0.7rem', fontWeight: 600 }}>Error</span>}
-            {state.compileStatus === 'compiling' && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Compiling...</span>}
+          {state.compileStatus === 'success' && <span style={{ color: 'var(--accent-primary)', fontSize: '0.7rem', fontWeight: 600 }}>Compiled</span>}
+          {state.compileStatus === 'error' && <span style={{ color: 'var(--status-error-bright)', fontSize: '0.7rem', fontWeight: 600 }}>Error</span>}
+          {state.compileStatus === 'compiling' && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Compiling...</span>}
+          <button
+            type="button"
+            onClick={openAiAssistant}
+            style={{
+              background: 'var(--bg-surface)',
+              color: 'var(--accent-primary)',
+              border: '1px solid var(--accent-primary)',
+              borderRadius: '999px',
+              padding: '4px 10px',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Edit With AI
+          </button>
         </div>
       </div>
 
       <div style={{ padding: '0 16px 32px 16px' }}>
-        <SectionHeader 
-            action={
-                <IconButton onClick={() => setState(s => ({ ...s, inputs: [...s.inputs, { id: crypto.randomUUID(), name: 'input', label: 'Input', ty: 'Image' }] }))} title="Add Input">
-                    + Add
-                </IconButton>
-            }
+        <SectionHeader
+          action={
+            <IconButton
+              onClick={() => markDraft(s => ({
+                ...s,
+                inputs: [
+                  ...s.inputs,
+                  { id: makeId('in'), name: uniqueName('input', s.inputs), label: 'Input', ty: 'Image' },
+                ],
+              }))}
+              title="Add Input Or Control"
+            >
+              + Add
+            </IconButton>
+          }
         >
-            Inputs
+          Inputs & Controls
         </SectionHeader>
-        
-        {state.inputs.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '8px' }}>No inputs defined.</div>}
+
+        {state.inputs.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '8px' }}>No inputs or controls defined.</div>}
 
         {state.inputs.map((input, idx) => (
-          <PortCard key={input.id} onRemove={() => {
-            const newInputs = state.inputs.filter((_, i) => i !== idx);
-            setState(s => ({ ...s, inputs: newInputs }));
-          }}>
-            <Row>
-                <InputGroup>
-                    <Label title="Variable name used in GLSL (e.g. u_myInput)">Variable Name</Label>
-                    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-primary)', border: '1px solid var(--border-default)', borderRadius: '3px', overflow: 'hidden' }}>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', paddingLeft: '8px', userSelect: 'none' }}>u_</div>
-                        <TextInput 
-                            value={input.name} 
-                            onChange={e => {
-                                const newInputs = [...state.inputs];
-                                newInputs[idx].name = e.target.value;
-                                setState(s => ({ ...s, inputs: newInputs }));
-                            }}
-                            placeholder="name"
-                            style={{ border: 'none', paddingLeft: '2px' }}
-                        />
-                    </div>
-                </InputGroup>
-                <InputGroup>
-                    <Label title="Label displayed on the node">Label</Label>
-                    <TextInput 
-                        value={input.label} 
-                        onChange={e => {
-                            const newInputs = [...state.inputs];
-                            newInputs[idx].label = e.target.value;
-                            setState(s => ({ ...s, inputs: newInputs }));
-                        }}
-                        placeholder="Label"
+          <PortCard
+            key={input.id}
+            onRemove={() => markDraft(s => ({ ...s, inputs: s.inputs.filter((_, i) => i !== idx) }))}
+          >
+            <Row style={{ marginBottom: isScalarScriptType(input.ty) ? '8px' : undefined }}>
+              <InputGroup>
+                <Label title={isScalarScriptType(input.ty) ? 'Uniform name used directly in GLSL' : 'Image variable name used as u_name in GLSL'}>
+                  {isScalarScriptType(input.ty) ? 'Name' : 'Variable Name'}
+                </Label>
+                {isScalarScriptType(input.ty) ? (
+                  <TextInput
+                    value={input.name}
+                    onChange={e => updateInput(idx, { name: e.target.value })}
+                    placeholder="amount"
+                  />
+                ) : (
+                  <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-primary)', border: '1px solid var(--border-default)', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', paddingLeft: '8px', userSelect: 'none' }}>u_</div>
+                    <TextInput
+                      value={input.name}
+                      onChange={e => updateInput(idx, { name: e.target.value })}
+                      placeholder="name"
+                      style={{ border: 'none', paddingLeft: '2px' }}
                     />
-                </InputGroup>
-                <InputGroup>
-                    <Label>Type</Label>
-                    <Select
-                        value={input.ty}
-                        onChange={e => {
-                            const newInputs = [...state.inputs];
-                            newInputs[idx].ty = e.target.value;
-                            setState(s => ({ ...s, inputs: newInputs }));
-                        }}
-                    >
-                        <option value="Image">Image</option>
-                        <option value="Mask">Mask</option>
-                        <option value="Float">Float</option>
-                        <option value="Int">Int</option>
-                    </Select>
-                </InputGroup>
+                  </div>
+                )}
+              </InputGroup>
+              <InputGroup>
+                <Label title="Label displayed on the node">Label</Label>
+                <TextInput
+                  value={input.label}
+                  onChange={e => updateInput(idx, { label: e.target.value })}
+                  placeholder="Label"
+                />
+              </InputGroup>
+              <InputGroup>
+                <Label>Type</Label>
+                <Select value={input.ty} onChange={e => updateInput(idx, { ty: e.target.value })}>
+                  <option value="Image">Image</option>
+                  <option value="Mask">Mask</option>
+                  <option value="Float">Float</option>
+                  <option value="Int">Int</option>
+                  <option value="Bool">Bool</option>
+                </Select>
+              </InputGroup>
             </Row>
+
+            {isScalarScriptType(input.ty) && (
+              <div style={{ background: 'var(--bg-primary)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
+                <Label>Control Default & Range</Label>
+                {input.ty === 'Bool' ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                    <input
+                      id={`default-${input.id}`}
+                      type="checkbox"
+                      checked={Boolean(input.default)}
+                      onChange={e => updateInput(idx, { default: e.target.checked })}
+                    />
+                    <label htmlFor={`default-${input.id}`} style={{ cursor: 'pointer' }}>Default Value</label>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <TextInput
+                      type="number"
+                      value={numberValue(input.default)}
+                      onChange={e => updateInput(idx, { default: e.target.value ? Number(e.target.value) : 0 })}
+                      placeholder="Default"
+                      title="Default Value"
+                    />
+                    <TextInput
+                      type="number"
+                      value={numberValue(input.min)}
+                      onChange={e => updateInput(idx, { min: e.target.value ? Number(e.target.value) : undefined })}
+                      placeholder="Min"
+                      title="Minimum Value"
+                    />
+                    <TextInput
+                      type="number"
+                      value={numberValue(input.max)}
+                      onChange={e => updateInput(idx, { max: e.target.value ? Number(e.target.value) : undefined })}
+                      placeholder="Max"
+                      title="Maximum Value"
+                    />
+                    <TextInput
+                      type="number"
+                      value={numberValue(input.step)}
+                      onChange={e => updateInput(idx, { step: e.target.value ? Number(e.target.value) : undefined })}
+                      placeholder="Step"
+                      title="Step Value"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </PortCard>
         ))}
 
         <SectionHeader
-            action={
-                <IconButton onClick={() => setState(s => ({ ...s, outputs: [...s.outputs, { id: crypto.randomUUID(), name: 'output', label: 'Output', ty: 'Image' }] }))} title="Add Output">
-                    + Add
-                </IconButton>
-            }
+          action={
+            <IconButton
+              onClick={() => markDraft(s => ({
+                ...s,
+                outputs: [
+                  ...s.outputs,
+                  { id: makeId('out'), name: uniqueName('output', s.outputs), label: 'Output', ty: 'Image' },
+                ],
+              }))}
+              title="Add Output"
+            >
+              + Add
+            </IconButton>
+          }
         >
-            Outputs
+          Outputs
         </SectionHeader>
 
         {state.outputs.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '8px' }}>No outputs defined.</div>}
 
         {state.outputs.map((output, idx) => (
-          <PortCard key={output.id} onRemove={() => {
-            const newOutputs = state.outputs.filter((_, i) => i !== idx);
-            setState(s => ({ ...s, outputs: newOutputs }));
-          }}>
+          <PortCard
+            key={output.id}
+            onRemove={() => markDraft(s => ({ ...s, outputs: s.outputs.filter((_, i) => i !== idx) }))}
+          >
             <Row>
-                <InputGroup>
-                    <Label title="Internal name (unused for outputs currently but good for metadata)">Name</Label>
-                    <TextInput 
-                        value={output.name} 
-                        onChange={e => {
-                            const newOutputs = [...state.outputs];
-                            newOutputs[idx].name = e.target.value;
-                            setState(s => ({ ...s, outputs: newOutputs }));
-                        }}
-                        placeholder="name"
-                    />
-                </InputGroup>
-                <InputGroup>
-                    <Label title="Label displayed on the node">Label</Label>
-                    <TextInput 
-                        value={output.label} 
-                        onChange={e => {
-                            const newOutputs = [...state.outputs];
-                            newOutputs[idx].label = e.target.value;
-                            setState(s => ({ ...s, outputs: newOutputs }));
-                        }}
-                        placeholder="Label"
-                    />
-                </InputGroup>
-                <InputGroup>
-                    <Label>Type</Label>
-                    <Select
-                        value={output.ty}
-                        onChange={e => {
-                            const newOutputs = [...state.outputs];
-                            newOutputs[idx].ty = e.target.value;
-                            setState(s => ({ ...s, outputs: newOutputs }));
-                        }}
-                    >
-                        <option value="Image">Image</option>
-                        <option value="Mask">Mask</option>
-                        <option value="Float">Float</option>
-                        <option value="Int">Int</option>
-                    </Select>
-                </InputGroup>
+              <InputGroup>
+                <Label title="Internal output name">Name</Label>
+                <TextInput
+                  value={output.name}
+                  onChange={e => updateOutput(idx, { name: e.target.value })}
+                  placeholder="name"
+                />
+              </InputGroup>
+              <InputGroup>
+                <Label title="Label displayed on the node">Label</Label>
+                <TextInput
+                  value={output.label}
+                  onChange={e => updateOutput(idx, { label: e.target.value })}
+                  placeholder="Label"
+                />
+              </InputGroup>
+              <InputGroup>
+                <Label>Type</Label>
+                <Select value={output.ty} onChange={e => updateOutput(idx, { ty: e.target.value })}>
+                  <option value="Image">Image</option>
+                  <option value="Mask">Mask</option>
+                </Select>
+              </InputGroup>
             </Row>
           </PortCard>
         ))}
 
-        <SectionHeader
-            action={
-                <IconButton onClick={() => setState(s => ({ ...s, params: [...s.params, { id: crypto.randomUUID(), key: 'param', label: 'Param', ty: 'Float', default: 0, min: 0, max: 1 }] }))} title="Add Parameter">
-                    + Add
-                </IconButton>
-            }
-        >
-            Parameters
-        </SectionHeader>
-
-        {state.params.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic', marginBottom: '8px' }}>No parameters defined.</div>}
-
-        {state.params.map((param, idx) => (
-          <PortCard key={param.id} onRemove={() => {
-            const newParams = state.params.filter((_, i) => i !== idx);
-            setState(s => ({ ...s, params: newParams }));
-          }}>
-            <Row style={{ marginBottom: '8px' }}>
-                <InputGroup>
-                    <Label title="Variable name used in GLSL (e.g. param)">Key</Label>
-                    <TextInput 
-                        value={param.key} 
-                        onChange={e => {
-                            const newParams = [...state.params];
-                            newParams[idx].key = e.target.value;
-                            setState(s => ({ ...s, params: newParams }));
-                        }}
-                        placeholder="Key"
-                    />
-                </InputGroup>
-                <InputGroup>
-                    <Label title="Label displayed in Inspector">Label</Label>
-                    <TextInput 
-                        value={param.label} 
-                        onChange={e => {
-                            const newParams = [...state.params];
-                            newParams[idx].label = e.target.value;
-                            setState(s => ({ ...s, params: newParams }));
-                        }}
-                        placeholder="Label"
-                    />
-                </InputGroup>
-                <InputGroup>
-                    <Label>Type</Label>
-                    <Select
-                        value={param.ty}
-                        onChange={e => {
-                            const newParams = [...state.params];
-                            newParams[idx].ty = e.target.value;
-                            if (e.target.value === 'Bool') newParams[idx].default = false;
-                            else newParams[idx].default = 0;
-                            setState(s => ({ ...s, params: newParams }));
-                        }}
-                    >
-                        <option value="Float">Float</option>
-                        <option value="Int">Int</option>
-                        <option value="Bool">Bool</option>
-                    </Select>
-                </InputGroup>
-            </Row>
-            
-            <div style={{ background: 'var(--bg-primary)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
-                <Label>Constraints & Default</Label>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    {param.ty === 'Bool' ? (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--text-primary)' }}>
-                            <input 
-                                id={`cb-${param.id}`}
-                                type="checkbox" 
-                                checked={Boolean(param.default)}
-                                onChange={e => {
-                                    const newParams = [...state.params];
-                                    newParams[idx].default = e.target.checked;
-                                    setState(s => ({ ...s, params: newParams }));
-                                }}
-                            />
-                            <label htmlFor={`cb-${param.id}`} style={{ cursor: 'pointer' }}>Default Value</label>
-                        </div>
-                    ) : (
-                        <>
-                            <div style={{ flex: 1 }}>
-                                <TextInput 
-                                    type="number" 
-                                    value={String(param.default)}
-                                    onChange={e => {
-                                        const newParams = [...state.params];
-                                        newParams[idx].default = parseFloat(e.target.value);
-                                        setState(s => ({ ...s, params: newParams }));
-                                    }}
-                                    placeholder="Default"
-                                    title="Default Value"
-                                />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <TextInput 
-                                    type="number" 
-                                    value={String(param.min ?? '')}
-                                    onChange={e => {
-                                        const newParams = [...state.params];
-                                        newParams[idx].min = e.target.value ? parseFloat(e.target.value) : undefined;
-                                        setState(s => ({ ...s, params: newParams }));
-                                    }}
-                                    placeholder="Min"
-                                    title="Minimum Value"
-                                />
-                            </div>
-                            <div style={{ flex: 1 }}>
-                                <TextInput 
-                                    type="number" 
-                                    value={String(param.max ?? '')}
-                                    onChange={e => {
-                                        const newParams = [...state.params];
-                                        newParams[idx].max = e.target.value ? parseFloat(e.target.value) : undefined;
-                                        setState(s => ({ ...s, params: newParams }));
-                                    }}
-                                    placeholder="Max"
-                                    title="Maximum Value"
-                                />
-                            </div>
-                        </>
-                    )}
-                </div>
-            </div>
-          </PortCard>
-        ))}
+        <SectionHeader>Node Options</SectionHeader>
+        <label style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          fontSize: '0.8rem',
+          cursor: 'pointer',
+          marginBottom: '12px',
+        }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Enable mask input</span>
+          <input
+            type="checkbox"
+            checked={state.supportsMask}
+            onChange={(e) => markDraft(s => ({ ...s, supportsMask: e.target.checked }))}
+            style={{ accentColor: 'var(--accent-primary)' }}
+          />
+        </label>
 
         <SectionHeader>GLSL Kernel (body of process)</SectionHeader>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', fontFamily: 'monospace', background: 'var(--bg-surface)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
-          <div><span style={{color: 'var(--accent-primary)'}}>u_input</span> : readonly image2D</div>
-          <div><span style={{color: 'var(--accent-primary)'}}>imageLoad(img, pixel)</span> : vec4</div>
-          <div><span style={{color: 'var(--accent-primary)'}}>imageSize(img)</span> : ivec2</div>
+          <div><span style={{ color: 'var(--accent-primary)' }}>u_input</span> : primary readonly image2D</div>
+          <div><span style={{ color: 'var(--accent-primary)' }}>u_name</span> : additional image or mask input</div>
+          <div><span style={{ color: 'var(--accent-primary)' }}>amount</span> : scalar controls are uniforms by name</div>
+          <div><span style={{ color: 'var(--accent-primary)' }}>imageLoad(img, pixel)</span> : vec4</div>
         </div>
-        
+
         <textarea
           value={state.kernel}
-          onChange={e => setState(s => ({ ...s, kernel: e.target.value }))}
+          onChange={e => markDraft(s => ({ ...s, kernel: e.target.value }))}
           style={{
             width: '100%',
             minHeight: '250px',
@@ -634,97 +514,21 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
               boxShadow: 'var(--shadow-sm)'
             }}
           >
-            {state.compileStatus === 'compiling' ? 'Compiling...' : 'Compile Shader'}
+            {state.compileStatus === 'compiling' ? 'Compiling...' : 'Apply & Compile'}
           </button>
-          
+
           {state.compileError && (
-            <div style={{ 
-                color: 'var(--status-error-bright)',
-                fontSize: '0.85rem', 
-                whiteSpace: 'pre-wrap', 
-                background: 'var(--status-error-subtle-bg)',
-                border: '1px solid var(--status-error-subtle-border)',
-                padding: '12px', 
-                borderRadius: '4px',
-                fontFamily: 'monospace'
+            <div style={{
+              color: 'var(--status-error-bright)',
+              fontSize: '0.85rem',
+              whiteSpace: 'pre-wrap',
+              background: 'var(--status-error-subtle-bg)',
+              border: '1px solid var(--status-error-subtle-border)',
+              padding: '12px',
+              borderRadius: '4px',
+              fontFamily: 'monospace'
             }}>
               <strong>Error:</strong> {state.compileError}
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: '32px', borderTop: '1px solid var(--border-default)', paddingTop: '24px' }}>
-          <SectionHeader action={
-            <IconButton onClick={() => setApiKeyVisible(v => !v)} title={apiKeyVisible ? 'Hide API key' : 'Show API key'}>
-              {apiKeyVisible ? 'Hide' : 'Show'}
-            </IconButton>
-          }>
-            AI Generation
-          </SectionHeader>
-          
-          {apiKeyVisible && (
-            <div style={{ marginBottom: '12px' }}>
-                <Label>Anthropic API Key</Label>
-                <TextInput
-                type="password"
-                value={apiKey}
-                onChange={e => {
-                    const nextKey = e.target.value;
-                    setApiKey(nextKey);
-    if (nextKey) localStorage.setItem('cascade_anthropic_api_key', nextKey);
-    else localStorage.removeItem('cascade_anthropic_api_key');
-                }}
-                placeholder="sk-ant-..."
-                />
-            </div>
-          )}
-          
-          <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>
-            {!apiKey && (
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', background: 'var(--bg-surface)', padding: '8px', borderRadius: '4px' }}>
-                    Set your Anthropic API key to enable AI generation
-                </div>
-            )}
-            <textarea
-              value={aiPrompt}
-              onChange={e => setAiPrompt(e.target.value)}
-              placeholder="Describe the effect you want (e.g. 'VHS glitch effect with chromatic aberration')..."
-              style={{
-                width: '100%',
-                minHeight: '80px',
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-default)',
-                borderRadius: '4px',
-                padding: '8px',
-                color: 'var(--text-primary)',
-                fontSize: '0.85rem',
-                resize: 'vertical',
-                outline: 'none'
-              }}
-            />
-            <button
-              type="button"
-              disabled={!apiKey || aiGenerating}
-              title={!apiKey ? 'Add API key to enable' : undefined}
-              onClick={handleGenerate}
-              style={{
-                background: aiGenerating || !apiKey ? 'var(--bg-tertiary)' : 'var(--bg-surface)',
-                color: aiGenerating || !apiKey ? 'var(--text-muted)' : 'var(--accent-primary)',
-                border: '1px solid var(--accent-primary)',
-                borderRadius: '4px',
-                padding: '8px 12px',
-                cursor: aiGenerating || !apiKey ? 'not-allowed' : 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                opacity: aiGenerating || !apiKey ? 0.5 : 1
-              }}
-            >
-              {aiGenerating ? 'Generating...' : '✨ Generate GLSL'}
-            </button>
-          </div>
-          {aiError && (
-            <div style={{ marginTop: '8px', color: 'var(--status-error-bright)', fontSize: '0.8rem', whiteSpace: 'pre-wrap' }}>
-              {aiError}
             </div>
           )}
         </div>

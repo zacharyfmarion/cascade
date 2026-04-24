@@ -12,12 +12,14 @@ pub fn builtin_blend_manifest() -> KernelManifest {
                 label: "Image".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "blend_image".to_string(),
                 label: "Blend".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -25,6 +27,7 @@ pub fn builtin_blend_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -197,12 +200,14 @@ pub fn builtin_alpha_over_manifest() -> KernelManifest {
                 label: "Background".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "foreground".to_string(),
                 label: "Foreground".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -210,6 +215,7 @@ pub fn builtin_alpha_over_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "opacity".to_string(),
@@ -247,12 +253,14 @@ pub fn builtin_merge_manifest() -> KernelManifest {
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -260,6 +268,7 @@ pub fn builtin_merge_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -421,18 +430,21 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "mask".to_string(),
                 label: "Mask".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -440,6 +452,7 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "invert_mask".to_string(),
@@ -481,12 +494,14 @@ pub fn builtin_image_math_manifest() -> KernelManifest {
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -494,6 +509,7 @@ pub fn builtin_image_math_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![ManifestParam {
             key: "operation".to_string(),
@@ -592,12 +608,14 @@ pub fn builtin_channel_shuffle_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         outputs: vec![ManifestPort {
             name: "image".to_string(),
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {
@@ -696,12 +714,14 @@ pub fn builtin_copy_channels_manifest() -> KernelManifest {
                 label: "A".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
             ManifestPort {
                 name: "B".to_string(),
                 label: "B".to_string(),
                 ty: "Image".to_string(),
                 optional: false,
+                ..Default::default()
             },
         ],
         outputs: vec![ManifestPort {
@@ -709,6 +729,7 @@ pub fn builtin_copy_channels_manifest() -> KernelManifest {
             label: "Image".to_string(),
             ty: "Image".to_string(),
             optional: false,
+            ..Default::default()
         }],
         params: vec![
             ManifestParam {

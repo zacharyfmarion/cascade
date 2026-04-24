@@ -19,7 +19,9 @@ export function isNodeSupportedOnSurface(
 }
 
 export function getAuthoringNodeSpecs(nodeSpecs: NodeSpec[], surface: RuntimeSurface): NodeSpec[] {
-  return nodeSpecs.filter(spec => isNodeSupportedOnSurface(spec, surface));
+  return nodeSpecs.filter(
+    spec => !spec.id.startsWith('gpu_script::') && isNodeSupportedOnSurface(spec, surface),
+  );
 }
 
 export function getUnsupportedNodeMessage(

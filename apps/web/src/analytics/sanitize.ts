@@ -4,6 +4,7 @@ const SENSITIVE_KEY_PATTERN = /api[_-]?key|token|secret|password|prompt|content|
 // We must restore it after sanitizing, even though it matches SENSITIVE_KEY_PATTERN.
 const POSTHOG_INTERNAL_PROPERTY_KEYS = new Set(['token']);
 
+
 type AnalyticsValue =
   | string
   | number

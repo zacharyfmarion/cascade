@@ -1,5 +1,6 @@
 import { getRuntimeSurface } from '../platform/runtime';
 
+
 const STORAGE_KEY = 'cascade-analytics-debug';
 const MAX_ENTRIES = 200;
 const MAX_CAPTURES = 100;

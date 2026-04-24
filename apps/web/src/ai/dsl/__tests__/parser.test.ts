@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { parseDsl, splitTopLevelParams } from '../parser';
 import { mockSpecs } from './helpers';
+import { HandleMap } from '../handleMap';
+import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../../gpuScript';
 
 describe('parseDsl', () => {
   it('parses empty input to empty ast', () => {
@@ -231,6 +233,37 @@ describe('parseDsl', () => {
     const result = parseDsl('blend1 = Blend(mode: "invalid_mode")', mockSpecs);
     expect(result.errors.some((e) => e.message.includes("Invalid value for 'mode'"))).toBe(true);
   });
+
+  it('parses gpu script source as a multiline string for existing nodes', () => {
+    const manifest = buildDefaultGpuScriptManifest('gpu_script::demo');
+    const specs = [...mockSpecs, buildGpuScriptNodeSpec(manifest)];
+    const nodes = new Map([
+      ['node-1', {
+        id: 'node-1',
+        typeId: 'gpu_script::demo',
+        params: {},
+        inputDefaults: {},
+        position: { x: 0, y: 0 },
+        muted: false,
+      }],
+    ]);
+    const handleMap = new HandleMap();
+    handleMap.set('gpu1', 'node-1');
+
+    const result = parseDsl(
+      'gpu1 = GpuScript(script: """\nfloat gain = 1.2;\nreturn vec4(color.rgb * gain, color.a);\n""")',
+      specs,
+      { currentNodes: nodes, handleMap },
+    );
+
+    expect(result.errors).toHaveLength(0);
+    const node = result.ast?.nodes.get('gpu1');
+    expect(node?.nodeTypeId).toBe('gpu_script::demo');
+    expect(node?.params.get('script')).toEqual({
+      type: 'string',
+      value: 'float gain = 1.2;\nreturn vec4(color.rgb * gain, color.a);',
+    });
+  });
 });
 
 describe('splitTopLevelParams', () => {
@@ -247,5 +280,11 @@ describe('splitTopLevelParams', () => {
 
   it('does not split commas inside strings', () => {
     expect(splitTopLevelParams('path: "a,b.jpg"')).toEqual(['path: "a,b.jpg"']);
+  });
+
+  it('does not split commas inside multiline strings', () => {
+    expect(splitTopLevelParams('script: """\nvec3 c = vec3(1.0, 0.0, 0.0);\nreturn vec4(c, color.a);\n"""')).toEqual([
+      'script: """\nvec3 c = vec3(1.0, 0.0, 0.0);\nreturn vec4(c, color.a);\n"""',
+    ]);
   });
 });

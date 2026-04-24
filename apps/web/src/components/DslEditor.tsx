@@ -291,10 +291,13 @@ export const DslEditor: React.FC = () => {
   // ─── Validate only (show markers without applying) ──────────────────
   const validateAndMark = useCallback(
     (text: string) => {
-      const { nodeSpecs } = useGraphStore.getState();
+      const { nodeSpecs, nodes } = useGraphStore.getState();
       if (nodeSpecs.length === 0) return;
 
-      const parseResult = parseDsl(text, nodeSpecs);
+      const parseResult = parseDsl(text, nodeSpecs, {
+        currentNodes: nodes,
+        handleMap: deriveHandleMap(nodes),
+      });
       sourceMapRef.current = parseResult.sourceMap ?? null;
       if (parseResult.errors.length > 0) {
         setMarkers(parseResult.errors);

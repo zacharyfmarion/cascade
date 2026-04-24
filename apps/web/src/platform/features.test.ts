@@ -50,6 +50,14 @@ describe('platform feature visibility helpers', () => {
     expect(specs.map(spec => spec.id)).toEqual(['viewer', 'load_video']);
   });
 
+  it('excludes gpu_script instance types from the authoring catalog', () => {
+    const gpuScriptBase: NodeSpec = { id: 'gpu_script', display_name: 'GPU Script', category: 'GPU', description: '', inputs: [], outputs: [], params: [] };
+    const gpuScriptInst1: NodeSpec = { id: 'gpu_script::aaa-111', display_name: 'GPU Script', category: 'GPU', description: '', inputs: [], outputs: [], params: [] };
+    const gpuScriptInst2: NodeSpec = { id: 'gpu_script::bbb-222', display_name: 'GPU Script', category: 'GPU', description: '', inputs: [], outputs: [], params: [] };
+    const specs = getAuthoringNodeSpecs([gpuScriptBase, gpuScriptInst1, gpuScriptInst2], 'web');
+    expect(specs.map(s => s.id)).toEqual(['gpu_script']);
+  });
+
   it('reports unsupported desktop-only nodes clearly', () => {
     expect(isNodeSupportedOnSurface(loadVideoSpec, 'web')).toBe(false);
     expect(getUnsupportedNodeMessage(loadVideoSpec, 'web')).toBe('Load Video is only available in the desktop app.');

@@ -17,7 +17,12 @@ const buildNodeSummary = (nodeSpecs: NodeSpec[]): string => {
   for (const spec of nodeSpecs) {
     const cat = spec.category || 'Other';
     if (!groups[cat]) groups[cat] = [];
-    groups[cat].push(snakeToPascal(spec.id));
+    const normalizedName = spec.id === 'gpu_script' || spec.id.startsWith('gpu_script::')
+      ? 'GpuScript'
+      : snakeToPascal(spec.id);
+    if (!groups[cat].includes(normalizedName)) {
+      groups[cat].push(normalizedName);
+    }
   }
 
   let ref = '';
@@ -64,7 +69,7 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 | Float | bare number | \`sigma: 5.0\` |
 | Int | bare integer | \`width: 1920\` |
 | Bool | true/false | \`flip_x: true\` |
-| String | "quoted" | \`path: "/img.png"\` |
+| String | "quoted" or triple-quoted multiline | \`path: "/img.png"\`, \`script: """\\nreturn color;\\n"""\` |
 | Color | rgba(r,g,b,a) | \`color: rgba(1.0, 0.0, 0.0, 1.0)\` |
 | Dropdown | "option_string" | \`mode: "multiply"\` — use exact string from options |
 | ColorPalette | [rgba(...), ...] | \`colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0)]\` |
@@ -106,7 +111,7 @@ Capture a screenshot of the current viewer output.
 List all available node types grouped by category (compact). Returns names + one-line descriptions.
 
 ### get_node_schema(node_type)
-Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. Call this before using a node type you haven't used before.
+Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. For \`GpuScript\`, this also returns the special editable \`script\` field, mask behavior, and GLSL context. Call this before using a node type you haven't used before.
 
 ### create_gpu_script(description)
 Generate a custom GPU Script node from a text description. Creates a draft GPU Script node, asks the GLSL generator for a manifest, compiles it, and returns the node id/handle plus success or compile errors.
@@ -125,19 +130,30 @@ vec4 process(vec4 color, vec2 uv, ivec2 pixel)
 Available globals:
 - \`u_input\` : readonly image2D for the primary input (use \`imageLoad(u_input, pixel)\`)
 - Additional image inputs are bound as \`u_<name>\` (readonly image2D)
-- Params are exposed directly by name (float/int/bool only)
+- Scalar input controls are exposed directly by name (Float/Int/Bool only)
 - Helpers: \`float bayer8(int x, int y)\`, \`float luminance(vec4 c)\`
 
 ### Manifest Fields
 \`\`\`
 {
   id,
-  inputs: [{name, label, ty}],
+  inputs: [
+    {name, label, ty},
+    {name, label, ty: "Float"|"Int"|"Bool", default, min, max, step, ui}
+  ],
   outputs: [{name, label, ty}],
-  params: [{key, label, type, default, min, max, step}],
-  kernel: "GLSL body"
+  params: [],
+  kernel: "GLSL body",
+  supports_mask: true
 }
 \`\`\`
+
+### Editing Existing GPU Script Nodes
+- Existing GPU Script nodes may use runtime type ids like \`gpu_script::abc123\`, but they all use the \`GpuScript\` editing model.
+- Call \`get_gpu_script_manifest\` before editing an existing GPU Script node so you can preserve its current ports, scalar controls, kernel, and \`supports_mask\` setting unless the user asked to change them.
+- Use \`inputs\` for both image/mask ports and user controls. New manifests should keep \`params: []\`; legacy params can be migrated to scalar inputs.
+- In the DSL, GPU Script nodes expose a special \`script\` field for editing the GLSL body. Use triple-quoted multiline strings for non-trivial kernels.
+- The \`mask\` input is implicit: it exists when \`supports_mask\` is true.
 
 ### When to use create_gpu_script
 - The user asks for a bespoke GPU effect (e.g., "VHS glitch", "chromatic aberration", "CRT scanlines")

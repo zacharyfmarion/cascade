@@ -131,6 +131,11 @@ export class TauriEngine implements EngineBridge {
     return JSON.parse(json) as NodeSpec;
   }
 
+  async getNodeSpec(nodeId: string): Promise<NodeSpec> {
+    const json = await invoke<string>('get_node_spec', { nodeId });
+    return JSON.parse(json) as NodeSpec;
+  }
+
   async loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> {
     const json = await invoke<string>('load_image_data', data, {
       headers: { 'x-node-id': nodeId },

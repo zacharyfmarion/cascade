@@ -4,6 +4,7 @@ import { snakeToPascal, labelToSnake } from './types';
 import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
+import { parseGpuScriptManifestJson } from '../gpuScript';
 
 export interface SerializerInput {
   nodes: Map<string, NodeInstance>;
@@ -58,7 +59,10 @@ const formatDslValue = (paramValue: DslParamValue): string => {
     case 'bool':
       return paramValue.value ? 'true' : 'false';
     case 'string':
-      return `"${paramValue.value}"`;
+      if (paramValue.value.includes('\n') && !paramValue.value.includes('"""')) {
+        return `"""\n${paramValue.value}\n"""`;
+      }
+      return JSON.stringify(paramValue.value);
     case 'color':
       return formatColor(paramValue.value);
     case 'ramp':
@@ -158,7 +162,8 @@ export function serializeGraph(input: SerializerInput): string {
       useGraphStore.getState().setDslHandle(node.id, handle);
     }
     const rawId = spec ? spec.id : node.typeId;
-    const strippedId = rawId.replace(/^gpu_kernel::/, '');
+    const logicalTypeId = node.typeId.startsWith('gpu_script') ? 'gpu_script' : rawId;
+    const strippedId = logicalTypeId.replace(/^gpu_kernel::/, '');
     const typeName = snakeToPascal(strippedId);
 
     const params: string[] = [];
@@ -168,6 +173,16 @@ export function serializeGraph(input: SerializerInput): string {
         const value = source[paramSpec.key];
         if (!shouldIncludeParam(paramSpec, value)) continue;
         params.push(formatParamEntry(paramSpec, value));
+      }
+    }
+
+    if (node.typeId.startsWith('gpu_script')) {
+      const manifestValue = node.params['__script_manifest'];
+      const manifestJson =
+        manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+      const manifest = parseGpuScriptManifestJson(manifestJson);
+      if (manifest) {
+        params.push(`script: ${formatDslValue({ type: 'string', value: manifest.kernel })}`);
       }
     }
 

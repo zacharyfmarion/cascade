@@ -10,6 +10,11 @@ import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { getNodeCategory, getPortType } from '../../../analytics/nodeGraph';
 import { trackAnalyticsEvent } from '../../../analytics/runtime';
 import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
+import {
+  buildDefaultGpuScriptManifest,
+  buildGpuScriptNodeSpec,
+  parseGpuScriptManifestJson,
+} from '../../../ai/gpuScript';
 import { pendingImageFiles } from '../../../components/nodes/pendingImageFiles';
 import { hydrateRootGraphFromEngine } from '../hydration';
 
@@ -97,15 +102,15 @@ export const createGraphSlice: StateCreator<
       const params: Record<string, ParamValue> = {};
 
       if (!spec && actualTypeId.startsWith('gpu_script::')) {
-        spec = {
-          id: actualTypeId,
-          display_name: 'GPU Script',
-          category: 'GPU',
-          description: 'Custom GPU shader node. Write GLSL and compile to run.',
-          inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
-          outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
-          params: [],
-        };
+        const eng = getEngine();
+        if (eng.getNodeSpec) {
+          try {
+            spec = await Promise.resolve(eng.getNodeSpec(result.id));
+          } catch {
+            spec = undefined;
+          }
+        }
+        spec ??= buildGpuScriptNodeSpec(buildDefaultGpuScriptManifest(actualTypeId));
         set({ nodeSpecs: [...get().nodeSpecs, spec] });
       }
 
@@ -128,7 +133,12 @@ export const createGraphSlice: StateCreator<
       newNodes.set(result.id, {
         id: result.id,
         typeId: actualTypeId,
-        params,
+        params: actualTypeId.startsWith('gpu_script::')
+          ? {
+              ...params,
+              __script_manifest: { String: JSON.stringify(buildDefaultGpuScriptManifest(actualTypeId)) },
+            }
+          : params,
         inputDefaults,
         position,
         muted: false,
@@ -476,7 +486,14 @@ export const createGraphSlice: StateCreator<
       const newConnections: Connection[] = [];
 
       for (const n of internalGraph.nodes) {
-        const spec = get().nodeSpecs.find(s => s.id === n.typeId);
+        const manifestValue = n.params['__script_manifest'];
+        const manifestJson =
+          manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+        const gpuScriptSpec = n.typeId.startsWith('gpu_script::')
+          ? parseGpuScriptManifestJson(manifestJson)
+          : null;
+        const spec = get().nodeSpecs.find(s => s.id === n.typeId)
+          ?? (gpuScriptSpec ? buildGpuScriptNodeSpec(gpuScriptSpec) : undefined);
         const params: Record<string, ParamValue> = {};
         if (spec) {
           spec.params.forEach(p => {
@@ -484,6 +501,9 @@ export const createGraphSlice: StateCreator<
           });
         } else {
           Object.assign(params, n.params);
+        }
+        if (manifestJson) {
+          params.__script_manifest = { String: manifestJson };
         }
         newNodes.set(n.id, {
           id: n.id,
@@ -519,7 +539,23 @@ export const createGraphSlice: StateCreator<
         editingStack: [...get().editingStack, context],
         nodes: newNodes,
         connections: newConnections,
-        nodeSpecs: withGroupIOSpecs(get().nodeSpecs, internalGraph),
+        nodeSpecs: withGroupIOSpecs(
+          [
+            ...get().nodeSpecs,
+            ...internalGraph.nodes
+              .filter(n => n.typeId.startsWith('gpu_script::'))
+              .map((n) => {
+                const manifestValue = n.params['__script_manifest'];
+                const manifestJson =
+                  manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+                const manifest = parseGpuScriptManifestJson(manifestJson);
+                return manifest ? buildGpuScriptNodeSpec(manifest) : null;
+              })
+              .filter((spec): spec is NodeSpec => Boolean(spec))
+              .filter(spec => !get().nodeSpecs.some(existing => existing.id === spec.id)),
+          ],
+          internalGraph,
+        ),
         selectedNodeIds: new Set(),
         renderResults: new Map(),
         fitViewRequestId: get().fitViewRequestId + 1,

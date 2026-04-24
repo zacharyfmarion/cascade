@@ -9,6 +9,10 @@ import { validateAst } from './validator';
 import { diffAst } from './differ';
 import { validateSemantics } from './semanticValidator';
 import { serializeGraph } from './serializer';
+import {
+  buildDefaultGpuScriptManifest,
+  parseGpuScriptManifestJson,
+} from '../gpuScript';
 
 export type ApplyResult =
   | { success: true; evalErrors?: DiagnosticItem[] }
@@ -74,6 +78,15 @@ const applyParamValue = async (
 ) => {
   const store = useGraphStore.getState();
   const node = store.nodes.get(nodeId);
+  if (node?.typeId.startsWith('gpu_script') && paramKey === 'script' && paramValue.type === 'string') {
+    const manifestValue = node.params['__script_manifest'];
+    const manifestJson =
+      manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+    const manifest = parseGpuScriptManifestJson(manifestJson) ?? buildDefaultGpuScriptManifest(node.typeId);
+    manifest.kernel = paramValue.value;
+    await store.compileScriptNode(nodeId, JSON.stringify(manifest));
+    return;
+  }
   const spec = node ? getNodeSpec(nodeSpecs, node.typeId) : undefined;
   const paramSpec = getParamSpec(spec, paramKey);
   const value = dslParamToStoreParam(paramValue);
@@ -243,7 +256,8 @@ export const applyDsl = async (
   currentNodes: Map<string, NodeInstance>,
   currentConnections: Connection[],
 ): Promise<ApplyDslResult> => {
-  const parseResult = parseDsl(newDslText, nodeSpecs);
+  const parseContext = { currentNodes, handleMap };
+  const parseResult = parseDsl(newDslText, nodeSpecs, parseContext);
   if (parseResult.errors.length > 0 || !parseResult.ast) {
     return { success: false, errors: parseResult.errors };
   }
@@ -259,13 +273,13 @@ export const applyDsl = async (
     connections: currentConnections,
     nodeSpecs,
   });
-  const currentParsed = parseDsl(currentDsl, nodeSpecs);
-  if (currentParsed.errors.length > 0 || !currentParsed.ast) {
-    return { success: false, errors: currentParsed.errors };
+  const reparsedCurrent = parseDsl(currentDsl, nodeSpecs, parseContext);
+  if (reparsedCurrent.errors.length > 0 || !reparsedCurrent.ast) {
+    return { success: false, errors: reparsedCurrent.errors };
   }
 
-  const normalizedNewAst = buildAstWithDefaults(currentParsed.ast, parseResult.ast, nodeSpecs);
-  const mutations = diffAst(currentParsed.ast, normalizedNewAst);
+  const normalizedNewAst = buildAstWithDefaults(reparsedCurrent.ast, parseResult.ast, nodeSpecs);
+  const mutations = diffAst(reparsedCurrent.ast, normalizedNewAst);
   // Semantic validation via Rust engine (type compat, port existence, cycles)
   const validateEditsFn = useGraphStore.getState().validateEdits;
   if (validateEditsFn) {

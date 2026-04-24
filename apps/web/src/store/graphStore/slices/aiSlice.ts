@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { NodeSpec } from '../../types';
+import type { NodeSpec, ParamDefault, ParamValue, PortSpec } from '../../types';
 import { getEngine } from '../kernel';
 import { formatGpuScriptCompileError } from '../../../engine/gpuScriptErrors';
 
@@ -22,6 +22,31 @@ export interface AiSliceActions {
 }
 
 export type AiSlice = AiSliceState & AiSliceActions;
+
+const scalarPortDefaultToValue = (port: PortSpec): ParamValue | null => {
+  const value: ParamDefault | undefined = port.default;
+  if (!value) return null;
+  if (port.ty === 'Float' && 'Float' in value) return { Float: value.Float };
+  if (port.ty === 'Int' && 'Int' in value) return { Int: value.Int };
+  if (port.ty === 'Bool' && 'Bool' in value) return { Bool: value.Bool };
+  return null;
+};
+
+const inputDefaultsForSpec = (
+  spec: NodeSpec,
+  existing: Record<string, ParamValue>,
+): Record<string, ParamValue> => {
+  const validInputs = new Set(spec.inputs.map(input => input.name));
+  const defaults: Record<string, ParamValue> = {};
+  for (const input of spec.inputs) {
+    const defaultValue = scalarPortDefaultToValue(input);
+    if (defaultValue) defaults[input.name] = defaultValue;
+  }
+  for (const [name, value] of Object.entries(existing)) {
+    if (validInputs.has(name)) defaults[name] = value;
+  }
+  return defaults;
+};
 
 export const createAiSlice: StateCreator<
   GraphState,
@@ -102,7 +127,20 @@ export const createAiSlice: StateCreator<
         specs.push(spec);
       }
 
-      set({ nodeSpecs: specs, dirty: true });
+      const newNodes = new Map(get().nodes);
+      const currentNode = newNodes.get(nodeId);
+      if (currentNode) {
+        newNodes.set(nodeId, {
+          ...currentNode,
+          params: {
+            ...currentNode.params,
+            __script_manifest: { String: manifestJson },
+          },
+          inputDefaults: inputDefaultsForSpec(spec, currentNode.inputDefaults),
+        });
+      }
+
+      set({ nodeSpecs: specs, nodes: newNodes, dirty: true });
       get().triggerAffectedViewers([nodeId]);
       return spec;
     } catch (error) {
