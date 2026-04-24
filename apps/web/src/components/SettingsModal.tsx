@@ -430,60 +430,81 @@ function ColorTab() {
     getViewsForDisplay(colorManagement.activeDisplay).then(setAvailableViews);
   }, [colorManagement?.activeDisplay, getViewsForDisplay, colorManagement]);
 
-  const isOcioActive = ocioEnabled && colorManagement && colorManagement.displays.length > 1;
+  const isOcioLoaded = Boolean(colorManagement && colorManagement.displays.length > 1);
 
-  const statusLine = isOcioActive
+  const statusLine = isOcioLoaded
     ? `OCIO${ocioConfigSource === 'file' && ocioConfigPath ? `: ${ocioConfigPath.split('/').pop()}` : ' (env)'}`
     : 'Builtin (linear sRGB)';
 
-  const handleLoadFromEnv = async () => {
+  const applyOcio = async (source: 'env' | 'file', path?: string) => {
     setLoading(true);
     setError(null);
     try {
-      await loadOcioFromEnv();
+      if (source === 'env') {
+        await loadOcioFromEnv();
+      } else if (path) {
+        await loadOcioConfig(path);
+      }
       setOcioEnabled(true);
-      setOcioConfigSource('env');
     } catch (e) {
       setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleBrowseFile = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({
-        multiple: false,
-        title: 'Select OCIO Config',
-        filters: [{ name: 'OCIO Config', extensions: ['ocio'] }],
-      });
-      if (!selected) { setLoading(false); return; }
-      const path = Array.isArray(selected) ? selected[0] : selected;
-      await loadOcioConfig(path);
-      setOcioEnabled(true);
-      setOcioConfigSource('file');
-      setOcioConfigPath(path);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReset = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      await resetColorManagement();
       setOcioEnabled(false);
-    } catch (e) {
-      setError(String(e));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleToggle = async (checked: boolean) => {
+    if (!checked) {
+      setLoading(true);
+      setError(null);
+      try {
+        await resetColorManagement();
+        setOcioEnabled(false);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    // Enabling: only proceed if we have what we need
+    if (ocioConfigSource === 'file' && !ocioConfigPath) {
+      // No path yet — don't check the box, let user browse first
+      return;
+    }
+    await applyOcio(ocioConfigSource, ocioConfigPath);
+  };
+
+  const handleSourceChange = async (source: 'env' | 'file') => {
+    setOcioConfigSource(source);
+    // If OCIO is already enabled, re-apply with the new source immediately
+    // (but for 'file' with no path yet, wait for user to browse)
+    if (ocioEnabled) {
+      if (source === 'env') {
+        await applyOcio('env');
+      } else if (ocioConfigPath) {
+        await applyOcio('file', ocioConfigPath);
+      } else {
+        // Switching to file with no path — disable until they browse
+        await resetColorManagement();
+        setOcioEnabled(false);
+      }
+    }
+  };
+
+  const handleBrowse = async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({
+      multiple: false,
+      title: 'Select OCIO Config',
+      filters: [{ name: 'OCIO Config', extensions: ['ocio'] }],
+    });
+    if (!selected) return;
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    setOcioConfigPath(path);
+    // Apply immediately — browsing is an explicit user action
+    await applyOcio('file', path);
   };
 
   const handleDisplayChange = async (display: string) => {
@@ -502,13 +523,13 @@ function ColorTab() {
     setOcioActiveView(view);
   };
 
-  const buttonStyle: React.CSSProperties = {
+  const smallButtonStyle: React.CSSProperties = {
     background: 'var(--bg-secondary)',
     color: 'var(--text-primary)',
     border: '1px solid var(--border-default)',
     borderRadius: '3px',
     fontSize: '0.75rem',
-    padding: '4px 10px',
+    padding: '3px 8px',
     cursor: loading ? 'not-allowed' : 'pointer',
     opacity: loading ? 0.6 : 1,
   };
@@ -516,24 +537,55 @@ function ColorTab() {
   return (
     <div>
       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-        Color Management: <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{statusLine}</span>
+        Color Management:{' '}
+        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{statusLine}</span>
       </div>
 
-      <div style={{ marginBottom: '12px' }}>
-        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
-          Enable OCIO
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button type="button" style={buttonStyle} disabled={loading} onClick={handleLoadFromEnv}>
-            Load from $OCIO env var
-          </button>
-          <button type="button" style={buttonStyle} disabled={loading} onClick={handleBrowseFile}>
-            Browse for .ocio file…
-          </button>
-        </div>
-      </div>
+      <label style={{ ...rowStyle, cursor: loading ? 'not-allowed' : 'pointer' }}>
+        <span style={{ color: 'var(--text-secondary)' }}>Enable OCIO</span>
+        <input
+          type="checkbox"
+          checked={ocioEnabled && isOcioLoaded}
+          disabled={loading || (ocioConfigSource === 'file' && !ocioConfigPath && !ocioEnabled)}
+          onChange={e => handleToggle(e.target.checked)}
+        />
+      </label>
 
-      {isOcioActive && colorManagement && (
+      <label style={rowStyle}>
+        <span style={{ color: 'var(--text-secondary)' }}>Source</span>
+        <select
+          value={ocioConfigSource}
+          onChange={e => handleSourceChange(e.target.value as 'env' | 'file')}
+          style={selectStyle}
+          disabled={loading}
+        >
+          <option value="env">$OCIO environment variable</option>
+          <option value="file">Config file</option>
+        </select>
+      </label>
+
+      {ocioConfigSource === 'file' && (
+        <div style={{ ...rowStyle, gap: '8px' }}>
+          <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>Config</span>
+          <span style={{
+            flex: 1,
+            fontSize: '0.75rem',
+            color: ocioConfigPath ? 'var(--text-primary)' : 'var(--text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            textAlign: 'right',
+            marginRight: '8px',
+          }}>
+            {ocioConfigPath ? ocioConfigPath.split('/').pop() : 'No file selected'}
+          </span>
+          <button type="button" style={smallButtonStyle} disabled={loading} onClick={handleBrowse}>
+            Browse…
+          </button>
+        </div>
+      )}
+
+      {isOcioLoaded && colorManagement && (
         <>
           <label style={rowStyle}>
             <span style={{ color: 'var(--text-secondary)' }}>Display</span>
@@ -559,11 +611,6 @@ function ColorTab() {
               ))}
             </select>
           </label>
-          <div style={{ marginTop: '16px' }}>
-            <button type="button" style={{ ...buttonStyle, color: 'var(--text-danger, var(--text-secondary))' }} disabled={loading} onClick={handleReset}>
-              Reset to Builtin
-            </button>
-          </div>
         </>
       )}
 
