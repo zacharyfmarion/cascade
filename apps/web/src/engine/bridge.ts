@@ -136,6 +136,9 @@ export interface EngineBridge {
   getColorManagementInfo?(): Promise<ColorManagementInfo> | ColorManagementInfo;
   getViewsForDisplay?(display: string): Promise<string[]> | string[];
   setDisplayView?(display: string, view: string): Promise<void> | void;
+  loadOcioConfig?(path: string): Promise<void>;
+  loadOcioFromEnv?(): Promise<void>;
+  resetColorManagement?(): Promise<void>;
   setProjectFormat?(width: number, height: number): Promise<void> | void;
   validateEdits?(editsJson: string): EditValidationError[] | Promise<EditValidationError[]>;
   exportGroupAsPackage?(groupDefId: string): Promise<unknown> | unknown;

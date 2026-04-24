@@ -771,19 +771,30 @@ fn set_project_format(
     Ok(())
 }
 
+#[cfg(feature = "ocio")]
+#[tauri::command]
+fn load_ocio_config(state: State<'_, EngineState>, path: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.load_ocio_config(&path).map_err(|e| e.to_string())
+}
+
+#[cfg(feature = "ocio")]
+#[tauri::command]
+fn load_ocio_from_env(state: State<'_, EngineState>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.load_ocio_from_env().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reset_color_management(state: State<'_, EngineState>) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.reset_color_management();
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut engine = Engine::new();
-
-    #[cfg(feature = "ocio")]
-    {
-        match engine.load_ocio_from_env() {
-            Ok(()) => eprintln!("[cascade] Loaded OCIO config from $OCIO"),
-            Err(e) => {
-                eprintln!("[cascade] OCIO not loaded ({e}), using builtin color management")
-            }
-        }
-    }
+    let engine = Engine::new();
 
     tauri::Builder::default()
         .manage(Mutex::new(AppState { engine }))
@@ -843,6 +854,11 @@ pub fn run() {
             get_color_management_info,
             set_display_view,
             set_project_format,
+            reset_color_management,
+            #[cfg(feature = "ocio")]
+            load_ocio_config,
+            #[cfg(feature = "ocio")]
+            load_ocio_from_env,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

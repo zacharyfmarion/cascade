@@ -404,7 +404,22 @@ function ColorTab() {
   const setDisplayView = useGraphStore(s => s.setDisplayView);
   const getViewsForDisplay = useGraphStore(s => s.getViewsForDisplay);
   const loadColorManagementInfo = useGraphStore(s => s.loadColorManagementInfo);
+  const loadOcioConfig = useGraphStore(s => s.loadOcioConfig);
+  const loadOcioFromEnv = useGraphStore(s => s.loadOcioFromEnv);
+  const resetColorManagement = useGraphStore(s => s.resetColorManagement);
+
+  const ocioEnabled = useSettingsStore(s => s.ocioEnabled);
+  const setOcioEnabled = useSettingsStore(s => s.setOcioEnabled);
+  const ocioConfigSource = useSettingsStore(s => s.ocioConfigSource);
+  const setOcioConfigSource = useSettingsStore(s => s.setOcioConfigSource);
+  const ocioConfigPath = useSettingsStore(s => s.ocioConfigPath);
+  const setOcioConfigPath = useSettingsStore(s => s.setOcioConfigPath);
+  const setOcioActiveDisplay = useSettingsStore(s => s.setOcioActiveDisplay);
+  const setOcioActiveView = useSettingsStore(s => s.setOcioActiveView);
+
   const [availableViews, setAvailableViews] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadColorManagementInfo();
@@ -415,54 +430,148 @@ function ColorTab() {
     getViewsForDisplay(colorManagement.activeDisplay).then(setAvailableViews);
   }, [colorManagement?.activeDisplay, getViewsForDisplay, colorManagement]);
 
-  if (!colorManagement) {
-    return (
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        Loading color management info...
-      </div>
-    );
-  }
+  const isOcioActive = ocioEnabled && colorManagement && colorManagement.displays.length > 1;
+
+  const statusLine = isOcioActive
+    ? `OCIO${ocioConfigSource === 'file' && ocioConfigPath ? `: ${ocioConfigPath.split('/').pop()}` : ' (env)'}`
+    : 'Builtin (linear sRGB)';
+
+  const handleLoadFromEnv = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await loadOcioFromEnv();
+      setOcioEnabled(true);
+      setOcioConfigSource('env');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBrowseFile = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        multiple: false,
+        title: 'Select OCIO Config',
+        filters: [{ name: 'OCIO Config', extensions: ['ocio'] }],
+      });
+      if (!selected) { setLoading(false); return; }
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      await loadOcioConfig(path);
+      setOcioEnabled(true);
+      setOcioConfigSource('file');
+      setOcioConfigPath(path);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReset = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await resetColorManagement();
+      setOcioEnabled(false);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleDisplayChange = async (display: string) => {
     const views = await getViewsForDisplay(display);
     setAvailableViews(views);
     const view = views.length > 0 ? views[0] : '';
     await setDisplayView(display, view);
+    setOcioActiveDisplay(display);
+    setOcioActiveView(view);
   };
 
   const handleViewChange = async (view: string) => {
+    if (!colorManagement) return;
     await setDisplayView(colorManagement.activeDisplay, view);
+    setOcioActiveDisplay(colorManagement.activeDisplay);
+    setOcioActiveView(view);
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    background: 'var(--bg-secondary)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border-default)',
+    borderRadius: '3px',
+    fontSize: '0.75rem',
+    padding: '4px 10px',
+    cursor: loading ? 'not-allowed' : 'pointer',
+    opacity: loading ? 0.6 : 1,
   };
 
   return (
     <div>
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-        Working Space: {colorManagement.workingSpace}
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+        Color Management: <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{statusLine}</span>
       </div>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Display</span>
-        <select
-          value={colorManagement.activeDisplay}
-          onChange={e => handleDisplayChange(e.target.value)}
-          style={selectStyle}
-        >
-          {colorManagement.displays.map(d => (
-            <option key={d} value={d}>{d}</option>
-          ))}
-        </select>
-      </label>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>View</span>
-        <select
-          value={colorManagement.activeView}
-          onChange={e => handleViewChange(e.target.value)}
-          style={selectStyle}
-        >
-          {availableViews.map(v => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-        </select>
-      </label>
+
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+          Enable OCIO
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button type="button" style={buttonStyle} disabled={loading} onClick={handleLoadFromEnv}>
+            Load from $OCIO env var
+          </button>
+          <button type="button" style={buttonStyle} disabled={loading} onClick={handleBrowseFile}>
+            Browse for .ocio file…
+          </button>
+        </div>
+      </div>
+
+      {isOcioActive && colorManagement && (
+        <>
+          <label style={rowStyle}>
+            <span style={{ color: 'var(--text-secondary)' }}>Display</span>
+            <select
+              value={colorManagement.activeDisplay}
+              onChange={e => handleDisplayChange(e.target.value)}
+              style={selectStyle}
+            >
+              {colorManagement.displays.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </label>
+          <label style={rowStyle}>
+            <span style={{ color: 'var(--text-secondary)' }}>View</span>
+            <select
+              value={colorManagement.activeView}
+              onChange={e => handleViewChange(e.target.value)}
+              style={selectStyle}
+            >
+              {availableViews.map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+          <div style={{ marginTop: '16px' }}>
+            <button type="button" style={{ ...buttonStyle, color: 'var(--text-danger, var(--text-secondary))' }} disabled={loading} onClick={handleReset}>
+              Reset to Builtin
+            </button>
+          </div>
+        </>
+      )}
+
+      {error && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-error, red)', marginTop: '8px' }}>
+          {error}
+        </div>
+      )}
     </div>
   );
 }
