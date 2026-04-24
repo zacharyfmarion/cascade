@@ -15,7 +15,7 @@ const ALL_TAB_LABELS: { key: Tab; label: string; tauriOnly?: boolean }[] = [
   { key: 'performance', label: 'Performance' },
   { key: 'playback', label: 'Playback' },
   { key: 'privacy', label: 'Privacy' },
-  { key: 'color', label: 'Color', tauriOnly: true },
+  // { key: 'color', label: 'Color', tauriOnly: true },
   { key: 'ai', label: 'AI' },
 ];
 
@@ -468,9 +468,8 @@ function ColorTab() {
       }
       return;
     }
-    // Enabling: only proceed if we have what we need
     if (ocioConfigSource === 'file' && !ocioConfigPath) {
-      // No path yet — don't check the box, let user browse first
+      setError('Select a config file using Browse… first');
       return;
     }
     await applyOcio(ocioConfigSource, ocioConfigPath);
@@ -549,7 +548,7 @@ function ColorTab() {
         <input
           type="checkbox"
           checked={applying || (ocioEnabled && isOcioLoaded)}
-          disabled={applying || (ocioConfigSource === 'file' && !ocioConfigPath && !ocioEnabled)}
+          disabled={applying}
           onChange={e => handleToggle(e.target.checked)}
         />
       </label>
