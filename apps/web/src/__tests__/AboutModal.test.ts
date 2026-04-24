@@ -11,9 +11,8 @@ describe('AboutModal content', () => {
     expect(ABOUT_MODAL_COPY.downloadLabel).toBe('Download Cascade for Mac');
   });
 
-  it('release constants point at the correct download URLs', () => {
+  it('release constants point at the correct download URL', () => {
     expect(REPOSITORY_URL).toContain('github.com');
-    expect(getMacDownloadUrl('aarch64')).toContain('Cascade_latest_aarch64.dmg');
-    expect(getMacDownloadUrl('x64')).toContain('Cascade_latest_x64.dmg');
+    expect(getMacDownloadUrl()).toContain('Cascade_latest_aarch64.dmg');
   });
 });
