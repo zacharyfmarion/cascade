@@ -2553,7 +2553,10 @@ impl Engine {
         for conn in &data.connections {
             if let Some(type_id) = node_type_by_uuid.get(&conn.to_node) {
                 if type_id.starts_with("gpu_script::")
-                    && gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none()
+                    && gpu_script_manifests
+                        .get(type_id)
+                        .and_then(|m| m.as_ref())
+                        .is_none()
                 {
                     draft_extra_inputs
                         .entry(type_id.clone())
@@ -2563,7 +2566,10 @@ impl Engine {
             }
             if let Some(type_id) = node_type_by_uuid.get(&conn.from_node) {
                 if type_id.starts_with("gpu_script::")
-                    && gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none()
+                    && gpu_script_manifests
+                        .get(type_id)
+                        .and_then(|m| m.as_ref())
+                        .is_none()
                 {
                     draft_extra_outputs
                         .entry(type_id.clone())
