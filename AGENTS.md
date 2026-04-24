@@ -154,3 +154,46 @@ Multiple AI agents may be working on this repository simultaneously. If you enco
 - TypeScript: ESLint config at `apps/web/eslint.config.js`. No hardcoded colors.
 - Commits: Conventional-style preferred (e.g., `feat:`, `fix:`, `refactor:`).
 - Tests: Add tests for new node implementations. GPU tests should handle missing GPU gracefully.
+
+## Cursor Cloud specific instructions
+
+### Environment prerequisites
+
+The VM snapshot already has Rust (stable + nightly), `wasm-pack`, Node 22, and Yarn 4.9.1 (via corepack) installed. The update script runs `yarn install` in `apps/web/` on startup to keep frontend deps current.
+
+### Building the WASM bridge
+
+Before running the frontend dev server or TypeScript checks, both WASM packages must be built:
+
+```bash
+# Single-threaded (stable toolchain)
+wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
+
+# Multi-threaded (nightly toolchain, needed for tsc to pass)
+cd apps/web && yarn build:wasm:mt
+```
+
+The first build after a fresh VM start takes ~2–3 minutes (full compile); subsequent rebuilds are incremental (~10s). `npx tsc -b --noEmit` will fail with TS2307 if the `wasm-pkg-threads` directory is missing.
+
+### Running services
+
+- **Frontend dev server**: `cd apps/web && npx vite --host 0.0.0.0` (port 5173). Avoid `yarn dev` if you don't want the `predev` hook to rebuild WASM from scratch. The Vite config includes a `wasmHotRebuild` plugin that auto-rebuilds WASM when Rust source files change.
+- **Rust workspace checks**: Use `--exclude cascade-ocio-sys --exclude cascade-ocio --exclude cascade-tauri` to skip crates requiring system libraries (GTK, OpenColorIO, webkit2gtk) not available in the VM. With Tauri system deps installed, you can drop `--exclude cascade-tauri`.
+- **Tauri desktop app**: Build with `--no-default-features` to skip `video` (macOS-only) and `ocio` (needs OpenColorIO). Run in dev mode:
+  ```bash
+  cd apps/tauri
+  DISPLAY=:1 XDG_RUNTIME_DIR=/tmp/runtime-ubuntu WEBKIT_DISABLE_DMABUF_RENDERER=1 \
+    cargo tauri dev --no-dev-server-wait \
+    --config '{"build":{"beforeDevCommand":"echo ok"}}' \
+    -- --no-default-features
+  ```
+  The `--no-dev-server-wait` flag and `beforeDevCommand` override prevent starting a second Vite server. The Vite dev server must already be running on port 5173. Do **not** pass `--features custom-protocol` in dev mode — it causes the webview to serve from `frontendDist` (empty) instead of `devUrl`.
+
+### Gotchas
+
+- `cargo fmt --check` may show a pre-existing diff in `crates/cascade-wasm/src/lib.rs` — this is a known formatting issue in the repo, not an agent error.
+- GPU tests in `cascade-gpu` will be skipped (no GPU available in the VM). This is expected.
+- `libssl-dev` and Tauri Linux system deps (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `libjavascriptcoregtk-4.1-dev`, `libsoup-3.0-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`) are pre-installed in the VM snapshot.
+- The `packageManager` field in `apps/web/package.json` pins Yarn 4.9.1. Corepack must be enabled (`corepack enable`) before running `yarn`.
+- The `load_video_file` Tauri command needs a `cfg` guard to compile on Linux (the `render_video` command already has one). A minimal fix is applied in the branch.
+- A stub `apps/web/dist/index.html` must exist for `tauri::generate_context!()` to pass compile-time checks (only the `devUrl` is used at runtime in dev mode).
