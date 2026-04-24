@@ -1337,23 +1337,23 @@ impl Engine {
         let mut draft_extra_outputs: HashMap<String, HashSet<String>> = HashMap::new();
         for conn in &data.connections {
             if let Some(type_id) = node_type_by_uuid.get(&conn.to_node) {
-                if type_id.starts_with("gpu_script::") {
-                    if gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none() {
-                        draft_extra_inputs
-                            .entry(type_id.clone())
-                            .or_default()
-                            .insert(conn.to_port.clone());
-                    }
+                if type_id.starts_with("gpu_script::")
+                    && gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none()
+                {
+                    draft_extra_inputs
+                        .entry(type_id.clone())
+                        .or_default()
+                        .insert(conn.to_port.clone());
                 }
             }
             if let Some(type_id) = node_type_by_uuid.get(&conn.from_node) {
-                if type_id.starts_with("gpu_script::") {
-                    if gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none() {
-                        draft_extra_outputs
-                            .entry(type_id.clone())
-                            .or_default()
-                            .insert(conn.from_port.clone());
-                    }
+                if type_id.starts_with("gpu_script::")
+                    && gpu_script_manifests.get(type_id).and_then(|m| m.as_ref()).is_none()
+                {
+                    draft_extra_outputs
+                        .entry(type_id.clone())
+                        .or_default()
+                        .insert(conn.from_port.clone());
                 }
             }
         }

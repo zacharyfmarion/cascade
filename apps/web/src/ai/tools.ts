@@ -260,7 +260,10 @@ const toolExecutors = {
     const specs = getAuthoringSpecs();
     const typeId = pascalToSnake(node_type);
     if (typeId === 'gpu_script' || typeId.startsWith('gpu_script::')) {
-      return buildGpuScriptSchema(specs, node_type);
+      // Pass all nodeSpecs (including gpu_script:: instances) so buildGpuScriptSchema
+      // can find the specific instance spec for runtime_type.
+      const allSpecs = useGraphStore.getState().nodeSpecs;
+      return buildGpuScriptSchema(allSpecs, node_type);
     }
     const spec = specs.find((s: NodeSpec) => s.id === typeId);
     if (!spec) {
