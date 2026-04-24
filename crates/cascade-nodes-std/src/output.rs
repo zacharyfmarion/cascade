@@ -1,4 +1,4 @@
-use cascade_core::color::ColorManagement;
+use cascade_core::color::{BuiltinColorManagement, ColorManagement};
 use cascade_core::exr::encode_multilayer_exr;
 use cascade_core::node::{EvalContext, Node, NodeFuture};
 use cascade_core::types::*;
@@ -32,12 +32,20 @@ impl Viewer {
     ) -> Vec<u8> {
         let mut pixels = image.data.as_ref().clone();
         let source_space = cm.working_space();
+        // Try OCIO display transform, then direct color space conversion,
+        // then fall back to builtin linear→sRGB so the display is never raw linear.
         let processor = cm
             .create_display_transform(source_space, display, view)
-            .or_else(|_| cm.create_transform(source_space, &ColorSpaceId::new(ColorSpaceId::SRGB)));
-        if let Ok(processor) = processor {
-            processor.apply(&mut pixels);
-        }
+            .or_else(|_| cm.create_transform(source_space, &ColorSpaceId::new(ColorSpaceId::SRGB)))
+            .unwrap_or_else(|_| {
+                BuiltinColorManagement::new()
+                    .create_transform(
+                        &ColorSpaceId::new(ColorSpaceId::LINEAR_SRGB),
+                        &ColorSpaceId::new(ColorSpaceId::SRGB),
+                    )
+                    .expect("builtin linear→sRGB must not fail")
+            });
+        processor.apply(&mut pixels);
         let pixel_count = image.pixel_count();
         let mut out = vec![0u8; pixel_count * 4];
         out.par_chunks_exact_mut(4)
