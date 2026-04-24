@@ -627,18 +627,23 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       )}
       
       {lastError && (
-        <div style={{
-          position: 'absolute',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          padding: '6px 10px',
-          background: 'var(--status-errorBg)',
-          color: 'var(--text-primary)',
-          fontSize: '0.72rem',
-          lineHeight: '1.3',
-          zIndex: 20,
-        }}>
+        <div
+          onPointerDown={e => e.stopPropagation()}
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            padding: '6px 10px',
+            background: 'var(--status-errorBg)',
+            color: 'var(--text-primary)',
+            fontSize: '0.72rem',
+            lineHeight: '1.3',
+            zIndex: 20,
+            userSelect: 'text',
+            cursor: 'text',
+          }}
+        >
           {lastError.message}
         </div>
       )}
