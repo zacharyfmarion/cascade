@@ -236,7 +236,6 @@ impl Engine {
     pub fn load_ocio_config(&mut self, path: &str) -> Result<(), CascadeError> {
         let ocio = cascade_ocio::OcioColorManagement::from_file(path)?;
         self.color_management = Box::new(ocio);
-        self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
     }
@@ -245,7 +244,6 @@ impl Engine {
     pub fn load_ocio_from_env(&mut self) -> Result<(), CascadeError> {
         let ocio = cascade_ocio::OcioColorManagement::from_env()?;
         self.color_management = Box::new(ocio);
-        self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
     }

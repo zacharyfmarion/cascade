@@ -32,7 +32,10 @@ impl Viewer {
     ) -> Vec<u8> {
         let mut pixels = image.data.as_ref().clone();
         let source_space = cm.working_space();
-        if let Ok(processor) = cm.create_display_transform(source_space, display, view) {
+        let processor = cm
+            .create_display_transform(source_space, display, view)
+            .or_else(|_| cm.create_transform(source_space, &ColorSpaceId::new(ColorSpaceId::SRGB)));
+        if let Ok(processor) = processor {
             processor.apply(&mut pixels);
         }
         let pixel_count = image.pixel_count();
