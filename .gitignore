@@ -57,3 +57,6 @@ playwright-report/
 
 # Personal skills (not shared with repo)
 .opencode/skills/multi-review/
+
+# Agent-managed worktrees (scratch space, not versioned)
+.claude/worktrees/
