@@ -271,6 +271,13 @@ impl Engine {
         Ok(())
     }
 
+    pub fn reset_color_management(&mut self) {
+        self.color_management = Box::new(cascade_core::color::BuiltinColorManagement::new());
+        self.active_display = "sRGB".to_string();
+        self.active_view = "Standard".to_string();
+        self.evaluator = Evaluator::new();
+    }
+
     #[cfg(feature = "ocio")]
     fn sync_active_display_view(&mut self) {
         let displays = self.color_management.available_displays();

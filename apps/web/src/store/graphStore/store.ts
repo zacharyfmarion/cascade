@@ -32,6 +32,7 @@ import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditVal
 import type { NodeInterfaceChange } from '../../engine/bridge';
 import type { EngineError } from '../../engine/engineError';
 import { useSettingsStore } from '../settingsStore';
+import { isDesktopRuntime } from '../../platform/runtime';
 import {
   kernel,
   createEngine,
@@ -188,6 +189,9 @@ export interface GraphState {
   getViewsForDisplay: (display: string) => Promise<string[]>;
   loadColorManagementInfo: () => Promise<void>;
   setProjectFormat: (width: number, height: number) => Promise<void>;
+  loadOcioConfig: (path: string) => Promise<void>;
+  loadOcioFromEnv: () => Promise<void>;
+  resetColorManagement: () => Promise<void>;
   linkToViewer: (nodeId: string, outputIndex?: number) => Promise<void>;
 
   aiActionInProgress: boolean;
@@ -243,6 +247,21 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
 
         if (kernel.engine.setProjectFormat) {
           await kernel.engine.setProjectFormat(settings.projectWidth, settings.projectHeight);
+        }
+
+        if (isDesktopRuntime() && settings.ocioEnabled) {
+          try {
+            if (settings.ocioConfigSource === 'file' && settings.ocioConfigPath) {
+              await get().loadOcioConfig(settings.ocioConfigPath);
+            } else {
+              await get().loadOcioFromEnv();
+            }
+            if (settings.ocioActiveDisplay && settings.ocioActiveView && kernel.engine.setDisplayView) {
+              await kernel.engine.setDisplayView(settings.ocioActiveDisplay, settings.ocioActiveView);
+            }
+          } catch (e) {
+            console.warn('Failed to restore OCIO config:', e);
+          }
         }
 
         if (kernel.engine.getColorManagementInfo) {

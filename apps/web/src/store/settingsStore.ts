@@ -64,6 +64,18 @@ interface SettingsState {
   projectWidth: number;
   projectHeight: number;
   setProjectFormat: (width: number, height: number) => void;
+
+  // --- Color management ---
+  ocioEnabled: boolean;
+  setOcioEnabled: (enabled: boolean) => void;
+  ocioConfigSource: 'file' | 'env';
+  setOcioConfigSource: (source: 'file' | 'env') => void;
+  ocioConfigPath: string;
+  setOcioConfigPath: (path: string) => void;
+  ocioActiveDisplay: string;
+  setOcioActiveDisplay: (display: string) => void;
+  ocioActiveView: string;
+  setOcioActiveView: (view: string) => void;
 }
 
 const STORAGE_KEY = 'cascade-settings';
@@ -84,6 +96,11 @@ const DEFAULT_SETTINGS = {
   aiAssistantModel: 'claude-sonnet-4-6',
   projectWidth: 1920,
   projectHeight: 1080,
+  ocioEnabled: false,
+  ocioConfigSource: 'env' as 'file' | 'env',
+  ocioConfigPath: '',
+  ocioActiveDisplay: '',
+  ocioActiveView: '',
 };
 
 export function loadSettings() {
@@ -120,8 +137,13 @@ export const useSettingsStore = create<SettingsState>()(
           aiAssistantModel,
           projectWidth,
           projectHeight,
+          ocioEnabled,
+          ocioConfigSource,
+          ocioConfigPath,
+          ocioActiveDisplay,
+          ocioActiveView,
         } = get();
-        
+
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify({
             snapToGrid,
@@ -139,6 +161,11 @@ export const useSettingsStore = create<SettingsState>()(
             aiAssistantModel,
             projectWidth,
             projectHeight,
+            ocioEnabled,
+            ocioConfigSource,
+            ocioConfigPath,
+            ocioActiveDisplay,
+            ocioActiveView,
           }));
         } catch (e) {
           console.error('Failed to save settings:', e);
@@ -205,6 +232,17 @@ export const useSettingsStore = create<SettingsState>()(
         projectWidth: initial.projectWidth,
         projectHeight: initial.projectHeight,
         setProjectFormat: (width, height) => { set({ projectWidth: width, projectHeight: height }); save(); },
+
+        ocioEnabled: initial.ocioEnabled,
+        setOcioEnabled: (enabled) => { set({ ocioEnabled: enabled }); save(); },
+        ocioConfigSource: initial.ocioConfigSource,
+        setOcioConfigSource: (source) => { set({ ocioConfigSource: source }); save(); },
+        ocioConfigPath: initial.ocioConfigPath,
+        setOcioConfigPath: (path) => { set({ ocioConfigPath: path }); save(); },
+        ocioActiveDisplay: initial.ocioActiveDisplay,
+        setOcioActiveDisplay: (display) => { set({ ocioActiveDisplay: display }); save(); },
+        ocioActiveView: initial.ocioActiveView,
+        setOcioActiveView: (view) => { set({ ocioActiveView: view }); save(); },
       };
     },
     { name: 'SettingsStore' }

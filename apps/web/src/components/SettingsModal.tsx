@@ -15,7 +15,7 @@ const ALL_TAB_LABELS: { key: Tab; label: string; tauriOnly?: boolean }[] = [
   { key: 'performance', label: 'Performance' },
   { key: 'playback', label: 'Playback' },
   { key: 'privacy', label: 'Privacy' },
-  { key: 'color', label: 'Color', tauriOnly: true },
+  // { key: 'color', label: 'Color', tauriOnly: true },
   { key: 'ai', label: 'AI' },
 ];
 
@@ -404,7 +404,22 @@ function ColorTab() {
   const setDisplayView = useGraphStore(s => s.setDisplayView);
   const getViewsForDisplay = useGraphStore(s => s.getViewsForDisplay);
   const loadColorManagementInfo = useGraphStore(s => s.loadColorManagementInfo);
+  const loadOcioConfig = useGraphStore(s => s.loadOcioConfig);
+  const loadOcioFromEnv = useGraphStore(s => s.loadOcioFromEnv);
+  const resetColorManagement = useGraphStore(s => s.resetColorManagement);
+
+  const ocioEnabled = useSettingsStore(s => s.ocioEnabled);
+  const setOcioEnabled = useSettingsStore(s => s.setOcioEnabled);
+  const ocioConfigSource = useSettingsStore(s => s.ocioConfigSource);
+  const setOcioConfigSource = useSettingsStore(s => s.setOcioConfigSource);
+  const ocioConfigPath = useSettingsStore(s => s.ocioConfigPath);
+  const setOcioConfigPath = useSettingsStore(s => s.setOcioConfigPath);
+  const setOcioActiveDisplay = useSettingsStore(s => s.setOcioActiveDisplay);
+  const setOcioActiveView = useSettingsStore(s => s.setOcioActiveView);
+
   const [availableViews, setAvailableViews] = useState<string[]>([]);
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     loadColorManagementInfo();
@@ -415,54 +430,197 @@ function ColorTab() {
     getViewsForDisplay(colorManagement.activeDisplay).then(setAvailableViews);
   }, [colorManagement?.activeDisplay, getViewsForDisplay, colorManagement]);
 
-  if (!colorManagement) {
-    return (
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-        Loading color management info...
-      </div>
-    );
-  }
+  const isOcioLoaded = Boolean(colorManagement && colorManagement.displays.length > 1);
+
+  const statusLine = isOcioLoaded
+    ? `OCIO${ocioConfigSource === 'file' && ocioConfigPath ? `: ${ocioConfigPath.split('/').pop()}` : ' (env)'}`
+    : 'Builtin (linear sRGB)';
+
+  const applyOcio = async (source: 'env' | 'file', path?: string) => {
+    setApplying(true);
+    setError(null);
+    try {
+      if (source === 'env') {
+        await loadOcioFromEnv();
+      } else if (path) {
+        await loadOcioConfig(path);
+      }
+      setOcioEnabled(true);
+    } catch (e) {
+      setError(String(e));
+      setOcioEnabled(false);
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const handleToggle = async (checked: boolean) => {
+    if (!checked) {
+      setApplying(true);
+      setError(null);
+      try {
+        await resetColorManagement();
+        setOcioEnabled(false);
+      } catch (e) {
+        setError(String(e));
+      } finally {
+        setApplying(false);
+      }
+      return;
+    }
+    if (ocioConfigSource === 'file' && !ocioConfigPath) {
+      setError('Select a config file using Browse… first');
+      return;
+    }
+    await applyOcio(ocioConfigSource, ocioConfigPath);
+  };
+
+  const handleSourceChange = async (source: 'env' | 'file') => {
+    setOcioConfigSource(source);
+    // If OCIO is already enabled, re-apply with the new source immediately
+    // (but for 'file' with no path yet, wait for user to browse)
+    if (ocioEnabled) {
+      if (source === 'env') {
+        await applyOcio('env');
+      } else if (ocioConfigPath) {
+        await applyOcio('file', ocioConfigPath);
+      } else {
+        // Switching to file with no path — disable until they browse
+        await resetColorManagement();
+        setOcioEnabled(false);
+      }
+    }
+  };
+
+  const handleBrowse = async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({
+      multiple: false,
+      title: 'Select OCIO Config',
+      filters: [{ name: 'OCIO Config', extensions: ['ocio'] }],
+    });
+    if (!selected) return;
+    const path = Array.isArray(selected) ? selected[0] : selected;
+    setOcioConfigPath(path);
+    // Apply immediately — browsing is an explicit user action
+    await applyOcio('file', path);
+  };
 
   const handleDisplayChange = async (display: string) => {
     const views = await getViewsForDisplay(display);
     setAvailableViews(views);
     const view = views.length > 0 ? views[0] : '';
     await setDisplayView(display, view);
+    setOcioActiveDisplay(display);
+    setOcioActiveView(view);
   };
 
   const handleViewChange = async (view: string) => {
+    if (!colorManagement) return;
     await setDisplayView(colorManagement.activeDisplay, view);
+    setOcioActiveDisplay(colorManagement.activeDisplay);
+    setOcioActiveView(view);
+  };
+
+  const smallButtonStyle: React.CSSProperties = {
+    background: 'var(--bg-secondary)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border-default)',
+    borderRadius: '3px',
+    fontSize: '0.75rem',
+    padding: '3px 8px',
+    cursor: applying ? 'not-allowed' : 'pointer',
+    opacity: applying ? 0.6 : 1,
   };
 
   return (
     <div>
-      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-        Working Space: {colorManagement.workingSpace}
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+        Color Management:{' '}
+        <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{statusLine}</span>
       </div>
+
+      <label style={{ ...rowStyle, cursor: applying ? 'not-allowed' : 'pointer' }}>
+        <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          Enable OCIO
+          {applying && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Applying…</span>}
+        </span>
+        <input
+          type="checkbox"
+          checked={applying || (ocioEnabled && isOcioLoaded)}
+          disabled={applying}
+          onChange={e => handleToggle(e.target.checked)}
+        />
+      </label>
+
       <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Display</span>
+        <span style={{ color: 'var(--text-secondary)' }}>Source</span>
         <select
-          value={colorManagement.activeDisplay}
-          onChange={e => handleDisplayChange(e.target.value)}
+          value={ocioConfigSource}
+          onChange={e => handleSourceChange(e.target.value as 'env' | 'file')}
           style={selectStyle}
+          disabled={applying}
         >
-          {colorManagement.displays.map(d => (
-            <option key={d} value={d}>{d}</option>
-          ))}
+          <option value="env">$OCIO environment variable</option>
+          <option value="file">Config file</option>
         </select>
       </label>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>View</span>
-        <select
-          value={colorManagement.activeView}
-          onChange={e => handleViewChange(e.target.value)}
-          style={selectStyle}
-        >
-          {availableViews.map(v => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-        </select>
-      </label>
+
+      {ocioConfigSource === 'file' && (
+        <div style={{ ...rowStyle, gap: '8px' }}>
+          <span style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>Config</span>
+          <span style={{
+            flex: 1,
+            fontSize: '0.75rem',
+            color: ocioConfigPath ? 'var(--text-primary)' : 'var(--text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            textAlign: 'right',
+            marginRight: '8px',
+          }}>
+            {ocioConfigPath ? ocioConfigPath.split('/').pop() : 'No file selected'}
+          </span>
+          <button type="button" style={smallButtonStyle} disabled={applying} onClick={handleBrowse}>
+            Browse…
+          </button>
+        </div>
+      )}
+
+      {isOcioLoaded && colorManagement && (
+        <>
+          <label style={rowStyle}>
+            <span style={{ color: 'var(--text-secondary)' }}>Display</span>
+            <select
+              value={colorManagement.activeDisplay}
+              onChange={e => handleDisplayChange(e.target.value)}
+              style={selectStyle}
+            >
+              {colorManagement.displays.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </label>
+          <label style={rowStyle}>
+            <span style={{ color: 'var(--text-secondary)' }}>View</span>
+            <select
+              value={colorManagement.activeView}
+              onChange={e => handleViewChange(e.target.value)}
+              style={selectStyle}
+            >
+              {availableViews.map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
+
+      {error && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--color-error, red)', marginTop: '8px' }}>
+          {error}
+        </div>
+      )}
     </div>
   );
 }

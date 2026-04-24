@@ -359,6 +359,18 @@ export class TauriEngine implements EngineBridge {
     await invoke('set_display_view', { display, view });
   }
 
+  async loadOcioConfig(path: string): Promise<void> {
+    await invoke('load_ocio_config', { path });
+  }
+
+  async loadOcioFromEnv(): Promise<void> {
+    await invoke('load_ocio_from_env');
+  }
+
+  async resetColorManagement(): Promise<void> {
+    await invoke('reset_color_management');
+  }
+
   async setProjectFormat(width: number, height: number): Promise<void> {
     await invoke('set_project_format', { width, height });
   }
