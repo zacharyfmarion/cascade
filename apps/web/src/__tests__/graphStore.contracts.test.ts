@@ -779,6 +779,18 @@ describe('Asset loading contracts', () => {
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
   });
+
+  it('loadImagePath stores a resolvable file URI and triggers viewer render', async () => {
+    const s = useGraphStore.getState();
+    const img = await s.addNode('load_image', { x: 0, y: 0 });
+    await s.addNode('viewer', { x: 200, y: 0 });
+
+    mockEngine._clearRenderCalls();
+    await s.loadImagePath(img, '/tmp/plate.png');
+
+    expect(useGraphStore.getState().nodes.get(img)?.params.path).toEqual({ String: 'file:///tmp/plate.png' });
+    expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
+  });
 });
 
 describe('Full undo/redo chain contracts', () => {

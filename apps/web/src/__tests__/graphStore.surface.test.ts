@@ -96,6 +96,7 @@ const EXPECTED_KEYS: string[] = [
   'loadBatchFiles',
   'loadColorManagementInfo',
   'loadImageFile',
+  'loadImagePath',
   'loadOcioConfig',
   'loadOcioFromEnv',
   'loadPaletteFile',

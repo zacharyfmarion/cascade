@@ -128,6 +128,7 @@ export interface GraphState {
   frameSelectedNodes: (nodeSizes?: Map<string, { width: number; height: number }>) => string | null;
   selectFrame: (id: string | null) => void;
   loadImageFile: (nodeId: string, file: File) => void;
+  loadImagePath: (nodeId: string, path: string) => Promise<void>;
   loadVideoFile: (nodeId: string, path: string) => Promise<VideoInfo | null>;
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;

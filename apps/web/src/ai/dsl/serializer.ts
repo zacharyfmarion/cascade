@@ -50,10 +50,11 @@ const unwrapParamValue = (paramSpec: ParamSpec, paramValue: ParamValue): DslPara
 };
 
 const formatAssetValue = (typeId: string, paramKey: string, value: string): string | null => {
-  if (paramKey !== 'path' && paramKey !== 'pattern' && paramKey !== 'files') return null;
+  if (!value) return null;
+  if (paramKey !== 'path' && paramKey !== 'directory' && paramKey !== 'file_path' && paramKey !== 'files') return null;
   if (typeId === 'load_image') return `image(${JSON.stringify(value)})`;
-  if (typeId === 'load_image_sequence') return `sequence(${JSON.stringify(value)})`;
-  if (typeId === 'load_video') return `video(${JSON.stringify(value)})`;
+  if (typeId === 'load_image_sequence' && paramKey === 'directory') return `sequence(${JSON.stringify(value)})`;
+  if (typeId === 'load_video' && paramKey === 'file_path') return `video(${JSON.stringify(value)})`;
   if (typeId === 'load_image_batch') return value.startsWith('images(') ? value : `images([${JSON.stringify(value)}])`;
   return null;
 };
@@ -101,9 +102,34 @@ const formatParamEntry = (typeId: string, paramSpec: ParamSpec, paramValue: Para
   return `${paramSpec.key}: ${formatDslValue(dslValue, { typeId, paramKey: paramSpec.key })}`;
 };
 
-const shouldIncludeParam = (paramSpec: ParamSpec, paramValue: ParamValue | undefined): paramValue is ParamValue => {
+const getStringParam = (node: NodeInstance, key: string): string => {
+  const value = node.params[key];
+  return value && 'String' in value ? value.String : '';
+};
+
+const shouldIncludeParam = (
+  node: NodeInstance,
+  paramSpec: ParamSpec,
+  paramValue: ParamValue | undefined,
+): paramValue is ParamValue => {
   if (!paramValue) return false;
+  if (node.typeId === 'load_image' && paramSpec.key === 'image_data') return false;
+  if (node.typeId === 'load_image_sequence') {
+    if (paramSpec.key === 'directory') return Boolean(getStringParam(node, 'directory'));
+    if (paramSpec.key === 'pattern') return Boolean(getStringParam(node, 'directory'));
+  }
+  if (node.typeId === 'load_video' && paramSpec.key === 'file_path') {
+    return Boolean(getStringParam(node, 'file_path'));
+  }
   return JSON.stringify(paramValue) !== JSON.stringify(paramSpec.default);
+};
+
+const formatVirtualAssetParamEntries = (node: NodeInstance, spec: NodeSpec | undefined): string[] => {
+  if (node.typeId !== 'load_image') return [];
+  if (spec?.params.some((param) => param.key === 'path')) return [];
+  const path = getStringParam(node, 'path');
+  if (!path) return [];
+  return [`path: image(${JSON.stringify(path)})`];
 };
 
 const topologicalOrder = (nodes: Map<string, NodeInstance>, connections: Connection[], handleMap: HandleMap): NodeInstance[] => {
@@ -176,12 +202,12 @@ export function serializeGraph(input: SerializerInput): string {
     const strippedId = logicalTypeId.replace(/^gpu_kernel::/, '');
     const typeName = snakeToPascal(strippedId);
 
-    const params: string[] = [];
+    const params: string[] = formatVirtualAssetParamEntries(node, spec);
     if (spec) {
       for (const paramSpec of spec.params) {
         const source = isConnectableParam(paramSpec) ? node.inputDefaults : node.params;
         const value = source[paramSpec.key];
-        if (!shouldIncludeParam(paramSpec, value)) continue;
+        if (!shouldIncludeParam(node, paramSpec, value)) continue;
         params.push(formatParamEntry(node.typeId, paramSpec, value));
       }
     }

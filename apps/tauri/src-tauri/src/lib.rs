@@ -150,6 +150,22 @@ fn load_image_data(
 }
 
 #[tauri::command]
+fn load_image_path(
+    state: State<'_, EngineState>,
+    node_id: String,
+    path: String,
+) -> Result<String, String> {
+    let normalized = path.strip_prefix("file://").unwrap_or(&path);
+    let data = std::fs::read(normalized).map_err(|e| e.to_string())?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let change = s
+        .engine
+        .load_image_data(&node_id, &data)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&change).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn load_palette_data(
     state: State<'_, EngineState>,
     request: tauri::ipc::Request,
@@ -824,6 +840,7 @@ pub fn run() {
             set_position,
             set_muted,
             load_image_data,
+            load_image_path,
             load_palette_data,
             get_image_data,
             render_viewer,

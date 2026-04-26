@@ -71,8 +71,8 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 | Float | bare number | \`sigma: 5.0\` |
 | Int | bare integer | \`width: 1920\` |
 | Bool | true/false | \`flip_x: true\` |
-| String | "quoted" or triple-quoted multiline | \`path: "/img.png"\`, \`script: """\\nreturn color;\\n"""\` |
-| Asset path | inline constructor | \`path: image("file:///plate.exr")\`, \`path: sequence("file:///shot.%04d.exr", first: 1001, last: 1100)\`, \`path: video("file:///ref.mov")\` |
+| String | "quoted" or triple-quoted multiline | \`label: "matte"\`, \`script: """\\nreturn color;\\n"""\` |
+| Resolvable asset source | inline constructor | \`path: image("file:///plate.exr")\`, \`directory: sequence("file:///shot")\`, \`file_path: video("file:///ref.mov")\` |
 | Color | rgba(r,g,b,a) | \`color: rgba(1.0, 0.0, 0.0, 1.0)\` |
 | Dropdown | "option_string" | \`mode: "multiply"\` — use exact string from options |
 | ColorPalette | [rgba(...), ...] | \`colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0)]\` |
@@ -82,7 +82,7 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 ### Example Graph
 \`\`\`
 graph {
-  load1 = LoadImage(path: image("file:///plate.exr"))
+  load1 = LoadImage()
   blur1 = GaussianBlur(sigma: 5.0)
   grade1 = BrightnessContrast(brightness: 0.1, contrast: 1.2)
   viewer = Viewer()
@@ -92,6 +92,8 @@ graph {
   grade1.image -> viewer.image
 }
 \`\`\`
+
+Web-dropped files and embedded project assets are represented by the node/project state, not by fake paths in the DSL. Leave loaders like \`LoadImage()\`, \`LoadImageSequence()\`, and \`LoadImageBatch()\` without asset params unless the source is a real resolvable URI/path.
 
 ## Tools
 

@@ -58,6 +58,28 @@ describe('parseDsl', () => {
     ]);
   });
 
+  it('parses virtual load image path when runtime spec only exposes image_data', () => {
+    const runtimeSpecs = mockSpecs.map((spec) => spec.id === 'load_image'
+      ? {
+          ...spec,
+          params: [{
+            key: 'image_data',
+            label: 'Image Data',
+            ty: 'String' as const,
+            default: { String: '' },
+            ui_hint: { type: 'Hidden' as const },
+            promotable: true,
+          }],
+        }
+      : spec);
+    const result = parseGraph('load1 = LoadImage(path: image("file:///Users/test/plate.png"))', runtimeSpecs);
+    expect(result.errors).toHaveLength(0);
+    expect(result.ast?.nodes.get('load1')?.params.get('path')).toEqual({
+      type: 'string',
+      value: 'file:///Users/test/plate.png',
+    });
+  });
+
   it('parses single node with float param', () => {
     const result = parseGraph('blur1 = GaussianBlur(amount: 5.0)', mockSpecs);
     const node = result.ast?.nodes.get('blur1');

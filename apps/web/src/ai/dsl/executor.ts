@@ -78,6 +78,10 @@ const applyParamValue = async (
 ) => {
   const store = useGraphStore.getState();
   const node = store.nodes.get(nodeId);
+  if (node?.typeId === 'load_image' && paramKey === 'path' && paramValue.type === 'string') {
+    await store.loadImagePath(nodeId, paramValue.value);
+    return;
+  }
   if (node?.typeId.startsWith('gpu_script') && paramKey === 'script' && paramValue.type === 'string') {
     const manifestValue = node.params['__script_manifest'];
     const manifestJson =
@@ -194,6 +198,12 @@ const executeMutations = async (
 
   return error;
 };
+
+const mutationDiagnosticsToError = (diagnostics: DiagnosticItem[]): string | null => {
+  if (diagnostics.length === 0) return null;
+  return diagnostics.map(diagnostic => diagnostic.message).join('\n');
+};
+
 export const applyMutations = async (
   mutations: GraphMutation[],
   handleMap: HandleMap,
@@ -208,6 +218,10 @@ export const applyMutations = async (
   });
   if (mutationError) {
     return { success: false, error: mutationError };
+  }
+  const diagnosticError = mutationDiagnosticsToError(result.diagnostics.mutationErrors);
+  if (diagnosticError) {
+    return { success: false, error: diagnosticError };
   }
 
   autoLayoutGraph();
@@ -247,6 +261,38 @@ const buildAstWithDefaults = (
   }
 
   return { nodes: nextNodes, connections: newAst.connections };
+};
+
+const getMutationLine = (mutation: GraphMutation, ast: DslAst): number | null => {
+  switch (mutation.type) {
+    case 'addNode':
+    case 'removeNode':
+    case 'setParam':
+    case 'setMuted':
+      return ast.nodes.get(mutation.handle)?.line ?? null;
+    case 'connect':
+      return ast.connections.find(conn =>
+        conn.fromHandle === mutation.fromHandle
+        && conn.fromPort === mutation.fromPort
+        && conn.toHandle === mutation.toHandle
+        && conn.toPort === mutation.toPort
+      )?.line ?? null;
+    case 'disconnect':
+      return ast.connections.find(conn =>
+        conn.toHandle === mutation.toHandle
+        && conn.toPort === mutation.toPort
+      )?.line ?? null;
+    default:
+      return null;
+  }
+};
+
+const getApplyFailureLine = (mutations: GraphMutation[], ast: DslAst): number => {
+  for (const mutation of mutations) {
+    const line = getMutationLine(mutation, ast);
+    if (line && line > 0) return line;
+  }
+  return 1;
 };
 
 export const applyDsl = async (
@@ -295,7 +341,7 @@ export const applyDsl = async (
   }
   const applyResult = await applyMutations(mutations, handleMap, nodeSpecs, { origin: 'dsl', awaitRender: true });
   if (!applyResult.success) {
-    return { success: false, errors: [{ line: 0, message: applyResult.error }] };
+    return { success: false, errors: [{ line: getApplyFailureLine(mutations, normalizedNewAst), message: applyResult.error }] };
   }
 
   const store = useGraphStore.getState();

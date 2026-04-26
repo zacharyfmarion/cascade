@@ -266,6 +266,16 @@ export function createMockEngine(): EngineBridge & {
       };
     },
 
+    loadImagePath: (nodeId: string, path: string): NodeInterfaceChange => {
+      imageDataStore.set(nodeId, new TextEncoder().encode(path));
+      const spec = NODE_SPECS.find(s => s.id === 'load_image');
+      return {
+        newSpec: spec ?? NODE_SPECS[0],
+        removedOutputPorts: [],
+        prunedConnections: [],
+      };
+    },
+
     getImageData: (nodeId: string): Uint8Array | null => {
       return imageDataStore.get(nodeId) ?? null;
     },

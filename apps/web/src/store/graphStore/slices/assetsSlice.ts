@@ -7,6 +7,7 @@ export type AssetsSliceState = object;
 
 export interface AssetsSliceActions {
   loadImageFile: (nodeId: string, file: File) => void;
+  loadImagePath: (nodeId: string, path: string) => Promise<void>;
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
   loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
@@ -20,6 +21,31 @@ export const createAssetsSlice: StateCreator<
   [],
   AssetsSlice
 > = (set, get) => ({
+  loadImagePath: async (nodeId, path) => {
+    const eng = getEngine();
+    if (!eng.loadImagePath) {
+      throw new Error('Current engine does not support loading images by path');
+    }
+    try {
+      const change = await eng.loadImagePath(nodeId, path);
+      get().applyNodeInterfaceChange(nodeId, change);
+      const newNodes = new Map(get().nodes);
+      const node = newNodes.get(nodeId);
+      if (node) {
+        const source = path.startsWith('file://') ? path : `file://${path}`;
+        newNodes.set(nodeId, {
+          ...node,
+          params: { ...node.params, path: { String: source } as ParamValue },
+        });
+      }
+      set({ nodes: newNodes, dirty: true });
+      get().triggerAllViewers();
+    } catch (e) {
+      console.error('loadImagePath failed:', e);
+      throw e;
+    }
+  },
+
   loadImageFile: (nodeId, file) => {
     file.arrayBuffer().then(async buffer => {
       const data = new Uint8Array(buffer);

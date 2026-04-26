@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { serializeGraph, type SerializerInput } from '../serializer';
 import { HandleMap } from '../handleMap';
-import type { Connection, NodeInstance } from '../../../store/types';
+import type { Connection, NodeInstance, NodeSpec } from '../../../store/types';
 import { makeNodeInstance, mockSpecs } from './helpers';
 import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../../gpuScript';
 
@@ -32,6 +32,68 @@ const graphBodyLines = (output: string): string[] =>
     .map((line) => line.trim())
     .filter((line) => line && line !== 'graph {' && line !== '}');
 
+const loaderSpecs: NodeSpec[] = [
+  ...mockSpecs,
+  {
+    id: 'load_image_sequence',
+    display_name: 'Load Image Sequence',
+    category: 'Input',
+    description: 'Load an image sequence from a directory',
+    inputs: [],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [
+      {
+        key: 'directory',
+        label: 'Directory',
+        ty: 'String',
+        default: { String: '' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+      {
+        key: 'pattern',
+        label: 'Pattern',
+        ty: 'String',
+        default: { String: 'frame_{frame}.png' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+    ],
+  },
+  {
+    id: 'load_video',
+    display_name: 'Load Video',
+    category: 'Input',
+    description: 'Load a video file',
+    inputs: [],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [{
+      key: 'file_path',
+      label: 'File Path',
+      ty: 'String',
+      default: { String: '' },
+      ui_hint: { type: 'Hidden' },
+      promotable: false,
+    }],
+  },
+  {
+    id: 'load_image',
+    display_name: 'Load Image',
+    category: 'Input',
+    description: 'Load an image or multi-layer EXR file',
+    inputs: [],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [{
+      key: 'image_data',
+      label: 'Image Data',
+      ty: 'String',
+      default: { String: '' },
+      ui_hint: { type: 'Hidden' },
+      promotable: true,
+    }],
+  },
+];
+
 describe('serializeGraph', () => {
   it('serializes empty graph to empty string', () => {
     const input = buildInput(new Map(), []);
@@ -54,6 +116,67 @@ describe('serializeGraph', () => {
     }));
     const output = serializeGraph(buildInput(nodes, []));
     expect(output).toBe(graph(['load1 = LoadImage(path: image("file:///plate.exr"))']));
+  });
+
+  it('omits embedded web image data from load image DSL', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image',
+      params: { image_data: { String: '<embedded bytes>' } },
+    }));
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], loaderSpecs));
+    expect(output).toBe(graph(['load1 = LoadImage()']));
+  });
+
+  it('serializes virtual load image path when the runtime spec only exposes image_data', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image',
+      params: {
+        image_data: { String: '<embedded bytes>' },
+        path: { String: 'file:///Users/test/plate.png' },
+      },
+    }));
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], loaderSpecs));
+    expect(output).toBe(graph(['load1 = LoadImage(path: image("file:///Users/test/plate.png"))']));
+  });
+
+  it('omits in-memory sequence pattern without a resolvable directory', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image_sequence',
+      params: { pattern: { String: '00032_{frame}.png' } },
+    }));
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], loaderSpecs));
+    expect(output).toBe(graph(['seq1 = LoadImageSequence()']));
+  });
+
+  it('serializes sequence directories and patterns when the source is resolvable', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image_sequence',
+      params: {
+        directory: { String: 'file:///shots/a' },
+        pattern: { String: 'plate_{frame}.exr' },
+      },
+    }));
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], loaderSpecs));
+    expect(output).toBe(graph(['seq1 = LoadImageSequence(directory: sequence("file:///shots/a"), pattern: "plate_{frame}.exr")']));
+  });
+
+  it('serializes load video file paths as inline asset constructors', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_video',
+      params: { file_path: { String: 'file:///ref.mov' } },
+    }));
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], loaderSpecs));
+    expect(output).toBe(graph(['load1 = LoadVideo(file_path: video("file:///ref.mov"))']));
   });
 
   it('serializes single node with non-default param', () => {

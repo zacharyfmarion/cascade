@@ -98,6 +98,7 @@ export interface EngineBridge {
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;
   setDslHandle?(nodeId: string, handle: string): Promise<void> | void;
   loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> | NodeInterfaceChange;
+  loadImagePath?(nodeId: string, path: string): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   loadPaletteData?(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> | [number, number, number, number][];
   renderViewer(viewerNodeId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> | ViewerResult | null;
   exportGraph(): Promise<unknown> | unknown;

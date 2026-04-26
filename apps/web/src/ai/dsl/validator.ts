@@ -98,8 +98,19 @@ const expectedLabel = (valueType: ValueType): string => {
   return valueType.toLowerCase();
 };
 
-const getParamSpec = (spec: NodeSpec, key: string): ParamSpec | undefined =>
-  spec.params.find(param => param.key === key);
+const virtualLoadImagePathParam: ParamSpec = {
+  key: 'path',
+  label: 'Path',
+  ty: 'String',
+  default: { String: '' },
+  ui_hint: { type: 'FilePicker' },
+  promotable: false,
+};
+
+const getParamSpec = (node: DslNode, spec: NodeSpec, key: string): ParamSpec | undefined => {
+  if (node.nodeTypeId === 'load_image' && key === 'path') return virtualLoadImagePathParam;
+  return spec.params.find(param => param.key === key);
+};
 
 
 const addError = (errors: ValidationError[], error: ValidationError) => {
@@ -146,7 +157,7 @@ const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationErr
       }
       continue;
     }
-    const paramSpec = getParamSpec(spec, paramKey);
+    const paramSpec = getParamSpec(node, spec, paramKey);
     if (!paramSpec) {
       addError(errors, {
         line: node.line,

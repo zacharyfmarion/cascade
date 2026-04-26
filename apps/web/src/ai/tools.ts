@@ -438,19 +438,19 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
 
 export const cascadeTools = {
   read_graph: tool({
-    description: 'Get the current graph as Cascade DSL text. The DSL uses graph { ... }, node = NodeType(...), source.output -> target.input connections, muted(NodeType(...)) wrappers, and inline asset constructors like image("file:///plate.exr").',
+    description: 'Get the current graph as Cascade DSL text. The DSL uses graph { ... }, node = NodeType(...), source.output -> target.input connections, muted(NodeType(...)) wrappers, and inline asset constructors only for resolvable asset sources. Web-dropped/embedded assets are omitted from loader params.',
     inputSchema: readGraphSchema,
     execute: toolExecutors.read_graph,
   }),
 
   edit_graph: tool({
-    description: 'Edit the graph by finding and replacing text in the Cascade DSL. Use arrow connections (source.output -> target.input), muted(...) wrappers, and inline asset constructors. The old_text must match exactly. The result is parsed, validated, and applied atomically.',
+    description: 'Edit the graph by finding and replacing text in the Cascade DSL. Use arrow connections (source.output -> target.input), muted(...) wrappers, and inline asset constructors only for resolvable asset sources. The old_text must match exactly. The result is parsed, validated, and applied atomically.',
     inputSchema: editGraphSchema,
     execute: toolExecutors.edit_graph,
   }),
 
   write_graph: tool({
-    description: 'Replace the entire graph with new Cascade DSL text. Use graph { ... }, node bindings, arrow connections, muted(...) wrappers, and inline asset constructors. Frames/layout are not represented. The DSL is parsed, validated, diffed, and applied with minimal mutations.',
+    description: 'Replace the entire graph with new Cascade DSL text. Use graph { ... }, node bindings, arrow connections, muted(...) wrappers, and inline asset constructors only for resolvable asset sources. Do not invent file paths for web-dropped/embedded assets. Frames/layout are not represented. The DSL is parsed, validated, diffed, and applied with minimal mutations.',
     inputSchema: writeGraphSchema,
     execute: toolExecutors.write_graph,
   }),

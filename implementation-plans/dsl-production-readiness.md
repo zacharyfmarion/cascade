@@ -130,6 +130,8 @@ Those APIs should be added before enabling parsed group/GPU definitions in the e
 - [x] Remove legacy `@muted` and `<-` compatibility; only the new syntax is supported.
 - [x] Update Monaco tokenization for the new syntax.
 - [x] Update AI tool descriptions and syntax guidance.
+- [x] Clarify loader asset semantics: embedded web assets stay in project state and are omitted from DSL.
+- [x] Route desktop `LoadImage(path: image(...))` edits through asset loading and surface invalid path errors in the DSL editor.
 - [x] Add tests for arrows, wrappers, graph blocks, assets, and formatting.
 - [x] Add coverage tooling and thresholds for DSL code.
 - [x] Identify required internal group engine APIs.

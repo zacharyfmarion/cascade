@@ -32,6 +32,20 @@ export interface ParseContext {
   handleMap?: HandleMap;
 }
 
+const virtualLoadImagePathParam: ParamSpec = {
+  key: 'path',
+  label: 'Path',
+  ty: 'String',
+  default: { String: '' },
+  ui_hint: { type: 'FilePicker' },
+  promotable: false,
+};
+
+const getParamSpec = (nodeTypeId: string, paramSpecByKey: Map<string, ParamSpec>, key: string): ParamSpec | undefined => {
+  if (nodeTypeId === 'load_image' && key === 'path') return virtualLoadImagePathParam;
+  return paramSpecByKey.get(key);
+};
+
 const advanceScanner = (text: string, index: number, state: ScanState): { nextIndex: number; state: ScanState } => {
   if (state.stringMode === 'triple') {
     if (text.startsWith('"""', index)) {
@@ -532,7 +546,7 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
           continue;
         }
         const paramKey = pair.key.startsWith('input.') ? pair.key.slice('input.'.length) : pair.key;
-        const paramSpec = paramSpecByKey.get(paramKey);
+        const paramSpec = getParamSpec(nodeTypeId, paramSpecByKey, paramKey);
         if (!paramSpec && nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
           const parsedScript = parseParamValue({
             key: 'script',
