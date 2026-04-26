@@ -15,8 +15,10 @@ export interface ParseResult {
   sourceMap?: DslSourceMap;
 }
 
-const NODE_REGEX = /^(@muted\s+)?([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\(([\s\S]*)\)$/;
-const CONNECTION_REGEX = /^([a-z][a-z0-9_]*)\.([\w]+)\s*<-\s*([a-z][a-z0-9_]*)\.([\w]+)$/;
+const NODE_REGEX = /^([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\(([\s\S]*)\)$/;
+const MUTED_NODE_REGEX = /^([a-z][a-z0-9_]*)\s*=\s*muted\(\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\(([\s\S]*)\)\s*\)$/;
+const ARROW_CONNECTION_REGEX = /^([a-z][a-z0-9_]*)\.([\w]+)\s*->\s*([a-z][a-z0-9_]*)\.([\w]+)$/;
+const VERSION_REGEX = /^cascade\s+\d+$/;
 
 type StringMode = 'none' | 'double' | 'triple';
 
@@ -71,6 +73,51 @@ const stripInlineComment = (line: string): string => {
   }
   return line;
 };
+
+const findGraphBody = (input: string): string | null => {
+  const graphMatch = /\bgraph\s*\{/.exec(input);
+  if (!graphMatch) return null;
+
+  const openIndex = input.indexOf('{', graphMatch.index);
+  let depth = 0;
+  let bodyStart = -1;
+  let state: ScanState = { stringMode: 'none', escaped: false };
+
+  for (let i = openIndex; i < input.length;) {
+    const char = input[i];
+    if (state.stringMode === 'none') {
+      if (char === '{') {
+        depth += 1;
+        if (depth === 1) {
+          bodyStart = i + 1;
+        }
+      } else if (char === '}') {
+        depth -= 1;
+        if (depth === 0 && bodyStart >= 0) {
+          const lineOffset = input.slice(0, bodyStart).split(/\r?\n/).length - 1;
+          return `${'\n'.repeat(lineOffset)}${input.slice(bodyStart, i)}`;
+        }
+      }
+    }
+    const next = advanceScanner(input, i, state);
+    state = next.state;
+    i = next.nextIndex;
+  }
+
+  return null;
+};
+
+const stripDocumentShell = (input: string): string => {
+  const graphBody = findGraphBody(input);
+  if (graphBody !== null) return graphBody;
+  return input;
+};
+
+const hasNonDocumentShellContent = (input: string): boolean =>
+  input
+    .split(/\r?\n/)
+    .map((line) => stripInlineComment(line).trim())
+    .some((line) => line && !line.startsWith('#') && !VERSION_REGEX.test(line));
 
 export const splitTopLevelParams = (paramStr: string): string[] => {
   const parts: string[] = [];
@@ -285,6 +332,10 @@ const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | nul
       return null;
     }
     case 'String': {
+      const assetString = parseAssetConstructor(trimmed);
+      if (assetString !== null) {
+        return { type: 'string', value: assetString };
+      }
       if (trimmed.startsWith('"""') && trimmed.endsWith('"""')) {
         let value = trimmed.slice(3, -3);
         if (value.startsWith('\n')) value = value.slice(1);
@@ -313,6 +364,29 @@ const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | nul
     default:
       return null;
   }
+};
+
+const parseAssetConstructor = (raw: string): string | null => {
+  const trimmed = raw.trim();
+  const match = /^(image|sequence|video)\s*\(([\s\S]*)\)$/.exec(trimmed);
+  if (match) {
+    const entries = splitTopLevelParams(match[2]);
+    const first = entries[0]?.trim();
+    if (first?.startsWith('"') && first.endsWith('"')) {
+      try {
+        return JSON.parse(first) as string;
+      } catch {
+        return first.slice(1, -1);
+      }
+    }
+    return null;
+  }
+
+  if (trimmed.startsWith('images(') && trimmed.endsWith(')')) {
+    return trimmed;
+  }
+
+  return null;
 };
 
 interface LogicalLine {
@@ -397,22 +471,34 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
   const nodeSpans = new Map<string, DslSourceSpan>();
   const connectionSpans = new Map<string, DslSourceSpan>();
   const specById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
+  const graphBody = findGraphBody(input);
 
-  const logicalLines = joinContinuationLines(input);
+  if (graphBody === null && hasNonDocumentShellContent(input)) {
+    return {
+      ast: { nodes, connections },
+      errors: [{ line: 1, message: 'Expected a graph { ... } block' }],
+      sourceMap: { nodeSpans, connectionSpans },
+    };
+  }
+
+  const logicalLines = joinContinuationLines(graphBody ?? stripDocumentShell(input));
   for (const { text: line, startLine: lineNumber } of logicalLines) {
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
     if (trimmedLine.startsWith('#')) continue;
+    if (VERSION_REGEX.test(trimmedLine)) continue;
 
     const withoutComment = stripInlineComment(line).trim();
     if (!withoutComment) continue;
+    if (VERSION_REGEX.test(withoutComment)) continue;
 
-    const nodeMatch = withoutComment.match(NODE_REGEX);
+    const mutedNodeMatch = withoutComment.match(MUTED_NODE_REGEX);
+    const nodeMatch = mutedNodeMatch ?? withoutComment.match(NODE_REGEX);
     if (nodeMatch) {
-      const muted = Boolean(nodeMatch[1]);
-      const handle = nodeMatch[2];
-      const nodeType = nodeMatch[3];
-      const paramsSection = nodeMatch[4];
+      const muted = Boolean(mutedNodeMatch);
+      const handle = nodeMatch[1];
+      const nodeType = nodeMatch[2];
+      const paramsSection = nodeMatch[3];
 
       if (nodes.has(handle)) {
         errors.push({ line: lineNumber, message: `Duplicate handle '${handle}'` });
@@ -445,8 +531,9 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
           errors.push({ line: lineNumber, message: `Invalid param syntax '${entry}'` });
           continue;
         }
-        const paramSpec = paramSpecByKey.get(pair.key);
-        if (!paramSpec && nodeTypeId.startsWith('gpu_script') && pair.key === 'script') {
+        const paramKey = pair.key.startsWith('input.') ? pair.key.slice('input.'.length) : pair.key;
+        const paramSpec = paramSpecByKey.get(paramKey);
+        if (!paramSpec && nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
           const parsedScript = parseParamValue({
             key: 'script',
             label: 'Script',
@@ -459,7 +546,7 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
             errors.push({ line: lineNumber, message: `Invalid value for 'script'. Expected a multiline or quoted string.` });
             continue;
           }
-          params.set(pair.key, parsedScript);
+          params.set(paramKey, parsedScript);
           continue;
         }
         if (!paramSpec) {
@@ -472,7 +559,7 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
           errors.push({ line: lineNumber, message: `Invalid value for '${pair.key}'. ${hint}` });
           continue;
         }
-        params.set(pair.key, parsed);
+        params.set(paramKey, parsed);
       }
 
       nodes.set(handle, { handle, nodeType, nodeTypeId, params, muted, line: lineNumber });
@@ -486,12 +573,12 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
       continue;
     }
 
-    const connectionMatch = withoutComment.match(CONNECTION_REGEX);
+    const connectionMatch = withoutComment.match(ARROW_CONNECTION_REGEX);
     if (connectionMatch) {
-      const toHandle = connectionMatch[1];
-      const toPort = connectionMatch[2];
-      const fromHandle = connectionMatch[3];
-      const fromPort = connectionMatch[4];
+      const fromHandle = connectionMatch[1];
+      const fromPort = connectionMatch[2];
+      const toHandle = connectionMatch[3];
+      const toPort = connectionMatch[4];
       connections.push({ fromHandle, fromPort, toHandle, toPort, line: lineNumber });
       const trimmedLine = withoutComment.trim();
       connectionSpans.set(`${fromHandle}.${fromPort}->${toHandle}.${toPort}`, {

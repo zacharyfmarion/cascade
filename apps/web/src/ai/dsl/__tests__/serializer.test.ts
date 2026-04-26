@@ -24,6 +24,14 @@ const buildInputWithSpecs = (
   handleMap,
 });
 
+const graph = (lines: string[]): string =>
+  `graph {\n${lines.map((line) => (line ? `  ${line}` : '')).join('\n')}\n}`;
+
+const graphBodyLines = (output: string): string[] =>
+  output.split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && line !== 'graph {' && line !== '}');
+
 describe('serializeGraph', () => {
   it('serializes empty graph to empty string', () => {
     const input = buildInput(new Map(), []);
@@ -34,7 +42,18 @@ describe('serializeGraph', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set('node-1', makeNodeInstance({ id: 'node-1', typeId: 'viewer' }));
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('viewer1 = Viewer()');
+    expect(output).toBe(graph(['viewer1 = Viewer()']));
+  });
+
+  it('serializes load image paths as inline asset constructors', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image',
+      params: { path: { String: 'file:///plate.exr' } },
+    }));
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe(graph(['load1 = LoadImage(path: image("file:///plate.exr"))']));
   });
 
   it('serializes single node with non-default param', () => {
@@ -49,7 +68,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur(amount: 5.0)');
+    expect(output).toBe(graph(['blur1 = GaussianBlur(amount: 5.0)']));
   });
 
   it('omits params when value matches default', () => {
@@ -64,7 +83,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur()');
+    expect(output).toBe(graph(['blur1 = GaussianBlur()']));
   });
 
   it('serializes muted nodes with prefix', () => {
@@ -80,7 +99,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('@muted blur1 = GaussianBlur(amount: 5.0)');
+    expect(output).toBe(graph(['blur1 = muted(GaussianBlur(amount: 5.0))']));
   });
 
   it('serializes connections in correct format', () => {
@@ -91,7 +110,7 @@ describe('serializeGraph', () => {
       { id: 'c1', fromNode: 'load', fromPort: 'image', toNode: 'blur', toPort: 'image' },
     ];
     const output = serializeGraph(buildInput(nodes, connections));
-    expect(output).toBe(['load1 = LoadImage()', 'blur1 = GaussianBlur()', '', 'blur1.image <- load1.image'].join('\n'));
+    expect(output).toBe(graph(['load1 = LoadImage()', 'blur1 = GaussianBlur()', '', 'load1.image -> blur1.image']));
   });
 
   it('sorts connections deterministically by toHandle|toPort', () => {
@@ -110,11 +129,11 @@ describe('serializeGraph', () => {
       { id: 'c3', fromNode: 'node-load', fromPort: 'image', toNode: 'node-blend', toPort: 'base' },
     ];
     const output = serializeGraph(buildInput(nodes, connections, handleMap));
-    const lines = output.split('\n').filter((line) => line.includes('<-'));
+    const lines = output.split('\n').map((line) => line.trim()).filter((line) => line.includes('->'));
     expect(lines).toEqual([
-      'blend1.base <- load1.image',
-      'blend1.overlay <- load1.image',
-      'blur1.image <- load1.image',
+      'load1.image -> blend1.base',
+      'load1.image -> blend1.overlay',
+      'load1.image -> blur1.image',
     ]);
   });
 
@@ -128,7 +147,7 @@ describe('serializeGraph', () => {
       { id: 'c2', fromNode: 'blur', fromPort: 'image', toNode: 'viewer', toPort: 'image' },
     ];
     const output = serializeGraph(buildInput(nodes, connections));
-    const nodeLines = output.split('\n').slice(0, 3);
+    const nodeLines = graphBodyLines(output).filter((line) => line.includes('='));
     expect(nodeLines).toEqual(['load1 = LoadImage()', 'blur1 = GaussianBlur()', 'viewer1 = Viewer()']);
   });
 
@@ -137,7 +156,7 @@ describe('serializeGraph', () => {
     nodes.set('blur-a', makeNodeInstance({ id: 'blur-a', typeId: 'gaussian_blur' }));
     nodes.set('blur-b', makeNodeInstance({ id: 'blur-b', typeId: 'gaussian_blur' }));
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output.split('\n')).toEqual(['blur1 = GaussianBlur()', 'blur2 = GaussianBlur()']);
+    expect(graphBodyLines(output)).toEqual(['blur1 = GaussianBlur()', 'blur2 = GaussianBlur()']);
   });
 
   it('uses inputDefaults for promotable params', () => {
@@ -152,7 +171,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur(amount: 0.25)');
+    expect(output).toBe(graph(['blur1 = GaussianBlur(amount: 0.25)']));
   });
 
   it('does not add blank line when no connections', () => {
@@ -168,7 +187,7 @@ describe('serializeGraph', () => {
     );
     const output = serializeGraph(buildInput(nodes, []));
     expect(output.includes('\n\n')).toBe(false);
-    expect(output).toBe('solid1 = SolidColor(width: 1024)');
+    expect(output).toBe(graph(['solid1 = SolidColor(width: 1024)']));
   });
 
   it('formats floats with trailing .0', () => {
@@ -183,7 +202,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blur1 = GaussianBlur(amount: 5.0)');
+    expect(output).toBe(graph(['blur1 = GaussianBlur(amount: 5.0)']));
   });
 
   it('serializes palette param', () => {
@@ -199,7 +218,7 @@ describe('serializeGraph', () => {
     const handleMap = new HandleMap();
     handleMap.set('palette1', 'node-1');
     const output = serializeGraph(buildInput(nodes, [], handleMap));
-    expect(output).toBe('palette1 = ColorPalette(colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0)])');
+    expect(output).toBe(graph(['palette1 = ColorPalette(colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0)])']));
   });
 
   it('serializes ramp param', () => {
@@ -221,7 +240,7 @@ describe('serializeGraph', () => {
     handleMap.set('ramp1', 'node-1');
     const output = serializeGraph(buildInput(nodes, [], handleMap));
     expect(output).toBe(
-      'ramp1 = ColorRamp(stops: [0.25: rgba(0.0, 0.0, 0.0, 1.0), 0.75: rgba(1.0, 1.0, 1.0, 1.0)])'
+      graph(['ramp1 = ColorRamp(stops: [0.25: rgba(0.0, 0.0, 0.0, 1.0), 0.75: rgba(1.0, 1.0, 1.0, 1.0)])'])
     );
   });
 
@@ -238,7 +257,7 @@ describe('serializeGraph', () => {
     const handleMap = new HandleMap();
     handleMap.set('curves1', 'node-1');
     const output = serializeGraph(buildInput(nodes, [], handleMap));
-    expect(output).toBe('curves1 = Curves(master_curve: [(0.0, 0.0), (0.5, 0.7), (1.0, 1.0)])');
+    expect(output).toBe(graph(['curves1 = Curves(master_curve: [(0.0, 0.0), (0.5, 0.7), (1.0, 1.0)])']));
   });
 
   it('omits palette param when value matches default', () => {
@@ -254,7 +273,7 @@ describe('serializeGraph', () => {
     const handleMap = new HandleMap();
     handleMap.set('palette1', 'node-1');
     const output = serializeGraph(buildInput(nodes, [], handleMap));
-    expect(output).toBe('palette1 = ColorPalette()');
+    expect(output).toBe(graph(['palette1 = ColorPalette()']));
   });
 
   it('serializes dropdown param as snake_case string', () => {
@@ -268,7 +287,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blend1 = Blend(mode: "screen")');
+    expect(output).toBe(graph(['blend1 = Blend(mode: "screen")']));
   });
 
   it('serializes gpu script source as a multiline string', () => {
@@ -306,7 +325,7 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('blend1 = Blend()');
+    expect(output).toBe(graph(['blend1 = Blend()']));
   });
 
   it('serializes gradient dropdown as snake_case', () => {
@@ -321,6 +340,6 @@ describe('serializeGraph', () => {
       })
     );
     const output = serializeGraph(buildInput(nodes, []));
-    expect(output).toBe('gradient1 = Gradient(direction: "radial")');
+    expect(output).toBe(graph(['gradient1 = Gradient(direction: "radial")']));
   });
 });

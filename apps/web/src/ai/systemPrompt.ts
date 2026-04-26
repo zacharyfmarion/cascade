@@ -36,11 +36,13 @@ export const buildSystemPrompt = (nodeSpecs: NodeSpec[]): string => `You are an 
 
 ## DSL Syntax
 
-The graph is represented as text with **node declarations** and **connection statements**.
+The graph is represented as text with a \`graph { ... }\` block containing **node bindings** and **connection statements**.
 
 ### Node Declarations
 \`\`\`
-handle = NodeType(param: value, param2: value2)
+graph {
+  handle = NodeType(param: value, param2: value2)
+}
 \`\`\`
 - **handle**: lowercase identifier (e.g., \`blur1\`, \`load1\`, \`viewer\`)
 - **NodeType**: PascalCase node type (e.g., \`GaussianBlur\`, \`LoadImage\`, \`Viewer\`)
@@ -48,13 +50,13 @@ handle = NodeType(param: value, param2: value2)
 
 ### Connections
 \`\`\`
-target.input_port <- source.output_port
+source.output_port -> target.input_port
 \`\`\`
-Data flows from source to target (right to left).
+Use arrow syntax. Data flows left to right from source output to target input.
 
 ### Muted Nodes
 \`\`\`
-@muted blur1 = GaussianBlur(sigma: 5.0)
+blur1 = muted(GaussianBlur(sigma: 5.0))
 \`\`\`
 
 ### Comments
@@ -70,6 +72,7 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 | Int | bare integer | \`width: 1920\` |
 | Bool | true/false | \`flip_x: true\` |
 | String | "quoted" or triple-quoted multiline | \`path: "/img.png"\`, \`script: """\\nreturn color;\\n"""\` |
+| Asset path | inline constructor | \`path: image("file:///plate.exr")\`, \`path: sequence("file:///shot.%04d.exr", first: 1001, last: 1100)\`, \`path: video("file:///ref.mov")\` |
 | Color | rgba(r,g,b,a) | \`color: rgba(1.0, 0.0, 0.0, 1.0)\` |
 | Dropdown | "option_string" | \`mode: "multiply"\` — use exact string from options |
 | ColorPalette | [rgba(...), ...] | \`colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0)]\` |
@@ -78,14 +81,16 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 
 ### Example Graph
 \`\`\`
-load1 = LoadImage()
-blur1 = GaussianBlur(sigma: 5.0)
-grade1 = BrightnessContrast(brightness: 0.1, contrast: 1.2)
-viewer = Viewer()
+graph {
+  load1 = LoadImage(path: image("file:///plate.exr"))
+  blur1 = GaussianBlur(sigma: 5.0)
+  grade1 = BrightnessContrast(brightness: 0.1, contrast: 1.2)
+  viewer = Viewer()
 
-blur1.image <- load1.image
-grade1.image <- blur1.image
-viewer.image <- grade1.image
+  load1.image -> blur1.image
+  blur1.image -> grade1.image
+  grade1.image -> viewer.image
+}
 \`\`\`
 
 ## Tools
@@ -98,7 +103,7 @@ Find \`old_text\` in the current DSL and replace with \`new_text\`. The result i
 
 **Examples:**
 - Change a param: \`edit_graph(old_text: "blur1 = GaussianBlur(sigma: 5.0)", new_text: "blur1 = GaussianBlur(sigma: 15.0)")\`
-- Insert a node: \`edit_graph(old_text: "viewer.image <- blur1.image", new_text: "sharpen1 = Sharpen(amount: 0.5)\\nsharpen1.image <- blur1.image\\nviewer.image <- sharpen1.image")\`
+- Insert a node: \`edit_graph(old_text: "blur1.image -> viewer.image", new_text: "sharpen1 = Sharpen(amount: 0.5)\\nblur1.image -> sharpen1.image\\nsharpen1.image -> viewer.image")\`
 - Remove a node: \`edit_graph(old_text: "blur1 = GaussianBlur(sigma: 5.0)\\n...connections...", new_text: "...rewired connections...")\`
 
 ### write_graph(dsl)
@@ -171,6 +176,7 @@ Available globals:
 5. Use \`list_node_types\` to discover what node types are available
 6. You do NOT control node positions — they are auto-laid-out based on connections
 7. Always ensure the output chain connects to a Viewer node so the user sees results
+8. Frames and layout metadata are not represented in the DSL
 
 ## IMPORTANT: You Cannot See Images Unless You Explicitly Look
 You have NO automatic visual feedback. After writing or editing the graph, you CANNOT see what the output looks like unless you call \`view_current_image\`. Do NOT claim the result "looks good" or describe what the image shows without first calling \`view_current_image\`. If the user asks how it looks or you want to verify the result, you MUST call \`view_current_image\` first.
@@ -220,7 +226,7 @@ Use this technique when:
 - Compositing results are unexpected — view the foreground, background, and mask layers separately to understand what's being combined
 
 How to do it:
-1. Add a Viewer node in the DSL and connect it to the output you want to inspect (e.g. \`debug1 = Viewer()\` then \`debug1.image <- chromakey1.image\`)
+1. Add a Viewer node in the DSL and connect it to the output you want to inspect (e.g. \`debug1 = Viewer()\` then \`chromakey1.image -> debug1.image\`)
 2. Call \`view_current_image\` — the user can also click on that Viewer node to see the intermediate result
 3. Once debugging is done, remove the extra Viewer nodes to keep the graph clean
 

@@ -135,8 +135,8 @@ export const DslEditor: React.FC = () => {
         defaultToken: '',
         tokenPostfix: '.dsl',
 
-        keywords: ['true', 'false'],
-        builtinFunctions: ['rgba'],
+        keywords: ['cascade', 'graph', 'node', 'group', 'gpu', 'inputs', 'outputs', 'params', 'code', 'true', 'false'],
+        builtinFunctions: ['rgba', 'palette', 'ramp', 'curve', 'image', 'sequence', 'video', 'images', 'muted'],
 
         tokenizer: {
           root: [
@@ -144,21 +144,19 @@ export const DslEditor: React.FC = () => {
             [/^\s*#.*$/, 'comment'],
             [/(\s+)(#.*)$/, ['white', 'comment']],
 
-            // Annotation (@muted) — must precede handle rules
-            [/@@muted/, 'keyword.annotation'],
-
-            // Connection: handle.port <- handle.port
-            [/([a-z][a-z0-9_]*)(\.)(\w+)(\s*)(<-)(\s*)([a-z][a-z0-9_]*)(\.)(\w+)/,
+            // Connection: handle.port -> handle.port
+            [/([a-z][a-z0-9_]*)(\.)(\w+)(\s*)(->)(\s*)([a-z][a-z0-9_]*)(\.)(\w+)/,
               ['variable.handle', 'delimiter', 'variable.port', 'white',
                'operator.arrow', 'white',
                'variable.handle', 'delimiter', 'variable.port']],
 
+            // Keywords and builtin wrappers/constructors
+            [/\b(cascade|graph|node|group|gpu|inputs|outputs|params|code)\b/, 'keyword'],
+            [/\b(rgba|palette|ramp|curve|image|sequence|video|images|muted)(\()/, ['support.function', 'delimiter']],
+
             // Node declaration: handle = NodeType or handle = Ns::NodeType
             [/([a-z][a-z0-9_]*)(\s*)(=)(\s*)([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)/,
               ['variable.handle', 'white', 'delimiter', 'white', 'type.node']],
-
-            // Builtin functions: rgba(, palette(, ramp(, curve(
-            [/(rgba|palette|ramp|curve)(\()/, ['support.function', 'delimiter']],
 
             // Parameter key: word followed by colon
             [/([a-z_][a-z0-9_]*)(\s*)(:)/, ['variable.parameter', 'white', 'delimiter']],
@@ -177,8 +175,8 @@ export const DslEditor: React.FC = () => {
             // Array brackets
             [/\[|\]/, 'delimiter.bracket'],
 
-            // Remaining delimiters: = ( ) , .
-            [/[=(),.]/, 'delimiter'],
+            // Remaining delimiters: = ( ) , . { }
+            [/[=(),.{}]/, 'delimiter'],
 
             // Catch-all identifiers (unmatched lowercase words)
             [/[a-z_][a-z0-9_]*/, 'identifier'],

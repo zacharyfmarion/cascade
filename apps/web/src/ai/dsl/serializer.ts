@@ -3,7 +3,6 @@ import type { DslParamValue } from './types';
 import { snakeToPascal, labelToSnake } from './types';
 import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
-import { useGraphStore } from '../../store/graphStore';
 import { parseGpuScriptManifestJson } from '../gpuScript';
 
 export interface SerializerInput {
@@ -50,7 +49,16 @@ const unwrapParamValue = (paramSpec: ParamSpec, paramValue: ParamValue): DslPara
   return { type: 'string', value: paramValue.String };
 };
 
-const formatDslValue = (paramValue: DslParamValue): string => {
+const formatAssetValue = (typeId: string, paramKey: string, value: string): string | null => {
+  if (paramKey !== 'path' && paramKey !== 'pattern' && paramKey !== 'files') return null;
+  if (typeId === 'load_image') return `image(${JSON.stringify(value)})`;
+  if (typeId === 'load_image_sequence') return `sequence(${JSON.stringify(value)})`;
+  if (typeId === 'load_video') return `video(${JSON.stringify(value)})`;
+  if (typeId === 'load_image_batch') return value.startsWith('images(') ? value : `images([${JSON.stringify(value)}])`;
+  return null;
+};
+
+const formatDslValue = (paramValue: DslParamValue, context?: { typeId: string; paramKey: string }): string => {
   switch (paramValue.type) {
     case 'float':
       return formatFloat(paramValue.value);
@@ -59,6 +67,10 @@ const formatDslValue = (paramValue: DslParamValue): string => {
     case 'bool':
       return paramValue.value ? 'true' : 'false';
     case 'string':
+      if (context) {
+        const assetValue = formatAssetValue(context.typeId, context.paramKey, paramValue.value);
+        if (assetValue) return assetValue;
+      }
       if (paramValue.value.includes('\n') && !paramValue.value.includes('"""')) {
         return `"""\n${paramValue.value}\n"""`;
       }
@@ -84,9 +96,9 @@ const formatDslValue = (paramValue: DslParamValue): string => {
   }
 };
 
-const formatParamEntry = (paramSpec: ParamSpec, paramValue: ParamValue): string => {
+const formatParamEntry = (typeId: string, paramSpec: ParamSpec, paramValue: ParamValue): string => {
   const dslValue = unwrapParamValue(paramSpec, paramValue);
-  return `${paramSpec.key}: ${formatDslValue(dslValue)}`;
+  return `${paramSpec.key}: ${formatDslValue(dslValue, { typeId, paramKey: paramSpec.key })}`;
 };
 
 const shouldIncludeParam = (paramSpec: ParamSpec, paramValue: ParamValue | undefined): paramValue is ParamValue => {
@@ -151,6 +163,7 @@ const topologicalOrder = (nodes: Map<string, NodeInstance>, connections: Connect
 
 export function serializeGraph(input: SerializerInput): string {
   const { nodes, connections, nodeSpecs, handleMap } = input;
+  if (nodes.size === 0) return '';
   const nodeSpecById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
 
   const orderedNodes = topologicalOrder(nodes, connections, handleMap);
@@ -158,9 +171,6 @@ export function serializeGraph(input: SerializerInput): string {
   const nodeLines = orderedNodes.map((node) => {
     const spec = nodeSpecById.get(node.typeId);
     const handle = handleMap.getOrCreate(node.id, node.typeId);
-    if (!node.dslHandle || node.dslHandle !== handle) {
-      useGraphStore.getState().setDslHandle(node.id, handle);
-    }
     const rawId = spec ? spec.id : node.typeId;
     const logicalTypeId = node.typeId.startsWith('gpu_script') ? 'gpu_script' : rawId;
     const strippedId = logicalTypeId.replace(/^gpu_kernel::/, '');
@@ -172,7 +182,7 @@ export function serializeGraph(input: SerializerInput): string {
         const source = isConnectableParam(paramSpec) ? node.inputDefaults : node.params;
         const value = source[paramSpec.key];
         if (!shouldIncludeParam(paramSpec, value)) continue;
-        params.push(formatParamEntry(paramSpec, value));
+        params.push(formatParamEntry(node.typeId, paramSpec, value));
       }
     }
 
@@ -187,8 +197,8 @@ export function serializeGraph(input: SerializerInput): string {
     }
 
     const paramSection = params.join(', ');
-    const mutedPrefix = node.muted ? '@muted ' : '';
-    return `${mutedPrefix}${handle} = ${typeName}(${paramSection})`;
+    const expression = `${typeName}(${paramSection})`;
+    return node.muted ? `${handle} = muted(${expression})` : `${handle} = ${expression}`;
   });
 
   const connectionLines = connections
@@ -197,16 +207,15 @@ export function serializeGraph(input: SerializerInput): string {
       const fromHandle = handleMap.getOrCreate(connection.fromNode, nodes.get(connection.fromNode)?.typeId ?? 'node');
       const toHandle = handleMap.getOrCreate(connection.toNode, nodes.get(connection.toNode)?.typeId ?? 'node');
       return {
-        line: `${toHandle}.${connection.toPort} <- ${fromHandle}.${connection.fromPort}`,
+        line: `${fromHandle}.${connection.fromPort} -> ${toHandle}.${connection.toPort}`,
         sortKey: `${toHandle}|${connection.toPort}`,
       };
     })
     .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
     .map((entry) => entry.line);
 
-  if (connectionLines.length === 0) {
-    return nodeLines.join('\n');
-  }
-
-  return `${nodeLines.join('\n')}\n\n${connectionLines.join('\n')}`;
+  const graphLines = connectionLines.length === 0
+    ? nodeLines
+    : [...nodeLines, '', ...connectionLines];
+  return `graph {\n${graphLines.map((line) => (line ? `  ${line}` : '')).join('\n')}\n}`;
 }
