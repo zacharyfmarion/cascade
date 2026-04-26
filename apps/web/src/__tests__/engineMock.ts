@@ -1,5 +1,5 @@
 import type { EngineBridge, AddNodeResult, NodeInterfaceChange } from '../engine/bridge';
-import type { NodeSpec, ParamValue, ViewerResult } from '../store/types';
+import type { GroupInternalGraph, InternalGraphNode, NodeSpec, ParamValue, ViewerResult } from '../store/types';
 import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec, parseGpuScriptManifestJson } from '../ai/gpuScript';
 
 const NODE_SPECS: NodeSpec[] = [
@@ -166,10 +166,12 @@ export function createMockEngine(): EngineBridge & {
   _setRenderResult: (r: ViewerResult | null) => void;
   _renderCalls: string[];
   _clearRenderCalls: () => void;
+  _groupGraphs: Map<string, GroupInternalGraph>;
 } {
   const nodes = new Map<string, { typeId: string; params: Record<string, ParamValue> }>();
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
+  const groupGraphs = new Map<string, GroupInternalGraph>();
   let graphState: unknown = { nodes: [], connections: [] };
   let renderResult: ViewerResult | null = null;
   const renderCalls: string[] = [];
@@ -182,6 +184,7 @@ export function createMockEngine(): EngineBridge & {
     _setRenderResult: (r: ViewerResult | null) => { renderResult = r; },
     _renderCalls: renderCalls,
     _clearRenderCalls: () => { renderCalls.length = 0; },
+    _groupGraphs: groupGraphs,
 
     listNodeTypes: () => NODE_SPECS,
 
@@ -240,6 +243,91 @@ export function createMockEngine(): EngineBridge & {
       if (!manifest) throw new Error('Invalid manifest');
       node.params.__script_manifest = { String: manifestJson };
       return buildGpuScriptNodeSpec({ ...manifest, id: node.typeId });
+    },
+
+    compileInternalScriptNode: async (_groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec> => {
+      const manifest = parseGpuScriptManifestJson(manifestJson);
+      if (!manifest) throw new Error('Invalid manifest');
+      const spec = buildGpuScriptNodeSpec({ ...manifest, id: nodeId });
+      return spec;
+    },
+
+    getGroupInternalGraph: async (groupNodeId: string): Promise<GroupInternalGraph> => {
+      let graph = groupGraphs.get(groupNodeId);
+      if (!graph) {
+        graph = {
+          groupDefId: 'group::test',
+          name: 'Test Group',
+          nodes: [],
+          connections: [],
+          inputs: [],
+          outputs: [],
+        };
+        groupGraphs.set(groupNodeId, graph);
+      }
+      return graph;
+    },
+
+    addInternalNode: async (groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode> => {
+      let graph = Array.from(groupGraphs.values()).find(item => item.groupDefId === groupDefId);
+      if (!graph) {
+        graph = { groupDefId, name: 'Test Group', nodes: [], connections: [], inputs: [], outputs: [] };
+        groupGraphs.set('group-node', graph);
+      }
+      const id = `internal-${++nodeCounter}`;
+      const actualTypeId = typeId === 'gpu_script' ? `gpu_script::mock_${nodeCounter}` : typeId;
+      const spec = NODE_SPECS.find(s => s.id === typeId || s.id === actualTypeId);
+      const params: Record<string, ParamValue> = {};
+      if (spec) {
+        for (const p of spec.params) params[p.key] = p.default;
+      }
+      const node: InternalGraphNode = {
+        id,
+        typeId: actualTypeId,
+        position: { x, y },
+        params,
+        inputDefaults: {},
+        muted: false,
+      };
+      graph.nodes.push(node);
+      return node;
+    },
+
+    removeInternalNode: async (groupDefId: string, nodeId: string): Promise<NodeSpec> => {
+      const graph = Array.from(groupGraphs.values()).find(item => item.groupDefId === groupDefId);
+      if (graph) {
+        graph.nodes = graph.nodes.filter(node => node.id !== nodeId);
+        graph.connections = graph.connections.filter(conn => conn.fromNode !== nodeId && conn.toNode !== nodeId);
+      }
+      return NODE_SPECS[0];
+    },
+
+    setInternalParam: async (groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec> => {
+      const graph = Array.from(groupGraphs.values()).find(item => item.groupDefId === groupDefId);
+      const node = graph?.nodes.find(item => item.id === nodeId);
+      if (node) node.params = { ...node.params, [key]: value };
+      return NODE_SPECS[0];
+    },
+
+    setInternalInputDefault: async (groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec> => {
+      const graph = Array.from(groupGraphs.values()).find(item => item.groupDefId === groupDefId);
+      const node = graph?.nodes.find(item => item.id === nodeId);
+      if (node) node.inputDefaults = { ...node.inputDefaults, [portName]: value };
+      return NODE_SPECS[0];
+    },
+
+    setInternalPosition: async (groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec> => {
+      const graph = Array.from(groupGraphs.values()).find(item => item.groupDefId === groupDefId);
+      const node = graph?.nodes.find(item => item.id === nodeId);
+      if (node) node.position = { x, y };
+      return NODE_SPECS[0];
+    },
+
+    setInternalMuted: async (groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec> => {
+      const graph = Array.from(groupGraphs.values()).find(item => item.groupDefId === groupDefId);
+      const node = graph?.nodes.find(item => item.id === nodeId);
+      if (node) node.muted = muted;
+      return NODE_SPECS[0];
     },
 
     getNodeSpec: async (nodeId: string): Promise<NodeSpec> => {

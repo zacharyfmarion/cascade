@@ -35,9 +35,9 @@ export interface GraphSliceActions {
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
-  setParam: (nodeId: string, key: string, value: ParamValue) => void;
+  setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void> | void;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
-  setPosition: (nodeId: string, position: { x: number; y: number }) => void;
+  setPosition: (nodeId: string, position: { x: number; y: number }) => Promise<void> | void;
   toggleMuteSelected: () => Promise<void>;
 
   isInsideGroup: () => boolean;
@@ -94,6 +94,43 @@ export const createGraphSlice: StateCreator<
 
       await get().pushUndo();
       tagUiOrigin();
+
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !ctx.groupNodeId || !eng.addInternalNode || !eng.getGroupInternalGraph) {
+          set({ lastError: parseEngineError(new Error('Internal group node creation not supported by this engine')) });
+          return '';
+        }
+        const internalNode = await eng.addInternalNode(ctx.groupDefId, typeId, position.x, position.y);
+        const spec = get().nodeSpecs.find(s => s.id === internalNode.typeId);
+        const params: Record<string, ParamValue> = {};
+        if (spec) {
+          spec.params.forEach(p => {
+            params[p.key] = internalNode.params[p.key] ?? p.default;
+          });
+        } else {
+          Object.assign(params, internalNode.params);
+        }
+        const newNodes = new Map(get().nodes);
+        newNodes.set(internalNode.id, {
+          id: internalNode.id,
+          typeId: internalNode.typeId,
+          params,
+          inputDefaults: internalNode.inputDefaults ?? {},
+          position: internalNode.position,
+          muted: internalNode.muted ?? false,
+        });
+        const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId);
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        set({
+          nodes: newNodes,
+          nodeSpecs: withGroupIOSpecs(specs, internalGraph),
+          selectedNodeIds: new Set([internalNode.id]),
+        });
+        return internalNode.id;
+      }
 
       const result = await getEngine().addNode(typeId, position.x, position.y);
       const actualTypeId = result.typeId;
@@ -163,6 +200,27 @@ export const createGraphSlice: StateCreator<
     removeNode: async (id) => {
       await get().pushUndo();
       tagUiOrigin();
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !ctx.groupNodeId || !eng.removeInternalNode || !eng.getGroupInternalGraph) {
+          set({ lastError: parseEngineError(new Error('Internal group node removal not supported by this engine')) });
+          return;
+        }
+        await eng.removeInternalNode(ctx.groupDefId, id);
+        const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId);
+        const newNodes = new Map(get().nodes);
+        newNodes.delete(id);
+        set({
+          nodes: newNodes,
+          connections: get().connections.filter(c => c.fromNode !== id && c.toNode !== id),
+          nodeSpecs: withGroupIOSpecs(await Promise.resolve(eng.listNodeTypes()), internalGraph),
+          selectedNodeIds: new Set(Array.from(get().selectedNodeIds).filter(nodeId => nodeId !== id)),
+        });
+        get().triggerAffectedViewers([id]);
+        return;
+      }
       const removedNode = get().nodes.get(id);
       await getEngine().removeNode(id);
       const newNodes = new Map(get().nodes);
@@ -361,12 +419,23 @@ export const createGraphSlice: StateCreator<
       }
     },
 
-    setParam: (nodeId, key, value) => {
+    setParam: async (nodeId, key, value) => {
       // Synchronous delta undo — no Worker calls, no blocking.
       // Captures oldValue from current Zustand state before mutating.
       pushParamDeltaSync('param', nodeId, key, get, set);
       tagUiOrigin();
-      getEngine().setParam(nodeId, key, value);
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !eng.setInternalParam) {
+          set({ lastError: parseEngineError(new Error('Internal group param edits not supported by this engine')) });
+          return;
+        }
+        await eng.setInternalParam(ctx.groupDefId, nodeId, key, value);
+      } else {
+        await Promise.resolve(getEngine().setParam(nodeId, key, value));
+      }
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
       if (node) {
@@ -386,7 +455,18 @@ export const createGraphSlice: StateCreator<
       // Synchronous delta undo — same pattern as setParam.
       pushParamDeltaSync('inputDefault', nodeId, portName, get, set);
       tagUiOrigin();
-      await getEngine().setInputDefault(nodeId, portName, value);
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !eng.setInternalInputDefault) {
+          set({ lastError: parseEngineError(new Error('Internal group input default edits not supported by this engine')) });
+          return;
+        }
+        await eng.setInternalInputDefault(ctx.groupDefId, nodeId, portName, value);
+      } else {
+        await getEngine().setInputDefault(nodeId, portName, value);
+      }
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
       if (node) {
@@ -402,14 +482,25 @@ export const createGraphSlice: StateCreator<
       get().triggerAffectedViewers([nodeId]);
     },
 
-    setPosition: (nodeId, position) => {
+    setPosition: async (nodeId, position) => {
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
       if (node) {
         node.position = position;
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
-        getEngine().setPosition(nodeId, position.x, position.y);
+        const editingStack = get().editingStack;
+        if (editingStack.length > 1) {
+          const ctx = editingStack[editingStack.length - 1];
+          const eng = getEngine();
+          if (!ctx.groupDefId || !eng.setInternalPosition) {
+            set({ lastError: parseEngineError(new Error('Internal group position edits not supported by this engine')) });
+            return;
+          }
+          await eng.setInternalPosition(ctx.groupDefId, nodeId, position.x, position.y);
+        } else {
+          await Promise.resolve(getEngine().setPosition(nodeId, position.x, position.y));
+        }
       }
     },
 
@@ -440,9 +531,19 @@ export const createGraphSlice: StateCreator<
       pushMuteDeltaSync(entries, get, set);
 
       const eng = getEngine();
+      const editingStack = get().editingStack;
 
       for (const id of selectedIds) {
-        await Promise.resolve(eng.setMuted(id, newMuted));
+        if (editingStack.length > 1) {
+          const ctx = editingStack[editingStack.length - 1];
+          if (!ctx.groupDefId || !eng.setInternalMuted) {
+            set({ lastError: parseEngineError(new Error('Internal group mute edits not supported by this engine')) });
+            return;
+          }
+          await eng.setInternalMuted(ctx.groupDefId, id, newMuted);
+        } else {
+          await Promise.resolve(eng.setMuted(id, newMuted));
+        }
       }
 
       const newNodes = new Map(nodes);
@@ -511,7 +612,7 @@ export const createGraphSlice: StateCreator<
           params,
           inputDefaults: n.inputDefaults ?? {},
           position: n.position,
-          muted: false,
+          muted: n.muted ?? false,
         });
       }
 
@@ -609,7 +710,7 @@ export const createGraphSlice: StateCreator<
               params: n.params,
               inputDefaults: n.inputDefaults ?? {},
               position: n.position,
-              muted: false,
+              muted: n.muted ?? false,
             });
           }
 
@@ -864,7 +965,7 @@ export const createGraphSlice: StateCreator<
           params,
           inputDefaults: n.inputDefaults ?? {},
           position: n.position,
-          muted: false,
+          muted: n.muted ?? false,
         });
       }
 

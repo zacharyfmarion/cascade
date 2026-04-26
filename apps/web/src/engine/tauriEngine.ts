@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
-import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo, InternalGraphNode } from '../store/types';
 
 type DocumentEnvelope = {
   cascade: unknown;
@@ -12,6 +12,28 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
+
+const parsePosition = (value: unknown): { x: number; y: number } => {
+  if (Array.isArray(value)) {
+    return { x: Number(value[0]), y: Number(value[1]) };
+  }
+  if (isRecord(value)) {
+    return { x: Number(value.x), y: Number(value.y) };
+  }
+  return { x: 0, y: 0 };
+};
+
+const normalizeInternalGraphNode = (nodeEntry: unknown): InternalGraphNode => {
+  const nodeRecord = asRecord(nodeEntry);
+  return {
+    id: String(nodeRecord.id ?? ''),
+    typeId: String(nodeRecord.typeId ?? ''),
+    position: parsePosition(nodeRecord.position),
+    params: asParamValueRecord(nodeRecord.params),
+    inputDefaults: asParamValueRecord(nodeRecord.inputDefaults ?? nodeRecord.input_defaults),
+    muted: Boolean(nodeRecord.muted),
+  };
+};
 
 const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && ('cascade' in value || 'compositor' in value) && 'graph' in value;
 
@@ -292,21 +314,7 @@ export class TauriEngine implements EngineBridge {
     return {
       groupDefId: String(rawRecord.groupDefId ?? ''),
       name: String(rawRecord.name ?? ''),
-      nodes: rawNodes.map((nodeEntry: unknown) => {
-        const nodeRecord = asRecord(nodeEntry);
-        const position = Array.isArray(nodeRecord.position)
-          ? { x: Number(nodeRecord.position[0]), y: Number(nodeRecord.position[1]) }
-          : isRecord(nodeRecord.position)
-            ? { x: Number(nodeRecord.position.x), y: Number(nodeRecord.position.y) }
-            : { x: 0, y: 0 };
-        return {
-          id: String(nodeRecord.id ?? ''),
-          typeId: String(nodeRecord.typeId ?? ''),
-          position,
-          params: asParamValueRecord(nodeRecord.params),
-          inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
-        };
-      }),
+      nodes: rawNodes.map(normalizeInternalGraphNode),
       connections: rawConnections.map((connEntry: unknown) => {
         const connRecord = asRecord(connEntry);
         return {
@@ -334,6 +342,41 @@ export class TauriEngine implements EngineBridge {
 
   async removeInternalConnection(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec> {
     const json = await invoke<string>('remove_internal_connection', { groupDefId, toNode, toPort });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async addInternalNode(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode> {
+    const json = await invoke<string>('add_internal_node', { groupDefId, typeId, x, y });
+    return normalizeInternalGraphNode(JSON.parse(json) as unknown);
+  }
+
+  async removeInternalNode(groupDefId: string, nodeId: string): Promise<NodeSpec> {
+    const json = await invoke<string>('remove_internal_node', { groupDefId, nodeId });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async setInternalParam(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec> {
+    const json = await invoke<string>('set_internal_param', { groupDefId, nodeId, key, value: JSON.stringify(value) });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async setInternalInputDefault(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec> {
+    const json = await invoke<string>('set_internal_input_default', { groupDefId, nodeId, portName, value: JSON.stringify(value) });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async setInternalPosition(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec> {
+    const json = await invoke<string>('set_internal_position', { groupDefId, nodeId, x, y });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async setInternalMuted(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec> {
+    const json = await invoke<string>('set_internal_muted', { groupDefId, nodeId, muted });
+    return JSON.parse(json) as NodeSpec;
+  }
+
+  async compileInternalScriptNode(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec> {
+    const json = await invoke<string>('compile_internal_script_node', { groupDefId, nodeId, manifestJson });
     return JSON.parse(json) as NodeSpec;
   }
 

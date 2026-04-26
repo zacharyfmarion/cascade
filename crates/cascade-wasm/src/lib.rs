@@ -15,7 +15,8 @@ use cascade_core::group::{
 };
 use cascade_core::node::{Node, NodeRegistry};
 use cascade_core::types::{
-    ColorStop, Format, FrameTime, NodeSpec, ParamValue, PortSpec, UiNodeSpec, Value, ValueType,
+    ColorStop, Format, FrameTime, NodeSpec, ParamDefault, ParamValue, PortSpec, UiNodeSpec, Value,
+    ValueType,
 };
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{gpu_script_passthrough_manifest, GpuContext, KernelManifest};
@@ -39,6 +40,19 @@ const GPU_SCRIPT_MANIFEST_PARAM_KEY: &str = "__script_manifest";
 
 fn serialize_gpu_script_manifest(manifest: &KernelManifest) -> Result<String, JsValue> {
     serde_json::to_string(manifest).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+fn param_default_to_value(default: &ParamDefault) -> ParamValue {
+    match default {
+        ParamDefault::Float(value) => ParamValue::Float(*value),
+        ParamDefault::Int(value) => ParamValue::Int(*value),
+        ParamDefault::Bool(value) => ParamValue::Bool(*value),
+        ParamDefault::Color(value) => ParamValue::Color(*value),
+        ParamDefault::ColorRamp(value) => ParamValue::ColorRamp(value.clone()),
+        ParamDefault::ColorPalette(value) => ParamValue::ColorPalette(value.clone()),
+        ParamDefault::CurvePoints(value) => ParamValue::CurvePoints(value.clone()),
+        ParamDefault::String(value) => ParamValue::String(value.clone()),
+    }
 }
 
 fn extract_gpu_script_manifest(
@@ -1715,6 +1729,97 @@ impl Engine {
         serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    pub fn add_internal_node(
+        &mut self,
+        group_def_id: &str,
+        type_id: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<JsValue, JsValue> {
+        let node = self
+            .add_internal_node_internal(group_def_id, type_id, x, y)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&node).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn remove_internal_node(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+    ) -> Result<JsValue, JsValue> {
+        let spec = self
+            .remove_internal_node_internal(group_def_id, node_id)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn set_internal_param(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        key: &str,
+        value: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let value: ParamValue =
+            serde_wasm_bindgen::from_value(value).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let spec = self
+            .set_internal_param_internal(group_def_id, node_id, key, value)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn set_internal_input_default(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        port_name: &str,
+        value: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let value: ParamValue =
+            serde_wasm_bindgen::from_value(value).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let spec = self
+            .set_internal_input_default_internal(group_def_id, node_id, port_name, value)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn set_internal_position(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<JsValue, JsValue> {
+        let spec = self
+            .set_internal_position_internal(group_def_id, node_id, x, y)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn set_internal_muted(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        muted: bool,
+    ) -> Result<JsValue, JsValue> {
+        let spec = self
+            .set_internal_muted_internal(group_def_id, node_id, muted)
+            .map_err(to_js_error)?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    pub fn compile_internal_script_node(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        manifest_json: &str,
+    ) -> Result<JsValue, JsValue> {
+        let spec = self
+            .compile_internal_script_node_internal(group_def_id, node_id, manifest_json)
+            .map_err(|e| JsValue::from_str(&e))?;
+        serde_wasm_bindgen::to_value(&spec).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     fn create_group_internal(
         &mut self,
         node_ids: &[String],
@@ -1862,6 +1967,7 @@ impl Engine {
                 type_id: info.type_id.clone(),
                 position: (ox, oy),
                 params,
+                muted: false,
                 image_data,
                 input_defaults: info.input_defaults.clone(),
             });
@@ -1875,6 +1981,7 @@ impl Engine {
             type_id: "group_input".to_string(),
             position: (min_x - node_width - padding, avg_y),
             params: HashMap::new(),
+            muted: false,
             image_data: None,
             input_defaults: HashMap::new(),
         });
@@ -1884,6 +1991,7 @@ impl Engine {
             type_id: "group_output".to_string(),
             position: (max_x + node_width + padding, avg_y),
             params: HashMap::new(),
+            muted: false,
             image_data: None,
             input_defaults: HashMap::new(),
         });
@@ -2184,6 +2292,7 @@ impl Engine {
                 id: internal.id.clone(),
                 type_id: internal.type_id.clone(),
                 params,
+                muted: internal.muted,
                 position: (ox, oy),
                 input_defaults: internal.input_defaults.clone(),
             });
@@ -2484,6 +2593,315 @@ impl Engine {
         Ok(spec)
     }
 
+    fn default_params_for_type(&self, type_id: &str) -> HashMap<String, ParamValue> {
+        self.registry
+            .get_spec(type_id)
+            .map(|spec| {
+                spec.params
+                    .iter()
+                    .map(|param| (param.key.clone(), param_default_to_value(&param.default)))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn default_input_defaults_for_type(&self, type_id: &str) -> HashMap<String, ParamValue> {
+        self.registry
+            .get_spec(type_id)
+            .map(|spec| {
+                spec.inputs
+                    .iter()
+                    .filter_map(|port| {
+                        port.default
+                            .as_ref()
+                            .map(|value| (port.name.clone(), param_default_to_value(value)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn prepare_internal_type(
+        &mut self,
+        requested_type_id: &str,
+    ) -> Result<(String, HashMap<String, ParamValue>), CascadeError> {
+        if requested_type_id == "gpu_script" {
+            let type_id = format!("gpu_script::{}", Uuid::new_v4());
+            let mut params = HashMap::new();
+            if let Some(gpu_context) = self.gpu_context.clone() {
+                let manifest = gpu_script_passthrough_manifest(&type_id);
+                match GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()) {
+                    Ok(_) => {
+                        let manifest_for_factory = manifest.clone();
+                        let gpu_ctx = gpu_context.clone();
+                        Arc::make_mut(&mut self.registry).register_or_replace(
+                            &type_id,
+                            move || {
+                                #[allow(clippy::expect_used)]
+                                Arc::new(
+                                    GpuKernelNode::from_manifest(
+                                        manifest_for_factory.clone(),
+                                        gpu_ctx.clone(),
+                                    )
+                                    .expect("GPU node factory: manifest was pre-validated"),
+                                )
+                            },
+                        );
+                        let manifest_json = serde_json::to_string(&manifest)
+                            .map_err(|e| CascadeError::Other(e.to_string()))?;
+                        self.kernel_manifests.insert(type_id.clone(), manifest);
+                        params.insert(
+                            GPU_SCRIPT_MANIFEST_PARAM_KEY.to_string(),
+                            ParamValue::String(manifest_json),
+                        );
+                    }
+                    Err(_) => {
+                        let uid = type_id.clone();
+                        Arc::make_mut(&mut self.registry)
+                            .register_or_replace(&type_id, move || {
+                                Arc::new(GpuScriptDraftNode::new(&uid))
+                            });
+                    }
+                }
+            } else {
+                let uid = type_id.clone();
+                Arc::make_mut(&mut self.registry)
+                    .register_or_replace(&type_id, move || Arc::new(GpuScriptDraftNode::new(&uid)));
+            }
+            return Ok((type_id, params));
+        }
+
+        if self.registry.get_spec(requested_type_id).is_none()
+            && !self.group_definitions.contains_key(requested_type_id)
+        {
+            return Err(CascadeError::Other(format!(
+                "Unknown node type: {requested_type_id}"
+            )));
+        }
+
+        Ok((requested_type_id.to_string(), HashMap::new()))
+    }
+
+    fn refresh_group_instances(&mut self, group_def_id: &str) -> Result<(), CascadeError> {
+        let def_arc = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
+        let group_node_ids: Vec<NodeId> = self
+            .graph
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.type_id == group_def_id)
+            .map(|(id, _)| id)
+            .collect();
+        for node_id in group_node_ids {
+            let group_node = GroupNode::from_definition(def_arc.clone(), &self.registry)
+                .map_err(CascadeError::Other)?;
+            self.nodes.insert(node_id, Arc::new(group_node));
+            self.graph
+                .prune_connections_for_node(node_id, &self.registry);
+            self.graph.mark_dirty(node_id);
+        }
+        Ok(())
+    }
+
+    fn add_internal_node_internal(
+        &mut self,
+        group_def_id: &str,
+        type_id: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<InternalGraphNode, CascadeError> {
+        let existing = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
+        let mut updated = (*existing.as_ref()).clone();
+        let (actual_type_id, prepared_params) = self.prepare_internal_type(type_id)?;
+        let mut params = self.default_params_for_type(&actual_type_id);
+        params.extend(prepared_params);
+        let input_defaults = self.default_input_defaults_for_type(&actual_type_id);
+        let node_id = format!("n_{}", Uuid::new_v4().simple());
+        updated.internal_graph.nodes.push(InternalNode {
+            id: node_id.clone(),
+            type_id: actual_type_id.clone(),
+            params: params.clone(),
+            muted: false,
+            position: (x, y),
+            image_data: None,
+            input_defaults: input_defaults.clone(),
+        });
+        self.register_group(updated).map_err(CascadeError::Other)?;
+        self.refresh_group_instances(group_def_id)?;
+        Ok(InternalGraphNode {
+            id: node_id,
+            type_id: actual_type_id,
+            params,
+            muted: false,
+            position: (x, y),
+            input_defaults,
+        })
+    }
+
+    fn remove_internal_node_internal(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+    ) -> Result<NodeSpec, CascadeError> {
+        let existing = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
+        let mut updated = (*existing.as_ref()).clone();
+        let (gi_id, go_id) = find_group_nodes(&updated).map_err(CascadeError::Other)?;
+        if node_id == gi_id || node_id == go_id {
+            return Err(CascadeError::Other(
+                "Cannot remove group boundary nodes".to_string(),
+            ));
+        }
+        let before = updated.internal_graph.nodes.len();
+        updated
+            .internal_graph
+            .nodes
+            .retain(|node| node.id != node_id);
+        if updated.internal_graph.nodes.len() == before {
+            return Err(CascadeError::Other(format!(
+                "Internal node not found: {node_id}"
+            )));
+        }
+        updated
+            .internal_graph
+            .connections
+            .retain(|conn| conn.from_node != node_id && conn.to_node != node_id);
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
+        self.refresh_group_instances(group_def_id)?;
+        Ok(spec)
+    }
+
+    fn update_internal_node<F>(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        update: F,
+    ) -> Result<NodeSpec, CascadeError>
+    where
+        F: FnOnce(&mut InternalNode),
+    {
+        let existing = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| CascadeError::Other("Group definition not found".to_string()))?;
+        let mut updated = (*existing.as_ref()).clone();
+        let node = updated
+            .internal_graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == node_id)
+            .ok_or_else(|| CascadeError::Other(format!("Internal node not found: {node_id}")))?;
+        update(node);
+        let spec = self.register_group(updated).map_err(CascadeError::Other)?;
+        self.refresh_group_instances(group_def_id)?;
+        Ok(spec)
+    }
+
+    fn set_internal_param_internal(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        key: &str,
+        value: ParamValue,
+    ) -> Result<NodeSpec, CascadeError> {
+        self.update_internal_node(group_def_id, node_id, |node| {
+            node.params.insert(key.to_string(), value);
+        })
+    }
+
+    fn set_internal_input_default_internal(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        port_name: &str,
+        value: ParamValue,
+    ) -> Result<NodeSpec, CascadeError> {
+        self.update_internal_node(group_def_id, node_id, |node| {
+            node.input_defaults.insert(port_name.to_string(), value);
+        })
+    }
+
+    fn set_internal_position_internal(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        x: f64,
+        y: f64,
+    ) -> Result<NodeSpec, CascadeError> {
+        self.update_internal_node(group_def_id, node_id, |node| {
+            node.position = (x, y);
+        })
+    }
+
+    fn set_internal_muted_internal(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        muted: bool,
+    ) -> Result<NodeSpec, CascadeError> {
+        self.update_internal_node(group_def_id, node_id, |node| {
+            node.muted = muted;
+        })
+    }
+
+    fn compile_internal_script_node_internal(
+        &mut self,
+        group_def_id: &str,
+        node_id: &str,
+        manifest_json: &str,
+    ) -> Result<NodeSpec, String> {
+        let existing = self
+            .group_definitions
+            .get(group_def_id)
+            .ok_or_else(|| "Group definition not found".to_string())?;
+        let mut updated = (*existing.as_ref()).clone();
+        let internal = updated
+            .internal_graph
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == node_id)
+            .ok_or_else(|| format!("Internal node not found: {node_id}"))?;
+        if !internal.type_id.starts_with("gpu_script") {
+            return Err("Node is not a GPU Script node".to_string());
+        }
+        let mut manifest: KernelManifest =
+            serde_json::from_str(manifest_json).map_err(|e| e.to_string())?;
+        manifest.id = internal.type_id.clone();
+        let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
+        let gpu_context = self
+            .gpu_context
+            .clone()
+            .ok_or_else(|| "GPU not available".to_string())?;
+        let compiled_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())?;
+        let spec = compiled_node.spec();
+        let manifest_for_factory = manifest.clone();
+        let gpu_ctx = gpu_context.clone();
+        Arc::make_mut(&mut self.registry).register_or_replace(&internal.type_id, move || {
+            #[allow(clippy::expect_used)]
+            Arc::new(
+                GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
+                    .expect("GPU node factory: manifest was pre-validated"),
+            )
+        });
+        self.kernel_manifests
+            .insert(internal.type_id.clone(), manifest);
+        internal.params.insert(
+            GPU_SCRIPT_MANIFEST_PARAM_KEY.to_string(),
+            ParamValue::String(manifest_json),
+        );
+        self.register_group(updated).map_err(|e| e.to_string())?;
+        self.refresh_group_instances(group_def_id)
+            .map_err(|e| e.to_string())?;
+        Ok(spec)
+    }
+
     /// Get the current per-instance NodeSpec for a node (reflects dynamic EXR ports).
     pub fn get_node_spec(&self, node_id: &str) -> Result<JsValue, JsValue> {
         let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
@@ -2753,6 +3171,8 @@ struct InternalGraphNode {
     id: String,
     type_id: String,
     params: HashMap<String, ParamValue>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    muted: bool,
     position: (f64, f64),
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     input_defaults: HashMap<String, ParamValue>,

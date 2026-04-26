@@ -1,8 +1,8 @@
 mod menu;
 
 use cascade_runtime::{
-    migrations, AssetReference, CascadeDocument, Engine, NodeSpec, PortSpec, RenderResult,
-    SerializableGraph, UiNodeSpec,
+    migrations, AssetReference, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
+    RenderResult, SerializableGraph, UiNodeSpec,
 };
 use std::sync::Mutex;
 use std::time::Instant;
@@ -674,6 +674,116 @@ fn remove_internal_connection(
 }
 
 #[tauri::command]
+fn add_internal_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    type_id: String,
+    x: f64,
+    y: f64,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .add_internal_node(&group_def_id, &type_id, x, y)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_internal_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .remove_internal_node(&group_def_id, &node_id)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_param(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    key: String,
+    value: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let value: ParamValue = serde_json::from_str(&value).map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_param(&group_def_id, &node_id, &key, value)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_input_default(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    port_name: String,
+    value: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let value: ParamValue = serde_json::from_str(&value).map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_input_default(&group_def_id, &node_id, &port_name, value)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_position(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    x: f64,
+    y: f64,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_position(&group_def_id, &node_id, x, y)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_muted(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    muted: bool,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_muted(&group_def_id, &node_id, muted)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn compile_internal_script_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    manifest_json: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .compile_internal_script_node(&group_def_id, &node_id, &manifest_json)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn rename_group(
     state: State<'_, EngineState>,
     group_def_id: String,
@@ -868,6 +978,13 @@ pub fn run() {
             update_group_interface,
             add_internal_connection,
             remove_internal_connection,
+            add_internal_node,
+            remove_internal_node,
+            set_internal_param,
+            set_internal_input_default,
+            set_internal_position,
+            set_internal_muted,
+            compile_internal_script_node,
             rename_group,
             export_group_as_package,
             import_custom_nodes,

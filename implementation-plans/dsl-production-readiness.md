@@ -135,7 +135,7 @@ Those APIs should be added before enabling parsed group/GPU definitions in the e
 - [x] Add tests for arrows, wrappers, graph blocks, assets, and formatting.
 - [x] Add coverage tooling and thresholds for DSL code.
 - [x] Identify required internal group engine APIs.
-- [ ] Implement required internal group engine APIs.
+- [x] Implement required internal group engine APIs.
 - [ ] Add group/GPU definition parsing and execution once APIs exist.
 - [x] Run `yarn test`, `yarn lint`, and `npx tsc -b --noEmit`.
 

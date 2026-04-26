@@ -32,6 +32,7 @@ import type {
   CreateGroupResult,
   UngroupResult,
   GroupInternalGraph,
+  InternalGraphNode,
   CustomNodeInfo,
 } from '../store/types';
 
@@ -104,6 +105,13 @@ interface WorkerAPI {
     toPort: string,
   ): Promise<NodeSpec>;
   removeInternalConnection(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec>;
+  addInternalNode(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode>;
+  removeInternalNode(groupDefId: string, nodeId: string): Promise<NodeSpec>;
+  setInternalParam(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalInputDefault(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalPosition(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec>;
+  setInternalMuted(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec>;
+  compileInternalScriptNode(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec>;
   renameGroup(groupDefId: string, newName: string): Promise<NodeSpec>;
 
   getLastRenderTimings(): Promise<Record<string, number>>;
@@ -424,6 +432,34 @@ export class WorkerEngine implements EngineBridge {
     toPort: string,
   ): Promise<NodeSpec> {
     return this.getAPI().removeInternalConnection(groupDefId, toNode, toPort);
+  }
+
+  addInternalNode(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode> {
+    return this.getAPI().addInternalNode(groupDefId, typeId, x, y);
+  }
+
+  removeInternalNode(groupDefId: string, nodeId: string): Promise<NodeSpec> {
+    return this.getAPI().removeInternalNode(groupDefId, nodeId);
+  }
+
+  setInternalParam(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec> {
+    return this.getAPI().setInternalParam(groupDefId, nodeId, key, value);
+  }
+
+  setInternalInputDefault(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec> {
+    return this.getAPI().setInternalInputDefault(groupDefId, nodeId, portName, value);
+  }
+
+  setInternalPosition(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec> {
+    return this.getAPI().setInternalPosition(groupDefId, nodeId, x, y);
+  }
+
+  setInternalMuted(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec> {
+    return this.getAPI().setInternalMuted(groupDefId, nodeId, muted);
+  }
+
+  compileInternalScriptNode(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec> {
+    return this.getAPI().compileInternalScriptNode(groupDefId, nodeId, manifestJson);
   }
 
   renameGroup(groupDefId: string, newName: string): Promise<NodeSpec> {

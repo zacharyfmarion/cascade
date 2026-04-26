@@ -1283,4 +1283,39 @@ describe('Project lifecycle contracts', () => {
     // Graph should be restored (nodes were rebuilt from serialized data)
     expect(s.nodes.size).toBe(nodesArr.length);
   });
+
+  it('group edit mode routes node and param edits through internal graph APIs', async () => {
+    const groupNodeId = 'group-node';
+    const groupDefId = 'group::test';
+    mockEngine._groupGraphs.set(groupNodeId, {
+      groupDefId,
+      name: 'Test Group',
+      nodes: [],
+      connections: [],
+      inputs: [],
+      outputs: [],
+    });
+    useGraphStore.setState({
+      editingStack: [
+        { id: 'root', label: 'Root', groupNodeId: null },
+        { id: groupDefId, label: 'Test Group', groupNodeId, groupDefId },
+      ],
+    });
+
+    const addInternalNode = vi.spyOn(mockEngine, 'addInternalNode');
+    const setInternalParam = vi.spyOn(mockEngine, 'setInternalParam');
+    const removeInternalNode = vi.spyOn(mockEngine, 'removeInternalNode');
+
+    const nodeId = await useGraphStore.getState().addNode('gaussian_blur', { x: 42, y: 24 });
+    expect(addInternalNode).toHaveBeenCalledWith(groupDefId, 'gaussian_blur', 42, 24);
+    expect(useGraphStore.getState().nodes.get(nodeId)?.typeId).toBe('gaussian_blur');
+
+    await useGraphStore.getState().setParam(nodeId, 'amount', { Float: 2.5 });
+    expect(setInternalParam).toHaveBeenCalledWith(groupDefId, nodeId, 'amount', { Float: 2.5 });
+    expect(mockEngine._groupGraphs.get(groupNodeId)?.nodes.find(node => node.id === nodeId)?.params.amount).toEqual({ Float: 2.5 });
+
+    await useGraphStore.getState().removeNode(nodeId);
+    expect(removeInternalNode).toHaveBeenCalledWith(groupDefId, nodeId);
+    expect(useGraphStore.getState().nodes.has(nodeId)).toBe(false);
+  });
 });

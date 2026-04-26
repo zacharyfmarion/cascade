@@ -111,14 +111,14 @@ export interface GraphState {
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
-  setParam: (nodeId: string, key: string, value: ParamValue) => void;
+  setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void> | void;
   setDslHandle: (nodeId: string, handle: string) => void;
   setParamLive: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamCommit: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
   setInputDefaultLive: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
   setInputDefaultCommit: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
-  setPosition: (nodeId: string, position: { x: number; y: number }) => void;
+  setPosition: (nodeId: string, position: { x: number; y: number }) => Promise<void> | void;
   selectNode: (id: string | null) => void;
   setSelectedNodes: (ids: string[]) => void;
   toggleMuteSelected: () => Promise<void>;

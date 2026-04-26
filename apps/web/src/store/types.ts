@@ -167,10 +167,19 @@ export interface RestoredNode {
 export interface GroupInternalGraph {
   groupDefId: string;
   name: string;
-  nodes: { id: string; typeId: string; position: { x: number; y: number }; params: Record<string, ParamValue>; inputDefaults: Record<string, ParamValue> }[];
+  nodes: InternalGraphNode[];
   connections: Connection[];
   inputs: PortSpec[];
   outputs: PortSpec[];
+}
+
+export interface InternalGraphNode {
+  id: string;
+  typeId: string;
+  position: { x: number; y: number };
+  params: Record<string, ParamValue>;
+  inputDefaults: Record<string, ParamValue>;
+  muted?: boolean;
 }
 
 export interface EditingContext {

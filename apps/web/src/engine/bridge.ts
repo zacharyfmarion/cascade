@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo, InternalGraphNode } from '../store/types';
 
 export interface ColorSpaceInfo {
   id: string;
@@ -128,6 +128,13 @@ export interface EngineBridge {
   updateGroupInterface?(groupDefId: string, inputs: PortSpec[], outputs: PortSpec[]): Promise<NodeSpec>;
   addInternalConnection?(groupDefId: string, fromNode: string, fromPort: string, toNode: string, toPort: string): Promise<NodeSpec>;
   removeInternalConnection?(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec>;
+  addInternalNode?(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode>;
+  removeInternalNode?(groupDefId: string, nodeId: string): Promise<NodeSpec>;
+  setInternalParam?(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalInputDefault?(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalPosition?(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec>;
+  setInternalMuted?(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec>;
+  compileInternalScriptNode?(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec>;
   renameGroup?(groupDefId: string, newName: string): Promise<NodeSpec>;
   getLastRenderTimings?(): Record<string, number> | Promise<Record<string, number>>;
   setAiApiKey?(provider: string, key: string): Promise<void> | void;

@@ -307,6 +307,7 @@ impl GroupNode {
             for (key, value) in &node.input_defaults {
                 graph.set_input_default(node_id, key, value.clone());
             }
+            graph.set_muted(node_id, node.muted);
 
             let instance: Arc<dyn Node> = if node.type_id == "group_input" {
                 Arc::new(GroupInputNode::new(interface.inputs.clone()))
