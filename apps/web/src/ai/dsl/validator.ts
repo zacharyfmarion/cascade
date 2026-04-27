@@ -1,6 +1,8 @@
 import type { NodeSpec, ParamSpec, ValueType } from '../../store/types';
 import type {
   DslAst,
+  DslGroupDefinition,
+  DslGpuDefinition,
   DslNode,
   DslParamValue,
   ValidationError,
@@ -266,6 +268,211 @@ const validateNodeTypes = (ast: DslAst, specById: Map<string, NodeSpec>, errors:
   }
 };
 
+// ---------------------------------------------------------------------------
+// Custom definition validation
+// ---------------------------------------------------------------------------
+
+const collectDuplicates = <T extends { name: string; line: number }>(
+  items: T[],
+  label: string,
+  definitionName: string,
+  errors: ValidationError[],
+): Set<string> => {
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  for (const item of items) {
+    if (seen.has(item.name)) {
+      addError(errors, {
+        line: item.line,
+        message: `Line ${item.line}: Duplicate ${label} "${item.name}" in definition "${definitionName}"`,
+      });
+      dupes.add(item.name);
+    }
+    seen.add(item.name);
+  }
+  return seen;
+};
+
+const validateGpuDefinition = (
+  definition: DslGpuDefinition,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+) => {
+  if (definition.outputs.length === 0) {
+    addError(errors, {
+      line: definition.line,
+      message: `Line ${definition.line}: GPU node "${definition.name}" must declare at least one output`,
+    });
+  }
+  if (!definition.code.trim()) {
+    addError(errors, {
+      line: definition.line,
+      message: `Line ${definition.line}: GPU node "${definition.name}" has an empty code block`,
+    });
+  }
+  collectDuplicates(definition.inputs, 'input', definition.name, errors);
+  collectDuplicates(definition.outputs, 'output', definition.name, errors);
+
+  // Warn if there are no image inputs (unusual for a GPU node)
+  const hasImageInput = definition.inputs.some(
+    input => input.valueType === 'image' || input.valueType === 'mask',
+  );
+  if (!hasImageInput && definition.inputs.length > 0) {
+    warnings.push({
+      line: definition.line,
+      message: `GPU node "${definition.name}" has no image or mask inputs`,
+    });
+  }
+};
+
+const validateGroupDefinition = (
+  definition: DslGroupDefinition,
+  specById: Map<string, NodeSpec>,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+) => {
+  if (definition.outputs.length === 0) {
+    addError(errors, {
+      line: definition.line,
+      message: `Line ${definition.line}: Group node "${definition.name}" must declare at least one output`,
+    });
+  }
+
+  const inputNames = collectDuplicates(definition.inputs, 'input', definition.name, errors);
+  const outputNames = collectDuplicates(definition.outputs, 'output', definition.name, errors);
+  const paramNames = collectDuplicates(definition.params, 'param', definition.name, errors);
+
+  // Param names must not shadow input or output port names (would create ambiguous `param.x` refs)
+  for (const param of definition.params) {
+    if (inputNames.has(param.name) || outputNames.has(param.name)) {
+      addError(errors, {
+        line: param.line,
+        message: `Line ${param.line}: Param "${param.name}" in "${definition.name}" conflicts with a port of the same name`,
+      });
+    }
+  }
+
+  // Reserved handles 'input' and 'output' must not be used for internal nodes
+  const internalHandles = new Set<string>();
+  const seenInternalHandles = new Set<string>();
+  for (const node of definition.graph.nodes.values()) {
+    if (node.handle === 'input' || node.handle === 'output') {
+      addError(errors, {
+        line: node.line,
+        message: `Line ${node.line}: Handle "${node.handle}" is reserved and cannot be used in "${definition.name}" internal graph`,
+      });
+    } else if (seenInternalHandles.has(node.handle)) {
+      addError(errors, {
+        line: node.line,
+        message: `Line ${node.line}: Duplicate handle "${node.handle}" in "${definition.name}" internal graph`,
+      });
+    } else {
+      seenInternalHandles.add(node.handle);
+      internalHandles.add(node.handle);
+    }
+  }
+
+  // Validate internal node types
+  for (const node of definition.graph.nodes.values()) {
+    if (!specById.has(node.nodeTypeId)) {
+      const nodeTypeCandidates = Array.from(specById.values()).map(spec => snakeToPascal(spec.id));
+      const suggestion = findClosestMatch(node.nodeType, nodeTypeCandidates);
+      const message = suggestion
+        ? `Line ${node.line}: Unknown node type "${node.nodeType}" in "${definition.name}" internal graph. Did you mean "${suggestion}"?`
+        : `Line ${node.line}: Unknown node type "${node.nodeType}" in "${definition.name}" internal graph`;
+      addError(errors, { line: node.line, message, suggestion: suggestion ?? undefined });
+    }
+  }
+
+  // Validate param.xxx references in internal node params
+  for (const node of definition.graph.nodes.values()) {
+    for (const [, paramValue] of node.params) {
+      if (paramValue.type === 'ref' && paramValue.value.startsWith('param.')) {
+        const refName = paramValue.value.slice('param.'.length);
+        if (!paramNames.has(refName)) {
+          addError(errors, {
+            line: node.line,
+            message: `Line ${node.line}: Reference "param.${refName}" in "${definition.name}" refers to an undeclared param`,
+          });
+        }
+      }
+    }
+  }
+
+  // Validate internal graph connections
+  const validFromHandles = new Set([...internalHandles, 'input']);
+  const validToHandles = new Set([...internalHandles, 'output']);
+
+  for (const conn of definition.graph.connections) {
+    if (!validFromHandles.has(conn.fromHandle)) {
+      addError(errors, {
+        line: conn.line,
+        message: `Line ${conn.line}: Unknown source "${conn.fromHandle}" in "${definition.name}" internal graph`,
+      });
+    } else if (conn.fromHandle === 'input' && !inputNames.has(conn.fromPort)) {
+      addError(errors, {
+        line: conn.line,
+        message: `Line ${conn.line}: Connection references undeclared input port "${conn.fromPort}" in "${definition.name}"`,
+      });
+    }
+
+    if (conn.toHandle === 'input') {
+      addError(errors, {
+        line: conn.line,
+        message: `Line ${conn.line}: Cannot connect TO "input" in "${definition.name}" internal graph`,
+      });
+    } else if (!validToHandles.has(conn.toHandle)) {
+      addError(errors, {
+        line: conn.line,
+        message: `Line ${conn.line}: Unknown destination "${conn.toHandle}" in "${definition.name}" internal graph`,
+      });
+    } else if (conn.toHandle === 'output' && !outputNames.has(conn.toPort)) {
+      addError(errors, {
+        line: conn.line,
+        message: `Line ${conn.line}: Connection references undeclared output port "${conn.toPort}" in "${definition.name}"`,
+      });
+    }
+
+    if (conn.fromHandle === 'output') {
+      addError(errors, {
+        line: conn.line,
+        message: `Line ${conn.line}: Cannot connect FROM "output" in "${definition.name}" internal graph`,
+      });
+    }
+  }
+
+  // Warn if a declared output port is never driven
+  const drivenOutputPorts = new Set(
+    definition.graph.connections
+      .filter(conn => conn.toHandle === 'output')
+      .map(conn => conn.toPort),
+  );
+  for (const output of definition.outputs) {
+    if (!drivenOutputPorts.has(output.name)) {
+      warnings.push({
+        line: output.line,
+        message: `Output port "${output.name}" of "${definition.name}" is never connected internally`,
+      });
+    }
+  }
+};
+
+const validateCustomDefinitions = (
+  ast: DslAst,
+  specById: Map<string, NodeSpec>,
+  errors: ValidationError[],
+  warnings: ValidationWarning[],
+) => {
+  if (!ast.customNodes) return;
+  for (const definition of ast.customNodes.values()) {
+    if (definition.kind === 'gpu') {
+      validateGpuDefinition(definition, errors, warnings);
+    } else {
+      validateGroupDefinition(definition, specById, errors, warnings);
+    }
+  }
+};
+
 const validateWarnings = (ast: DslAst, warnings: ValidationWarning[]) => {
   const connectedHandles = new Set<string>();
   for (const conn of ast.connections) {
@@ -293,6 +500,7 @@ export const validateAst = (ast: DslAst, nodeSpecs: NodeSpec[]): ValidationResul
   const warnings: ValidationWarning[] = [];
   const specById = new Map(nodeSpecs.map(spec => [spec.id, spec]));
 
+  validateCustomDefinitions(ast, specById, errors, warnings);
   validateNodeTypes(ast, specById, errors);
   validateConnections(ast, errors);
   validateWarnings(ast, warnings);

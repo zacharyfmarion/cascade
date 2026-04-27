@@ -113,6 +113,8 @@ const EXPECTED_KEYS: string[] = [
   'recomputeSequenceState',
   'redo',
   'refreshAiNodeStale',
+  'registerGpuKernel',
+  'registerGroupDefinition',
   'removeFrame',
   'removeNode',
   'renameGroup',

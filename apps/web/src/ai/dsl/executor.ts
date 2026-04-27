@@ -515,6 +515,7 @@ export const applyDsl = async (
     nodes: store.nodes,
     connections: store.connections,
     nodeSpecs: store.nodeSpecs.length > 0 ? store.nodeSpecs : validationSpecs,
+    customNodes: parseResult.ast.customNodes,
   });
 
   return { success: true, updatedDsl, evalErrors: applyResult.evalErrors, sourceMap: parseResult.sourceMap };

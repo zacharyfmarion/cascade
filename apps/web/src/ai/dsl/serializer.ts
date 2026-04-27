@@ -1,5 +1,5 @@
 import { HandleMap } from './handleMap';
-import type { DslParamValue } from './types';
+import type { DslConnection, DslCustomNodeDefinition, DslNode, DslParamDeclaration, DslParamValue, DslPortDeclaration } from './types';
 import { snakeToPascal, labelToSnake } from './types';
 import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
@@ -10,6 +10,7 @@ export interface SerializerInput {
   connections: Connection[];
   nodeSpecs: NodeSpec[];
   handleMap: HandleMap;
+  customNodes?: Map<string, DslCustomNodeDefinition>;
 }
 
 const formatFloat = (value: number): string => {
@@ -189,6 +190,84 @@ const topologicalOrder = (nodes: Map<string, NodeInstance>, connections: Connect
   return ordered;
 };
 
+// ---------------------------------------------------------------------------
+// Custom node definition serialization
+// ---------------------------------------------------------------------------
+
+const formatExtras = (item: { min?: number; max?: number; step?: number }): string => {
+  const parts: string[] = [];
+  if (item.min !== undefined) parts.push(`min ${formatFloat(item.min)}`);
+  if (item.max !== undefined) parts.push(`max ${formatFloat(item.max)}`);
+  if (item.step !== undefined) parts.push(`step ${formatFloat(item.step)}`);
+  return parts.length > 0 ? ` ${parts.join(' ')}` : '';
+};
+
+const formatPortDeclaration = (port: DslPortDeclaration): string => {
+  const optMark = port.optional ? '?' : '';
+  const defaultStr = port.defaultValue !== undefined
+    ? ` = ${formatDslValue(port.defaultValue)}`
+    : '';
+  return `${port.valueType} ${port.name}${optMark}${defaultStr}${formatExtras(port)}`;
+};
+
+const formatParamDeclaration = (param: DslParamDeclaration): string =>
+  `${param.valueType} ${param.name} = ${formatDslValue(param.defaultValue)}${formatExtras(param)}`;
+
+const formatInternalNode = (node: DslNode): string => {
+  const params: string[] = [];
+  for (const [key, value] of node.params) {
+    params.push(`${key}: ${formatDslValue(value)}`);
+  }
+  const expression = `${node.nodeType}(${params.join(', ')})`;
+  return node.muted ? `${node.handle} = muted(${expression})` : `${node.handle} = ${expression}`;
+};
+
+const formatInternalConnection = (conn: DslConnection): string =>
+  `${conn.fromHandle}.${conn.fromPort} -> ${conn.toHandle}.${conn.toPort}`;
+
+const formatSection = (header: string, lines: string[]): string => {
+  if (lines.length === 0) return '';
+  const body = lines.map(line => `    ${line}`).join('\n');
+  return `  ${header} {\n${body}\n  }`;
+};
+
+export function serializeCustomDefinition(definition: DslCustomNodeDefinition): string {
+  const sections: string[] = [];
+
+  if (definition.inputs.length > 0) {
+    sections.push(formatSection('inputs', definition.inputs.map(formatPortDeclaration)));
+  }
+  if (definition.outputs.length > 0) {
+    sections.push(formatSection('outputs', definition.outputs.map(formatPortDeclaration)));
+  }
+
+  if (definition.kind === 'gpu') {
+    const codeLines = definition.code.split('\n').map(line => `  ${line}`);
+    sections.push(`  code """\n${codeLines.join('\n')}\n  """`);
+  } else {
+    if (definition.params.length > 0) {
+      sections.push(formatSection('params', definition.params.map(formatParamDeclaration)));
+    }
+
+    const internalNodes = Array.from(definition.graph.nodes.values());
+    const internalConnections = definition.graph.connections;
+    if (internalNodes.length > 0 || internalConnections.length > 0) {
+      const nodeLines = internalNodes.map(formatInternalNode);
+      const connLines = internalConnections
+        .map(formatInternalConnection)
+        .sort();
+      const graphLines = connLines.length === 0
+        ? nodeLines
+        : [...nodeLines, '', ...connLines];
+      sections.push(formatSection('graph', graphLines));
+    }
+  }
+
+  const kind = definition.kind === 'gpu' ? 'gpu' : 'group';
+  const body = sections.join('\n\n');
+  return `node ${definition.name} = ${kind} {\n${body}\n}`;
+}
+
 export function serializeGraph(input: SerializerInput): string {
   const { nodes, connections, nodeSpecs, handleMap } = input;
   if (nodes.size === 0) return '';
@@ -245,5 +324,11 @@ export function serializeGraph(input: SerializerInput): string {
   const graphLines = connectionLines.length === 0
     ? nodeLines
     : [...nodeLines, '', ...connectionLines];
-  return `graph {\n${graphLines.map((line) => (line ? `  ${line}` : '')).join('\n')}\n}`;
+  const graphBlock = `graph {\n${graphLines.map((line) => (line ? `  ${line}` : '')).join('\n')}\n}`;
+
+  const { customNodes } = input;
+  if (!customNodes || customNodes.size === 0) return graphBlock;
+
+  const definitionBlocks = Array.from(customNodes.values()).map(serializeCustomDefinition);
+  return [...definitionBlocks, graphBlock].join('\n\n');
 }
