@@ -861,7 +861,8 @@ const parseTripleQuotedSection = (body: string, sectionName: string, line: numbe
   }
   let value = match[1];
   if (value.startsWith('\n')) value = value.slice(1);
-  if (value.endsWith('\n')) value = value.slice(0, -1);
+  // Strip trailing newline + indentation whitespace before the closing """
+  value = value.replace(/\n\s*$/, '');
   return value;
 };
 

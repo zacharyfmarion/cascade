@@ -27,6 +27,8 @@ const normalizePrefix = (prefix: string): string => {
 };
 
 const getPrefixForType = (typeId: string): string => {
+  // gpu_script typeIds are uuid-based (gpu_script::uuid); always use 'gpu'
+  if (typeId.startsWith('gpu_script')) return 'gpu';
   if (typeId in HANDLE_ALIASES) {
     return HANDLE_ALIASES[typeId];
   }
@@ -54,10 +56,14 @@ export class HandleMap {
   }
 
   getOrCreate(nodeId: string, typeId: string): string {
+    return this.getOrCreateWithBase(nodeId, getPrefixForType(typeId));
+  }
+
+  getOrCreateWithBase(nodeId: string, base: string): string {
     const existing = this.nodeIdToHandle.get(nodeId);
     if (existing) return existing;
 
-    const prefix = getPrefixForType(typeId);
+    const prefix = normalizePrefix(base);
     const nextSuffix = this.usedPrefixes.get(prefix) ?? 1;
     let suffix = nextSuffix;
     let handle = `${prefix}${suffix}`;

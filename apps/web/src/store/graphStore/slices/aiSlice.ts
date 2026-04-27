@@ -153,7 +153,10 @@ export const createAiSlice: StateCreator<
       const nextSpecs = groupContext && eng.getGroupInternalGraph
         ? withGroupIOSpecs(specs, await eng.getGroupInternalGraph(groupContext.groupNodeId!))
         : specs;
-      set({ nodeSpecs: nextSpecs, nodes: newNodes, dirty: true });
+      // Also store in nodeSpecsById so the spec survives any subsequent listNodeTypes() resets
+      const newSpecsById = new Map(get().nodeSpecsById);
+      newSpecsById.set(nodeId, spec);
+      set({ nodeSpecs: nextSpecs, nodes: newNodes, nodeSpecsById: newSpecsById, dirty: true });
       get().triggerAffectedViewers([nodeId]);
       return spec;
     } catch (error) {

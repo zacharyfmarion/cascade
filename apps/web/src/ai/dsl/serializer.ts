@@ -245,6 +245,34 @@ const scalarPortDefaultDslValue = (ty: string, def: number | boolean | undefined
   return { type: 'float', value: Number(def ?? 0) };
 };
 
+const displayNameToPascal = (displayName: string): string =>
+  displayName
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+
+const displayNameToHandleBase = (displayName: string): string => {
+  const pascal = displayNameToPascal(displayName);
+  // convert PascalCase → snake_case for use as a handle prefix
+  return pascal
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+    || 'gpu';
+};
+
+const GPU_SCRIPT_DEFAULT_DISPLAY_NAME = 'GPU Script';
+
+const gpuDefinitionName = (manifest: GpuScriptManifest, gpuNodeCounter: number): string => {
+  const pascal = displayNameToPascal(manifest.display_name);
+  if (!pascal || pascal === displayNameToPascal(GPU_SCRIPT_DEFAULT_DISPLAY_NAME)) {
+    return `GpuNode${gpuNodeCounter}`;
+  }
+  return pascal;
+};
+
 const manifestToGpuDefinition = (name: string, manifest: GpuScriptManifest): DslGpuDefinition => ({
   kind: 'gpu',
   name,
@@ -314,19 +342,25 @@ export function serializeGraph(input: SerializerInput): string {
 
   // Collect gpu_script node definitions to lift into top-level blocks
   const liftedGpuDefs = new Map<string, DslGpuDefinition>();
+  let gpuNodeCounter = 0;
 
   const orderedNodes = topologicalOrder(nodes, connections, handleMap);
 
   const nodeLines = orderedNodes.map((node) => {
-    const handle = handleMap.getOrCreate(node.id, node.typeId);
-
     // gpu_script nodes: lift to a top-level `node Name = gpu { ... }` definition
     if (node.typeId.startsWith('gpu_script')) {
       const manifestJson = node.params['__script_manifest'];
       const manifestStr = manifestJson && 'String' in manifestJson ? manifestJson.String : undefined;
       const manifest = parseGpuScriptManifestJson(manifestStr);
       if (manifest) {
-        const defName = snakeToPascal(handle);
+        gpuNodeCounter += 1;
+        const defName = gpuDefinitionName(manifest, gpuNodeCounter);
+        // Derive handle from display_name so it reads like 'film_glow1' not 'gpu1'
+        const handleBase = displayNameToHandleBase(manifest.display_name);
+        const isDefault = !manifest.display_name || manifest.display_name === GPU_SCRIPT_DEFAULT_DISPLAY_NAME;
+        const handle = isDefault
+          ? handleMap.getOrCreate(node.id, 'gpu_script')
+          : handleMap.getOrCreateWithBase(node.id, handleBase);
         liftedGpuDefs.set(handle, manifestToGpuDefinition(defName, manifest));
 
         // Emit current scalar param values that differ from the manifest defaults
@@ -346,6 +380,7 @@ export function serializeGraph(input: SerializerInput): string {
       }
     }
 
+    const handle = handleMap.getOrCreate(node.id, node.typeId);
     const spec = nodeSpecById.get(node.typeId);
     const rawId = spec ? spec.id : node.typeId;
     const strippedId = rawId.replace(/^gpu_kernel::/, '');

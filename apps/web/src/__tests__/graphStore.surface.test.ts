@@ -118,6 +118,7 @@ const EXPECTED_KEYS: string[] = [
   'removeFrame',
   'removeNode',
   'renameGroup',
+  'renameGpuScriptNode',
   'renderAllViewersAsync',
   'renderBatch',
   'renderSequence',

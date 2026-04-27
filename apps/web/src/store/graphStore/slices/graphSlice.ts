@@ -47,6 +47,7 @@ export interface GraphSliceActions {
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
+  renameGpuScriptNode: (nodeId: string, newName: string) => Promise<void>;
   registerGpuKernel: (manifestJson: string) => Promise<NodeSpec | null>;
   registerGroupDefinition: (json: string) => Promise<NodeSpec | null>;
   importCustomNodes: (json: string) => Promise<string[]>;
@@ -881,6 +882,23 @@ export const createGraphSlice: StateCreator<
       );
 
       set({ nodeSpecs: specs, editingStack });
+    },
+
+    renameGpuScriptNode: async (nodeId, newName) => {
+      const node = get().nodes.get(nodeId);
+      if (!node || !node.typeId.startsWith('gpu_script::')) return;
+      const manifestValue = node.params['__script_manifest'];
+      const manifestJson = manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+      const manifest = parseGpuScriptManifestJson(manifestJson);
+      if (!manifest) return;
+      const updatedManifest = { ...manifest, display_name: newName };
+      const updatedJson = JSON.stringify(updatedManifest);
+      await get().setParam(nodeId, '__script_manifest', { String: updatedJson });
+      const updatedSpec = buildGpuScriptNodeSpec(updatedManifest);
+      const newNodeSpecs = get().nodeSpecs.map(s => s.id === node.typeId ? updatedSpec : s);
+      const newSpecsById = new Map(get().nodeSpecsById);
+      newSpecsById.set(nodeId, updatedSpec);
+      set({ nodeSpecs: newNodeSpecs, nodeSpecsById: newSpecsById });
     },
 
     importCustomNodes: async (json) => {

@@ -37,6 +37,7 @@ import { ColorRampNode } from './nodes/ColorRampNode';
 import { GroupInputNode } from './nodes/GroupInputNode';
 import { GroupOutputNode } from './nodes/GroupOutputNode';
 import { GroupNodeComponent } from './nodes/GroupNodeComponent';
+import { GpuScriptNodeComponent } from './nodes/GpuScriptNodeComponent';
 import { ColorPaletteNode } from './nodes/ColorPaletteNode';
 import { CurvesNode } from './nodes/CurvesNode';
 import { FrameNode } from './nodes/FrameNode';
@@ -103,6 +104,8 @@ export const NodeCanvas: React.FC = () => {
       if (!(spec.id in types)) {
         if (spec.id.startsWith('group::')) {
           types[spec.id] = withNodeErrorBoundary(GroupNodeComponent, spec.id);
+        } else if (spec.id.startsWith('gpu_script::')) {
+          types[spec.id] = withNodeErrorBoundary(GpuScriptNodeComponent, spec.id);
         } else {
           types[spec.id] = withNodeErrorBoundary(ProcessingNode, spec.id);
         }
@@ -113,6 +116,8 @@ export const NodeCanvas: React.FC = () => {
       if (!instanceSpec || node.typeId in types) continue;
       if (node.typeId.startsWith('group::')) {
         types[node.typeId] = withNodeErrorBoundary(GroupNodeComponent, node.typeId);
+      } else if (node.typeId.startsWith('gpu_script::')) {
+        types[node.typeId] = withNodeErrorBoundary(GpuScriptNodeComponent, node.typeId);
       } else {
         types[node.typeId] = withNodeErrorBoundary(ProcessingNode, node.typeId);
       }

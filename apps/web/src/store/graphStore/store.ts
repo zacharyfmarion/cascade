@@ -176,6 +176,7 @@ export interface GraphState {
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
+  renameGpuScriptNode: (nodeId: string, newName: string) => Promise<void>;
   isInsideGroup: () => boolean;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
   registerGpuKernel: (manifestJson: string) => Promise<NodeSpec | null>;

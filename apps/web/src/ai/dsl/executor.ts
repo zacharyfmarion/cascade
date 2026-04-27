@@ -9,6 +9,7 @@ import { validateAst } from './validator';
 import { diffAst } from './differ';
 import { validateSemantics } from './semanticValidator';
 import { serializeGraph } from './serializer';
+import type { GpuScriptManifest } from '../gpuScript';
 import {
   buildDefaultGpuScriptManifest,
   parseGpuScriptManifestJson,
@@ -99,6 +100,120 @@ const gpuDefinitionToManifest = (definition: DslGpuDefinition) => {
   };
 };
 
+// Build a GpuScriptManifest for an existing gpu_script *instance* (not a named kernel).
+// Scalars live in `inputs` (not `params`), `params` is always [].
+// Preserves `id` and `display_name` from the existing manifest so renames persist.
+const gpuDefinitionToInstanceManifest = (
+  definition: DslGpuDefinition,
+  existingManifest: GpuScriptManifest | null,
+  fallbackTypeId: string,
+): GpuScriptManifest => {
+  const hasMaskInput = definition.inputs.some(
+    input => !isGpuScalarType(input.valueType) && input.name === 'mask',
+  );
+  const inputs = definition.inputs.map(input =>
+    isGpuScalarType(input.valueType)
+      ? (() => {
+          const rawDefault = scalarDslValueToJson(input.defaultValue);
+          const numericDefault: number | boolean =
+            typeof rawDefault === 'number' || typeof rawDefault === 'boolean'
+              ? rawDefault
+              : (input.valueType === 'bool' ? false : 0);
+          return {
+            name: input.name,
+            label: labelFromName(input.name),
+            ty: manifestType(input.valueType),
+            default: numericDefault,
+            ...(input.min !== undefined ? { min: input.min } : {}),
+            ...(input.max !== undefined ? { max: input.max } : {}),
+            ...(input.step !== undefined ? { step: input.step } : {}),
+            ui: input.valueType === 'bool' ? 'Checkbox' : 'Slider',
+          };
+        })()
+      : {
+          name: input.name,
+          label: labelFromName(input.name),
+          ty: manifestType(input.valueType),
+          optional: input.optional,
+        },
+  );
+  return {
+    id: existingManifest?.id ?? fallbackTypeId,
+    display_name: existingManifest?.display_name ?? labelFromName(definition.name),
+    category: existingManifest?.category ?? 'GPU',
+    description: existingManifest?.description ?? 'Custom GPU shader node',
+    inputs,
+    outputs: definition.outputs.map(output => ({
+      name: output.name,
+      label: labelFromName(output.name),
+      ty: manifestType(output.valueType),
+    })),
+    params: [],
+    kernel: definition.code,
+    supports_mask: !hasMaskInput,
+  };
+};
+
+// Return a map from definition name to existing nodeId for gpu_script instances.
+// The parser resolves custom gpu type names to their snaked form (e.g. 'FilmGlow' → 'film_glow'),
+// so we match dslNode.nodeTypeId against the snaked name rather than the raw definition name.
+const findGpuScriptInstanceMap = (
+  ast: DslAst,
+  currentNodes: Map<string, NodeInstance>,
+  handleMap: HandleMap,
+): Map<string, string> => {
+  const instanceMap = new Map<string, string>();
+  if (!ast.customNodes) return instanceMap;
+  for (const [name, definition] of ast.customNodes.entries()) {
+    if (definition.kind !== 'gpu') continue;
+    const resolvedTypeId = pascalToSnake(name);
+    for (const dslNode of ast.nodes.values()) {
+      if (dslNode.nodeTypeId !== resolvedTypeId) continue;
+      const nodeId = handleMap.getNodeId(dslNode.handle);
+      if (!nodeId) continue;
+      if (currentNodes.get(nodeId)?.typeId.startsWith('gpu_script::')) {
+        instanceMap.set(name, nodeId);
+        break;
+      }
+    }
+  }
+  return instanceMap;
+};
+
+// Recompile existing gpu_script instances whose definition has changed in the new DSL.
+const recompileGpuScriptInstances = async (
+  ast: DslAst,
+  instanceMap: Map<string, string>,
+  currentNodes: Map<string, NodeInstance>,
+): Promise<ValidationError[]> => {
+  if (instanceMap.size === 0) return [];
+  const errors: ValidationError[] = [];
+  const store = useGraphStore.getState();
+  for (const [name, nodeId] of instanceMap.entries()) {
+    const definition = ast.customNodes?.get(name);
+    if (!definition || definition.kind !== 'gpu') continue;
+    const currentNode = currentNodes.get(nodeId);
+    const existingManifestValue = currentNode?.params['__script_manifest'];
+    const existingManifestJson =
+      existingManifestValue && 'String' in existingManifestValue ? existingManifestValue.String : undefined;
+    const existingManifest = parseGpuScriptManifestJson(existingManifestJson);
+    const newManifest = gpuDefinitionToInstanceManifest(
+      definition,
+      existingManifest,
+      currentNode?.typeId ?? 'gpu_script',
+    );
+    try {
+      await store.compileScriptNode(nodeId, JSON.stringify(newManifest));
+    } catch (e) {
+      errors.push({
+        line: definition.line,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return errors;
+};
+
 const emptyInternalNode = (id: string, typeId: string) => ({
   id,
   type_id: typeId,
@@ -169,11 +284,16 @@ const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition) => {
   };
 };
 
-const registerCustomDefinitions = async (ast: DslAst): Promise<ValidationError[]> => {
+const registerCustomDefinitions = async (
+  ast: DslAst,
+  gpuScriptInstances: Map<string, string>,
+): Promise<ValidationError[]> => {
   const errors: ValidationError[] = [];
   const definitions = ast.customNodes ? Array.from(ast.customNodes.values()) : [];
   const store = useGraphStore.getState();
   for (const definition of definitions) {
+    // gpu_script instances are handled by recompileGpuScriptInstances, not registered as named kernels
+    if (definition.kind === 'gpu' && gpuScriptInstances.has(definition.name)) continue;
     const spec = definition.kind === 'gpu'
       ? await store.registerGpuKernel(JSON.stringify(gpuDefinitionToManifest(definition)))
       : await store.registerGroupDefinition(JSON.stringify(groupDefinitionToRuntimeJson(definition)));
@@ -473,15 +593,30 @@ export const applyDsl = async (
     return { success: false, errors: validation.errors };
   }
 
-  const customDefinitionErrors = await registerCustomDefinitions(parseResult.ast);
+  // Identify which gpu definitions map to existing gpu_script node instances
+  const gpuScriptInstances = findGpuScriptInstanceMap(parseResult.ast, currentNodes, handleMap);
+
+  // Recompile existing instances with the updated definition (ports + code)
+  const instanceErrors = await recompileGpuScriptInstances(parseResult.ast, gpuScriptInstances, currentNodes);
+  if (instanceErrors.length > 0) {
+    return { success: false, errors: instanceErrors };
+  }
+
+  // Register truly new named kernels and group definitions (not existing instances)
+  const customDefinitionErrors = await registerCustomDefinitions(parseResult.ast, gpuScriptInstances);
   if (customDefinitionErrors.length > 0) {
     return { success: false, errors: customDefinitionErrors };
   }
 
+  // Use post-recompile store state so the diff baseline reflects any updated ports/code
+  const storeAfterCompile = useGraphStore.getState();
+  const nodesForDiff = gpuScriptInstances.size > 0 ? storeAfterCompile.nodes : currentNodes;
+  const connectionsForDiff = gpuScriptInstances.size > 0 ? storeAfterCompile.connections : currentConnections;
+
   const currentDsl = serializeGraph({
     handleMap,
-    nodes: currentNodes,
-    connections: currentConnections,
+    nodes: nodesForDiff,
+    connections: connectionsForDiff,
     nodeSpecs: validationSpecs,
   });
   const reparsedCurrent = parseDsl(currentDsl, validationSpecs, parseContext);
