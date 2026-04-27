@@ -12,7 +12,7 @@ import type {
   DslPortDeclaration,
 } from '../types';
 import { makeNodeInstance, mockSpecs } from './helpers';
-import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../../gpuScript';
+import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../../gpuScript';
 
 const buildInput = (nodes: Map<string, NodeInstance>, connections: Connection[], handleMap = new HandleMap()): SerializerInput => ({
   nodes,
@@ -422,7 +422,7 @@ describe('serializeGraph', () => {
     expect(output).toBe(graph(['blend1 = Blend(mode: "screen")']));
   });
 
-  it('serializes gpu script source as a multiline string', () => {
+  it('lifts gpu_script nodes to top-level gpu definitions', () => {
     const manifest = {
       ...buildDefaultGpuScriptManifest('gpu_script::demo'),
       kernel: 'float gain = 1.2;\nreturn vec4(color.rgb * gain, color.a);',
@@ -440,10 +440,72 @@ describe('serializeGraph', () => {
     handleMap.set('gpu1', 'gpu-node');
 
     const output = serializeGraph(buildInputWithSpecs(nodes, [], specs, handleMap));
-    expect(output).toContain('gpu1 = GpuScript(');
-    expect(output).toContain('script: """');
+    // definition block comes first
+    expect(output).toContain('node Gpu1 = gpu {');
+    expect(output).toContain('code """');
     expect(output).toContain('float gain = 1.2;');
     expect(output).toContain('return vec4(color.rgb * gain, color.a);');
+    // root graph references by type name, no inline script
+    expect(output).toContain('gpu1 = Gpu1()');
+    expect(output).not.toContain('GpuScript(');
+    expect(output).not.toContain('script:');
+  });
+
+  it('emits non-default scalar params for lifted gpu_script nodes', () => {
+    const manifest = buildGpuScriptManifest(
+      'gpu_script::vignette',
+      [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'strength', label: 'Strength', ty: 'Float', default: 0.5, min: 0, max: 2, step: 0.01 },
+      ],
+      [{ name: 'image', label: 'Image', ty: 'Image' }],
+      [],
+      'return color;',
+    );
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('vign-node', makeNodeInstance({
+      id: 'vign-node',
+      typeId: 'gpu_script::vignette',
+      params: {
+        __script_manifest: { String: JSON.stringify(manifest) },
+        strength: { Float: 1.2 },
+      },
+    }));
+    const handleMap = new HandleMap();
+    handleMap.set('vign1', 'vign-node');
+
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], mockSpecs, handleMap));
+    expect(output).toContain('node Vign1 = gpu {');
+    // non-default strength value should appear in root graph
+    expect(output).toContain('vign1 = Vign1(strength: 1.2');
+  });
+
+  it('omits default scalar params for lifted gpu_script nodes', () => {
+    const manifest = buildGpuScriptManifest(
+      'gpu_script::vignette',
+      [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'strength', label: 'Strength', ty: 'Float', default: 0.5, min: 0, max: 2, step: 0.01 },
+      ],
+      [{ name: 'image', label: 'Image', ty: 'Image' }],
+      [],
+      'return color;',
+    );
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('vign-node', makeNodeInstance({
+      id: 'vign-node',
+      typeId: 'gpu_script::vignette',
+      params: {
+        __script_manifest: { String: JSON.stringify(manifest) },
+        strength: { Float: 0.5 }, // same as default
+      },
+    }));
+    const handleMap = new HandleMap();
+    handleMap.set('vign1', 'vign-node');
+
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], mockSpecs, handleMap));
+    // default value should be omitted
+    expect(output).toContain('vign1 = Vign1()');
   });
 
   it('serializes default dropdown value (omitted from output)', () => {

@@ -1,9 +1,9 @@
 import { HandleMap } from './handleMap';
-import type { DslConnection, DslCustomNodeDefinition, DslNode, DslParamDeclaration, DslParamValue, DslPortDeclaration } from './types';
+import type { DslConnection, DslCustomNodeDefinition, DslGpuDefinition, DslNode, DslParamDeclaration, DslParamValue, DslPortDeclaration } from './types';
 import { snakeToPascal, labelToSnake } from './types';
 import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
-import { parseGpuScriptManifestJson } from '../gpuScript';
+import { isScalarScriptType, parseGpuScriptManifestJson, type GpuScriptManifest } from '../gpuScript';
 
 export interface SerializerInput {
   nodes: Map<string, NodeInstance>;
@@ -231,6 +231,45 @@ const formatSection = (header: string, lines: string[]): string => {
   return `  ${header} {\n${body}\n  }`;
 };
 
+const scalarPortToDslValue = (ty: string, raw: ParamValue | undefined): DslParamValue | null => {
+  if (!raw) return null;
+  if (ty === 'Bool') return { type: 'bool', value: 'Bool' in raw ? raw.Bool : false };
+  if (ty === 'Int') return { type: 'int', value: 'Int' in raw ? raw.Int : 0 };
+  if ('Float' in raw) return { type: 'float', value: raw.Float };
+  return null;
+};
+
+const scalarPortDefaultDslValue = (ty: string, def: number | boolean | undefined): DslParamValue => {
+  if (ty === 'Bool') return { type: 'bool', value: Boolean(def ?? false) };
+  if (ty === 'Int') return { type: 'int', value: Math.round(Number(def ?? 0)) };
+  return { type: 'float', value: Number(def ?? 0) };
+};
+
+const manifestToGpuDefinition = (name: string, manifest: GpuScriptManifest): DslGpuDefinition => ({
+  kind: 'gpu',
+  name,
+  line: 1,
+  inputs: manifest.inputs.map(port => ({
+    valueType: port.ty.toLowerCase(),
+    name: port.name,
+    optional: port.name === 'mask',
+    defaultValue: isScalarScriptType(port.ty)
+      ? scalarPortDefaultDslValue(port.ty, port.default)
+      : undefined,
+    min: port.min,
+    max: port.max,
+    step: port.step,
+    line: 1,
+  })),
+  outputs: manifest.outputs.map(port => ({
+    valueType: port.ty.toLowerCase(),
+    name: port.name,
+    optional: false,
+    line: 1,
+  })),
+  code: manifest.kernel,
+});
+
 export function serializeCustomDefinition(definition: DslCustomNodeDefinition): string {
   const sections: string[] = [];
 
@@ -273,14 +312,43 @@ export function serializeGraph(input: SerializerInput): string {
   if (nodes.size === 0) return '';
   const nodeSpecById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
 
+  // Collect gpu_script node definitions to lift into top-level blocks
+  const liftedGpuDefs = new Map<string, DslGpuDefinition>();
+
   const orderedNodes = topologicalOrder(nodes, connections, handleMap);
 
   const nodeLines = orderedNodes.map((node) => {
-    const spec = nodeSpecById.get(node.typeId);
     const handle = handleMap.getOrCreate(node.id, node.typeId);
+
+    // gpu_script nodes: lift to a top-level `node Name = gpu { ... }` definition
+    if (node.typeId.startsWith('gpu_script')) {
+      const manifestJson = node.params['__script_manifest'];
+      const manifestStr = manifestJson && 'String' in manifestJson ? manifestJson.String : undefined;
+      const manifest = parseGpuScriptManifestJson(manifestStr);
+      if (manifest) {
+        const defName = snakeToPascal(handle);
+        liftedGpuDefs.set(handle, manifestToGpuDefinition(defName, manifest));
+
+        // Emit current scalar param values that differ from the manifest defaults
+        const scalarParams: string[] = [];
+        for (const port of manifest.inputs.filter(p => isScalarScriptType(p.ty))) {
+          const raw = node.params[port.name];
+          const dslValue = scalarPortToDslValue(port.ty, raw);
+          if (!dslValue) continue;
+          const defValue = scalarPortDefaultDslValue(port.ty, port.default);
+          if (JSON.stringify(dslValue) !== JSON.stringify(defValue)) {
+            scalarParams.push(`${port.name}: ${formatDslValue(dslValue)}`);
+          }
+        }
+        const paramSection = scalarParams.join(', ');
+        const expression = `${defName}(${paramSection})`;
+        return node.muted ? `${handle} = muted(${expression})` : `${handle} = ${expression}`;
+      }
+    }
+
+    const spec = nodeSpecById.get(node.typeId);
     const rawId = spec ? spec.id : node.typeId;
-    const logicalTypeId = node.typeId.startsWith('gpu_script') ? 'gpu_script' : rawId;
-    const strippedId = logicalTypeId.replace(/^gpu_kernel::/, '');
+    const strippedId = rawId.replace(/^gpu_kernel::/, '');
     const typeName = snakeToPascal(strippedId);
 
     const params: string[] = formatVirtualAssetParamEntries(node, spec);
@@ -290,16 +358,6 @@ export function serializeGraph(input: SerializerInput): string {
         const value = source[paramSpec.key];
         if (!shouldIncludeParam(node, paramSpec, value)) continue;
         params.push(formatParamEntry(node.typeId, paramSpec, value));
-      }
-    }
-
-    if (node.typeId.startsWith('gpu_script')) {
-      const manifestValue = node.params['__script_manifest'];
-      const manifestJson =
-        manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
-      const manifest = parseGpuScriptManifestJson(manifestJson);
-      if (manifest) {
-        params.push(`script: ${formatDslValue({ type: 'string', value: manifest.kernel })}`);
       }
     }
 
@@ -326,9 +384,13 @@ export function serializeGraph(input: SerializerInput): string {
     : [...nodeLines, '', ...connectionLines];
   const graphBlock = `graph {\n${graphLines.map((line) => (line ? `  ${line}` : '')).join('\n')}\n}`;
 
-  const { customNodes } = input;
-  if (!customNodes || customNodes.size === 0) return graphBlock;
+  // Merge lifted gpu_script definitions with any explicit customNodes
+  const allDefs = new Map<string, DslCustomNodeDefinition>([
+    ...liftedGpuDefs,
+    ...(input.customNodes ?? new Map()),
+  ]);
+  if (allDefs.size === 0) return graphBlock;
 
-  const definitionBlocks = Array.from(customNodes.values()).map(serializeCustomDefinition);
+  const definitionBlocks = Array.from(allDefs.values()).map(serializeCustomDefinition);
   return [...definitionBlocks, graphBlock].join('\n\n');
 }
