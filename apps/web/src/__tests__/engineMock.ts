@@ -172,6 +172,7 @@ export function createMockEngine(): EngineBridge & {
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
   const groupGraphs = new Map<string, GroupInternalGraph>();
+  const extraSpecs: NodeSpec[] = [];
   let graphState: unknown = { nodes: [], connections: [] };
   let renderResult: ViewerResult | null = null;
   const renderCalls: string[] = [];
@@ -186,12 +187,53 @@ export function createMockEngine(): EngineBridge & {
     _clearRenderCalls: () => { renderCalls.length = 0; },
     _groupGraphs: groupGraphs,
 
-    listNodeTypes: () => NODE_SPECS,
+    listNodeTypes: () => [...NODE_SPECS, ...extraSpecs],
+
+    registerGpuKernel: async (manifestJson: string): Promise<NodeSpec> => {
+      const manifest = parseGpuScriptManifestJson(manifestJson);
+      if (!manifest) throw new Error('Invalid manifest');
+      const spec = buildGpuScriptNodeSpec(manifest);
+      const existing = extraSpecs.findIndex(s => s.id === spec.id);
+      if (existing >= 0) {
+        extraSpecs[existing] = spec;
+      } else {
+        extraSpecs.push(spec);
+      }
+      return spec;
+    },
+
+    registerGroupDefinition: async (json: string): Promise<NodeSpec> => {
+      const definition = JSON.parse(json) as {
+        id: string;
+        name: string;
+        category: string;
+        description: string;
+        explicit_inputs?: NodeSpec['inputs'];
+        explicit_outputs?: NodeSpec['outputs'];
+        promotions?: Array<{ spec: NodeSpec['params'][number] }>;
+      };
+      const spec: NodeSpec = {
+        id: definition.id,
+        display_name: definition.name,
+        category: definition.category,
+        description: definition.description,
+        inputs: definition.explicit_inputs ?? [],
+        outputs: definition.explicit_outputs ?? [],
+        params: (definition.promotions ?? []).map(promotion => promotion.spec),
+      };
+      const existing = extraSpecs.findIndex(s => s.id === spec.id);
+      if (existing >= 0) {
+        extraSpecs[existing] = spec;
+      } else {
+        extraSpecs.push(spec);
+      }
+      return spec;
+    },
 
     addNode: (typeId: string, _x: number, _y: number): AddNodeResult => {
       const id = `node-${++nodeCounter}`;
       const actualTypeId = typeId === 'gpu_script' ? `gpu_script::mock_${nodeCounter}` : typeId;
-      const spec = NODE_SPECS.find(s => s.id === typeId);
+      const spec = [...NODE_SPECS, ...extraSpecs].find(s => s.id === typeId);
       const params: Record<string, ParamValue> = {};
       if (spec) {
         for (const p of spec.params) {

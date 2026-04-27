@@ -433,6 +433,11 @@ export class TauriEngine implements EngineBridge {
     return JSON.parse(result) as NodeSpec[];
   }
 
+  async registerGroupDefinition(json: string): Promise<NodeSpec> {
+    const result = await invoke<string>('register_group_definition', { json });
+    return JSON.parse(result) as NodeSpec;
+  }
+
   async listCustomNodes(): Promise<CustomNodeInfo[]> {
     const json = await invoke<string>('list_custom_nodes');
     return JSON.parse(json) as CustomNodeInfo[];

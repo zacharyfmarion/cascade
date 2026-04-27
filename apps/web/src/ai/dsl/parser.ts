@@ -1,6 +1,16 @@
-import type { DslAst, DslConnection, DslNode, DslParamValue, DslSourceMap, DslSourceSpan } from './types';
+import type {
+  DslAst,
+  DslConnection,
+  DslCustomNodeDefinition,
+  DslNode,
+  DslParamDeclaration,
+  DslParamValue,
+  DslPortDeclaration,
+  DslSourceMap,
+  DslSourceSpan,
+} from './types';
 import { pascalToSnake, labelToSnake, snakeToLabel } from './types';
-import type { NodeInstance, NodeSpec, ParamSpec } from '../../store/types';
+import type { NodeInstance, NodeSpec, ParamDefault, ParamSpec, PortSpec, ValueType } from '../../store/types';
 import type { HandleMap } from './handleMap';
 
 interface ParseError {
@@ -19,6 +29,8 @@ const NODE_REGEX = /^([a-z][a-z0-9_]*)\s*=\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-
 const MUTED_NODE_REGEX = /^([a-z][a-z0-9_]*)\s*=\s*muted\(\s*([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)\(([\s\S]*)\)\s*\)$/;
 const ARROW_CONNECTION_REGEX = /^([a-z][a-z0-9_]*)\.([\w]+)\s*->\s*([a-z][a-z0-9_]*)\.([\w]+)$/;
 const VERSION_REGEX = /^cascade\s+\d+$/;
+const CUSTOM_NODE_HEADER_REGEX = /^node\s+([A-Z][A-Za-z0-9_]*)\s*=\s*(group|gpu)\s*\{/;
+const SECTION_HEADER_REGEX = /^(inputs|outputs|params|graph)\s*\{/;
 
 type StringMode = 'none' | 'double' | 'triple';
 
@@ -88,11 +100,31 @@ const stripInlineComment = (line: string): string => {
   return line;
 };
 
-const findGraphBody = (input: string): string | null => {
-  const graphMatch = /\bgraph\s*\{/.exec(input);
-  if (!graphMatch) return null;
+interface DocumentBlock {
+  kind: 'graph' | 'custom';
+  name?: string;
+  customKind?: 'group' | 'gpu';
+  body: string;
+  startLine: number;
+  bodyLineOffset: number;
+  startIndex: number;
+  endIndex: number;
+}
 
-  const openIndex = input.indexOf('{', graphMatch.index);
+interface SectionBlock {
+  name: string;
+  body: string;
+  startLine: number;
+  bodyLineOffset: number;
+}
+
+const lineNumberAt = (input: string, index: number): number =>
+  input.slice(0, index).split(/\r?\n/).length;
+
+const findBalancedBlock = (
+  input: string,
+  openIndex: number,
+): { body: string; endIndex: number; bodyLineOffset: number } | null => {
   let depth = 0;
   let bodyStart = -1;
   let state: ScanState = { stringMode: 'none', escaped: false };
@@ -109,7 +141,7 @@ const findGraphBody = (input: string): string | null => {
         depth -= 1;
         if (depth === 0 && bodyStart >= 0) {
           const lineOffset = input.slice(0, bodyStart).split(/\r?\n/).length - 1;
-          return `${'\n'.repeat(lineOffset)}${input.slice(bodyStart, i)}`;
+          return { body: input.slice(bodyStart, i), endIndex: i + 1, bodyLineOffset: lineOffset };
         }
       }
     }
@@ -121,6 +153,70 @@ const findGraphBody = (input: string): string | null => {
   return null;
 };
 
+const findDocumentBlocks = (input: string): DocumentBlock[] => {
+  const blocks: DocumentBlock[] = [];
+  let depth = 0;
+  let state: ScanState = { stringMode: 'none', escaped: false };
+
+  for (let i = 0; i < input.length;) {
+    const char = input[i];
+    if (state.stringMode === 'none') {
+      if (depth === 0) {
+        const rest = input.slice(i);
+        const customMatch = rest.match(CUSTOM_NODE_HEADER_REGEX);
+        if (customMatch?.index === 0) {
+          const openIndex = i + customMatch[0].lastIndexOf('{');
+          const balanced = findBalancedBlock(input, openIndex);
+          if (balanced) {
+            blocks.push({
+              kind: 'custom',
+              name: customMatch[1],
+              customKind: customMatch[2] as 'group' | 'gpu',
+              body: balanced.body,
+              startLine: lineNumberAt(input, i),
+              bodyLineOffset: balanced.bodyLineOffset,
+              startIndex: i,
+              endIndex: balanced.endIndex,
+            });
+            i = balanced.endIndex;
+            continue;
+          }
+        }
+
+        if (/^graph\s*\{/.test(rest)) {
+          const openIndex = i + rest.indexOf('{');
+          const balanced = findBalancedBlock(input, openIndex);
+          if (balanced) {
+            blocks.push({
+              kind: 'graph',
+              body: balanced.body,
+              startLine: lineNumberAt(input, i),
+              bodyLineOffset: balanced.bodyLineOffset,
+              startIndex: i,
+              endIndex: balanced.endIndex,
+            });
+            i = balanced.endIndex;
+            continue;
+          }
+        }
+      }
+
+      if (char === '{') depth += 1;
+      if (char === '}') depth = Math.max(0, depth - 1);
+    }
+    const next = advanceScanner(input, i, state);
+    state = next.state;
+    i = next.nextIndex;
+  }
+
+  return blocks;
+};
+
+const findGraphBody = (input: string): string | null => {
+  const graph = findDocumentBlocks(input).find(block => block.kind === 'graph');
+  return graph ? `${'\n'.repeat(graph.bodyLineOffset)}${graph.body}` : null;
+};
+
 const stripDocumentShell = (input: string): string => {
   const graphBody = findGraphBody(input);
   if (graphBody !== null) return graphBody;
@@ -128,7 +224,9 @@ const stripDocumentShell = (input: string): string => {
 };
 
 const hasNonDocumentShellContent = (input: string): boolean =>
-  input
+  findDocumentBlocks(input)
+    .sort((a, b) => b.startIndex - a.startIndex)
+    .reduce((text, block) => `${text.slice(0, block.startIndex)}${text.slice(block.endIndex)}`, input)
     .split(/\r?\n/)
     .map((line) => stripInlineComment(line).trim())
     .some((line) => line && !line.startsWith('#') && !VERSION_REGEX.test(line));
@@ -289,6 +387,9 @@ const expectedFormatHint = (paramSpec: ParamSpec): string => {
 
 const parseParamValue = (paramSpec: ParamSpec, raw: string): DslParamValue | null => {
   const trimmed = raw.trim();
+  if (/^(param|input)\.[a-z][a-z0-9_]*$/.test(trimmed)) {
+    return { type: 'ref', value: trimmed };
+  }
   if (paramSpec.ui_hint.type === 'Dropdown' && 'data' in paramSpec.ui_hint) {
     const options = paramSpec.ui_hint.data;
     const unquoted = trimmed.startsWith('"') && trimmed.endsWith('"') ? trimmed.slice(1, -1) : trimmed;
@@ -478,24 +579,18 @@ export const joinContinuationLines = (input: string): LogicalLine[] => {
   return result;
 };
 
-export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult {
-  const errors: ParseError[] = [];
-  const nodes = new Map<string, DslNode>();
-  const connections: DslConnection[] = [];
-  const nodeSpans = new Map<string, DslSourceSpan>();
-  const connectionSpans = new Map<string, DslSourceSpan>();
+const parseGraphStatements = (
+  body: string,
+  nodeSpecs: NodeSpec[],
+  context: ParseContext | undefined,
+  errors: ParseError[],
+  nodes: Map<string, DslNode>,
+  connections: DslConnection[],
+  nodeSpans?: Map<string, DslSourceSpan>,
+  connectionSpans?: Map<string, DslSourceSpan>,
+) => {
   const specById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
-  const graphBody = findGraphBody(input);
-
-  if (graphBody === null && hasNonDocumentShellContent(input)) {
-    return {
-      ast: { nodes, connections },
-      errors: [{ line: 1, message: 'Expected a graph { ... } block' }],
-      sourceMap: { nodeSpans, connectionSpans },
-    };
-  }
-
-  const logicalLines = joinContinuationLines(graphBody ?? stripDocumentShell(input));
+  const logicalLines = joinContinuationLines(body);
   for (const { text: line, startLine: lineNumber } of logicalLines) {
     const trimmedLine = line.trim();
     if (!trimmedLine) continue;
@@ -528,8 +623,9 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
       })();
       // Try gpu_kernel:: prefix first (most nodes are GPU kernels now)
       const gpuId = `gpu_kernel::${baseId}`;
+      const groupId = `group::${baseId}`;
       const nodeTypeId = existingGpuScriptTypeId
-        ?? (specById.has(gpuId) ? gpuId : baseId);
+        ?? (specById.has(gpuId) ? gpuId : specById.has(groupId) ? groupId : baseId);
       const spec = specById.get(nodeTypeId);
       if (!spec) {
         errors.push({ line: lineNumber, message: `Unknown node type '${nodeType}'` });
@@ -578,7 +674,7 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
 
       nodes.set(handle, { handle, nodeType, nodeTypeId, params, muted, line: lineNumber });
       const trimmedLine = withoutComment.trim();
-      nodeSpans.set(handle, {
+      nodeSpans?.set(handle, {
         startLine: lineNumber,
         startCol: 0,
         endLine: lineNumber,
@@ -595,7 +691,7 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
       const toPort = connectionMatch[4];
       connections.push({ fromHandle, fromPort, toHandle, toPort, line: lineNumber });
       const trimmedLine = withoutComment.trim();
-      connectionSpans.set(`${fromHandle}.${fromPort}->${toHandle}.${toPort}`, {
+      connectionSpans?.set(`${fromHandle}.${fromPort}->${toHandle}.${toPort}`, {
         startLine: lineNumber,
         startCol: 0,
         endLine: lineNumber,
@@ -606,8 +702,345 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
 
     errors.push({ line: lineNumber, message: 'Unrecognized DSL line' });
   }
+};
 
-  const ast: DslAst = { nodes, connections };
+const valueTypeToParamType = (valueType: string): ParamSpec['ty'] | null => {
+  switch (valueType.toLowerCase()) {
+    case 'float': return 'Float';
+    case 'int': return 'Int';
+    case 'bool': return 'Bool';
+    case 'string': return 'String';
+    case 'color': return 'Color';
+    case 'image': return 'Image';
+    case 'mask': return 'Mask';
+    case 'field': return 'Field';
+    default: return null;
+  }
+};
+
+const declarationParamSpec = (name: string, valueType: string): ParamSpec | null => {
+  const ty = valueTypeToParamType(valueType);
+  if (!ty) return null;
+  return {
+    key: name,
+    label: name,
+    ty,
+    default: ty === 'Bool'
+      ? { Bool: false }
+      : ty === 'Int'
+        ? { Int: 0 }
+        : ty === 'Float'
+          ? { Float: 0 }
+          : ty === 'Color'
+            ? { Color: [0, 0, 0, 1] }
+            : { String: '' },
+    ui_hint: ty === 'Bool' ? { type: 'Checkbox' } : { type: 'NumberInput' },
+    promotable: true,
+  };
+};
+
+const parseDeclarationExtras = (
+  tokens: string[],
+  startIndex: number,
+): { min?: number; max?: number; step?: number } => {
+  const extras: { min?: number; max?: number; step?: number } = {};
+  for (let i = startIndex; i < tokens.length - 1; i += 2) {
+    const value = parseNumber(tokens[i + 1]);
+    if (value === null) continue;
+    if (tokens[i] === 'min') extras.min = value;
+    if (tokens[i] === 'max') extras.max = value;
+    if (tokens[i] === 'step') extras.step = value;
+  }
+  return extras;
+};
+
+const parsePortDeclaration = (line: string, lineNumber: number, errors: ParseError[]): DslPortDeclaration | null => {
+  const withoutComment = stripInlineComment(line).trim();
+  if (!withoutComment) return null;
+  const match = /^([a-z]+)\s+([a-z][a-z0-9_]*\??)(?:\s*=\s*([^\s]+))?(.*)$/.exec(withoutComment);
+  if (!match) {
+    errors.push({ line: lineNumber, message: `Invalid port declaration '${withoutComment}'` });
+    return null;
+  }
+  const valueType = match[1];
+  const rawName = match[2];
+  const optional = rawName.endsWith('?');
+  const name = optional ? rawName.slice(0, -1) : rawName;
+  const spec = declarationParamSpec(name, valueType);
+  if (!spec) {
+    errors.push({ line: lineNumber, message: `Unknown port type '${valueType}'` });
+    return null;
+  }
+  const tokens = match[4].trim().split(/\s+/).filter(Boolean);
+  const defaultValue = match[3] ? parseParamValue(spec, match[3]) ?? undefined : undefined;
+  return { valueType, name, optional, defaultValue, ...parseDeclarationExtras(tokens, 0), line: lineNumber };
+};
+
+const parseParamDeclaration = (line: string, lineNumber: number, errors: ParseError[]): DslParamDeclaration | null => {
+  const withoutComment = stripInlineComment(line).trim();
+  if (!withoutComment) return null;
+  const match = /^([a-z]+)\s+([a-z][a-z0-9_]*)\s*=\s*([^\s]+)(.*)$/.exec(withoutComment);
+  if (!match) {
+    errors.push({ line: lineNumber, message: `Invalid param declaration '${withoutComment}'` });
+    return null;
+  }
+  const valueType = match[1];
+  const name = match[2];
+  const spec = declarationParamSpec(name, valueType);
+  if (!spec) {
+    errors.push({ line: lineNumber, message: `Unknown param type '${valueType}'` });
+    return null;
+  }
+  const defaultValue = parseParamValue(spec, match[3]);
+  if (!defaultValue) {
+    errors.push({ line: lineNumber, message: `Invalid default value for param '${name}'` });
+    return null;
+  }
+  const tokens = match[4].trim().split(/\s+/).filter(Boolean);
+  return { valueType, name, defaultValue, ...parseDeclarationExtras(tokens, 0), line: lineNumber };
+};
+
+const findSectionBlocks = (body: string, bodyLineOffset: number): SectionBlock[] => {
+  const sections: SectionBlock[] = [];
+  let state: ScanState = { stringMode: 'none', escaped: false };
+  let depth = 0;
+
+  for (let i = 0; i < body.length;) {
+    const char = body[i];
+    if (state.stringMode === 'none') {
+      if (depth === 0) {
+        const rest = body.slice(i).trimStart();
+        const leading = body.slice(i).length - rest.length;
+        const sectionMatch = rest.match(SECTION_HEADER_REGEX);
+        if (sectionMatch?.index === 0) {
+          const headerIndex = i + leading;
+          const openIndex = headerIndex + sectionMatch[0].lastIndexOf('{');
+          const balanced = findBalancedBlock(body, openIndex);
+          if (balanced) {
+            sections.push({
+              name: sectionMatch[1],
+              body: `${'\n'.repeat(bodyLineOffset + balanced.bodyLineOffset)}${balanced.body}`,
+              startLine: bodyLineOffset + lineNumberAt(body, headerIndex),
+              bodyLineOffset: bodyLineOffset + balanced.bodyLineOffset,
+            });
+            i = balanced.endIndex;
+            continue;
+          }
+        }
+      }
+      if (char === '{') depth += 1;
+      if (char === '}') depth = Math.max(0, depth - 1);
+    }
+    const next = advanceScanner(body, i, state);
+    state = next.state;
+    i = next.nextIndex;
+  }
+
+  return sections;
+};
+
+const parseDeclarations = <T>(
+  section: SectionBlock | undefined,
+  errors: ParseError[],
+  parseLine: (line: string, lineNumber: number, errors: ParseError[]) => T | null,
+): T[] => {
+  if (!section) return [];
+  const declarations: T[] = [];
+  for (const { text, startLine } of joinContinuationLines(section.body)) {
+    const parsed = parseLine(text, startLine, errors);
+    if (parsed) declarations.push(parsed);
+  }
+  return declarations;
+};
+
+const parseTripleQuotedSection = (body: string, sectionName: string, line: number, errors: ParseError[]): string => {
+  const match = new RegExp(`${sectionName}\\s+"""([\\s\\S]*?)"""`).exec(body);
+  if (!match) {
+    errors.push({ line, message: `Expected ${sectionName} """...""" block` });
+    return '';
+  }
+  let value = match[1];
+  if (value.startsWith('\n')) value = value.slice(1);
+  if (value.endsWith('\n')) value = value.slice(0, -1);
+  return value;
+};
+
+const parseCustomDefinitions = (
+  blocks: DocumentBlock[],
+  nodeSpecs: NodeSpec[],
+  context: ParseContext | undefined,
+  errors: ParseError[],
+): Map<string, DslCustomNodeDefinition> => {
+  const definitions = new Map<string, DslCustomNodeDefinition>();
+  for (const block of blocks.filter((candidate) => candidate.kind === 'custom')) {
+    if (!block.name || !block.customKind) continue;
+    if (definitions.has(block.name)) {
+      errors.push({ line: block.startLine, message: `Duplicate custom node '${block.name}'` });
+      continue;
+    }
+    const sections = findSectionBlocks(block.body, block.bodyLineOffset);
+    const sectionByName = new Map(sections.map(section => [section.name, section]));
+    const inputs = parseDeclarations(sectionByName.get('inputs'), errors, parsePortDeclaration);
+    const outputs = parseDeclarations(sectionByName.get('outputs'), errors, parsePortDeclaration);
+
+    if (block.customKind === 'gpu') {
+      definitions.set(block.name, {
+        kind: 'gpu',
+        name: block.name,
+        line: block.startLine,
+        inputs,
+        outputs,
+        code: parseTripleQuotedSection(block.body, 'code', block.startLine, errors),
+      });
+      continue;
+    }
+
+    const params = parseDeclarations(sectionByName.get('params'), errors, parseParamDeclaration);
+    const graphNodes = new Map<string, DslNode>();
+    const graphConnections: DslConnection[] = [];
+    const graphSection = sectionByName.get('graph');
+    if (graphSection) {
+      parseGraphStatements(graphSection.body, nodeSpecs, context, errors, graphNodes, graphConnections);
+    }
+    definitions.set(block.name, {
+      kind: 'group',
+      name: block.name,
+      line: block.startLine,
+      inputs,
+      outputs,
+      params,
+      graph: { nodes: graphNodes, connections: graphConnections },
+    });
+  }
+  return definitions;
+};
+
+const dslDefaultToParamDefault = (value: DslParamValue): ParamDefault => {
+  switch (value.type) {
+    case 'float':
+      return { Float: value.value };
+    case 'int':
+      return { Int: value.value };
+    case 'bool':
+      return { Bool: value.value };
+    case 'color':
+      return { Color: value.value };
+    case 'ramp':
+      return { ColorRamp: value.value };
+    case 'curve':
+      return { CurvePoints: value.value };
+    case 'palette':
+      return { ColorPalette: value.value };
+    case 'string':
+    case 'ref':
+    case 'dropdown':
+      return { String: value.value };
+    default:
+      return { String: '' };
+  }
+};
+
+const fallbackDefaultForType = (ty: ValueType): ParamDefault => {
+  switch (ty) {
+    case 'Float': return { Float: 0 };
+    case 'Int': return { Int: 0 };
+    case 'Bool': return { Bool: false };
+    case 'Color': return { Color: [0, 0, 0, 1] };
+    default: return { String: '' };
+  }
+};
+
+const labelFromName = (name: string): string =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+
+const declarationToPortSpec = (declaration: DslPortDeclaration): PortSpec => {
+  const ty = valueTypeToParamType(declaration.valueType) ?? 'String';
+  return {
+    name: declaration.name,
+    label: labelFromName(declaration.name),
+    ty,
+    default: declaration.defaultValue ? dslDefaultToParamDefault(declaration.defaultValue) : undefined,
+    min: declaration.min,
+    max: declaration.max,
+    step: declaration.step,
+    ui_hint: ty === 'Bool' ? { type: 'Checkbox' } : ty === 'Float' || ty === 'Int' ? { type: 'Slider' } : undefined,
+  };
+};
+
+const declarationToParamSpec = (declaration: DslParamDeclaration | DslPortDeclaration): ParamSpec => {
+  const ty = valueTypeToParamType(declaration.valueType) ?? 'String';
+  const defaultValue = 'defaultValue' in declaration && declaration.defaultValue
+    ? dslDefaultToParamDefault(declaration.defaultValue)
+    : fallbackDefaultForType(ty);
+  return {
+    key: declaration.name,
+    label: labelFromName(declaration.name),
+    ty,
+    default: defaultValue,
+    min: declaration.min,
+    max: declaration.max,
+    step: declaration.step,
+    ui_hint: ty === 'Bool' ? { type: 'Checkbox' } : ty === 'Float' || ty === 'Int' ? { type: 'Slider' } : { type: 'TextArea' },
+    promotable: true,
+  };
+};
+
+const isScalarDeclaration = (declaration: DslPortDeclaration): boolean =>
+  ['float', 'int', 'bool', 'color', 'string'].includes(declaration.valueType.toLowerCase());
+
+export const customDefinitionToNodeSpec = (definition: DslCustomNodeDefinition): NodeSpec => {
+  if (definition.kind === 'gpu') {
+    return {
+      id: pascalToSnake(definition.name),
+      display_name: labelFromName(pascalToSnake(definition.name)),
+      category: 'GPU',
+      description: 'Custom GPU node defined in DSL',
+      inputs: definition.inputs.filter(input => !isScalarDeclaration(input)).map(declarationToPortSpec),
+      outputs: definition.outputs.map(declarationToPortSpec),
+      params: definition.inputs.filter(isScalarDeclaration).map(declarationToParamSpec),
+    };
+  }
+
+  return {
+    id: `group::${pascalToSnake(definition.name)}`,
+    display_name: labelFromName(pascalToSnake(definition.name)),
+    category: 'Custom',
+    description: 'Custom group node defined in DSL',
+    inputs: definition.inputs.map(declarationToPortSpec),
+    outputs: definition.outputs.map(declarationToPortSpec),
+    params: definition.params.map(declarationToParamSpec),
+  };
+};
+
+export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult {
+  const errors: ParseError[] = [];
+  const nodes = new Map<string, DslNode>();
+  const connections: DslConnection[] = [];
+  const nodeSpans = new Map<string, DslSourceSpan>();
+  const connectionSpans = new Map<string, DslSourceSpan>();
+  const blocks = findDocumentBlocks(input);
+  const graphBlock = blocks.find(block => block.kind === 'graph');
+
+  if (!graphBlock && hasNonDocumentShellContent(input)) {
+    return {
+      ast: { nodes, connections, customNodes: new Map() },
+      errors: [{ line: 1, message: 'Expected a graph { ... } block' }],
+      sourceMap: { nodeSpans, connectionSpans },
+    };
+  }
+
+  const customNodes = parseCustomDefinitions(blocks, nodeSpecs, context, errors);
+  const parseSpecs = [...nodeSpecs, ...Array.from(customNodes.values()).map(customDefinitionToNodeSpec)];
+  const graphBody = graphBlock
+    ? `${'\n'.repeat(graphBlock.bodyLineOffset)}${graphBlock.body}`
+    : stripDocumentShell(input);
+  parseGraphStatements(graphBody, parseSpecs, context, errors, nodes, connections, nodeSpans, connectionSpans);
+
+  const ast: DslAst = { nodes, connections, customNodes };
   const sourceMap: DslSourceMap = { nodeSpans, connectionSpans };
   return { ast, errors, sourceMap };
 }

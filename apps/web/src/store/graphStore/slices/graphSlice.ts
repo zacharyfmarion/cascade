@@ -47,6 +47,8 @@ export interface GraphSliceActions {
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
+  registerGpuKernel: (manifestJson: string) => Promise<NodeSpec | null>;
+  registerGroupDefinition: (json: string) => Promise<NodeSpec | null>;
   importCustomNodes: (json: string) => Promise<string[]>;
   applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
@@ -898,6 +900,40 @@ export const createGraphSlice: StateCreator<
         set({ lastError: parseEngineError(e) });
         get().pushToast('error', 'Import failed', e instanceof Error ? e.message : String(e));
         return [];
+      }
+    },
+
+    registerGpuKernel: async (manifestJson) => {
+      const eng = getEngine();
+      if (!eng.registerGpuKernel) {
+        set({ lastError: parseEngineError(new Error('GPU kernel registration not supported by this engine')) });
+        return null;
+      }
+      try {
+        const spec = await Promise.resolve(eng.registerGpuKernel(manifestJson));
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        set({ nodeSpecs: specs });
+        return spec;
+      } catch (e) {
+        set({ lastError: parseEngineError(e) });
+        return null;
+      }
+    },
+
+    registerGroupDefinition: async (json) => {
+      const eng = getEngine();
+      if (!eng.registerGroupDefinition) {
+        set({ lastError: parseEngineError(new Error('Group definition registration not supported by this engine')) });
+        return null;
+      }
+      try {
+        const spec = await Promise.resolve(eng.registerGroupDefinition(json));
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        set({ nodeSpecs: specs });
+        return spec;
+      } catch (e) {
+        set({ lastError: parseEngineError(e) });
+        return null;
       }
     },
 

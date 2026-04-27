@@ -819,6 +819,19 @@ fn import_custom_nodes(state: State<'_, EngineState>, json: String) -> Result<St
 }
 
 #[tauri::command]
+fn register_group_definition(
+    state: State<'_, EngineState>,
+    json: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let spec = s
+        .engine
+        .register_group_definition_json(&json)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&spec).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn list_custom_nodes(state: State<'_, EngineState>) -> Result<String, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let nodes = s.engine.list_custom_nodes();
@@ -988,6 +1001,7 @@ pub fn run() {
             rename_group,
             export_group_as_package,
             import_custom_nodes,
+            register_group_definition,
             list_custom_nodes,
             remove_custom_node,
             set_ai_api_key,

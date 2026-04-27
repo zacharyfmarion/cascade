@@ -58,6 +58,141 @@ describe('parseDsl', () => {
     ]);
   });
 
+  it('parses gpu custom node definitions before the root graph', () => {
+    const result = parseDsl([
+      'cascade 1',
+      '',
+      'node FilmGlow = gpu {',
+      '  inputs {',
+      '    image image',
+      '    mask mask?',
+      '    float gain = 1.2 min 0.0 max 4.0 step 0.01',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  code """',
+      '  vec3 glow = color.rgb * gain;',
+      '  return vec4(glow, color.a);',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  glow1 = FilmGlow(gain: 1.5)',
+      '}',
+    ].join('\n'), mockSpecs);
+
+    expect(result.errors).toHaveLength(0);
+    const definition = result.ast?.customNodes?.get('FilmGlow');
+    expect(definition?.kind).toBe('gpu');
+    if (definition?.kind !== 'gpu') throw new Error('expected gpu definition');
+    expect(definition.inputs).toMatchObject([
+      { valueType: 'image', name: 'image', optional: false },
+      { valueType: 'mask', name: 'mask', optional: true },
+      { valueType: 'float', name: 'gain', defaultValue: { type: 'float', value: 1.2 }, min: 0, max: 4, step: 0.01 },
+    ]);
+    expect(definition.outputs).toMatchObject([{ valueType: 'image', name: 'image' }]);
+    expect(definition.code).toContain('return vec4(glow, color.a);');
+    expect(result.ast?.nodes.get('glow1')?.nodeTypeId).toBe('film_glow');
+  });
+
+  it('parses group custom node definitions with internal graph syntax', () => {
+    const result = parseDsl([
+      'node KeyMix = group {',
+      '  inputs {',
+      '    image plate',
+      '    image foreground',
+      '    mask matte',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  params {',
+      '    float opacity = 1.0 min 0.0 max 1.0 step 0.01',
+      '    bool invert_matte = false',
+      '  }',
+      '',
+      '  graph {',
+      '    inv = InvertMask(enabled: param.invert_matte)',
+      '    over = AlphaOver(opacity: param.opacity)',
+      '',
+      '    input.matte -> inv.mask',
+      '    input.plate -> over.background',
+      '    input.foreground -> over.foreground',
+      '    inv.mask -> over.mask',
+      '    over.image -> output.image',
+      '  }',
+      '}',
+      '',
+      'graph {',
+      '  key1 = KeyMix(opacity: 0.8)',
+      '}',
+    ].join('\n'), [
+      ...mockSpecs,
+      {
+        id: 'invert_mask',
+        display_name: 'Invert Mask',
+        category: 'Mask',
+        description: 'Invert a mask',
+        inputs: [{ name: 'mask', label: 'Mask', ty: 'Mask' }],
+        outputs: [{ name: 'mask', label: 'Mask', ty: 'Mask' }],
+        params: [{
+          key: 'enabled',
+          label: 'Enabled',
+          ty: 'Bool',
+          default: { Bool: true },
+          ui_hint: { type: 'Checkbox' },
+          promotable: true,
+        }],
+      },
+      {
+        id: 'alpha_over',
+        display_name: 'Alpha Over',
+        category: 'Composite',
+        description: 'Composite foreground over background',
+        inputs: [
+          { name: 'background', label: 'Background', ty: 'Image' },
+          { name: 'foreground', label: 'Foreground', ty: 'Image' },
+          { name: 'mask', label: 'Mask', ty: 'Mask' },
+        ],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'opacity',
+          label: 'Opacity',
+          ty: 'Float',
+          default: { Float: 1 },
+          min: 0,
+          max: 1,
+          step: 0.01,
+          ui_hint: { type: 'Slider' },
+          promotable: true,
+        }],
+      },
+    ]);
+
+    expect(result.errors).toHaveLength(0);
+    const definition = result.ast?.customNodes?.get('KeyMix');
+    expect(definition?.kind).toBe('group');
+    if (definition?.kind !== 'group') throw new Error('expected group definition');
+    expect(definition.params).toMatchObject([
+      { valueType: 'float', name: 'opacity', defaultValue: { type: 'float', value: 1 }, min: 0, max: 1, step: 0.01 },
+      { valueType: 'bool', name: 'invert_matte', defaultValue: { type: 'bool', value: false } },
+    ]);
+    expect(definition.graph.nodes.get('inv')?.nodeTypeId).toBe('invert_mask');
+    expect(definition.graph.connections).toContainEqual({
+      fromHandle: 'over',
+      fromPort: 'image',
+      toHandle: 'output',
+      toPort: 'image',
+      line: 25,
+    });
+    expect(result.ast?.nodes.get('key1')?.nodeTypeId).toBe('group::key_mix');
+  });
+
   it('parses virtual load image path when runtime spec only exposes image_data', () => {
     const runtimeSpecs = mockSpecs.map((spec) => spec.id === 'load_image'
       ? {

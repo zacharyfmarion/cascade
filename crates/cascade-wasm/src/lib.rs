@@ -448,6 +448,24 @@ impl Engine {
             .map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
+    pub fn register_group_definition(
+        &mut self,
+        definition_js: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let mut def: GroupDefinition = serde_wasm_bindgen::from_value(definition_js)
+            .map_err(|e| JsValue::from_str(&format!("Invalid group definition: {e}")))?;
+        def.is_builtin = false;
+        let id = def.id.clone();
+        let spec = self
+            .register_group(def)
+            .map_err(|e| JsValue::from_str(&e))?;
+        self.refresh_group_instances(&id)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        spec.serialize(&serializer)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
     pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> Result<JsValue, JsValue> {
         match self.add_node_internal(type_id, x, y) {
             Some((id, actual_type_id)) => serde_wasm_bindgen::to_value(&AddNodeResult {

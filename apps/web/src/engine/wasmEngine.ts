@@ -193,6 +193,7 @@ export class WasmEngine implements EngineBridge {
     set_project_format?: (width: number, height: number) => void;
     export_group_as_package?: (groupDefId: string) => unknown;
     import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+    register_group_definition?: (definition: unknown) => NodeSpec;
   } {
     return this.getEngine() as Engine & {
       set_muted: (nodeId: string, muted: boolean) => void;
@@ -226,6 +227,7 @@ export class WasmEngine implements EngineBridge {
       set_project_format?: (width: number, height: number) => void;
       export_group_as_package?: (groupDefId: string) => unknown;
       import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+      register_group_definition?: (definition: unknown) => NodeSpec;
     };
   }
 
@@ -752,6 +754,16 @@ export class WasmEngine implements EngineBridge {
       const eng = this.getEngineWithBindings();
       const pkg = JSON.parse(json);
       return eng.import_custom_nodes?.(pkg) ?? [];
+    });
+  }
+
+  registerGroupDefinition(json: string): Promise<NodeSpec> {
+    return this.scheduler.enqueue(() => {
+      const eng = this.getEngineWithBindings();
+      const definition = JSON.parse(json);
+      const spec = eng.register_group_definition?.(definition);
+      if (!spec) throw new Error('Group definition registration not supported');
+      return spec;
     });
   }
 

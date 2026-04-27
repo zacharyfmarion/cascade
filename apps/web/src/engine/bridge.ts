@@ -151,6 +151,7 @@ export interface EngineBridge {
   validateEdits?(editsJson: string): EditValidationError[] | Promise<EditValidationError[]>;
   exportGroupAsPackage?(groupDefId: string): Promise<unknown> | unknown;
   importCustomNodes?(json: string): Promise<NodeSpec[]> | NodeSpec[];
+  registerGroupDefinition?(json: string): Promise<NodeSpec> | NodeSpec;
   listCustomNodes?(): Promise<CustomNodeInfo[]>;
   removeCustomNode?(groupDefId: string): Promise<void>;
   typesCompatible?(fromType: string, toType: string): boolean | Promise<boolean>;

@@ -137,6 +137,12 @@ Those APIs should be added before enabling parsed group/GPU definitions in the e
 - [x] Identify required internal group engine APIs.
 - [x] Implement required internal group engine APIs.
 - [ ] Add group/GPU definition parsing and execution once APIs exist.
+  - [x] Parse top-level `node Name = group/gpu { ... }` definitions into the DSL AST.
+  - [x] Parse declaration sections, GPU code blocks, group internal graph statements, and `param.*` references.
+  - [ ] Validate custom definition signatures and internal graph references.
+  - [x] Execute GPU definitions by registering/replacing GPU script specs before applying root graph edits.
+  - [x] Execute group definitions by registering stable group definitions before applying root graph edits.
+  - [ ] Serialize/format custom definitions canonically.
 - [x] Run `yarn test`, `yarn lint`, and `npx tsc -b --noEmit`.
 
 ## Assumptions

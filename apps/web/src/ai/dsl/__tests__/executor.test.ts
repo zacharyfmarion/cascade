@@ -117,4 +117,90 @@ describe('applyDsl', () => {
     }
     expect(useGraphStore.getState().nodes.get(nodeId)?.params.path).toEqual({ String: 'file:///tmp/old.png' });
   });
+
+  it('registers a gpu custom definition before applying root graph nodes', async () => {
+    const registerGpuKernel = vi.spyOn(mockEngine as EngineBridge, 'registerGpuKernel');
+    const handleMap = new HandleMap();
+    const result = await applyDsl(
+      [
+        'node FilmGlow = gpu {',
+        '  inputs {',
+        '    image image',
+        '    float gain = 1.5 min 0.0 max 4.0 step 0.01',
+        '  }',
+        '',
+        '  outputs {',
+        '    image image',
+        '  }',
+        '',
+        '  code """',
+        '  return vec4(color.rgb * gain, color.a);',
+        '  """',
+        '}',
+        '',
+        'graph {',
+        '  glow1 = FilmGlow(gain: 2.0)',
+        '}',
+      ].join('\n'),
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    expect(registerGpuKernel).toHaveBeenCalledOnce();
+    const manifest = JSON.parse(registerGpuKernel.mock.calls[0]?.[0] ?? '{}') as { id?: string; params?: unknown[] };
+    expect(manifest.id).toBe('film_glow');
+    expect(manifest.params).toMatchObject([{ key: 'gain', default: 1.5 }]);
+    expect(useGraphStore.getState().nodes.get(handleMap.getNodeId('glow1') ?? '')?.typeId).toBe('film_glow');
+  });
+
+  it('registers a group custom definition before applying root graph nodes', async () => {
+    const registerGroupDefinition = vi.spyOn(mockEngine as EngineBridge, 'registerGroupDefinition');
+    const handleMap = new HandleMap();
+    const result = await applyDsl(
+      [
+        'node SoftBlur = group {',
+        '  inputs {',
+        '    image image',
+        '  }',
+        '',
+        '  outputs {',
+        '    image image',
+        '  }',
+        '',
+        '  params {',
+        '    float amount = 1.0 min 0.0 max 5.0 step 0.01',
+        '  }',
+        '',
+        '  graph {',
+        '    blur = GaussianBlur(amount: param.amount)',
+        '    input.image -> blur.image',
+        '    blur.image -> output.image',
+        '  }',
+        '}',
+        '',
+        'graph {',
+        '  blur1 = SoftBlur(amount: 2.0)',
+        '}',
+      ].join('\n'),
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    expect(registerGroupDefinition).toHaveBeenCalledOnce();
+    const definition = JSON.parse(registerGroupDefinition.mock.calls[0]?.[0] ?? '{}') as {
+      id?: string;
+      promotions?: Array<{ group_param_key?: string; internal_node_id?: string; internal_param_key?: string }>;
+    };
+    expect(definition.id).toBe('group::soft_blur');
+    expect(definition.promotions).toMatchObject([
+      { group_param_key: 'amount', internal_node_id: 'blur', internal_param_key: 'amount' },
+    ]);
+    expect(useGraphStore.getState().nodes.get(handleMap.getNodeId('blur1') ?? '')?.typeId).toBe('group::soft_blur');
+  });
 });

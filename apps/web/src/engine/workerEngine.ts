@@ -128,6 +128,7 @@ interface WorkerAPI {
   validateEdits(editsJson: string): Promise<EditValidationError[]>;
   exportGroupAsPackage(groupDefId: string): Promise<unknown>;
   importCustomNodes(json: string): Promise<NodeSpec[]>;
+  registerGroupDefinition(json: string): Promise<NodeSpec>;
   listCustomNodes(): Promise<CustomNodeInfo[]>;
   removeCustomNode(groupDefId: string): Promise<void>;
 
@@ -534,6 +535,10 @@ export class WorkerEngine implements EngineBridge {
 
   importCustomNodes(json: string): Promise<NodeSpec[]> {
     return this.getAPI().importCustomNodes(json);
+  }
+
+  registerGroupDefinition(json: string): Promise<NodeSpec> {
+    return this.getAPI().registerGroupDefinition(json);
   }
 
   listCustomNodes(): Promise<CustomNodeInfo[]> {

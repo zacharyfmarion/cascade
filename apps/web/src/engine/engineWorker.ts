@@ -212,6 +212,7 @@ const getEngineWithBindings = () => getEngine() as EngineInstance & {
   set_project_format?: (width: number, height: number) => void;
   export_group_as_package?: (groupDefId: string) => unknown;
   import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+  register_group_definition?: (definition: unknown) => NodeSpec;
   render_viewer_scaled?: (viewerId: string, frame: bigint, scale: number) => Promise<unknown>;
 };
 
@@ -893,6 +894,16 @@ const engineAPI = {
       const eng = getEngineWithBindings();
       const pkg = JSON.parse(json);
       return eng.import_custom_nodes?.(pkg) ?? [];
+    });
+  },
+
+  registerGroupDefinition(json: string): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      const definition = JSON.parse(json);
+      const spec = eng.register_group_definition?.(definition);
+      if (!spec) throw new Error('Group definition registration not supported');
+      return spec;
     });
   },
 

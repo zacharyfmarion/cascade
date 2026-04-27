@@ -477,6 +477,16 @@ impl Engine {
         Ok(imported_specs)
     }
 
+    pub fn register_group_definition_json(&mut self, json: &str) -> Result<NodeSpec, CascadeError> {
+        let mut def: GroupDefinition = serde_json::from_str(json)
+            .map_err(|e| CascadeError::Other(format!("Invalid group definition: {e}")))?;
+        def.is_builtin = false;
+        let id = def.id.clone();
+        let spec = self.register_group(def).map_err(CascadeError::Other)?;
+        self.refresh_group_instances(&id)?;
+        Ok(spec)
+    }
+
     pub fn load_custom_nodes_from_dir(&mut self, dir: &Path) -> Result<usize, CascadeError> {
         if !dir.exists() {
             return Ok(0);

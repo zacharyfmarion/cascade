@@ -76,6 +76,8 @@ const formatDslValue = (paramValue: DslParamValue, context?: { typeId: string; p
         return `"""\n${paramValue.value}\n"""`;
       }
       return JSON.stringify(paramValue.value);
+    case 'ref':
+      return paramValue.value;
     case 'color':
       return formatColor(paramValue.value);
     case 'ramp':

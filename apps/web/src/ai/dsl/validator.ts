@@ -56,6 +56,8 @@ const dslValueType = (value: DslParamValue): ValueType => {
       return 'Bool';
     case 'string':
       return 'String';
+    case 'ref':
+      return 'Field';
     case 'color':
       return 'Color';
     case 'ramp':
@@ -76,6 +78,8 @@ const dslValueLabel = (value: DslParamValue): string => {
       return 'boolean';
     case 'string':
       return 'string';
+    case 'ref':
+      return 'reference';
     case 'color':
       return 'color';
     case 'ramp':
