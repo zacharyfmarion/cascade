@@ -35,13 +35,17 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - [x] Update formatting/reconciliation to preserve comments and untouched user formatting in safe graph-edit cases.
 - [x] Add shadow reconciliation tests for node param edits, node insert/delete, connection insert/delete, group rename, GPU script edits, and unsafe fallback.
 - [x] Harden custom node identity for duplicate names, nested group renames, delete/recreate, multiple instances, imported group packages, and GPU script instance edits.
-- [ ] Add `DslEditor` component tests for diagnostics, format, apply/revert, stale shadow text, and external graph changes.
-- [ ] Add Playwright e2e coverage for root DSL edits, group title <-> DSL sync, GPU script edits, save/load preservation, and invalid DSL recovery.
-- [ ] Run `yarn test`, `yarn lint`, `yarn lint:css`, `npx tsc -b --noEmit`, and relevant Playwright specs.
+- [x] Add `DslEditor` component tests for diagnostics, format, apply/revert, stale shadow text, and external graph changes.
+- [x] Add Playwright e2e coverage for root DSL edits, group title <-> DSL sync, GPU script edits, save/load preservation, and invalid DSL recovery.
+- [x] Run `yarn test`, `yarn lint`, `yarn lint:css`, `npx tsc -b --noEmit`, and relevant Playwright specs.
 - [ ] Commit each completed step after its tests pass.
 
 ## Validation Notes
 
 - Frontend-only changes should use the web validation commands from `AGENTS.md`.
 - Rust/Tauri validation is only required if this phase touches Rust crates or Tauri code.
-- The current full `yarn test` run has shown order-sensitive `batchExportSlice` Tauri dialog failures while the file passes in isolation; this should be tracked separately if it persists after DSL work.
+- Full `yarn test` now passes: 32 files, 563 tests.
+- Rust validation now passes with `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and `cargo fmt --all -- --check`.
+- Focused browser validation passes with `yarn exec playwright test e2e/dsl-editor.spec.ts --project=chromium --reporter=line`.
+- `wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg --no-opt` passes and was used for local browser validation.
+- The optimized `wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg` remains intermittently blocked in the `wasm-opt` step with `invalid type: sequence, expected a string at line 5 column 11`; Rust compilation succeeds before `wasm-opt`.

@@ -218,7 +218,7 @@ export interface GraphState {
     mutate: () => Promise<void> | void,
   ) => Promise<TransactionResult>;
   flushRender: () => Promise<Map<string, EngineError>>;
-  validateEdits: (editsJson: string) => EditValidationError[];
+  validateEdits: (editsJson: string) => EditValidationError[] | Promise<EditValidationError[]>;
   typesCompatible: (fromType: string, toType: string) => boolean;
 
   toasts: Toast[];

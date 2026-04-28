@@ -27,6 +27,10 @@ export interface CascadeTestHarness {
   setInputDefault(nodeId: string, portName: string, value: unknown): Promise<void>;
   saveProject(): Promise<unknown>;
   loadProject(project: unknown): Promise<void>;
+  getDslText(): Promise<string | null>;
+  getDslShadow(): Promise<unknown>;
+  applyDslText(text: string): Promise<{ success: boolean; errors?: Array<{ line: number; message: string }> }>;
+  renameGpuScriptNode(nodeId: string, newName: string): Promise<void>;
   selectNode(nodeId: string | null): Promise<void>;
   getSelectedNodes(): Promise<string[]>;
   setSelectedNodes(nodeIds: string[]): Promise<void>;

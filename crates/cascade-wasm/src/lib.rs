@@ -42,6 +42,19 @@ fn serialize_gpu_script_manifest(manifest: &KernelManifest) -> Result<String, Js
     serde_json::to_string(manifest).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+fn register_gpu_script_draft(
+    registry: &mut Arc<NodeRegistry>,
+    type_id: &str,
+    manifest: &KernelManifest,
+) -> Result<NodeSpec, String> {
+    let spec = manifest.to_node_spec()?;
+    let spec_for_factory = spec.clone();
+    Arc::make_mut(registry).register_or_replace(type_id, move || {
+        Arc::new(GpuScriptDraftNode::with_spec(spec_for_factory.clone()))
+    });
+    Ok(spec)
+}
+
 fn param_default_to_value(default: &ParamDefault) -> ParamValue {
     match default {
         ParamDefault::Float(value) => ParamValue::Float(*value),
@@ -253,31 +266,33 @@ impl Engine {
         manifest.id = type_id.clone();
         let manifest_json = serialize_gpu_script_manifest(&manifest)?;
 
-        let gpu_context = self
-            .gpu_context
-            .clone()
-            .ok_or_else(|| JsValue::from_str("GPU not available"))?;
-
-        let compiled_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())
-            .map_err(to_js_error_str)?;
-        let spec = compiled_node.spec();
-
+        let spec = if let Some(gpu_context) = self.gpu_context.clone() {
+            let compiled_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())
+                .map_err(to_js_error_str)?;
+            let spec = compiled_node.spec();
+            let manifest_for_factory = manifest.clone();
+            let gpu_ctx = gpu_context.clone();
+            Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
+                // SAFETY: The manifest was just validated by from_manifest() above (line 153).
+                // This factory only runs to create duplicate instances of an already-proven type.
+                // Changing register_or_replace to accept fallible factories is tracked for Phase C.
+                #[allow(clippy::expect_used)]
+                Arc::new(
+                    GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
+                        .expect("GPU node factory: manifest was pre-validated"),
+                )
+            });
+            self.nodes.insert(id, Arc::new(compiled_node));
+            spec
+        } else {
+            let spec = register_gpu_script_draft(&mut self.registry, &type_id, &manifest)
+                .map_err(|e| JsValue::from_str(&e))?;
+            self.nodes
+                .insert(id, Arc::new(GpuScriptDraftNode::with_spec(spec.clone())));
+            spec
+        };
         self.kernel_manifests
             .insert(type_id.clone(), manifest.clone());
-        let manifest_for_factory = manifest.clone();
-        let gpu_ctx = gpu_context.clone();
-        Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
-            // SAFETY: The manifest was just validated by from_manifest() above (line 153).
-            // This factory only runs to create duplicate instances of an already-proven type.
-            // Changing register_or_replace to accept fallible factories is tracked for Phase C.
-            #[allow(clippy::expect_used)]
-            Arc::new(
-                GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
-                    .expect("GPU node factory: manifest was pre-validated"),
-            )
-        });
-
-        self.nodes.insert(id, Arc::new(compiled_node));
         self.graph.prune_connections_for_node(id, &self.registry);
         self.graph.set_param(
             id,
@@ -529,18 +544,23 @@ impl Engine {
                         )
                     }
                     Err(_) => {
-                        let uid2 = uid.clone();
-                        Arc::make_mut(&mut self.registry).register_or_replace(&uid, move || {
-                            Arc::new(GpuScriptDraftNode::new(&uid2))
-                        });
-                        (uid, None, None)
+                        let spec =
+                            register_gpu_script_draft(&mut self.registry, &uid, &manifest).ok()?;
+                        (
+                            uid,
+                            Some(Arc::new(GpuScriptDraftNode::with_spec(spec)) as Arc<dyn Node>),
+                            Some(manifest),
+                        )
                     }
                 }
             } else {
-                let uid2 = uid.clone();
-                Arc::make_mut(&mut self.registry)
-                    .register_or_replace(&uid, move || Arc::new(GpuScriptDraftNode::new(&uid2)));
-                (uid, None, None)
+                let manifest = gpu_script_passthrough_manifest(&uid);
+                let spec = register_gpu_script_draft(&mut self.registry, &uid, &manifest).ok()?;
+                (
+                    uid,
+                    Some(Arc::new(GpuScriptDraftNode::with_spec(spec)) as Arc<dyn Node>),
+                    Some(manifest),
+                )
             }
         } else {
             (type_id.to_string(), None, None)
@@ -1397,22 +1417,29 @@ impl Engine {
         }
 
         for (type_id, manifest) in gpu_script_manifests {
-            if let (Some(gpu_context), Some(manifest)) =
-                (self.gpu_context.clone(), manifest.clone())
-            {
-                if GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()).is_ok() {
-                    let manifest_for_factory = manifest.clone();
-                    let gpu_ctx = gpu_context.clone();
-                    Arc::make_mut(&mut self.registry).register_or_replace(&type_id, move || {
-                        #[allow(clippy::expect_used)]
-                        Arc::new(
-                            GpuKernelNode::from_manifest(
-                                manifest_for_factory.clone(),
-                                gpu_ctx.clone(),
-                            )
-                            .expect("GPU node factory: manifest was pre-validated"),
-                        )
-                    });
+            if let Some(manifest) = manifest.clone() {
+                if let Some(gpu_context) = self.gpu_context.clone() {
+                    if GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()).is_ok() {
+                        let manifest_for_factory = manifest.clone();
+                        let gpu_ctx = gpu_context.clone();
+                        Arc::make_mut(&mut self.registry).register_or_replace(
+                            &type_id,
+                            move || {
+                                #[allow(clippy::expect_used)]
+                                Arc::new(
+                                    GpuKernelNode::from_manifest(
+                                        manifest_for_factory.clone(),
+                                        gpu_ctx.clone(),
+                                    )
+                                    .expect("GPU node factory: manifest was pre-validated"),
+                                )
+                            },
+                        );
+                        self.kernel_manifests.insert(type_id.clone(), manifest);
+                        continue;
+                    }
+                }
+                if register_gpu_script_draft(&mut self.registry, &type_id, &manifest).is_ok() {
                     self.kernel_manifests.insert(type_id.clone(), manifest);
                     continue;
                 }
@@ -2674,17 +2701,28 @@ impl Engine {
                         );
                     }
                     Err(_) => {
-                        let uid = type_id.clone();
-                        Arc::make_mut(&mut self.registry)
-                            .register_or_replace(&type_id, move || {
-                                Arc::new(GpuScriptDraftNode::new(&uid))
-                            });
+                        register_gpu_script_draft(&mut self.registry, &type_id, &manifest)
+                            .map_err(CascadeError::Other)?;
+                        let manifest_json = serde_json::to_string(&manifest)
+                            .map_err(|e| CascadeError::Other(e.to_string()))?;
+                        self.kernel_manifests.insert(type_id.clone(), manifest);
+                        params.insert(
+                            GPU_SCRIPT_MANIFEST_PARAM_KEY.to_string(),
+                            ParamValue::String(manifest_json),
+                        );
                     }
                 }
             } else {
-                let uid = type_id.clone();
-                Arc::make_mut(&mut self.registry)
-                    .register_or_replace(&type_id, move || Arc::new(GpuScriptDraftNode::new(&uid)));
+                let manifest = gpu_script_passthrough_manifest(&type_id);
+                register_gpu_script_draft(&mut self.registry, &type_id, &manifest)
+                    .map_err(CascadeError::Other)?;
+                let manifest_json = serde_json::to_string(&manifest)
+                    .map_err(|e| CascadeError::Other(e.to_string()))?;
+                self.kernel_manifests.insert(type_id.clone(), manifest);
+                params.insert(
+                    GPU_SCRIPT_MANIFEST_PARAM_KEY.to_string(),
+                    ParamValue::String(manifest_json),
+                );
             }
             return Ok((type_id, params));
         }
@@ -2893,21 +2931,23 @@ impl Engine {
             serde_json::from_str(manifest_json).map_err(|e| e.to_string())?;
         manifest.id = internal.type_id.clone();
         let manifest_json = serde_json::to_string(&manifest).map_err(|e| e.to_string())?;
-        let gpu_context = self
-            .gpu_context
-            .clone()
-            .ok_or_else(|| "GPU not available".to_string())?;
-        let compiled_node = GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())?;
-        let spec = compiled_node.spec();
-        let manifest_for_factory = manifest.clone();
-        let gpu_ctx = gpu_context.clone();
-        Arc::make_mut(&mut self.registry).register_or_replace(&internal.type_id, move || {
-            #[allow(clippy::expect_used)]
-            Arc::new(
-                GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
-                    .expect("GPU node factory: manifest was pre-validated"),
-            )
-        });
+        let spec = if let Some(gpu_context) = self.gpu_context.clone() {
+            let compiled_node =
+                GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone())?;
+            let spec = compiled_node.spec();
+            let manifest_for_factory = manifest.clone();
+            let gpu_ctx = gpu_context.clone();
+            Arc::make_mut(&mut self.registry).register_or_replace(&internal.type_id, move || {
+                #[allow(clippy::expect_used)]
+                Arc::new(
+                    GpuKernelNode::from_manifest(manifest_for_factory.clone(), gpu_ctx.clone())
+                        .expect("GPU node factory: manifest was pre-validated"),
+                )
+            });
+            spec
+        } else {
+            register_gpu_script_draft(&mut self.registry, &internal.type_id, &manifest)?
+        };
         self.kernel_manifests
             .insert(internal.type_id.clone(), manifest);
         internal.params.insert(
@@ -3118,7 +3158,7 @@ fn cascade_error_to_edit_kind(err: &CascadeError) -> EditErrorKind {
 fn strip_internal_params(params: &HashMap<String, ParamValue>) -> HashMap<String, ParamValue> {
     params
         .iter()
-        .filter(|(key, _)| !key.starts_with("__"))
+        .filter(|(key, _)| key.as_str() == GPU_SCRIPT_MANIFEST_PARAM_KEY || !key.starts_with("__"))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
 }

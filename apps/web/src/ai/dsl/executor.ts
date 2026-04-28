@@ -672,7 +672,7 @@ export const applyDsl = async (
   // Semantic validation via Rust engine (type compat, port existence, cycles)
   const validateEditsFn = useGraphStore.getState().validateEdits;
   if (validateEditsFn) {
-    const semanticErrors = validateSemantics(
+    const semanticErrors = await validateSemantics(
       mutations,
       parseResult.sourceMap ?? { nodeSpans: new Map(), connectionSpans: new Map(), trivia: [] },
       handleMap,

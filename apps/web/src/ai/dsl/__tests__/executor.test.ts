@@ -74,6 +74,27 @@ describe('applyDsl', () => {
     await useGraphStore.getState().initEngine();
   });
 
+  it('validates connections between newly added DSL nodes with temporary semantic ids', async () => {
+    const result = await applyDsl(
+      [
+        'graph {',
+        '  load1 = LoadImage()',
+        '  viewer1 = Viewer()',
+        '',
+        '  load1.image -> viewer1.value',
+        '}',
+      ].join('\n'),
+      new HandleMap(),
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    expect(useGraphStore.getState().nodes.size).toBe(2);
+    expect(useGraphStore.getState().connections).toHaveLength(1);
+  });
+
   it('loads a new desktop image path when a LoadImage image() constructor changes', async () => {
     const store = useGraphStore.getState();
     const nodeId = await store.addNode('load_image', { x: 0, y: 0 });

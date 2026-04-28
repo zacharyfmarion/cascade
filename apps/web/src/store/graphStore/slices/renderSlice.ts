@@ -42,7 +42,7 @@ export interface RenderSliceActions {
     options: TransactionOptions,
     mutate: () => Promise<void> | void,
   ) => Promise<TransactionResult>;
-  validateEdits: (editsJson: string) => EditValidationError[];
+  validateEdits: (editsJson: string) => EditValidationError[] | Promise<EditValidationError[]>;
   typesCompatible: (fromType: string, toType: string) => boolean;
 }
 
@@ -215,15 +215,10 @@ export const createRenderSlice: StateCreator<
       return new Map(nodeErrors);
     },
 
-    validateEdits: (editsJson: string): EditValidationError[] => {
+    validateEdits: (editsJson: string): EditValidationError[] | Promise<EditValidationError[]> => {
       const eng = getEngine();
       if (!eng.validateEdits) return [];
-      const result = eng.validateEdits(editsJson);
-      // validateEdits is sync for WASM, but interface allows Promise
-      if (result instanceof Promise) {
-        throw new Error('validateEdits must be synchronous');
-      }
-      return result;
+      return eng.validateEdits(editsJson);
     },
 
     typesCompatible: (fromType: string, toType: string): boolean => {
