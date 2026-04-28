@@ -3,6 +3,7 @@ import { parseDsl, splitTopLevelParams } from '../parser';
 import { mockSpecs } from './helpers';
 import { HandleMap } from '../handleMap';
 import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../../gpuScript';
+import type { NodeSpec } from '../../../store/types';
 
 const graph = (body: string): string => {
   if (!body.trim()) return '';
@@ -193,6 +194,146 @@ describe('parseDsl', () => {
     expect(result.ast?.nodes.get('key1')?.nodeTypeId).toBe('group::key_mix');
   });
 
+  it('parses a production golden document with comments, assets, refs, wrappers, arrows, and custom definitions', () => {
+    const specs: NodeSpec[] = [
+      ...mockSpecs,
+      {
+        id: 'load_image_sequence',
+        display_name: 'Load Image Sequence',
+        category: 'Input',
+        description: 'Loads an image sequence',
+        inputs: [],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'path',
+          label: 'Path',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'FilePicker' },
+          promotable: false,
+        }],
+      },
+      {
+        id: 'load_video',
+        display_name: 'Load Video',
+        category: 'Input',
+        description: 'Loads a video file',
+        inputs: [],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'path',
+          label: 'Path',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'FilePicker' },
+          promotable: false,
+        }],
+      },
+      {
+        id: 'load_image_batch',
+        display_name: 'Load Image Batch',
+        category: 'Input',
+        description: 'Loads multiple images',
+        inputs: [],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'files',
+          label: 'Files',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'FilePicker' },
+          promotable: false,
+        }],
+      },
+    ];
+    const result = parseDsl([
+      'cascade 1',
+      '',
+      '# Preserve a custom GPU definition comment.',
+      'node FilmGlow = gpu {',
+      '  inputs {',
+      '    image image',
+      '    float gain = 1.2 min 0.0 max 4.0 step 0.01',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  code """',
+      '  return color * gain;',
+      '  """',
+      '}',
+      '',
+      'node KeyMix = group {',
+      '  inputs {',
+      '    image plate',
+      '    image foreground',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  params {',
+      '    float opacity = 0.75 min 0.0 max 1.0 step 0.01',
+      '  }',
+      '',
+      '  graph {',
+      '    blur = GaussianBlur(amount: param.opacity)',
+      '    input.foreground -> blur.image',
+      '    blur.image -> output.image',
+      '  }',
+      '}',
+      '',
+      'graph {',
+      '  plate = LoadImage(path: image("file:///shots/a/plate.exr", color_space: "sRGB"))',
+      '  seq = LoadImageSequence(path: sequence("file:///shot.%04d.exr", first: 1001, last: 1100))',
+      '  clip = LoadVideo(path: video("file:///ref.mov"))',
+      '  batch = LoadImageBatch(files: images([',
+      '    "file:///a.png",',
+      '    "file:///b.png"',
+      '  ]))',
+      '  ramp = ColorRamp(stops: [0.0: rgba(0.0, 0.0, 0.0, 1.0), 1.0: rgba(1.0, 1.0, 1.0, 1.0)])',
+      '  curve = Curves(master_curve: [(0.0, 0.0), (0.5, 0.7), (1.0, 1.0)])',
+      '  blur = muted(GaussianBlur(amount: 12.0)) # wrapper syntax',
+      '  glow = FilmGlow(gain: 1.5)',
+      '  key = KeyMix(opacity: 0.8)',
+      '  view = Viewer()',
+      '',
+      '  plate.image -> blur.image',
+      '  blur.image -> glow.image',
+      '  glow.image -> key.foreground',
+      '  key.image -> view.image',
+      '}',
+    ].join('\n'), specs);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.ast?.customNodes?.get('FilmGlow')?.kind).toBe('gpu');
+    expect(result.ast?.customNodes?.get('KeyMix')?.kind).toBe('group');
+    const keyMix = result.ast?.customNodes?.get('KeyMix');
+    if (keyMix?.kind !== 'group') throw new Error('expected group definition');
+    expect(keyMix.graph.nodes.get('blur')?.params.get('amount')).toEqual({ type: 'ref', value: 'param.opacity' });
+    expect(result.ast?.nodes.get('plate')?.params.get('path')).toEqual({ type: 'string', value: 'file:///shots/a/plate.exr' });
+    expect(result.ast?.nodes.get('seq')?.params.get('path')).toEqual({ type: 'string', value: 'file:///shot.%04d.exr' });
+    expect(result.ast?.nodes.get('clip')?.params.get('path')).toEqual({ type: 'string', value: 'file:///ref.mov' });
+    expect(result.ast?.nodes.get('batch')?.params.get('files')).toEqual({
+      type: 'string',
+      value: 'images([\n    "file:///a.png",\n    "file:///b.png"\n  ])',
+    });
+    expect(result.ast?.nodes.get('ramp')?.params.get('stops')).toMatchObject({ type: 'ramp' });
+    expect(result.ast?.nodes.get('curve')?.params.get('master_curve')).toMatchObject({ type: 'curve' });
+    expect(result.ast?.nodes.get('blur')?.muted).toBe(true);
+    expect(result.ast?.nodes.get('glow')?.nodeTypeId).toBe('film_glow');
+    expect(result.ast?.nodes.get('key')?.nodeTypeId).toBe('group::key_mix');
+    expect(result.ast?.connections.map(connection => `${connection.fromHandle}.${connection.fromPort}->${connection.toHandle}.${connection.toPort}`)).toEqual([
+      'plate.image->blur.image',
+      'blur.image->glow.image',
+      'glow.image->key.foreground',
+      'key.image->view.image',
+    ]);
+  });
+
   it('parses virtual load image path when runtime spec only exposes image_data', () => {
     const runtimeSpecs = mockSpecs.map((spec) => spec.id === 'load_image'
       ? {
@@ -368,6 +509,32 @@ describe('parseDsl', () => {
     expect(result.errors.some((error) => error.message.includes('Duplicate handle'))).toBe(true);
   });
 
+  it('errors on duplicate custom node definitions', () => {
+    const result = parseDsl([
+      'node FilmGlow = gpu {',
+      '  inputs { image image }',
+      '  outputs { image image }',
+      '  code """',
+      '  return color;',
+      '  """',
+      '}',
+      '',
+      'node FilmGlow = gpu {',
+      '  inputs { image image }',
+      '  outputs { image image }',
+      '  code """',
+      '  return color;',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  glow1 = FilmGlow()',
+      '}',
+    ].join('\n'), mockSpecs);
+
+    expect(result.errors.some((error) => error.message.includes("Duplicate custom node 'FilmGlow'"))).toBe(true);
+  });
+
   it('errors on unknown node type with type name', () => {
     const result = parseGraph('foo1 = NotARealNode()', mockSpecs);
     expect(result.errors.some((error) => error.message.includes("Unknown node type 'NotARealNode'"))).toBe(true);
@@ -416,6 +583,28 @@ describe('parseDsl', () => {
   it('reports malformed params as param syntax errors', () => {
     const result = parseGraph('blur1 = GaussianBlur(amount 5.0)', mockSpecs);
     expect(result.errors.some((error) => error.message.includes('Invalid param syntax'))).toBe(true);
+  });
+
+  it('keeps partial invalid documents non-fatal while reporting diagnostics', () => {
+    const result = parseDsl([
+      'node FilmGlow = gpu {',
+      '  inputs {',
+      '    image image',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '}',
+      '',
+      'graph {',
+      '  glow1 = FilmGlow(',
+      '}',
+    ].join('\n'), mockSpecs);
+
+    expect(result.ast?.customNodes?.get('FilmGlow')?.kind).toBe('gpu');
+    expect(result.errors.some((error) => error.message.includes('Expected code'))).toBe(true);
+    expect(result.errors.some((error) => error.message.includes("Expected closing ')'"))).toBe(true);
   });
 
   it('handles blank lines and mixed whitespace', () => {
