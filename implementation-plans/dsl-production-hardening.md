@@ -13,7 +13,8 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 3. Harden shadow reconciliation so non-DSL graph edits patch known semantic regions when safe and regenerate only when ranges or identities are unsafe.
 4. Harden custom node identity for GPU scripts and groups across rename, duplicate names, nested definitions, delete/recreate, save/load, and AI tool edits.
 5. Add component and Playwright coverage for the visible DSL editor flows on top of the existing parser/executor unit coverage.
-6. Run the full frontend validation suite and document any pre-existing order-sensitive failures separately from DSL failures.
+6. Make WASM rebuilds deterministic by cleaning generated output directories before `wasm-pack`, so optimized rebuilds cannot trip on stale package metadata.
+7. Run the full frontend validation suite and document any pre-existing order-sensitive failures separately from DSL failures.
 
 ## Affected Areas
 
@@ -37,8 +38,9 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - [x] Harden custom node identity for duplicate names, nested group renames, delete/recreate, multiple instances, imported group packages, and GPU script instance edits.
 - [x] Add `DslEditor` component tests for diagnostics, format, apply/revert, stale shadow text, and external graph changes.
 - [x] Add Playwright e2e coverage for root DSL edits, group title <-> DSL sync, GPU script edits, save/load preservation, and invalid DSL recovery.
+- [x] Clean WASM output directories before single-threaded and multi-threaded `wasm-pack` builds.
 - [x] Run `yarn test`, `yarn lint`, `yarn lint:css`, `npx tsc -b --noEmit`, and relevant Playwright specs.
-- [ ] Commit each completed step after its tests pass.
+- [x] Commit each completed step after its tests pass.
 
 ## Validation Notes
 
@@ -47,5 +49,5 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - Full `yarn test` now passes: 32 files, 563 tests.
 - Rust validation now passes with `cargo test --workspace`, `cargo clippy --workspace -- -D warnings`, and `cargo fmt --all -- --check`.
 - Focused browser validation passes with `yarn exec playwright test e2e/dsl-editor.spec.ts --project=chromium --reporter=line`.
-- `wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg --no-opt` passes and was used for local browser validation.
-- The optimized `wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg` remains intermittently blocked in the `wasm-opt` step with `invalid type: sequence, expected a string at line 5 column 11`; Rust compilation succeeds before `wasm-opt`.
+- Optimized single-threaded WASM build passes via `yarn build:wasm:st`.
+- Optimized multi-threaded WASM build passes via `yarn build:wasm:mt`; Rust warns that the `atomics` target feature is unstable, which is expected for the nightly threaded build path.

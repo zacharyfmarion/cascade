@@ -9,8 +9,7 @@ import path from 'path';
 
 function wasmHotRebuild(): PluginOption {
   const cratesDir = path.resolve(__dirname, '../../crates');
-  const wasmCrate = path.resolve(cratesDir, 'cascade-wasm');
-  const stOutDir = path.resolve(__dirname, 'src/wasm-pkg');
+  const stBuildScript = path.resolve(__dirname, 'scripts/build-wasm-st.sh');
   const mtBuildScript = path.resolve(__dirname, 'scripts/build-wasm-mt.sh');
 
   let building = false;
@@ -24,7 +23,7 @@ function wasmHotRebuild(): PluginOption {
     }
     building = true;
 
-    const stCmd = `wasm-pack build ${wasmCrate} --target web --out-dir ${stOutDir}`;
+    const stCmd = `bash ${stBuildScript}`;
     const mtCmd = `bash ${mtBuildScript}`;
     server.config.logger.info('\x1b[36m[wasm] Rebuilding (single-threaded)...\x1b[0m');
     const start = Date.now();
