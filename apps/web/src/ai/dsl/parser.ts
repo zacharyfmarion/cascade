@@ -1544,6 +1544,14 @@ const parseTripleStringValue = (input: string, span: RawValueSpan): string => {
   return value;
 };
 
+const normalizeParserErrorMessage = (message: string, token: IToken): string => {
+  if (message.includes('RCurly')) return "Expected closing '}'";
+  if (message.includes('RParen')) return "Expected closing ')'";
+  if (message.includes('Colon')) return `Invalid param syntax '${tokenMatcher(token, EOF) ? '' : token.image}'`;
+  if (tokenMatcher(token, EOF)) return message;
+  return 'Unrecognized DSL line';
+};
+
 const parseChevrotainErrors = (input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult => {
   const lexResult = cascadeDslLexer.tokenize(input);
   cascadeParser.input = lexResult.tokens;
@@ -1555,10 +1563,9 @@ const parseChevrotainErrors = (input: string, nodeSpecs: NodeSpec[], context?: P
     })),
     ...cascadeParser.errors.flatMap((error) => {
       if (rawDocument.graph === null && error.message.includes('EOF')) return [];
-      const tokenIsEof = tokenMatcher(error.token, EOF);
       return [{
         line: error.token.startLine ?? 1,
-        message: tokenIsEof ? error.message : 'Unrecognized DSL line',
+        message: normalizeParserErrorMessage(error.message, error.token),
       }];
     }),
   ];

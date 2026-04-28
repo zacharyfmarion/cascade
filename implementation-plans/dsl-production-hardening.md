@@ -29,7 +29,7 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - [x] Create this production-hardening implementation plan.
 - [x] Add Chevrotain as the parser dependency and introduce a token vocabulary for the Cascade DSL.
 - [x] Replace `parseDsl()` internals with a Chevrotain parser that preserves the current AST contract.
-- [ ] Add parser diagnostics for incomplete live-edit states, unknown syntax, unclosed blocks, malformed params, and multiline strings/code.
+- [x] Add parser diagnostics for incomplete live-edit states, unknown syntax, unclosed blocks, malformed params, and multiline strings/code.
 - [ ] Add parser golden tests for comments, custom definitions, assets, arrays, refs, wrappers, arrows, duplicate handles, and partial invalid documents.
 - [ ] Add first-class comment/trivia capture to source maps where it matters for formatting and reconciliation.
 - [ ] Update formatting/reconciliation to preserve comments and untouched user formatting in safe graph-edit cases.

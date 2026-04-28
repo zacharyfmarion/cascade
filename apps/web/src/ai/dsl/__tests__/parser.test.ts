@@ -403,6 +403,21 @@ describe('parseDsl', () => {
     expect(result.errors.some((error) => error.line === 3 && error.message.includes('Unrecognized'))).toBe(true);
   });
 
+  it('reports an unclosed graph block with a useful live-edit diagnostic', () => {
+    const result = parseDsl(['graph {', '  viewer1 = Viewer()'].join('\n'), mockSpecs);
+    expect(result.errors.some((error) => error.message.includes("Expected closing '}'"))).toBe(true);
+  });
+
+  it('reports an unclosed node call with a useful live-edit diagnostic', () => {
+    const result = parseDsl(['graph {', '  viewer1 = Viewer(', '}'].join('\n'), mockSpecs);
+    expect(result.errors.some((error) => error.message.includes("Expected closing ')'"))).toBe(true);
+  });
+
+  it('reports malformed params as param syntax errors', () => {
+    const result = parseGraph('blur1 = GaussianBlur(amount 5.0)', mockSpecs);
+    expect(result.errors.some((error) => error.message.includes('Invalid param syntax'))).toBe(true);
+  });
+
   it('handles blank lines and mixed whitespace', () => {
     const input = ['  ', 'blur1 = GaussianBlur( amount: 5.0 )', '', 'viewer1 = Viewer()  '].join('\n');
     const result = parseGraph(input, mockSpecs);
