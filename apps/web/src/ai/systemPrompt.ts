@@ -56,19 +56,19 @@ Use arrow syntax. Data flows left to right from source output to target input.
 
 ### Muted Nodes
 \`\`\`
-blur1 = muted(GaussianBlur(sigma: 5.0))
+node1 = muted(NodeType(param: value))
 \`\`\`
 
 ### Comments
 \`\`\`
 # Full line comment
-blur1 = GaussianBlur(sigma: 5.0) # Inline comment
+node1 = NodeType(param: value) # Inline comment
 \`\`\`
 
 ### Param Value Types
 | Type | Syntax | Example |
 |------|--------|---------|
-| Float | bare number | \`sigma: 5.0\` |
+| Float | bare number | \`radius: 5.0\` |
 | Int | bare integer | \`width: 1920\` |
 | Bool | true/false | \`flip_x: true\` |
 | String | "quoted" or triple-quoted multiline | \`label: "matte"\`, \`script: """\\nreturn color;\\n"""\` |
@@ -83,13 +83,11 @@ blur1 = GaussianBlur(sigma: 5.0) # Inline comment
 \`\`\`
 graph {
   load1 = LoadImage()
-  blur1 = GaussianBlur(sigma: 5.0)
   grade1 = BrightnessContrast(brightness: 0.1, contrast: 1.2)
-  viewer = Viewer()
+  viewer1 = Viewer()
 
-  load1.image -> blur1.image
-  blur1.image -> grade1.image
-  grade1.image -> viewer.image
+  load1.image -> grade1.image
+  grade1.image -> viewer1.value
 }
 \`\`\`
 
@@ -104,9 +102,9 @@ Returns the current graph as DSL text. Call this to see what exists.
 Find \`old_text\` in the current DSL and replace with \`new_text\`. The result is parsed, validated, and applied atomically. Returns the updated DSL or errors.
 
 **Examples:**
-- Change a param: \`edit_graph(old_text: "blur1 = GaussianBlur(sigma: 5.0)", new_text: "blur1 = GaussianBlur(sigma: 15.0)")\`
-- Insert a node: \`edit_graph(old_text: "blur1.image -> viewer.image", new_text: "sharpen1 = Sharpen(amount: 0.5)\\nblur1.image -> sharpen1.image\\nsharpen1.image -> viewer.image")\`
-- Remove a node: \`edit_graph(old_text: "blur1 = GaussianBlur(sigma: 5.0)\\n...connections...", new_text: "...rewired connections...")\`
+- Change a param only after checking the node schema: \`edit_graph(old_text: "grade1 = BrightnessContrast(brightness: 0.1, contrast: 1.2)", new_text: "grade1 = BrightnessContrast(brightness: 0.2, contrast: 1.2)")\`
+- Insert a node: \`edit_graph(old_text: "load1.image -> viewer1.value", new_text: "invert1 = Invert()\\nload1.image -> invert1.image\\ninvert1.image -> viewer1.value")\`
+- Remove a node: \`edit_graph(old_text: "invert1 = Invert()\\nload1.image -> invert1.image\\ninvert1.image -> viewer1.value", new_text: "load1.image -> viewer1.value")\`
 
 ### write_graph(dsl)
 Replace the entire graph with new DSL. Use for building from scratch or major restructuring.
@@ -121,7 +119,7 @@ List all available node types grouped by category (compact). Returns names + one
 Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. For \`GpuScript\`, this also returns the special editable \`script\` field, mask behavior, and GLSL context. Call this before using a node type you haven't used before.
 
 ### create_gpu_script(description)
-Generate a custom GPU Script node from a text description. Creates a draft GPU Script node, asks the GLSL generator for a manifest, compiles it, and returns the node id/handle plus success or compile errors.
+Generate a custom GPU Script node from a text description. Creates a draft GPU Script node, asks the GLSL generator for a manifest, compiles it when a GPU backend is available, and returns the node id/handle plus success or compile errors.
 
 ### get_gpu_script_manifest(node_id or node_handle)
 Fetch the compiled GPU Script manifest from __script_manifest for an existing GPU Script node. If missing, the node needs compilation.
@@ -228,7 +226,7 @@ Use this technique when:
 - Compositing results are unexpected — view the foreground, background, and mask layers separately to understand what's being combined
 
 How to do it:
-1. Add a Viewer node in the DSL and connect it to the output you want to inspect (e.g. \`debug1 = Viewer()\` then \`chromakey1.image -> debug1.image\`)
+1. Add a Viewer node in the DSL and connect it to the output you want to inspect (e.g. \`debug1 = Viewer()\` then \`chromakey1.image -> debug1.value\`)
 2. Call \`view_current_image\` — the user can also click on that Viewer node to see the intermediate result
 3. Once debugging is done, remove the extra Viewer nodes to keep the graph clean
 
