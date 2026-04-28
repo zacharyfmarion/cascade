@@ -648,22 +648,34 @@ export function serializeGraph(input: SerializerInput): string {
   const liftedGpuDefs = new Map<string, DslGpuDefinition>();
   let gpuNodeCounter = 0;
 
-  const customHandleBaseForNode = (node: NodeInstance): string | null => {
+  const preferredHandleBaseForNode = (node: NodeInstance): string | null => {
     const customName = customDefinitionNameByRuntimeId.get(node.typeId);
-    if (!customName) return null;
-    const existingHandle = handleMap.getHandle(node.id);
-    if (existingHandle && /^user\d+$/.test(existingHandle)) {
-      handleMap.removeByNodeId(node.id);
+    if (customName) {
+      const existingHandle = handleMap.getHandle(node.id);
+      if (existingHandle && /^user\d+$/.test(existingHandle)) {
+        handleMap.removeByNodeId(node.id);
+      }
+      return displayNameToHandleBase(customName);
     }
-    return displayNameToHandleBase(customName);
+
+    if (node.typeId.startsWith('gpu_script')) {
+      const manifestJson = node.params['__script_manifest'];
+      const manifestStr = manifestJson && 'String' in manifestJson ? manifestJson.String : undefined;
+      const manifest = parseGpuScriptManifestJson(manifestStr);
+      if (manifest?.display_name && manifest.display_name !== GPU_SCRIPT_DEFAULT_DISPLAY_NAME) {
+        return displayNameToHandleBase(manifest.display_name);
+      }
+    }
+
+    return null;
   };
 
   for (const node of nodes.values()) {
-    const base = customHandleBaseForNode(node);
+    const base = preferredHandleBaseForNode(node);
     if (base) handleMap.getOrCreateWithBase(node.id, base);
   }
 
-  const orderedNodes = topologicalOrder(nodes, connections, handleMap, customHandleBaseForNode);
+  const orderedNodes = topologicalOrder(nodes, connections, handleMap, preferredHandleBaseForNode);
 
   const nodeLines = orderedNodes.map((node) => {
     // gpu_script nodes: lift to a top-level `node Name = gpu { ... }` definition
@@ -673,7 +685,7 @@ export function serializeGraph(input: SerializerInput): string {
       const manifest = parseGpuScriptManifestJson(manifestStr);
       if (manifest) {
         gpuNodeCounter += 1;
-        const defName = gpuDefinitionName(manifest, gpuNodeCounter);
+        const defName = uniqueDefinitionName(gpuDefinitionName(manifest, gpuNodeCounter), usedDefinitionNames);
         // Derive handle from display_name so it reads like 'film_glow1' not 'gpu1'
         const handleBase = displayNameToHandleBase(manifest.display_name);
         const isDefault = !manifest.display_name || manifest.display_name === GPU_SCRIPT_DEFAULT_DISPLAY_NAME;

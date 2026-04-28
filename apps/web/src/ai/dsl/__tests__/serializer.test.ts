@@ -226,6 +226,93 @@ describe('serializeGraph', () => {
     expect(output).not.toContain('User123');
   });
 
+  it('uses shadow names for nested runtime groups inside group definitions', () => {
+    const specs: NodeSpec[] = [
+      ...mockSpecs,
+      {
+        id: 'group::child',
+        display_name: 'Child Group',
+        category: 'User',
+        description: 'Nested child',
+        inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [],
+      },
+      {
+        id: 'group::parent',
+        display_name: 'Parent Group',
+        category: 'User',
+        description: 'Nested parent',
+        inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [],
+      },
+    ];
+    const nodes = new Map<string, NodeInstance>([
+      ['parent-node', makeNodeInstance({ id: 'parent-node', typeId: 'group::parent' })],
+    ]);
+    const childDefinition: SerializableGroupDefinition = {
+      id: 'group::child',
+      name: 'Child Group',
+      category: 'User',
+      description: 'Nested child',
+      internal_graph: {
+        nodes: [
+          { id: 'curves1', type_id: 'curves', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'curves1', to_port: 'image' },
+          { from_node: 'curves1', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+    const parentDefinition: SerializableGroupDefinition = {
+      id: 'group::parent',
+      name: 'Parent Group',
+      category: 'User',
+      description: 'Nested parent',
+      internal_graph: {
+        nodes: [
+          { id: 'child-node', type_id: 'group::child', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'child-node', to_port: 'image' },
+          { from_node: 'child-node', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+
+    const output = serializeGraph({
+      nodes,
+      connections: [],
+      nodeSpecs: specs,
+      handleMap: new HandleMap(),
+      groupDefinitions: [childDefinition, parentDefinition],
+      customDefinitionNames: [
+        { runtimeId: 'group::child', name: 'CurvesGroup' },
+        { runtimeId: 'group::parent', name: 'CloudyAdjustment' },
+      ],
+      pruneUnusedCustomDefinitions: true,
+    });
+
+    expect(output).toContain('node CurvesGroup = group {');
+    expect(output).toContain('node CloudyAdjustment = group {');
+    expect(output).toContain('child1 = CurvesGroup()');
+    expect(output).toContain('cloudy_adjustment1 = CloudyAdjustment()');
+  });
+
   it('serializes load image paths as inline asset constructors', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set('node-1', makeNodeInstance({
@@ -573,6 +660,89 @@ describe('serializeGraph', () => {
     const output = serializeGraph(buildInputWithSpecs(nodes, [], mockSpecs));
     expect(output).toContain('node FilmGlow = gpu {');
     expect(output).toContain('film_glow1 = FilmGlow()');
+  });
+
+  it('deduplicates gpu_script definition names across multiple instances with the same display name', () => {
+    const manifestA = {
+      ...buildDefaultGpuScriptManifest('gpu_script::demo-a'),
+      display_name: 'Film Glow',
+      kernel: 'return color;',
+    };
+    const manifestB = {
+      ...buildDefaultGpuScriptManifest('gpu_script::demo-b'),
+      display_name: 'Film Glow',
+      kernel: 'return color * 2.0;',
+    };
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('gpu-a', makeNodeInstance({
+      id: 'gpu-a',
+      typeId: 'gpu_script::demo-a',
+      params: { __script_manifest: { String: JSON.stringify(manifestA) } },
+    }));
+    nodes.set('gpu-b', makeNodeInstance({
+      id: 'gpu-b',
+      typeId: 'gpu_script::demo-b',
+      params: { __script_manifest: { String: JSON.stringify(manifestB) } },
+    }));
+
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], mockSpecs));
+
+    expect(output).toContain('node FilmGlow = gpu {');
+    expect(output).toContain('node FilmGlow2 = gpu {');
+    expect(output).toContain('film_glow1 = FilmGlow()');
+    expect(output).toContain('film_glow2 = FilmGlow2()');
+  });
+
+  it('deduplicates gpu_script names against group definition names', () => {
+    const manifest = {
+      ...buildDefaultGpuScriptManifest('gpu_script::film-glow'),
+      display_name: 'Film Glow',
+      kernel: 'return color;',
+    };
+    const specs: NodeSpec[] = [
+      ...mockSpecs,
+      {
+        id: 'group::film_glow',
+        display_name: 'Film Glow',
+        category: 'User',
+        description: 'Imported group',
+        inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [],
+      },
+    ];
+    const nodes = new Map<string, NodeInstance>([
+      ['group-node', makeNodeInstance({ id: 'group-node', typeId: 'group::film_glow' })],
+      ['gpu-node', makeNodeInstance({
+        id: 'gpu-node',
+        typeId: 'gpu_script::film-glow',
+        params: { __script_manifest: { String: JSON.stringify(manifest) } },
+      })],
+    ]);
+    const groupDefinition: SerializableGroupDefinition = {
+      id: 'group::film_glow',
+      name: 'Film Glow',
+      category: 'User',
+      description: 'Imported group',
+      internal_graph: { nodes: [], connections: [] },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+
+    const output = serializeGraph({
+      nodes,
+      connections: [],
+      nodeSpecs: specs,
+      handleMap: new HandleMap(),
+      groupDefinitions: [groupDefinition],
+    });
+
+    expect(output).toContain('node FilmGlow = group {');
+    expect(output).toContain('node FilmGlow2 = gpu {');
+    expect(output).toContain('film_glow1 = FilmGlow()');
+    expect(output).toContain('film_glow2 = FilmGlow2()');
   });
 
   it('emits non-default scalar params for lifted gpu_script nodes', () => {

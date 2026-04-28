@@ -34,7 +34,7 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - [x] Add first-class comment/trivia capture to source maps where it matters for formatting and reconciliation.
 - [x] Update formatting/reconciliation to preserve comments and untouched user formatting in safe graph-edit cases.
 - [x] Add shadow reconciliation tests for node param edits, node insert/delete, connection insert/delete, group rename, GPU script edits, and unsafe fallback.
-- [ ] Harden custom node identity for duplicate names, nested group renames, delete/recreate, multiple instances, imported group packages, and GPU script instance edits.
+- [x] Harden custom node identity for duplicate names, nested group renames, delete/recreate, multiple instances, imported group packages, and GPU script instance edits.
 - [ ] Add `DslEditor` component tests for diagnostics, format, apply/revert, stale shadow text, and external graph changes.
 - [ ] Add Playwright e2e coverage for root DSL edits, group title <-> DSL sync, GPU script edits, save/load preservation, and invalid DSL recovery.
 - [ ] Run `yarn test`, `yarn lint`, `yarn lint:css`, `npx tsc -b --noEmit`, and relevant Playwright specs.
