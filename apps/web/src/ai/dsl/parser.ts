@@ -1,3 +1,4 @@
+import { EmbeddedActionsParser, EOF, tokenMatcher, type IToken } from 'chevrotain';
 import type {
   DslAst,
   DslConnection,
@@ -12,6 +13,42 @@ import type {
 import { pascalToSnake, labelToSnake, snakeToLabel } from './types';
 import type { NodeInstance, NodeSpec, ParamDefault, ParamSpec, PortSpec, ValueType } from '../../store/types';
 import type { HandleMap } from './handleMap';
+import {
+  Arrow,
+  Cascade,
+  Code,
+  Colon,
+  Comma,
+  Dot,
+  Equals,
+  False,
+  Gpu,
+  Graph,
+  Group,
+  Identifier,
+  Inputs,
+  LCurly,
+  LParen,
+  LSquare,
+  Max,
+  Min,
+  Muted,
+  Node,
+  NumberLiteral,
+  Outputs,
+  Params,
+  Question,
+  RCurly,
+  RParen,
+  RSquare,
+  Step,
+  StringLiteral,
+  TripleStringLiteral,
+  True,
+  TypeIdentifier,
+  cascadeDslLexer,
+  cascadeDslTokens,
+} from './lexer';
 
 interface ParseError {
   line: number;
@@ -1017,7 +1054,727 @@ export const customDefinitionToNodeSpec = (definition: DslCustomNodeDefinition):
   };
 };
 
-export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult {
+interface RawValueSpan {
+  startOffset: number;
+  endOffset: number;
+}
+
+interface RawParamEntry {
+  key: string;
+  value: RawValueSpan;
+}
+
+interface RawDeclaration {
+  valueType: string;
+  name: string;
+  optional: boolean;
+  defaultValue?: RawValueSpan;
+  min?: number;
+  max?: number;
+  step?: number;
+  line: number;
+}
+
+type RawGraphStatement =
+  | {
+      kind: 'node';
+      handle: string;
+      nodeType: string;
+      params: RawParamEntry[];
+      muted: boolean;
+      line: number;
+      span: DslSourceSpan;
+    }
+  | {
+      kind: 'connection';
+      fromHandle: string;
+      fromPort: string;
+      toHandle: string;
+      toPort: string;
+      line: number;
+      span: DslSourceSpan;
+    };
+
+interface RawGraph {
+  statements: RawGraphStatement[];
+}
+
+interface RawCustomDefinition {
+  kind: 'group' | 'gpu';
+  name: string;
+  line: number;
+  inputs: RawDeclaration[];
+  outputs: RawDeclaration[];
+  params: RawDeclaration[];
+  graph?: RawGraph;
+  code?: RawValueSpan;
+}
+
+interface RawDocument {
+  graph: RawGraph | null;
+  customDefinitions: RawCustomDefinition[];
+}
+
+const tokenSpan = (start: IToken, end: IToken = start): DslSourceSpan => ({
+  startLine: start.startLine ?? 1,
+  startCol: Math.max(0, (start.startColumn ?? 1) - 1),
+  endLine: end.endLine ?? start.endLine ?? start.startLine ?? 1,
+  endCol: end.endColumn ?? start.endColumn ?? start.startColumn ?? 1,
+});
+
+const rawValueText = (input: string, span: RawValueSpan): string =>
+  input.slice(span.startOffset, span.endOffset + 1);
+
+const tokenRawSpan = (token: IToken): RawValueSpan => ({
+  startOffset: token.startOffset,
+  endOffset: token.endOffset ?? token.startOffset + token.image.length - 1,
+});
+
+const mergeRawSpans = (start: IToken, end: IToken): RawValueSpan => ({
+  startOffset: start.startOffset,
+  endOffset: end.endOffset ?? end.startOffset + end.image.length - 1,
+});
+
+class CascadeDslParser extends EmbeddedActionsParser {
+  constructor() {
+    super(cascadeDslTokens, { recoveryEnabled: true, maxLookahead: 3 });
+    this.performSelfAnalysis();
+  }
+
+  public document = this.RULE('document', (): RawDocument => {
+    const customDefinitions: RawCustomDefinition[] = [];
+    let graph: RawGraph | null = null;
+
+    this.MANY(() => {
+      this.OR([
+        {
+          GATE: () => tokenMatcher(this.LA(1), Cascade),
+          ALT: () => {
+            this.CONSUME(Cascade);
+            this.CONSUME(NumberLiteral);
+          },
+        },
+        {
+          GATE: () => tokenMatcher(this.LA(1), Node),
+          ALT: () => {
+            customDefinitions.push(this.SUBRULE(this.customDefinition));
+          },
+        },
+        {
+          GATE: () => tokenMatcher(this.LA(1), Graph),
+          ALT: () => {
+            graph = this.SUBRULE(this.graphBlock);
+          },
+        },
+      ]);
+    });
+
+    this.CONSUME(EOF);
+    return { graph, customDefinitions };
+  });
+
+  private customDefinition = this.RULE('customDefinition', (): RawCustomDefinition => {
+    const start = this.CONSUME(Node);
+    const name = this.CONSUME(TypeIdentifier);
+    this.CONSUME(Equals);
+    const kind = this.OR([
+      { ALT: () => this.CONSUME(Group) },
+      { ALT: () => this.CONSUME(Gpu) },
+    ]);
+    const definition: RawCustomDefinition = {
+      kind: tokenMatcher(kind, Group) ? 'group' : 'gpu',
+      name: name.image,
+      line: start.startLine ?? 1,
+      inputs: [],
+      outputs: [],
+      params: [],
+    };
+
+    this.CONSUME(LCurly);
+    this.MANY(() => {
+      this.OR1([
+        {
+          GATE: () => tokenMatcher(this.LA(1), Inputs),
+          ALT: () => {
+            definition.inputs = this.SUBRULE(this.inputsSection);
+          },
+        },
+        {
+          GATE: () => tokenMatcher(this.LA(1), Outputs),
+          ALT: () => {
+            definition.outputs = this.SUBRULE(this.outputsSection);
+          },
+        },
+        {
+          GATE: () => tokenMatcher(this.LA(1), Params),
+          ALT: () => {
+            definition.params = this.SUBRULE(this.paramsSection);
+          },
+        },
+        {
+          GATE: () => tokenMatcher(this.LA(1), Graph),
+          ALT: () => {
+            definition.graph = this.SUBRULE(this.graphBlock);
+          },
+        },
+        {
+          GATE: () => tokenMatcher(this.LA(1), Code),
+          ALT: () => {
+            this.CONSUME(Code);
+            definition.code = tokenRawSpan(this.CONSUME(TripleStringLiteral));
+          },
+        },
+      ]);
+    });
+    this.CONSUME(RCurly);
+
+    return definition;
+  });
+
+  private inputsSection = this.RULE('inputsSection', (): RawDeclaration[] => {
+    const declarations: RawDeclaration[] = [];
+    this.CONSUME(Inputs);
+    this.CONSUME(LCurly);
+    this.MANY(() => {
+      declarations.push(this.SUBRULE(this.declaration, { ARGS: [false] }));
+    });
+    this.CONSUME(RCurly);
+    return declarations;
+  });
+
+  private outputsSection = this.RULE('outputsSection', (): RawDeclaration[] => {
+    const declarations: RawDeclaration[] = [];
+    this.CONSUME(Outputs);
+    this.CONSUME(LCurly);
+    this.MANY(() => {
+      declarations.push(this.SUBRULE(this.declaration, { ARGS: [false] }));
+    });
+    this.CONSUME(RCurly);
+    return declarations;
+  });
+
+  private paramsSection = this.RULE('paramsSection', (): RawDeclaration[] => {
+    const declarations: RawDeclaration[] = [];
+    this.CONSUME(Params);
+    this.CONSUME(LCurly);
+    this.MANY(() => {
+      declarations.push(this.SUBRULE(this.declaration, { ARGS: [true] }));
+    });
+    this.CONSUME(RCurly);
+    return declarations;
+  });
+
+  private declaration = this.RULE('declaration', (requiresDefault = false): RawDeclaration => {
+    const valueType = this.CONSUME(Identifier);
+    const name = this.CONSUME2(Identifier);
+    let optional = false;
+    let defaultValue: RawValueSpan | undefined;
+    const extras: { min?: number; max?: number; step?: number } = {};
+    this.OPTION(() => {
+      this.CONSUME(Question);
+      optional = true;
+    });
+    this.OPTION2({
+      GATE: () => tokenMatcher(this.LA(1), Equals),
+      DEF: () => {
+        this.CONSUME(Equals);
+        defaultValue = this.SUBRULE(this.value);
+      },
+    });
+    if (requiresDefault && !this.RECORDING_PHASE && !defaultValue) {
+      defaultValue = tokenRawSpan(name);
+    }
+    this.MANY(() => {
+      const key = this.OR([
+        { ALT: () => this.CONSUME(Min) },
+        { ALT: () => this.CONSUME(Max) },
+        { ALT: () => this.CONSUME(Step) },
+      ]);
+      const value = Number(this.CONSUME(NumberLiteral).image);
+      if (key.image === 'min') extras.min = value;
+      if (key.image === 'max') extras.max = value;
+      if (key.image === 'step') extras.step = value;
+    });
+    return {
+      valueType: valueType.image,
+      name: name.image,
+      optional,
+      defaultValue,
+      ...extras,
+      line: valueType.startLine ?? 1,
+    };
+  });
+
+  private graphBlock = this.RULE('graphBlock', (): RawGraph => {
+    const statements: RawGraphStatement[] = [];
+    this.CONSUME(Graph);
+    this.CONSUME(LCurly);
+    this.MANY(() => {
+      statements.push(this.SUBRULE(this.graphStatement));
+    });
+    this.CONSUME(RCurly);
+    return { statements };
+  });
+
+  private graphStatement = this.RULE('graphStatement', (): RawGraphStatement => this.OR([
+    {
+      GATE: () => tokenMatcher(this.LA(1), Identifier) && tokenMatcher(this.LA(2), Equals),
+      ALT: () => this.SUBRULE(this.nodeStatement),
+    },
+    {
+      GATE: () => tokenMatcher(this.LA(1), Identifier) && tokenMatcher(this.LA(2), Dot),
+      ALT: () => this.SUBRULE(this.connectionStatement),
+    },
+  ]));
+
+  private nodeStatement = this.RULE('nodeStatement', (): RawGraphStatement => {
+    const handle = this.CONSUME(Identifier);
+    this.CONSUME(Equals);
+    let muted = false;
+    let nodeType: IToken;
+    let end: IToken;
+    let params: RawParamEntry[] = [];
+    this.OR([
+      {
+        GATE: () => tokenMatcher(this.LA(1), Muted),
+        ALT: () => {
+          this.CONSUME(Muted);
+          this.CONSUME(LParen);
+          nodeType = this.CONSUME(TypeIdentifier);
+          this.CONSUME2(LParen);
+          params = this.SUBRULE(this.paramList);
+          this.CONSUME2(RParen);
+          end = this.CONSUME(RParen);
+          muted = true;
+        },
+      },
+      {
+        ALT: () => {
+          nodeType = this.CONSUME2(TypeIdentifier);
+          this.CONSUME3(LParen);
+          params = this.SUBRULE2(this.paramList);
+          end = this.CONSUME3(RParen);
+        },
+      },
+    ]);
+    return {
+      kind: 'node',
+      handle: handle.image,
+      nodeType: nodeType!.image,
+      params,
+      muted,
+      line: handle.startLine ?? 1,
+      span: tokenSpan(handle, end!),
+    };
+  });
+
+  private paramList = this.RULE('paramList', (): RawParamEntry[] => {
+    const params: RawParamEntry[] = [];
+    this.OPTION(() => {
+      params.push(this.SUBRULE(this.paramEntry));
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        params.push(this.SUBRULE2(this.paramEntry));
+      });
+    });
+    return params;
+  });
+
+  private paramEntry = this.RULE('paramEntry', (): RawParamEntry => {
+    const first = this.CONSUME(Identifier);
+    let key = first.image;
+    this.OPTION(() => {
+      this.CONSUME(Dot);
+      key = `${key}.${this.CONSUME2(Identifier).image}`;
+    });
+    this.CONSUME(Colon);
+    return { key, value: this.SUBRULE(this.value) };
+  });
+
+  private connectionStatement = this.RULE('connectionStatement', (): RawGraphStatement => {
+    const fromHandle = this.CONSUME(Identifier);
+    this.CONSUME(Dot);
+    const fromPort = this.CONSUME2(Identifier);
+    this.CONSUME(Arrow);
+    const toHandle = this.CONSUME3(Identifier);
+    this.CONSUME2(Dot);
+    const toPort = this.CONSUME4(Identifier);
+    return {
+      kind: 'connection',
+      fromHandle: fromHandle.image,
+      fromPort: fromPort.image,
+      toHandle: toHandle.image,
+      toPort: toPort.image,
+      line: fromHandle.startLine ?? 1,
+      span: tokenSpan(fromHandle, toPort),
+    };
+  });
+
+  private value = this.RULE('value', (): RawValueSpan => this.OR([
+    { ALT: () => tokenRawSpan(this.CONSUME(NumberLiteral)) },
+    { ALT: () => tokenRawSpan(this.CONSUME(StringLiteral)) },
+    { ALT: () => tokenRawSpan(this.CONSUME(TripleStringLiteral)) },
+    { ALT: () => tokenRawSpan(this.CONSUME(True)) },
+    { ALT: () => tokenRawSpan(this.CONSUME(False)) },
+    { GATE: () => tokenMatcher(this.LA(1), LSquare), ALT: () => this.SUBRULE(this.arrayValue) },
+    { GATE: () => tokenMatcher(this.LA(1), LParen), ALT: () => this.SUBRULE(this.tupleValue) },
+    { GATE: () => tokenMatcher(this.LA(1), TypeIdentifier), ALT: () => this.SUBRULE(this.typeCallValue) },
+    {
+      GATE: () => tokenMatcher(this.LA(1), Identifier)
+        && !tokenMatcher(this.LA(2), Dot)
+        && !tokenMatcher(this.LA(2), LParen),
+      ALT: () => tokenRawSpan(this.CONSUME(Identifier)),
+    },
+    { GATE: () => tokenMatcher(this.LA(1), Identifier), ALT: () => this.SUBRULE(this.identifierValue) },
+  ]));
+
+  private identifierValue = this.RULE('identifierValue', (): RawValueSpan => {
+    const start = this.CONSUME(Identifier);
+    let end = start;
+    this.OR([
+      {
+        GATE: () => tokenMatcher(this.LA(1), Dot),
+        ALT: () => {
+          this.CONSUME(Dot);
+          end = this.CONSUME2(Identifier);
+        },
+      },
+      {
+        GATE: () => tokenMatcher(this.LA(1), LParen),
+        ALT: () => {
+          this.CONSUME(LParen);
+          this.SUBRULE(this.argumentList);
+          end = this.CONSUME(RParen);
+        },
+      },
+      { ALT: () => {} },
+    ]);
+    return mergeRawSpans(start, end);
+  });
+
+  private typeCallValue = this.RULE('typeCallValue', (): RawValueSpan => {
+    const start = this.CONSUME(TypeIdentifier);
+    this.CONSUME(LParen);
+    this.SUBRULE(this.argumentList);
+    const end = this.CONSUME(RParen);
+    return mergeRawSpans(start, end);
+  });
+
+  private argumentList = this.RULE('argumentList', (): void => {
+    this.OPTION(() => {
+      this.SUBRULE(this.argument);
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        this.SUBRULE2(this.argument);
+      });
+    });
+  });
+
+  private argument = this.RULE('argument', (): void => {
+    this.OR([
+      {
+        GATE: () => tokenMatcher(this.LA(1), Identifier) && tokenMatcher(this.LA(2), Colon),
+        ALT: () => {
+          this.CONSUME(Identifier);
+          this.CONSUME(Colon);
+          this.SUBRULE(this.value);
+        },
+      },
+      { ALT: () => { this.SUBRULE3(this.value); } },
+    ]);
+  });
+
+  private arrayValue = this.RULE('arrayValue', (): RawValueSpan => {
+    const start = this.CONSUME(LSquare);
+    this.OPTION({
+      GATE: () => !tokenMatcher(this.LA(1), RSquare),
+      DEF: () => {
+        this.SUBRULE(this.arrayElement);
+        this.MANY(() => {
+          this.CONSUME(Comma);
+          this.SUBRULE2(this.arrayElement);
+        });
+      },
+    });
+    const end = this.CONSUME(RSquare);
+    return mergeRawSpans(start, end);
+  });
+
+  private arrayElement = this.RULE('arrayElement', (): void => {
+    this.OR([
+      {
+        GATE: () => (
+          (tokenMatcher(this.LA(1), NumberLiteral) || tokenMatcher(this.LA(1), Identifier))
+          && tokenMatcher(this.LA(2), Colon)
+        ),
+        ALT: () => {
+          this.OR1([
+            { ALT: () => { this.CONSUME(NumberLiteral); } },
+            { ALT: () => { this.CONSUME(Identifier); } },
+          ]);
+          this.CONSUME(Colon);
+          this.SUBRULE(this.value);
+        },
+      },
+      { ALT: () => { this.SUBRULE2(this.value); } },
+    ]);
+  });
+
+  private tupleValue = this.RULE('tupleValue', (): RawValueSpan => {
+    const start = this.CONSUME(LParen);
+    this.OPTION(() => {
+      this.SUBRULE(this.value);
+      this.MANY(() => {
+        this.CONSUME(Comma);
+        this.SUBRULE2(this.value);
+      });
+    });
+    const end = this.CONSUME(RParen);
+    return mergeRawSpans(start, end);
+  });
+}
+
+const cascadeParser = new CascadeDslParser();
+
+const parseTripleStringValue = (input: string, span: RawValueSpan): string => {
+  const raw = rawValueText(input, span);
+  let value = raw.startsWith('"""') && raw.endsWith('"""') ? raw.slice(3, -3) : raw;
+  if (value.startsWith('\n')) value = value.slice(1);
+  value = value.replace(/\n\s*$/, '');
+  return value;
+};
+
+const parseChevrotainErrors = (input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult => {
+  const lexResult = cascadeDslLexer.tokenize(input);
+  cascadeParser.input = lexResult.tokens;
+  const rawDocument = cascadeParser.document();
+  const errors: ParseError[] = [
+    ...lexResult.errors.map(error => ({
+      line: error.line ?? 1,
+      message: 'Unrecognized DSL line',
+    })),
+    ...cascadeParser.errors.flatMap((error) => {
+      if (rawDocument.graph === null && error.message.includes('EOF')) return [];
+      const tokenIsEof = tokenMatcher(error.token, EOF);
+      return [{
+        line: error.token.startLine ?? 1,
+        message: tokenIsEof ? error.message : 'Unrecognized DSL line',
+      }];
+    }),
+  ];
+  cascadeParser.reset();
+
+  const nodes = new Map<string, DslNode>();
+  const connections: DslConnection[] = [];
+  const nodeSpans = new Map<string, DslSourceSpan>();
+  const connectionSpans = new Map<string, DslSourceSpan>();
+
+  if (rawDocument.graph === null && lexResult.tokens.some(token =>
+    !tokenMatcher(token, Cascade) && !tokenMatcher(token, NumberLiteral)
+  )) {
+    errors.push({ line: 1, message: 'Expected a graph { ... } block' });
+  }
+
+  const definitions = new Map<string, DslCustomNodeDefinition>();
+  for (const definition of rawDocument.customDefinitions) {
+    if (definitions.has(definition.name)) {
+      errors.push({ line: definition.line, message: `Duplicate custom node '${definition.name}'` });
+      continue;
+    }
+    const inputs = resolvePortDeclarations(input, definition.inputs, errors);
+    const outputs = resolvePortDeclarations(input, definition.outputs, errors);
+    if (definition.kind === 'gpu') {
+      definitions.set(definition.name, {
+        kind: 'gpu',
+        name: definition.name,
+        line: definition.line,
+        inputs,
+        outputs,
+        code: definition.code ? parseTripleStringValue(input, definition.code) : '',
+      });
+      if (!definition.code) {
+        errors.push({ line: definition.line, message: 'Expected code """...""" block' });
+      }
+      continue;
+    }
+    definitions.set(definition.name, {
+      kind: 'group',
+      name: definition.name,
+      line: definition.line,
+      inputs,
+      outputs,
+      params: resolveParamDeclarations(input, definition.params, errors),
+      graph: { nodes: new Map(), connections: [] },
+    });
+  }
+
+  const parseSpecs = [...nodeSpecs, ...Array.from(definitions.values()).map(customDefinitionToNodeSpec)];
+  for (const rawDefinition of rawDocument.customDefinitions) {
+    const definition = definitions.get(rawDefinition.name);
+    if (definition?.kind !== 'group' || !rawDefinition.graph) continue;
+    const graphNodes = new Map<string, DslNode>();
+    const graphConnections: DslConnection[] = [];
+    resolveGraphStatements(input, rawDefinition.graph, parseSpecs, context, errors, graphNodes, graphConnections);
+    definition.graph = { nodes: graphNodes, connections: graphConnections };
+  }
+
+  if (rawDocument.graph) {
+    resolveGraphStatements(input, rawDocument.graph, parseSpecs, context, errors, nodes, connections, nodeSpans, connectionSpans);
+  }
+
+  return {
+    ast: { nodes, connections, customNodes: definitions },
+    errors,
+    sourceMap: { nodeSpans, connectionSpans },
+  };
+};
+
+const resolvePortDeclarations = (
+  input: string,
+  declarations: RawDeclaration[],
+  errors: ParseError[],
+): DslPortDeclaration[] => declarations.flatMap((declaration) => {
+  const spec = declarationParamSpec(declaration.name, declaration.valueType);
+  if (!spec) {
+    errors.push({ line: declaration.line, message: `Unknown port type '${declaration.valueType}'` });
+    return [];
+  }
+  const defaultValue = declaration.defaultValue
+    ? parseParamValue(spec, rawValueText(input, declaration.defaultValue)) ?? undefined
+    : undefined;
+  return [{
+    valueType: declaration.valueType,
+    name: declaration.name,
+    optional: declaration.optional,
+    defaultValue,
+    min: declaration.min,
+    max: declaration.max,
+    step: declaration.step,
+    line: declaration.line,
+  }];
+});
+
+const resolveParamDeclarations = (
+  input: string,
+  declarations: RawDeclaration[],
+  errors: ParseError[],
+): DslParamDeclaration[] => declarations.flatMap((declaration) => {
+  const spec = declarationParamSpec(declaration.name, declaration.valueType);
+  if (!spec) {
+    errors.push({ line: declaration.line, message: `Unknown param type '${declaration.valueType}'` });
+    return [];
+  }
+  const defaultValue = declaration.defaultValue
+    ? parseParamValue(spec, rawValueText(input, declaration.defaultValue))
+    : null;
+  if (!defaultValue) {
+    errors.push({ line: declaration.line, message: `Invalid default value for param '${declaration.name}'` });
+    return [];
+  }
+  return [{
+    valueType: declaration.valueType,
+    name: declaration.name,
+    defaultValue,
+    min: declaration.min,
+    max: declaration.max,
+    step: declaration.step,
+    line: declaration.line,
+  }];
+});
+
+const resolveGraphStatements = (
+  input: string,
+  graph: RawGraph,
+  nodeSpecs: NodeSpec[],
+  context: ParseContext | undefined,
+  errors: ParseError[],
+  nodes: Map<string, DslNode>,
+  connections: DslConnection[],
+  nodeSpans?: Map<string, DslSourceSpan>,
+  connectionSpans?: Map<string, DslSourceSpan>,
+) => {
+  const specById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
+  for (const statement of graph.statements) {
+    if (statement.kind === 'connection') {
+      connections.push({
+        fromHandle: statement.fromHandle,
+        fromPort: statement.fromPort,
+        toHandle: statement.toHandle,
+        toPort: statement.toPort,
+        line: statement.line,
+      });
+      connectionSpans?.set(`${statement.fromHandle}.${statement.fromPort}->${statement.toHandle}.${statement.toPort}`, statement.span);
+      continue;
+    }
+
+    if (nodes.has(statement.handle)) {
+      errors.push({ line: statement.line, message: `Duplicate handle '${statement.handle}'` });
+      continue;
+    }
+
+    const baseId = pascalToSnake(statement.nodeType);
+    const existingGpuScriptTypeId = (() => {
+      if (baseId !== 'gpu_script') return null;
+      const nodeId = context?.handleMap?.getNodeId(statement.handle);
+      const typeId = nodeId ? context?.currentNodes?.get(nodeId)?.typeId : undefined;
+      return typeId?.startsWith('gpu_script::') ? typeId : null;
+    })();
+    const gpuId = `gpu_kernel::${baseId}`;
+    const groupId = `group::${baseId}`;
+    const nodeTypeId = existingGpuScriptTypeId
+      ?? (specById.has(gpuId) ? gpuId : specById.has(groupId) ? groupId : baseId);
+    const spec = specById.get(nodeTypeId);
+    if (!spec) {
+      errors.push({ line: statement.line, message: `Unknown node type '${statement.nodeType}'` });
+    }
+
+    const params = new Map<string, DslParamValue>();
+    const paramSpecByKey = new Map((spec?.params ?? []).map((param) => [param.key, param]));
+    for (const entry of statement.params) {
+      const paramKey = entry.key.startsWith('input.') ? entry.key.slice('input.'.length) : entry.key;
+      const paramSpec = getParamSpec(nodeTypeId, paramSpecByKey, paramKey);
+      const rawValue = rawValueText(input, entry.value);
+      if (!paramSpec && nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
+        const parsedScript = parseParamValue({
+          key: 'script',
+          label: 'Script',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'TextArea' },
+          promotable: false,
+        }, rawValue);
+        if (!parsedScript) {
+          errors.push({ line: statement.line, message: `Invalid value for 'script'. Expected a multiline or quoted string.` });
+          continue;
+        }
+        params.set(paramKey, parsedScript);
+        continue;
+      }
+      if (!paramSpec) {
+        errors.push({ line: statement.line, message: `Unknown param '${entry.key}' on ${statement.nodeType}` });
+        continue;
+      }
+      const parsed = parseParamValue(paramSpec, rawValue);
+      if (!parsed) {
+        errors.push({ line: statement.line, message: `Invalid value for '${entry.key}'. ${expectedFormatHint(paramSpec)}` });
+        continue;
+      }
+      params.set(paramKey, parsed);
+    }
+
+    nodes.set(statement.handle, {
+      handle: statement.handle,
+      nodeType: statement.nodeType,
+      nodeTypeId,
+      params,
+      muted: statement.muted,
+      line: statement.line,
+    });
+    nodeSpans?.set(statement.handle, statement.span);
+  }
+};
+
+function parseDslLegacy(input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult {
   const errors: ParseError[] = [];
   const nodes = new Map<string, DslNode>();
   const connections: DslConnection[] = [];
@@ -1044,4 +1801,12 @@ export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseCo
   const ast: DslAst = { nodes, connections, customNodes };
   const sourceMap: DslSourceMap = { nodeSpans, connectionSpans };
   return { ast, errors, sourceMap };
+}
+
+export function parseDsl(input: string, nodeSpecs: NodeSpec[], context?: ParseContext): ParseResult {
+  try {
+    return parseChevrotainErrors(input, nodeSpecs, context);
+  } catch {
+    return parseDslLegacy(input, nodeSpecs, context);
+  }
 }
