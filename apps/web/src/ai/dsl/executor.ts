@@ -674,7 +674,7 @@ export const applyDsl = async (
   if (validateEditsFn) {
     const semanticErrors = validateSemantics(
       mutations,
-      parseResult.sourceMap ?? { nodeSpans: new Map(), connectionSpans: new Map() },
+      parseResult.sourceMap ?? { nodeSpans: new Map(), connectionSpans: new Map(), trivia: [] },
       handleMap,
       validateEditsFn,
     );

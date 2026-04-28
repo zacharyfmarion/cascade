@@ -479,6 +479,40 @@ describe('parseDsl', () => {
     expect(node?.params.get('amount')).toEqual({ type: 'float', value: 5 });
   });
 
+  it('captures comments and blank lines as source-map trivia', () => {
+    const result = parseDsl([
+      '# file comment',
+      'graph {',
+      '',
+      '  # node comment',
+      '  blur1 = GaussianBlur(amount: 5.0) # inline node comment',
+      '  viewer1 = Viewer()',
+      '  blur1.image -> viewer1.image # inline connection comment',
+      '}',
+    ].join('\n'), mockSpecs);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.sourceMap?.trivia).toEqual([
+      expect.objectContaining({ kind: 'comment', text: '# file comment', inline: false }),
+      expect.objectContaining({ kind: 'blank', span: expect.objectContaining({ startLine: 3 }), inline: false }),
+      expect.objectContaining({ kind: 'comment', text: '# node comment', inline: false }),
+      expect.objectContaining({
+        kind: 'comment',
+        text: '# inline node comment',
+        inline: true,
+        targetKind: 'node',
+        targetKey: 'blur1',
+      }),
+      expect.objectContaining({
+        kind: 'comment',
+        text: '# inline connection comment',
+        inline: true,
+        targetKind: 'connection',
+        targetKey: 'blur1.image->viewer1.image',
+      }),
+    ]);
+  });
+
   it('rejects legacy muted annotation', () => {
     const input = '@muted blur1 = GaussianBlur(amount: 5.0)';
     const result = parseGraph(input, mockSpecs);

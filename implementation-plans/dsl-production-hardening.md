@@ -31,7 +31,7 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - [x] Replace `parseDsl()` internals with a Chevrotain parser that preserves the current AST contract.
 - [x] Add parser diagnostics for incomplete live-edit states, unknown syntax, unclosed blocks, malformed params, and multiline strings/code.
 - [x] Add parser golden tests for comments, custom definitions, assets, arrays, refs, wrappers, arrows, duplicate handles, and partial invalid documents.
-- [ ] Add first-class comment/trivia capture to source maps where it matters for formatting and reconciliation.
+- [x] Add first-class comment/trivia capture to source maps where it matters for formatting and reconciliation.
 - [ ] Update formatting/reconciliation to preserve comments and untouched user formatting in safe graph-edit cases.
 - [ ] Add shadow reconciliation tests for node param edits, node insert/delete, connection insert/delete, group rename, GPU script edits, and unsafe fallback.
 - [ ] Harden custom node identity for duplicate names, nested group renames, delete/recreate, multiple instances, imported group packages, and GPU script instance edits.

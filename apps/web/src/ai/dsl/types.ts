@@ -85,9 +85,21 @@ export interface DslSourceSpan {
   endCol: number;
 }
 
+export type DslTriviaTargetKind = 'node' | 'connection';
+
+export interface DslSourceTrivia {
+  kind: 'comment' | 'blank';
+  text: string;
+  span: DslSourceSpan;
+  inline: boolean;
+  targetKind?: DslTriviaTargetKind;
+  targetKey?: string;
+}
+
 export interface DslSourceMap {
   nodeSpans: Map<string, DslSourceSpan>;
   connectionSpans: Map<string, DslSourceSpan>;
+  trivia: DslSourceTrivia[];
 }
 
 export type GraphMutation =

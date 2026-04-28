@@ -9,6 +9,7 @@ import type {
   DslPortDeclaration,
   DslSourceMap,
   DslSourceSpan,
+  DslSourceTrivia,
 } from './types';
 import { pascalToSnake, labelToSnake, snakeToLabel } from './types';
 import type { NodeInstance, NodeSpec, ParamDefault, ParamSpec, PortSpec, ValueType } from '../../store/types';
@@ -1122,6 +1123,73 @@ const tokenSpan = (start: IToken, end: IToken = start): DslSourceSpan => ({
   endCol: end.endColumn ?? start.endColumn ?? start.startColumn ?? 1,
 });
 
+const semanticTargetForLine = (
+  line: number,
+  column: number,
+  nodeSpans: Map<string, DslSourceSpan>,
+  connectionSpans: Map<string, DslSourceSpan>,
+): Pick<DslSourceTrivia, 'targetKind' | 'targetKey'> => {
+  for (const [key, span] of nodeSpans) {
+    if (span.startLine === line && span.endLine === line && span.endCol <= column) {
+      return { targetKind: 'node', targetKey: key };
+    }
+  }
+  for (const [key, span] of connectionSpans) {
+    if (span.startLine === line && span.endLine === line && span.endCol <= column) {
+      return { targetKind: 'connection', targetKey: key };
+    }
+  }
+  return {};
+};
+
+const collectSourceTrivia = (
+  input: string,
+  commentTokens: IToken[],
+  nodeSpans: Map<string, DslSourceSpan>,
+  connectionSpans: Map<string, DslSourceSpan>,
+): DslSourceTrivia[] => {
+  const trivia: DslSourceTrivia[] = [];
+  const commentLines = new Set<number>();
+
+  for (const token of commentTokens) {
+    const startOffset = token.startOffset;
+    const lineStart = input.lastIndexOf('\n', Math.max(0, startOffset - 1)) + 1;
+    const before = input.slice(lineStart, startOffset);
+    const line = token.startLine ?? 1;
+    const inline = before.trim().length > 0;
+    commentLines.add(line);
+    trivia.push({
+      kind: 'comment',
+      text: token.image,
+      span: tokenSpan(token),
+      inline,
+      ...(inline ? semanticTargetForLine(line, Math.max(0, (token.startColumn ?? 1) - 1), nodeSpans, connectionSpans) : {}),
+    });
+  }
+
+  input.split(/\r?\n/).forEach((line, index) => {
+    const lineNumber = index + 1;
+    if (line.trim() !== '' || commentLines.has(lineNumber)) return;
+    trivia.push({
+      kind: 'blank',
+      text: '',
+      span: {
+        startLine: lineNumber,
+        startCol: 0,
+        endLine: lineNumber,
+        endCol: 0,
+      },
+      inline: false,
+    });
+  });
+
+  return trivia.sort((a, b) => (
+    a.span.startLine === b.span.startLine
+      ? a.span.startCol - b.span.startCol
+      : a.span.startLine - b.span.startLine
+  ));
+};
+
 const rawValueText = (input: string, span: RawValueSpan): string =>
   input.slice(span.startOffset, span.endOffset + 1);
 
@@ -1629,10 +1697,15 @@ const parseChevrotainErrors = (input: string, nodeSpecs: NodeSpec[], context?: P
     resolveGraphStatements(input, rawDocument.graph, parseSpecs, context, errors, nodes, connections, nodeSpans, connectionSpans);
   }
 
+  const commentTokens = (lexResult.groups.comments ?? []) as IToken[];
   return {
     ast: { nodes, connections, customNodes: definitions },
     errors,
-    sourceMap: { nodeSpans, connectionSpans },
+    sourceMap: {
+      nodeSpans,
+      connectionSpans,
+      trivia: collectSourceTrivia(input, commentTokens, nodeSpans, connectionSpans),
+    },
   };
 };
 
@@ -1794,7 +1867,7 @@ function parseDslLegacy(input: string, nodeSpecs: NodeSpec[], context?: ParseCon
     return {
       ast: { nodes, connections, customNodes: new Map() },
       errors: [{ line: 1, message: 'Expected a graph { ... } block' }],
-      sourceMap: { nodeSpans, connectionSpans },
+      sourceMap: { nodeSpans, connectionSpans, trivia: collectSourceTrivia(input, [], nodeSpans, connectionSpans) },
     };
   }
 
@@ -1806,7 +1879,7 @@ function parseDslLegacy(input: string, nodeSpecs: NodeSpec[], context?: ParseCon
   parseGraphStatements(graphBody, parseSpecs, context, errors, nodes, connections, nodeSpans, connectionSpans);
 
   const ast: DslAst = { nodes, connections, customNodes };
-  const sourceMap: DslSourceMap = { nodeSpans, connectionSpans };
+  const sourceMap: DslSourceMap = { nodeSpans, connectionSpans, trivia: collectSourceTrivia(input, [], nodeSpans, connectionSpans) };
   return { ast, errors, sourceMap };
 }
 
