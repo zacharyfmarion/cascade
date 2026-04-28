@@ -72,6 +72,7 @@ const createInitialState = () => ({
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
+  dslShadow: null,
   graphRevision: 0,
   lastTransactionOrigin: null,
 });

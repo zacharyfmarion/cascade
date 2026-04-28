@@ -77,6 +77,23 @@ const PORT_COLORS: Record<string, string> = {
 
  const DEFAULT_EDGE_COLOR = 'var(--text-muted)';
 
+const getGpuScriptSpecFromNode = (node: NodeInstance): NodeSpec | undefined => {
+  if (!node.typeId.startsWith('gpu_script::')) return undefined;
+  const manifestValue = node.params.__script_manifest;
+  const manifestJson = manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+  const manifest = parseGpuScriptManifestJson(manifestJson) ?? buildDefaultGpuScriptManifest(node.typeId);
+  return buildGpuScriptNodeSpec({ ...manifest, id: node.typeId });
+};
+
+const getCanvasNodeSpec = (
+  node: NodeInstance,
+  nodeSpecs: NodeSpec[],
+  nodeSpecsById: Map<string, NodeSpec>,
+): NodeSpec | undefined =>
+  nodeSpecsById.get(node.id)
+  ?? nodeSpecs.find(s => s.id === node.typeId)
+  ?? getGpuScriptSpecFromNode(node);
+
 interface ClipboardEntry {
   typeId: string;
   params: Record<string, ParamValue>;
@@ -88,7 +105,12 @@ import { CanvasContextMenu } from './CanvasContextMenu';
 import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 import { shortcutDispatcher } from '../shortcuts/dispatcher';
-import type { ParamValue } from '../store/types';
+import type { NodeInstance, NodeSpec, ParamValue } from '../store/types';
+import {
+  buildDefaultGpuScriptManifest,
+  buildGpuScriptNodeSpec,
+  parseGpuScriptManifestJson,
+} from '../ai/gpuScript';
 
 export const NodeCanvas: React.FC = () => {
   const nodesStore = useGraphStore(s => s.nodes);
@@ -112,13 +134,12 @@ export const NodeCanvas: React.FC = () => {
       }
     }
     for (const node of nodesStore.values()) {
-      const instanceSpec = nodeSpecsById.get(node.id);
-      if (!instanceSpec || node.typeId in types) continue;
+      if (node.typeId in types) continue;
       if (node.typeId.startsWith('group::')) {
         types[node.typeId] = withNodeErrorBoundary(GroupNodeComponent, node.typeId);
       } else if (node.typeId.startsWith('gpu_script::')) {
         types[node.typeId] = withNodeErrorBoundary(GpuScriptNodeComponent, node.typeId);
-      } else {
+      } else if (nodeSpecsById.has(node.id)) {
         types[node.typeId] = withNodeErrorBoundary(ProcessingNode, node.typeId);
       }
     }
@@ -325,7 +346,7 @@ export const NodeCanvas: React.FC = () => {
     (fromNode: string, fromPort: string): string => {
       const node = nodesStore.get(fromNode);
       if (!node) return DEFAULT_EDGE_COLOR;
-      const spec = nodeSpecsById.get(fromNode) ?? nodeSpecs.find(s => s.id === node.typeId);
+      const spec = getCanvasNodeSpec(node, nodeSpecs, nodeSpecsById);
       if (!spec) return DEFAULT_EDGE_COLOR;
       const output = spec.outputs.find(o => o.name === fromPort);
       return output ? (PORT_COLORS[output.ty] ?? DEFAULT_EDGE_COLOR) : DEFAULT_EDGE_COLOR;
@@ -339,7 +360,7 @@ export const NodeCanvas: React.FC = () => {
   // rapid Zustand updates (e.g. 60fps param drags with GPU nodes).
   const derivedNodes = useMemo((): FlowNode[] => {
     const nextNodes: FlowNode[] = Array.from(nodesStore.values()).map(node => {
-      const spec = nodeSpecsById.get(node.id) ?? nodeSpecs.find(s => s.id === node.typeId);
+      const spec = getCanvasNodeSpec(node, nodeSpecs, nodeSpecsById);
       return {
         id: node.id,
         type: node.typeId,

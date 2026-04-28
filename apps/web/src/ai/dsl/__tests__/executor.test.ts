@@ -3,6 +3,8 @@ import type { Connection, NodeInstance, NodeSpec } from '../../../store/types';
 import type { EngineBridge } from '../../../engine/bridge';
 import { createMockEngine, resetNodeCounter } from '../../../__tests__/engineMock';
 import { HandleMap } from '../handleMap';
+import { deriveHandleMap } from '../instance';
+import { serializeGraph } from '../serializer';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -53,6 +55,7 @@ const createInitialState = () => ({
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
+  dslShadow: null,
   graphRevision: 0,
   lastTransactionOrigin: null,
 });
@@ -456,6 +459,141 @@ describe('applyDsl — gpu_script instance recompile', () => {
       (manifestJson && 'String' in manifestJson ? manifestJson.String : '') ?? ''
     ) as { kernel?: string };
     expect(manifest.kernel).toBe(newCode);
+  });
+
+  it('recompiles a serialized gpu_script when apply uses a freshly derived handle map', async () => {
+    const store = useGraphStore.getState();
+    const nodeId = await store.addNode('gpu_script', { x: 0, y: 0 });
+
+    const serialized = serializeGraph({
+      nodes: useGraphStore.getState().nodes,
+      connections: useGraphStore.getState().connections,
+      nodeSpecs: useGraphStore.getState().nodeSpecs,
+      handleMap: deriveHandleMap(useGraphStore.getState().nodes),
+    });
+    const edited = serialized.replace('return color;', 'return vec4(color.rgb * 0.5, color.a);');
+
+    const compileScriptNode = vi.spyOn(mockEngine as EngineBridge, 'compileScriptNode');
+    const result = await applyDsl(
+      edited,
+      deriveHandleMap(useGraphStore.getState().nodes),
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    expect(compileScriptNode).toHaveBeenCalledOnce();
+    expect(compileScriptNode.mock.calls[0]?.[0]).toBe(nodeId);
+    const manifest = JSON.parse(compileScriptNode.mock.calls[0]?.[1] ?? '{}') as { kernel?: string };
+    expect(manifest.kernel).toBe('  return vec4(color.rgb * 0.5, color.a);');
+  });
+
+  it('preserves edited gpu_script code when the node is muted and unmuted', async () => {
+    const store = useGraphStore.getState();
+    const nodeId = await store.addNode('gpu_script', { x: 0, y: 0 });
+    const editedCode = 'return vec4(color.rgb * 0.25, color.a);';
+
+    const result = await applyDsl(
+      makeGpuDsl({ defName: 'GpuNode1', handle: 'gpu1', code: editedCode }),
+      deriveHandleMap(useGraphStore.getState().nodes),
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+    expect(result.success).toBe(true);
+
+    useGraphStore.setState({ selectedNodeIds: new Set([nodeId]) });
+    await useGraphStore.getState().toggleMuteSelected();
+    const mutedDsl = serializeGraph({
+      nodes: useGraphStore.getState().nodes,
+      connections: useGraphStore.getState().connections,
+      nodeSpecs: useGraphStore.getState().nodeSpecs,
+      handleMap: deriveHandleMap(useGraphStore.getState().nodes),
+    });
+    expect(mutedDsl).toContain(editedCode);
+    expect(mutedDsl).toContain('gpu1 = muted(GpuNode1())');
+
+    await useGraphStore.getState().toggleMuteSelected();
+    const unmutedDsl = serializeGraph({
+      nodes: useGraphStore.getState().nodes,
+      connections: useGraphStore.getState().connections,
+      nodeSpecs: useGraphStore.getState().nodeSpecs,
+      handleMap: deriveHandleMap(useGraphStore.getState().nodes),
+    });
+    expect(unmutedDsl).toContain(editedCode);
+    expect(unmutedDsl).toContain('gpu1 = GpuNode1()');
+  });
+
+  it('reuses existing GPU, loader, and viewer handles when adding a scalar input connection', async () => {
+    const store = useGraphStore.getState();
+    const loadId = await store.addNode('load_image', { x: 0, y: 0 });
+    const gpuId = await store.addNode('gpu_script', { x: 100, y: 0 });
+    const viewerId = await store.addNode('viewer', { x: 200, y: 0 });
+    await store.connect(loadId, 'image', gpuId, 'image');
+    await store.connect(gpuId, 'image', viewerId, 'value');
+
+    const handleMap = new HandleMap();
+    handleMap.set('load1', loadId);
+    handleMap.set('gpu1', gpuId);
+    handleMap.set('viewer1', viewerId);
+
+    const result = await applyDsl(
+      [
+        'node GpuNode1 = gpu {',
+        '  inputs {',
+        '    image image',
+        '    float multiplier',
+        '  }',
+        '',
+        '  outputs {',
+        '    image image',
+        '  }',
+        '',
+        '  code """',
+        '  return color * multiplier;',
+        '  """',
+        '}',
+        '',
+        'graph {',
+        '  gpu1 = GpuNode1()',
+        '  load1 = LoadImage(path: image("file:///Users/zacharymarion/Downloads/2x.png"))',
+        '  load1.image -> gpu1.image',
+        '  viewer1 = Viewer()',
+        '  gpu1.image -> viewer1.value',
+        '  float1 = FloatConstant(value: 10.0)',
+        '  float1.value -> gpu1.multiplier',
+        '}',
+      ].join('\n'),
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    const state = useGraphStore.getState();
+    expect(Array.from(state.nodes.values()).filter(node => node.typeId === 'load_image')).toHaveLength(1);
+    expect(Array.from(state.nodes.values()).filter(node => node.typeId.startsWith('gpu_script::'))).toHaveLength(1);
+    expect(Array.from(state.nodes.values()).filter(node => node.typeId === 'viewer')).toHaveLength(1);
+    expect(Array.from(state.nodes.values()).filter(node => node.typeId === 'float_constant')).toHaveLength(1);
+    expect(state.nodes.has(loadId)).toBe(true);
+    expect(state.nodes.has(gpuId)).toBe(true);
+    expect(state.nodes.has(viewerId)).toBe(true);
+    expect(state.connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fromNode: loadId, fromPort: 'image', toNode: gpuId, toPort: 'image' }),
+        expect.objectContaining({ fromPort: 'value', toNode: gpuId, toPort: 'multiplier' }),
+        expect.objectContaining({ fromNode: gpuId, fromPort: 'image', toNode: viewerId, toPort: 'value' }),
+      ]),
+    );
+    const gpuManifestValue = state.nodes.get(gpuId)?.params.__script_manifest;
+    const manifest = JSON.parse(gpuManifestValue && 'String' in gpuManifestValue ? gpuManifestValue.String : '{}') as {
+      kernel?: string;
+      inputs?: Array<{ name: string }>;
+    };
+    expect(manifest.kernel).toBe('  return color * multiplier;');
+    expect(manifest.inputs?.map(input => input.name)).toContain('multiplier');
   });
 
   it('scalar params go into inputs (not params) in the instance manifest', async () => {

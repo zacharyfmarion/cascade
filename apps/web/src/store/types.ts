@@ -1,4 +1,5 @@
 import type { RuntimeSurface } from '../platform/runtime';
+import type { DslSourceMap } from '../ai/dsl/types';
 
 export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field' | 'String' | 'Any';
 
@@ -115,6 +116,29 @@ export interface NodeInstance {
   position: { x: number; y: number };
   muted: boolean;
   dslHandle?: string;
+}
+
+export type DslShadowStatus = 'valid' | 'stale' | 'invalid';
+
+export interface DslShadowHandleEntry {
+  nodeId: string;
+  handle: string;
+}
+
+export interface DslShadowCustomDefinitionName {
+  runtimeId: string;
+  name: string;
+}
+
+export interface DslShadowDocument {
+  version: 1;
+  text: string;
+  graphHash: string;
+  graphRevision: number;
+  handles: DslShadowHandleEntry[];
+  customDefinitionNames: DslShadowCustomDefinitionName[];
+  status: DslShadowStatus;
+  sourceMap?: DslSourceMap;
 }
 
 export interface Connection {

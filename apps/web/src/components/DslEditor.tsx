@@ -5,9 +5,9 @@ import { useGraphStore } from '../store/graphStore';
 import { useThemeStore } from '../store/themeStore';
 import type { SyntaxColors } from '../themes/types';
 import { serializeGraph } from '../ai/dsl/serializer';
-import { deriveHandleMap } from '../ai/dsl/instance';
+import { buildDslShadowFromText, graphSemanticHash, handleMapFromShadow, reconcileDslShadowText } from '../ai/dsl/shadow';
 import { applyDsl } from '../ai/dsl/executor';
-import { parseDsl } from '../ai/dsl/parser';
+import { customDefinitionToNodeSpec, parseDsl } from '../ai/dsl/parser';
 import { validateAst } from '../ai/dsl/validator';
 import type { DslSourceMap } from '../ai/dsl/types';
 import type { DiagnosticItem, NodeInstance } from '../store/types';
@@ -39,13 +39,16 @@ const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
  * Returns empty string when specs/nodes aren't ready yet.
  */
 function serializeCurrent(): string {
-  const { nodes, connections, nodeSpecs } = useGraphStore.getState();
+  const { nodes, connections, nodeSpecs, dslShadow } = useGraphStore.getState();
   if (nodeSpecs.length === 0 || nodes.size === 0) return '';
+  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections)) {
+    return dslShadow.text;
+  }
   return serializeGraph({
     nodes,
     connections,
     nodeSpecs,
-    handleMap: deriveHandleMap(nodes),
+    handleMap: handleMapFromShadow(nodes, dslShadow),
   });
 }
 
@@ -270,7 +273,7 @@ export const DslEditor: React.FC = () => {
   const mapEvalErrorsToMarkers = useCallback(
     (errors: Array<Pick<DiagnosticItem, 'message' | 'nodeId' | 'line'>>, nodes: Map<string, NodeInstance>) => {
       const sourceMap = sourceMapRef.current;
-      const handleMap = deriveHandleMap(nodes);
+      const handleMap = handleMapFromShadow(nodes, useGraphStore.getState().dslShadow);
       return errors.map((err) => {
         let line = err.line;
         if (err.nodeId && sourceMap) {
@@ -289,12 +292,13 @@ export const DslEditor: React.FC = () => {
   // ─── Validate only (show markers without applying) ──────────────────
   const validateAndMark = useCallback(
     (text: string) => {
-      const { nodeSpecs, nodes } = useGraphStore.getState();
+      const { nodeSpecs, nodes, dslShadow } = useGraphStore.getState();
       if (nodeSpecs.length === 0) return;
+      const handleMap = handleMapFromShadow(nodes, dslShadow);
 
       const parseResult = parseDsl(text, nodeSpecs, {
         currentNodes: nodes,
-        handleMap: deriveHandleMap(nodes),
+        handleMap,
       });
       sourceMapRef.current = parseResult.sourceMap ?? null;
       if (parseResult.errors.length > 0) {
@@ -303,7 +307,10 @@ export const DslEditor: React.FC = () => {
       }
 
       if (parseResult.ast) {
-        const validation = validateAst(parseResult.ast, nodeSpecs);
+        const customSpecs = parseResult.ast.customNodes
+          ? Array.from(parseResult.ast.customNodes.values()).map(customDefinitionToNodeSpec)
+          : [];
+        const validation = validateAst(parseResult.ast, [...nodeSpecs, ...customSpecs]);
         if (!validation.valid) {
           setMarkers(validation.errors);
           return;
@@ -320,7 +327,7 @@ export const DslEditor: React.FC = () => {
     async (text: string) => {
       const { nodes, connections, nodeSpecs } = useGraphStore.getState();
       if (nodeSpecs.length === 0) return;
-      const handleMap = deriveHandleMap(nodes);
+      const handleMap = handleMapFromShadow(nodes, useGraphStore.getState().dslShadow);
       const result = await applyDsl(
         text,
         handleMap,
@@ -333,6 +340,17 @@ export const DslEditor: React.FC = () => {
         clearEvalMarkers();
       } else {
         clearMarkers();
+        const appliedState = useGraphStore.getState();
+        const appliedParse = parseDsl(text, appliedState.nodeSpecs, {
+          currentNodes: appliedState.nodes,
+          handleMap,
+        });
+        appliedState.setDslShadowFromEditor(
+          text,
+          handleMap,
+          appliedParse.ast,
+          result.sourceMap ?? appliedParse.sourceMap,
+        );
         // Show eval errors as warning markers if the render produced errors
         if (result.evalErrors && result.evalErrors.length > 0) {
           setEvalMarkers(mapEvalErrorsToMarkers(result.evalErrors, nodes));
@@ -429,15 +447,46 @@ export const DslEditor: React.FC = () => {
       // Don't re-serialize when the change originated from the DSL editor itself
       if (state.lastTransactionOrigin === 'dsl') return;
 
-      const { nodes, connections, nodeSpecs } = state;
+      const { nodes, connections, nodeSpecs, dslShadow } = state;
       if (nodeSpecs.length === 0 || nodes.size === 0) return;
 
-      const newDsl = serializeGraph({
-        nodes,
-        connections,
-        nodeSpecs,
-        handleMap: deriveHandleMap(nodes),
-      });
+      const graphHash = graphSemanticHash(nodes, connections);
+      const handleMap = handleMapFromShadow(nodes, dslShadow);
+      const serializedDsl = dslShadow?.status === 'valid' && dslShadow.graphHash === graphHash
+        ? dslShadow.text
+        : serializeGraph({
+            nodes,
+            connections,
+            nodeSpecs,
+            handleMap,
+          });
+      const serializedParse = parseDsl(serializedDsl, nodeSpecs, { currentNodes: nodes, handleMap });
+      const reconciledDsl = dslShadow?.text && dslShadow.graphHash !== graphHash
+        ? reconcileDslShadowText(
+            dslShadow.text,
+            dslShadow.sourceMap,
+            serializedDsl,
+            serializedParse.sourceMap,
+          )
+        : null;
+      const newDsl = reconciledDsl ?? serializedDsl;
+
+      if (!dslShadow || dslShadow.text !== newDsl || dslShadow.graphHash !== graphHash || dslShadow.status !== 'valid') {
+        const parseResult = newDsl === serializedDsl
+          ? serializedParse
+          : parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
+        useGraphStore.setState({
+          dslShadow: buildDslShadowFromText({
+            text: newDsl,
+            nodes,
+            connections,
+            graphRevision: state.graphRevision,
+            handleMap,
+            ast: parseResult.ast,
+            sourceMap: parseResult.sourceMap,
+          }),
+        });
+      }
 
       // Skip if the serialized text hasn't changed
       if (newDsl === lastPushedDslRef.current) return;

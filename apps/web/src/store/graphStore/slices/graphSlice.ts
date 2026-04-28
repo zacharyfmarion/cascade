@@ -151,7 +151,9 @@ export const createGraphSlice: StateCreator<
           }
         }
         spec ??= buildGpuScriptNodeSpec(buildDefaultGpuScriptManifest(actualTypeId));
-        set({ nodeSpecs: [...get().nodeSpecs, spec] });
+        const nextSpecsById = new Map(get().nodeSpecsById);
+        nextSpecsById.set(result.id, spec);
+        set({ nodeSpecs: [...get().nodeSpecs, spec], nodeSpecsById: nextSpecsById });
       }
 
       if (spec) {
@@ -183,6 +185,12 @@ export const createGraphSlice: StateCreator<
         position,
         muted: false,
       });
+
+      if (spec && actualTypeId.startsWith('gpu_script::')) {
+        const nextSpecsById = new Map(get().nodeSpecsById);
+        nextSpecsById.set(result.id, spec);
+        set({ nodeSpecsById: nextSpecsById });
+      }
 
       if (initialFile) {
         pendingImageFiles.set(result.id, initialFile);

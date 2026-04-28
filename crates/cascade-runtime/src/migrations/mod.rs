@@ -4,9 +4,10 @@ use std::fmt;
 
 pub mod v1_0_0_to_v1_1_0;
 pub mod v1_1_0_to_v1_2_0;
+pub mod v1_2_0_to_v1_3_0;
 
 /// Current document format version
-pub const CURRENT_VERSION: &str = "1.2.0";
+pub const CURRENT_VERSION: &str = "1.3.0";
 
 /// Error type for migration operations
 #[derive(Debug, Clone)]
@@ -75,6 +76,12 @@ static MIGRATIONS: &[Migration] = &[
         to_version: "1.2.0",
         description: "Unify CPU/GPU nodes: remap CPU node IDs to GPU kernel equivalents, rename ports for consistency",
         migrate: v1_1_0_to_v1_2_0::migrate,
+    },
+    Migration {
+        from_version: "1.2.0",
+        to_version: "1.3.0",
+        description: "Add optional DSL shadow document metadata",
+        migrate: v1_2_0_to_v1_3_0::migrate,
     },
 ];
 
@@ -289,6 +296,58 @@ mod tests {
         assert_eq!(report.from_version, CURRENT_VERSION);
         assert_eq!(report.to_version, CURRENT_VERSION);
         assert!(report.applied.is_empty());
+    }
+
+    #[test]
+    fn test_migrate_1_2_0_to_1_3_0_keeps_dsl_absent() {
+        let mut doc = json!({
+            "cascade": {
+                "format_version": "1.2.0"
+            },
+            "project": {},
+            "graph": {
+                "nodes": [],
+                "connections": [],
+                "group_definitions": []
+            }
+        });
+
+        let report = migrate_document(&mut doc).unwrap();
+
+        assert_eq!(report.to_version, CURRENT_VERSION);
+        assert_eq!(doc["cascade"]["format_version"].as_str().unwrap(), "1.3.0");
+        assert!(doc.get("dsl").is_none());
+    }
+
+    #[test]
+    fn test_migrate_1_2_0_to_1_3_0_preserves_existing_dsl_metadata() {
+        let mut doc = json!({
+            "cascade": {
+                "format_version": "1.2.0"
+            },
+            "project": {},
+            "graph": {
+                "nodes": [],
+                "connections": [],
+                "group_definitions": []
+            },
+            "dsl": {
+                "version": 1,
+                "text": "graph {}",
+                "graph_hash": "abc",
+                "handles": [{"node_id": "node-1", "handle": "load1"}],
+                "custom_definition_names": [{"runtime_id": "gpu_script::1", "name": "FilmGlow"}]
+            }
+        });
+
+        migrate_document(&mut doc).unwrap();
+
+        assert_eq!(doc["cascade"]["format_version"].as_str().unwrap(), "1.3.0");
+        assert_eq!(doc["dsl"]["text"].as_str().unwrap(), "graph {}");
+        assert_eq!(
+            doc["dsl"]["handles"][0]["handle"].as_str().unwrap(),
+            "load1"
+        );
     }
 
     #[test]

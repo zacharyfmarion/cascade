@@ -6,26 +6,29 @@ import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import type { NodeSpec, ParamSpec, PortSpec } from '../store/types';
 import { serializeGraph } from './dsl/serializer';
-import { parseDsl } from './dsl/parser';
+import { customDefinitionToNodeSpec, parseDsl } from './dsl/parser';
 import { validateAst } from './dsl/validator';
 import { diffAst } from './dsl/differ';
 import { applyMutations } from './dsl/executor';
 import { captureViewerThumbnail } from './viewerSnapshot';
 import { snakeToPascal, labelToSnake, pascalToSnake } from './dsl/types';
 import type { DslAst } from './dsl/types';
-import { getSharedHandleMap } from './dsl/instance';
+import { graphSemanticHash, handleMapFromShadow } from './dsl/shadow';
 import { buildDefaultGpuScriptManifest, buildGpuScriptManifestFromGlsl, buildGpuScriptNodeSpec, generateGlslKernel } from './gpuScript';
 
 export { resetSharedHandleMap as resetHandleMap } from './dsl/instance';
 
 
 function getCurrentDsl(): string {
-  const { nodes, connections, nodeSpecs } = useGraphStore.getState();
+  const { nodes, connections, nodeSpecs, dslShadow } = useGraphStore.getState();
+  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections)) {
+    return dslShadow.text;
+  }
   return serializeGraph({
     nodes,
     connections,
     nodeSpecs,
-    handleMap: getSharedHandleMap(),
+    handleMap: handleMapFromShadow(nodes, dslShadow),
   });
 }
 
@@ -33,7 +36,7 @@ function getCurrentDsl(): string {
 function getCurrentAst(): DslAst {
   const { nodeSpecs, nodes } = useGraphStore.getState();
   const dslText = getCurrentDsl();
-  const handleMap = getSharedHandleMap();
+  const handleMap = handleMapFromShadow(nodes, useGraphStore.getState().dslShadow);
   const result = parseDsl(dslText, nodeSpecs, { currentNodes: nodes, handleMap });
 
   return result.ast ?? { nodes: new Map(), connections: [] };
@@ -296,7 +299,7 @@ const toolExecutors = {
     const manifest = await generateGlslKernel(description, apiKey);
     const compiledManifest = buildGpuScriptManifestFromGlsl(typeId, manifest);
     const manifestJson = JSON.stringify(compiledManifest);
-    const handleMap = getSharedHandleMap();
+    const handleMap = handleMapFromShadow(store.nodes, store.dslShadow);
     const handle = handleMap.getOrCreate(nodeId, typeId);
     store.setDslHandle(nodeId, handle);
 
@@ -321,7 +324,7 @@ const toolExecutors = {
 
   get_gpu_script_manifest: async ({ node_id, node_handle }: GetGpuScriptManifestArgs) => {
     const store = useGraphStore.getState();
-    const handleMap = getSharedHandleMap();
+    const handleMap = handleMapFromShadow(store.nodes, store.dslShadow);
     const nodeId = node_id ?? (node_handle ? handleMap.getNodeId(node_handle) : undefined);
     if (!nodeId) {
       return { success: false, error: 'Unknown node id/handle.' };
@@ -367,8 +370,8 @@ const toolExecutors = {
 
 
 async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
-  const { nodeSpecs, nodes } = useGraphStore.getState();
-  const handleMap = getSharedHandleMap();
+  const { nodeSpecs, nodes, dslShadow } = useGraphStore.getState();
+  const handleMap = handleMapFromShadow(nodes, dslShadow);
 
 
   const parseResult = parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
@@ -387,7 +390,10 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
   }
 
 
-  const validation = validateAst(parseResult.ast, nodeSpecs);
+  const customSpecs = parseResult.ast.customNodes
+    ? Array.from(parseResult.ast.customNodes.values()).map(customDefinitionToNodeSpec)
+    : [];
+  const validation = validateAst(parseResult.ast, [...nodeSpecs, ...customSpecs]);
   if (!validation.valid) {
     return {
       success: false,
@@ -417,7 +423,8 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
     };
   }
 
-
+  const updatedState = useGraphStore.getState();
+  updatedState.setDslShadowFromEditor(newDsl, handleMap, parseResult.ast, parseResult.sourceMap);
   const updatedDsl = getCurrentDsl();
   const response: Record<string, unknown> = {
     success: true,

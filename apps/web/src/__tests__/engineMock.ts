@@ -40,6 +40,24 @@ const NODE_SPECS: NodeSpec[] = [
     params: [],
   },
   {
+    id: 'float_constant',
+    display_name: 'Float',
+    category: 'Generator',
+    description: 'A constant float value',
+    inputs: [],
+    outputs: [{ name: 'value', label: 'Value', ty: 'Float' }],
+    params: [
+      {
+        key: 'value',
+        label: 'Value',
+        ty: 'Float',
+        default: { Float: 0 },
+        ui_hint: { type: 'NumberInput' },
+        promotable: true,
+      },
+    ],
+  },
+  {
     id: 'gaussian_blur',
     display_name: 'Gaussian Blur',
     category: 'Filter',

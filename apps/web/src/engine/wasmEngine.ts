@@ -56,7 +56,7 @@ const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) 
 
 const createDocumentEnvelope = (graph: unknown) => ({
   cascade: {
-    format_version: '1.1.0',
+    format_version: '1.3.0',
     app_version: '',
     created_at: '',
     modified_at: '',

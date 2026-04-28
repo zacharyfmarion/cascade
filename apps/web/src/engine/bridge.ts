@@ -105,7 +105,7 @@ export interface EngineBridge {
   importGraph(data: unknown): Promise<void> | void;
   exportDocument?(): Promise<unknown> | unknown;
   importDocument?(data: unknown): Promise<void> | void;
-  saveProject?(path: string): Promise<void>;
+  saveProject?(path: string, dsl?: unknown): Promise<void>;
   loadProject?(path: string): Promise<unknown>;
   getImageData?(nodeId: string): Promise<Uint8Array | null> | Uint8Array | null;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
@@ -155,8 +155,8 @@ export interface EngineBridge {
   listCustomNodes?(): Promise<CustomNodeInfo[]>;
   removeCustomNode?(groupDefId: string): Promise<void>;
   typesCompatible?(fromType: string, toType: string): boolean | Promise<boolean>;
-  migrateDocument?(jsonStr: string): string;
-  needsMigration?(jsonStr: string): boolean;
+  migrateDocument?(jsonStr: string): string | Promise<string>;
+  needsMigration?(jsonStr: string): boolean | Promise<boolean>;
   getNodeSpec?(nodeId: string): Promise<NodeSpec> | NodeSpec;
   evaluateBytesOutput?(nodeId: string, portName: string): Promise<Uint8Array> | Uint8Array;
   /** Wait for all queued engine operations to complete. */

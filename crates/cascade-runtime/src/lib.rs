@@ -2852,6 +2852,7 @@ impl Engine {
             assets: HashMap::new(),
             scripts,
             view: None,
+            dsl: None,
         }
     }
 

@@ -41,7 +41,7 @@ const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) 
 
 const createDocumentEnvelope = (graph: unknown) => ({
   cascade: {
-    format_version: '1.1.0',
+    format_version: '1.3.0',
     app_version: '',
     created_at: '',
     modified_at: '',
@@ -224,8 +224,8 @@ export class TauriEngine implements EngineBridge {
     await invoke('import_graph', { data: JSON.stringify(graph) });
   }
 
-  async saveProject(path: string): Promise<void> {
-    await invoke('save_project', { path });
+  async saveProject(path: string, dsl?: unknown): Promise<void> {
+    await invoke('save_project', { path, dsl });
   }
 
   async loadProject(path: string): Promise<unknown> {
@@ -447,14 +447,12 @@ export class TauriEngine implements EngineBridge {
     await invoke('remove_custom_node', { groupDefId });
   }
 
-  migrateDocument(_jsonStr: string): string {
-    // TODO: Implement Tauri IPC for migration
-    return _jsonStr;  // Pass-through for now
+  async migrateDocument(jsonStr: string): Promise<string> {
+    return invoke<string>('migrate_document', { json: jsonStr });
   }
 
-  needsMigration(_jsonStr: string): boolean {
-    // TODO: Implement Tauri IPC
-    return false;
+  async needsMigration(jsonStr: string): Promise<boolean> {
+    return invoke<boolean>('needs_migration', { json: jsonStr });
   }
 }
 

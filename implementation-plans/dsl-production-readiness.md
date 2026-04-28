@@ -121,6 +121,17 @@ Root graph DSL edits can be parsed, validated, diffed, and applied through the e
 
 Those APIs should be added before enabling parsed group/GPU definitions in the executor; otherwise the DSL would accept syntax that cannot be applied reliably.
 
+### GPU Script Identity Follow-Up
+
+GPU script nodes currently have two identities:
+
+- the live graph/runtime instance id and `gpu_script::<uuid>` type id, with source stored in `__script_manifest`
+- the DSL projection, which lifts that instance into `node GpuNode1 = gpu { ... }` plus `gpu1 = GpuNode1()`
+
+That projection is correct syntactically, but it makes stable handle mapping essential. A generated DSL handle must resolve back to the same live node on parse/apply, otherwise edits can be interpreted as a new named GPU kernel instead of recompiling the existing script instance. The immediate fix is to make `deriveHandleMap()` populate deterministic handles for all current nodes, not only nodes that already have an explicit `dslHandle`.
+
+Longer term, production readiness still needs a first-class shadow document/revision model so comments, formatting, custom definition names, and generated handles are preserved intentionally instead of being rediscovered from graph order on every sync.
+
 ## Checklist
 
 - [x] Save this implementation plan.
@@ -143,6 +154,14 @@ Those APIs should be added before enabling parsed group/GPU definitions in the e
   - [x] Execute GPU definitions by registering/replacing GPU script specs before applying root graph edits.
   - [x] Execute group definitions by registering stable group definitions before applying root graph edits.
   - [x] Serialize/format custom definitions canonically.
+- [x] Keep GPU script instance specs available to React Flow after recompiling or loading script nodes.
+- [x] Recompile serialized GPU script definitions when the editor applies with a freshly derived handle map.
+- [x] Preserve edited GPU script code through mute/unmute serialization.
+- [x] Validate DSL editor diagnostics against custom group/GPU definition specs.
+- [x] Add first-class shadow document preservation for comments, custom definition names, and generated handles.
+  - [x] Add optional `.casc` `dsl` metadata with Rust-owned schema and `1.3.0` migration.
+  - [x] Persist and hydrate DSL shadow metadata in web and desktop project paths.
+  - [x] Share shadow-aware handle resolution between the DSL editor and AI tools.
 - [x] Run `yarn test`, `yarn lint`, and `npx tsc -b --noEmit`.
 
 ## Assumptions

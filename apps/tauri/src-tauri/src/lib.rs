@@ -333,9 +333,16 @@ fn import_graph(state: State<'_, EngineState>, data: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn save_project(state: State<'_, EngineState>, path: String) -> Result<(), String> {
+fn save_project(
+    state: State<'_, EngineState>,
+    path: String,
+    dsl: Option<serde_json::Value>,
+) -> Result<(), String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut document = s.engine.export_document();
+    if let Some(dsl) = dsl {
+        document.dsl = serde_json::from_value(dsl).ok();
+    }
 
     let file_path = std::path::Path::new(&path);
     if let Some(stem) = file_path.file_stem().and_then(|s| s.to_str()) {
@@ -376,6 +383,19 @@ fn save_project(state: State<'_, EngineState>, path: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn migrate_document(json: String) -> Result<String, String> {
+    let mut value: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    migrations::migrate_document(&mut value).map_err(|e| e.to_string())?;
+    serde_json::to_string(&value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn needs_migration(json: String) -> Result<bool, String> {
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    Ok(migrations::needs_migration(&value))
+}
+
+#[tauri::command]
 fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let file_path = std::path::Path::new(&path);
@@ -386,8 +406,9 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         migrations::migrate_document(&mut doc_value).map_err(|e| e.to_string())?;
 
         // Deserialize the migrated document
-        let document: CascadeDocument =
+        let mut document: CascadeDocument =
             serde_json::from_value(doc_value).map_err(|e| e.to_string())?;
+        let dsl = document.dsl.take();
 
         let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
         let assets: Vec<(String, String, String)> = document
@@ -418,8 +439,9 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
             }
         }
 
-        let graph = s.engine.export_graph();
-        serde_json::to_string(&graph).map_err(|e| e.to_string())
+        let mut exported = s.engine.export_document();
+        exported.dsl = dsl;
+        serde_json::to_string(&exported).map_err(|e| e.to_string())
     } else {
         // Fallback: try to load as SerializableGraph (without migration)
         let graph: SerializableGraph = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -972,6 +994,8 @@ pub fn run() {
             export_graph,
             import_graph,
             save_project,
+            migrate_document,
+            needs_migration,
             load_project,
             compile_script_node,
             get_node_spec,

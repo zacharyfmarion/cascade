@@ -27,6 +27,7 @@ import type {
   TransactionOptions,
   TransactionResult,
   TransactionOrigin,
+  DslShadowDocument,
 } from '../types';
 import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
 import type { NodeInterfaceChange } from '../../engine/bridge';
@@ -54,6 +55,8 @@ import type { ColorSlice } from './slices/colorSlice';
 import { createColorSlice } from './slices/colorSlice';
 import type { AiSlice } from './slices/aiSlice';
 import { createAiSlice } from './slices/aiSlice';
+import type { DslSlice } from './slices/dslSlice';
+import { createDslSlice } from './slices/dslSlice';
 import type { GraphSlice } from './slices/graphSlice';
 import { createGraphSlice } from './slices/graphSlice';
 import type { UndoSlice } from './slices/undoSlice';
@@ -102,6 +105,7 @@ export interface GraphState {
 
   nodeTimings: Map<string, number>;
   nodeErrors: Map<string, EngineError>;
+  dslShadow: DslShadowDocument | null;
   aiNodeStatuses: Record<string, string>;
   aiNodeStale: Record<string, boolean>;
   refreshAiNodeStale: () => void;
@@ -113,6 +117,10 @@ export interface GraphState {
   disconnect: (connectionId: string) => Promise<void>;
   setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void> | void;
   setDslHandle: (nodeId: string, handle: string) => void;
+  getDslShadow: () => DslShadowDocument | null;
+  setDslShadowFromEditor: DslSlice['setDslShadowFromEditor'];
+  refreshDslShadowFromGraph: (reason?: string) => void;
+  clearDslShadow: () => void;
   setParamLive: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamCommit: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
@@ -228,6 +236,7 @@ type CoreSlice = Omit<
   | keyof AssetsSlice
   | keyof ColorSlice
   | keyof AiSlice
+  | keyof DslSlice
   | keyof GraphSlice
   | keyof UndoSlice
   | keyof RenderSlice
@@ -292,6 +301,7 @@ export const useGraphStore = create<GraphState>()(
     ...createAssetsSlice(...args),
     ...createColorSlice(...args),
     ...createAiSlice(...args),
+    ...createDslSlice(...args),
     ...createUndoSlice(...args),
     ...createRenderSlice(...args),
     ...createLiveParamsSlice(...args),

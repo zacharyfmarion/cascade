@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
-import { buildDefaultGpuScriptManifest, buildGpuScriptManifest } from '../ai/gpuScript';
+import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../ai/gpuScript';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -66,6 +66,7 @@ const createInitialState = () => ({
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
+  dslShadow: null,
   graphRevision: 0,
   lastTransactionOrigin: null,
 });
@@ -620,6 +621,18 @@ describe('graphStore helper behaviors', () => {
     expect(state.nodes.get(nodeId)?.inputDefaults.amount).toEqual({ Float: 0.75 } as ParamValue);
     expect(state.nodes.get(nodeId)?.inputDefaults.old_control).toBeUndefined();
   });
+
+  it('addNode stores gpu script specs by instance id for canvas rendering', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gpu_script', { x: 0, y: 0 });
+    const state = useGraphStore.getState();
+    const node = state.nodes.get(nodeId);
+
+    expect(node?.typeId.startsWith('gpu_script::')).toBe(true);
+    expect(state.nodeSpecsById.get(nodeId)?.id).toBe(node?.typeId);
+    expect(state.nodeSpecsById.get(nodeId)?.outputs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'image', ty: 'Image' })]),
+    );
+  });
 });
 
 describe('graphStore project hydration', () => {
@@ -672,6 +685,164 @@ describe('graphStore project hydration', () => {
     expect(state.nodes.get('group-node')?.typeId).toBe(customGroupSpec.id);
     expect(state.nodeSpecs.some(spec => spec.id === customGroupSpec.id)).toBe(true);
     expect(state.nodeSpecsById.size).toBe(0);
+  });
+
+  it('loadProject hydrates optional DSL shadow metadata without blocking graph load', async () => {
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'load-node',
+          type_id: 'load_image',
+          position: [0, 0],
+          params: {},
+          input_defaults: {},
+        },
+      ],
+      connections: [],
+    };
+    const dsl = {
+      version: 1,
+      text: '# preserved comment\ngraph {\n  load1 = LoadImage()\n}',
+      graph_hash: 'old-hash',
+      handles: [{ node_id: 'load-node', handle: 'load1' }],
+      custom_definition_names: [],
+    };
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+        dsl,
+      }),
+    ], 'dsl-shadow.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.nodes.has('load-node')).toBe(true);
+    expect(state.dslShadow?.text).toContain('# preserved comment');
+    expect(state.dslShadow?.handles).toEqual([{ nodeId: 'load-node', handle: 'load1' }]);
+    expect(state.dslShadow?.status).toBe('valid');
+  });
+
+  it('loadProject treats semantically matching GPU DSL shadow as valid after engine manifest normalization', async () => {
+    const gpuManifest = {
+      id: 'gpu_script::saved',
+      display_name: 'GPU Script',
+      category: 'GPU',
+      description: 'Custom GPU shader node',
+      inputs: [
+        { name: 'image', label: 'Image', ty: 'Image', optional: false },
+        { name: 'age', label: 'Age', ty: 'Float', optional: false, default: 0, ui: 'Slider' },
+      ],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image', optional: false }],
+      params: [],
+      kernel: '  return color * 2;',
+      supports_mask: true,
+      pixel_space_params: [],
+    };
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'gpu-node',
+          type_id: 'gpu_script::saved',
+          position: [0, 0],
+          params: { __script_manifest: { String: JSON.stringify(gpuManifest) } },
+          input_defaults: { age: { Float: 0 } },
+        },
+        { id: 'load-node', type_id: 'load_image', position: [0, 0], params: {}, input_defaults: {} },
+        { id: 'viewer-node', type_id: 'viewer', position: [0, 0], params: {}, input_defaults: {} },
+      ],
+      connections: [
+        { from_node: 'load-node', from_port: 'image', to_node: 'gpu-node', to_port: 'image' },
+        { from_node: 'gpu-node', from_port: 'image', to_node: 'viewer-node', to_port: 'value' },
+      ],
+    };
+    const dslText = [
+      'node GpuNode1 = gpu {',
+      '  inputs {',
+      '    image image',
+      '    float age',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  # keep my shader note',
+      '  code """',
+      '  return color * 2;',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  gpu1 = GpuNode1()',
+      '  load1 = LoadImage()',
+      '  load1.image -> gpu1.image',
+      '  viewer1 = Viewer()',
+      '  gpu1.image -> viewer1.value',
+      '}',
+    ].join('\n');
+
+    mockEngine.getNodeSpec = async (nodeId: string): Promise<NodeSpec> => {
+      if (nodeId === 'gpu-node') {
+        return buildGpuScriptNodeSpec(gpuManifest);
+      }
+      const node = loadedGraph.nodes.find(item => item.id === nodeId);
+      const spec = NODE_SPECS.find(item => item.id === node?.type_id);
+      if (!spec) throw new Error(`Unknown node ${nodeId}`);
+      return spec;
+    };
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+        dsl: {
+          version: 1,
+          text: dslText,
+          graph_hash: 'legacy-hash-from-before-manifest-normalization',
+          handles: [
+            { node_id: 'gpu-node', handle: 'gpu1' },
+            { node_id: 'load-node', handle: 'load1' },
+            { node_id: 'viewer-node', handle: 'viewer1' },
+          ],
+          custom_definition_names: [{ runtime_id: 'gpu_node_1', name: 'GpuNode1' }],
+        },
+      }),
+    ], 'gpu-dsl-shadow.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.dslShadow?.status).toBe('valid');
+    expect(state.dslShadow?.text).toContain('# keep my shader note');
+    expect(state.dslShadow?.text).toContain('return color * 2;');
+  });
+
+  it('loadProject ignores malformed DSL shadow metadata', async () => {
+    const loadedGraph = {
+      nodes: [],
+      connections: [],
+    };
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+        dsl: 'not valid metadata',
+      }),
+    ], 'bad-dsl-shadow.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.dslShadow).toBeNull();
   });
 
   it('loadProject preserves the current graph on invalid JSON', async () => {

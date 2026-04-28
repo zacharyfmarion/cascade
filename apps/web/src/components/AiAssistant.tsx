@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChat } from '@ai-sdk/react';
+import { Chat, useChat } from '@ai-sdk/react';
 import { isToolUIPart, getToolName } from 'ai';
 import { getAuthoringNodeSpecs } from '../platform/features';
 import { getRuntimeSurface } from '../platform/runtime';
@@ -52,9 +52,13 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
     return createCascadeTransport(apiKey, model, authoringNodeSpecs);
   }, [apiKey, model, authoringNodeSpecs]);
 
-  const { messages, sendMessage, status, stop, error } = useChat({
-    transport: transport ?? undefined,
-  });
+  const chat = useMemo(() => {
+    if (!transport) return null;
+    return new Chat({ transport });
+  }, [transport]);
+
+  const chatOptions = useMemo(() => (chat ? { chat } : undefined), [chat]);
+  const { messages, sendMessage, status, stop, error } = useChat(chatOptions);
 
   const isConfigured = Boolean(apiKey);
   const isLoading = status === 'submitted' || status === 'streaming';
