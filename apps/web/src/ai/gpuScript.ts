@@ -1,4 +1,5 @@
 import type { NodeSpec, ParamDefault, ParamSpec, PortSpec } from '../store/types';
+import { createAnthropicMessagesRequest } from './anthropic';
 
 export type ScriptPort = {
   name: string;
@@ -120,14 +121,10 @@ Response:
 }`;
 
 export const generateGlslKernel = async (prompt: string, apiKey: string): Promise<GlslManifest> => {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+  const request = createAnthropicMessagesRequest(apiKey);
+  const response = await fetch(request.url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
+    headers: request.headers,
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
