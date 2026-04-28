@@ -27,7 +27,7 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 ## Checklist
 
 - [x] Create this production-hardening implementation plan.
-- [ ] Add Chevrotain as the parser dependency and introduce a token vocabulary for the Cascade DSL.
+- [x] Add Chevrotain as the parser dependency and introduce a token vocabulary for the Cascade DSL.
 - [ ] Replace `parseDsl()` internals with a Chevrotain parser that preserves the current AST contract.
 - [ ] Add parser diagnostics for incomplete live-edit states, unknown syntax, unclosed blocks, malformed params, and multiline strings/code.
 - [ ] Add parser golden tests for comments, custom definitions, assets, arrays, refs, wrappers, arrows, duplicate handles, and partial invalid documents.
@@ -45,4 +45,3 @@ Build this as a series of commit-sized hardening steps. Each step should add or 
 - Frontend-only changes should use the web validation commands from `AGENTS.md`.
 - Rust/Tauri validation is only required if this phase touches Rust crates or Tauri code.
 - The current full `yarn test` run has shown order-sensitive `batchExportSlice` Tauri dialog failures while the file passes in isolation; this should be tracked separately if it persists after DSL work.
-

@@ -27,6 +27,7 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@xyflow/react": "^12.10.0",
     "ai": "^6.0.97",
+    "chevrotain": "^12.0.0",
     "class-variance-authority": "^0.7.1",
     "comlink": "^4.4.2",
     "dockview": "^4.13.1",
