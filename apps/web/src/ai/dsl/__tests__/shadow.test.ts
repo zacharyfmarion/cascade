@@ -162,9 +162,9 @@ describe('reconcileDslShadowText', () => {
       '# top comment',
       'graph {',
       '  # keep this comment',
-      '  blur1 = GaussianBlur(amount: 1.0)',
+      '    blur1   =   GaussianBlur( amount: 1.0 )   # keep inline node note',
       '',
-      '  viewer1 = Viewer()',
+      '    viewer1   =   Viewer()',
       '}',
     ].join('\n');
     const newText = [
@@ -182,9 +182,38 @@ describe('reconcileDslShadowText', () => {
       '# top comment',
       'graph {',
       '  # keep this comment',
-      '  blur1 = GaussianBlur(amount: 2.0)',
+      '    blur1 = GaussianBlur(amount: 2.0)   # keep inline node note',
       '',
+      '    viewer1   =   Viewer()',
+      '}',
+    ].join('\n'));
+  });
+
+  it('preserves untouched connection formatting and inline comments', () => {
+    const oldText = [
+      'graph {',
+      '  blur1 = GaussianBlur()',
       '  viewer1 = Viewer()',
+      '    blur1.image   ->   viewer1.image   # display result',
+      '}',
+    ].join('\n');
+    const newText = [
+      'graph {',
+      '  blur1 = GaussianBlur()',
+      '  viewer1 = Viewer()',
+      '  blur1.image -> viewer1.image',
+      '}',
+    ].join('\n');
+
+    const oldParse = parseDsl(oldText, specs);
+    const newParse = parseDsl(newText, specs);
+    const reconciled = reconcileDslShadowText(oldText, oldParse.sourceMap, newText, newParse.sourceMap);
+
+    expect(reconciled).toBe([
+      'graph {',
+      '  blur1 = GaussianBlur()',
+      '  viewer1 = Viewer()',
+      '    blur1.image   ->   viewer1.image   # display result',
       '}',
     ].join('\n'));
   });

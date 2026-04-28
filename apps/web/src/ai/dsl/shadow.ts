@@ -399,6 +399,66 @@ const lineForSpan = (text: string, span: { startLine: number; endLine: number })
   return text.split('\n')[span.startLine - 1] ?? null;
 };
 
+const semanticLine = (line: string, inlineCommentCol?: number): string => {
+  const semantic = inlineCommentCol === undefined ? line : line.slice(0, inlineCommentCol);
+  return semantic.trim();
+};
+
+const normalizeSemanticLine = (line: string): string => {
+  let result = '';
+  let inString = false;
+  let escaped = false;
+  for (const char of line) {
+    if (inString) {
+      result += char;
+      if (char === '\\' && !escaped) {
+        escaped = true;
+        continue;
+      }
+      if (char === '"' && !escaped) inString = false;
+      escaped = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      result += char;
+      continue;
+    }
+    if (!/\s/.test(char)) result += char;
+  }
+  return result;
+};
+
+const replacementLinePreservingTrivia = (
+  oldLine: string,
+  nextLine: string,
+  sourceMap: DslSourceMap,
+  targetKind: 'node' | 'connection',
+  targetKey: string,
+  lineNumber: number,
+): string => {
+  const inlineComment = sourceMap.trivia.find(trivia =>
+    trivia.kind === 'comment'
+    && trivia.inline
+    && trivia.targetKind === targetKind
+    && trivia.targetKey === targetKey
+    && trivia.span.startLine === lineNumber
+  );
+  const oldSemantic = semanticLine(oldLine, inlineComment?.span.startCol);
+  const nextSemantic = semanticLine(nextLine);
+  if (normalizeSemanticLine(oldSemantic) === normalizeSemanticLine(nextSemantic)) {
+    return oldLine;
+  }
+
+  const indent = oldLine.match(/^\s*/)?.[0] ?? '';
+  if (!inlineComment) return `${indent}${nextSemantic}`;
+
+  const semanticEndCol = oldLine.slice(0, inlineComment.span.startCol).trimEnd().length;
+  const separator = oldLine.slice(semanticEndCol, inlineComment.span.startCol) || ' ';
+  const comment = oldLine.slice(inlineComment.span.startCol);
+  return `${indent}${nextSemantic}${separator}${comment}`;
+};
+
 const findGraphCloseLine = (lines: string[]): number => {
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     if (lines[index]?.trim() === '}') return index;
@@ -438,9 +498,15 @@ export const reconcileDslShadowText = (
   const queueReplacement = (
     oldSpan: { startLine: number; endLine: number } | undefined,
     nextLine: string | null,
+    targetKind?: 'node' | 'connection',
+    targetKey?: string,
   ): boolean => {
     if (!oldSpan || oldSpan.startLine !== oldSpan.endLine) return false;
-    replacements.set(oldSpan.startLine - 1, nextLine);
+    const oldLine = oldLines[oldSpan.startLine - 1];
+    const replacement = nextLine && oldLine !== undefined && targetKind && targetKey
+      ? replacementLinePreservingTrivia(oldLine, nextLine, oldSourceMap, targetKind, targetKey, oldSpan.startLine)
+      : nextLine;
+    replacements.set(oldSpan.startLine - 1, replacement);
     return true;
   };
 
@@ -448,7 +514,7 @@ export const reconcileDslShadowText = (
     const nextSpan = newSourceMap.nodeSpans.get(handle);
     if (nextSpan) {
       const nextLine = lineForSpan(newText, nextSpan);
-      if (!nextLine || !queueReplacement(oldSpan, nextLine)) return null;
+      if (!nextLine || !queueReplacement(oldSpan, nextLine, 'node', handle)) return null;
     } else if (!queueReplacement(oldSpan, null)) {
       return null;
     }
@@ -464,7 +530,7 @@ export const reconcileDslShadowText = (
     const nextSpan = newSourceMap.connectionSpans.get(key);
     if (nextSpan) {
       const nextLine = lineForSpan(newText, nextSpan);
-      if (!nextLine || !queueReplacement(oldSpan, nextLine)) return null;
+      if (!nextLine || !queueReplacement(oldSpan, nextLine, 'connection', key)) return null;
     } else if (!queueReplacement(oldSpan, null)) {
       return null;
     }
