@@ -157,6 +157,12 @@ Longer term, production readiness still needs a first-class shadow document/revi
 - [x] Keep GPU script instance specs available to React Flow after recompiling or loading script nodes.
 - [x] Recompile serialized GPU script definitions when the editor applies with a freshly derived handle map.
 - [x] Preserve edited GPU script code through mute/unmute serialization.
+- [x] Serialize UI-created group nodes as full `node Name = group { ... }` definitions instead of opaque `group::user_*` instances.
+- [x] Include runtime group definitions in DSL shadow hashes so internal group edits invalidate stale DSL text.
+- [x] Hydrate and refresh runtime group definitions from `exportGraph()` for save/load, group creation, and internal group edits.
+- [x] Prune unused runtime/custom group definitions after DSL group renames while preserving reachable nested group dependencies.
+- [x] Derive custom group instance handles and canvas display names from preserved DSL definition names when runtime specs still use generic group names.
+- [x] Sync custom group definition names bidirectionally between the canvas group title and DSL `node Name = group` blocks.
 - [x] Validate DSL editor diagnostics against custom group/GPU definition specs.
 - [x] Add first-class shadow document preservation for comments, custom definition names, and generated handles.
   - [x] Add optional `.casc` `dsl` metadata with Rust-owned schema and `1.3.0` migration.

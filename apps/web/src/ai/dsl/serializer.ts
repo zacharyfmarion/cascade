@@ -1,7 +1,7 @@
 import { HandleMap } from './handleMap';
-import type { DslConnection, DslCustomNodeDefinition, DslGpuDefinition, DslNode, DslParamDeclaration, DslParamValue, DslPortDeclaration } from './types';
-import { snakeToPascal, labelToSnake } from './types';
-import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec } from '../../store/types';
+import type { DslConnection, DslCustomNodeDefinition, DslGpuDefinition, DslGroupDefinition, DslNode, DslParamDeclaration, DslParamValue, DslPortDeclaration } from './types';
+import { snakeToPascal, labelToSnake, pascalToSnake } from './types';
+import type { NodeInstance, Connection, NodeSpec, ParamValue, ParamSpec, PortSpec, SerializableGroupDefinition, SerializableInternalNode, SerializablePromotion, DslShadowCustomDefinitionName } from '../../store/types';
 import { isConnectableParam } from '../../store/types';
 import { isScalarScriptType, parseGpuScriptManifestJson, type GpuScriptManifest } from '../gpuScript';
 
@@ -11,6 +11,9 @@ export interface SerializerInput {
   nodeSpecs: NodeSpec[];
   handleMap: HandleMap;
   customNodes?: Map<string, DslCustomNodeDefinition>;
+  groupDefinitions?: SerializableGroupDefinition[];
+  customDefinitionNames?: DslShadowCustomDefinitionName[];
+  pruneUnusedCustomDefinitions?: boolean;
 }
 
 const formatFloat = (value: number): string => {
@@ -105,6 +108,17 @@ const formatParamEntry = (typeId: string, paramSpec: ParamSpec, paramValue: Para
   return `${paramSpec.key}: ${formatDslValue(dslValue, { typeId, paramKey: paramSpec.key })}`;
 };
 
+const paramValueToDslValue = (value: ParamValue): DslParamValue => {
+  if ('Float' in value) return { type: 'float', value: value.Float };
+  if ('Int' in value) return { type: 'int', value: value.Int };
+  if ('Bool' in value) return { type: 'bool', value: value.Bool };
+  if ('Color' in value) return { type: 'color', value: value.Color };
+  if ('ColorRamp' in value) return { type: 'ramp', value: value.ColorRamp.map(stop => ({ position: stop.position, color: stop.color })) };
+  if ('CurvePoints' in value) return { type: 'curve', value: value.CurvePoints.map(point => ({ x: point.x, y: point.y })) };
+  if ('ColorPalette' in value) return { type: 'palette', value: value.ColorPalette };
+  return { type: 'string', value: value.String };
+};
+
 const getStringParam = (node: NodeInstance, key: string): string => {
   const value = node.params[key];
   return value && 'String' in value ? value.String : '';
@@ -135,7 +149,12 @@ const formatVirtualAssetParamEntries = (node: NodeInstance, spec: NodeSpec | und
   return [`path: image(${JSON.stringify(path)})`];
 };
 
-const topologicalOrder = (nodes: Map<string, NodeInstance>, connections: Connection[], handleMap: HandleMap): NodeInstance[] => {
+const topologicalOrder = (
+  nodes: Map<string, NodeInstance>,
+  connections: Connection[],
+  handleMap: HandleMap,
+  handleBaseForNode?: (node: NodeInstance) => string | null,
+): NodeInstance[] => {
   const inDegree = new Map<string, number>();
   const adjacency = new Map<string, Set<string>>();
 
@@ -154,7 +173,11 @@ const topologicalOrder = (nodes: Map<string, NodeInstance>, connections: Connect
     }
   }
 
-  const getHandle = (nodeId: string): string => handleMap.getOrCreate(nodeId, nodes.get(nodeId)?.typeId ?? 'node');
+  const getHandle = (nodeId: string): string => {
+    const node = nodes.get(nodeId);
+    const base = node ? handleBaseForNode?.(node) : null;
+    return base ? handleMap.getOrCreateWithBase(nodeId, base) : handleMap.getOrCreate(nodeId, node?.typeId ?? 'node');
+  };
 
   const queue = Array.from(nodes.keys())
     .filter((nodeId) => (inDegree.get(nodeId) ?? 0) === 0)
@@ -254,13 +277,268 @@ const displayNameToPascal = (displayName: string): string =>
     .join('');
 
 const displayNameToHandleBase = (displayName: string): string => {
-  const pascal = displayNameToPascal(displayName);
+  const pascal = /[\s_-]/.test(displayName) ? displayNameToPascal(displayName) : displayName;
   // convert PascalCase → snake_case for use as a handle prefix
   return pascal
     .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
     .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
     .toLowerCase()
     || 'gpu';
+};
+
+const uniqueDefinitionName = (baseName: string, usedNames: Set<string>): string => {
+  const fallback = baseName || 'GroupNode';
+  if (!usedNames.has(fallback)) {
+    usedNames.add(fallback);
+    return fallback;
+  }
+  let suffix = 2;
+  while (usedNames.has(`${fallback}${suffix}`)) {
+    suffix += 1;
+  }
+  const name = `${fallback}${suffix}`;
+  usedNames.add(name);
+  return name;
+};
+
+const definitionNameForGroup = (
+  definition: SerializableGroupDefinition,
+  customNameByRuntimeId: Map<string, string>,
+  usedNames: Set<string>,
+): string => {
+  const persisted = customNameByRuntimeId.get(definition.id);
+  if (persisted) return uniqueDefinitionName(persisted, usedNames);
+  return uniqueDefinitionName(displayNameToPascal(definition.name) || snakeToPascal(definition.id.replace(/^group::/, '')), usedNames);
+};
+
+const portToDslDeclaration = (port: PortSpec): DslPortDeclaration => ({
+  valueType: port.ty.toLowerCase(),
+  name: port.name,
+  optional: false,
+  defaultValue: port.default ? paramValueToDslValue(port.default as ParamValue) : undefined,
+  min: port.min,
+  max: port.max,
+  step: port.step,
+  line: 1,
+});
+
+const promotionToParamDeclaration = (promotion: SerializablePromotion): DslParamDeclaration => ({
+  valueType: promotion.spec.ty.toLowerCase(),
+  name: promotion.group_param_key,
+  defaultValue: unwrapParamValue(promotion.spec, promotion.spec.default),
+  min: promotion.spec.min,
+  max: promotion.spec.max,
+  step: promotion.spec.step,
+  line: 1,
+});
+
+const proxyAliasesForGroup = (definition: SerializableGroupDefinition): Map<string, string> => {
+  const aliases = new Map<string, string>();
+  for (const node of definition.internal_graph.nodes) {
+    if (node.type_id === 'group_input') aliases.set(node.id, 'input');
+    if (node.type_id === 'group_output') aliases.set(node.id, 'output');
+  }
+  aliases.set('gi', 'input');
+  aliases.set('go', 'output');
+  aliases.set('input', 'input');
+  aliases.set('output', 'output');
+  return aliases;
+};
+
+const findInputPortSpec = (spec: NodeSpec | undefined, name: string): PortSpec | null => {
+  const input = spec?.inputs.find(port => port.name === name);
+  if (input) return input;
+  const param = spec?.params.find(item => item.key === name);
+  return param
+    ? {
+        name: param.key,
+        label: param.label,
+        ty: param.ty,
+        default: param.default,
+        min: param.min,
+        max: param.max,
+        step: param.step,
+        ui_hint: param.ui_hint,
+      }
+    : null;
+};
+
+const inferGroupInputs = (
+  definition: SerializableGroupDefinition,
+  nodeSpecById: Map<string, NodeSpec>,
+): PortSpec[] => {
+  const proxies = proxyAliasesForGroup(definition);
+  const nodeById = new Map(definition.internal_graph.nodes.map(node => [node.id, node]));
+  const seen = new Set<string>();
+  const ports: PortSpec[] = [];
+  for (const connection of definition.internal_graph.connections) {
+    if (proxies.get(connection.from_node) !== 'input') continue;
+    if (seen.has(connection.from_port)) continue;
+    const targetNode = nodeById.get(connection.to_node);
+    const targetSpec = targetNode ? nodeSpecById.get(targetNode.type_id) : undefined;
+    const inferred = findInputPortSpec(targetSpec, connection.to_port);
+    ports.push(inferred
+      ? { ...inferred, name: connection.from_port, label: inferred.label || connection.from_port }
+      : { name: connection.from_port, label: connection.from_port, ty: 'Image' });
+    seen.add(connection.from_port);
+  }
+  return ports;
+};
+
+const inferGroupOutputs = (
+  definition: SerializableGroupDefinition,
+  nodeSpecById: Map<string, NodeSpec>,
+): PortSpec[] => {
+  const proxies = proxyAliasesForGroup(definition);
+  const nodeById = new Map(definition.internal_graph.nodes.map(node => [node.id, node]));
+  const seen = new Set<string>();
+  const ports: PortSpec[] = [];
+  for (const connection of definition.internal_graph.connections) {
+    if (proxies.get(connection.to_node) !== 'output') continue;
+    if (seen.has(connection.to_port)) continue;
+    const sourceNode = nodeById.get(connection.from_node);
+    const sourceSpec = sourceNode ? nodeSpecById.get(sourceNode.type_id) : undefined;
+    const inferred = sourceSpec?.outputs.find(port => port.name === connection.from_port);
+    ports.push(inferred
+      ? { ...inferred, name: connection.to_port, label: inferred.label || connection.to_port }
+      : { name: connection.to_port, label: connection.to_port, ty: 'Image' });
+    seen.add(connection.to_port);
+  }
+  return ports;
+};
+
+const typeNameForNodeTypeId = (
+  typeId: string,
+  nodeSpecById: Map<string, NodeSpec>,
+  customDefinitionNameByRuntimeId: Map<string, string>,
+): string => {
+  const customName = customDefinitionNameByRuntimeId.get(typeId);
+  if (customName) return customName;
+  const spec = nodeSpecById.get(typeId);
+  const rawId = spec ? spec.id : typeId;
+  return snakeToPascal(rawId.replace(/^gpu_kernel::/, ''));
+};
+
+const internalNodeToDslNode = (
+  node: SerializableInternalNode,
+  handle: string,
+  nodeSpecById: Map<string, NodeSpec>,
+  customDefinitionNameByRuntimeId: Map<string, string>,
+  promotions: SerializablePromotion[],
+): DslNode => {
+  const spec = nodeSpecById.get(node.type_id);
+  const promotedParamByKey = new Map(
+    promotions
+      .filter(promotion => promotion.internal_node_id === node.id)
+      .map(promotion => [promotion.internal_param_key, promotion.group_param_key]),
+  );
+  const params = new Map<string, DslParamValue>();
+
+  if (spec) {
+    for (const paramSpec of spec.params) {
+      const promotedName = promotedParamByKey.get(paramSpec.key);
+      if (promotedName) {
+        params.set(paramSpec.key, { type: 'ref', value: `param.${promotedName}` });
+        continue;
+      }
+      const value = isConnectableParam(paramSpec)
+        ? (node.input_defaults?.[paramSpec.key] ?? node.params?.[paramSpec.key])
+        : node.params?.[paramSpec.key];
+      if (!value || JSON.stringify(value) === JSON.stringify(paramSpec.default)) continue;
+      params.set(paramSpec.key, unwrapParamValue(paramSpec, value));
+    }
+  } else {
+    for (const [key, value] of Object.entries(node.params ?? {})) {
+      if (key === '__script_manifest') continue;
+      const promotedName = promotedParamByKey.get(key);
+      params.set(key, promotedName ? { type: 'ref', value: `param.${promotedName}` } : paramValueToDslValue(value));
+    }
+  }
+
+  return {
+    handle,
+    nodeType: typeNameForNodeTypeId(node.type_id, nodeSpecById, customDefinitionNameByRuntimeId),
+    nodeTypeId: node.type_id,
+    params,
+    muted: Boolean(node.muted),
+    line: 1,
+  };
+};
+
+const runtimeGroupDefinitionToDsl = (
+  definition: SerializableGroupDefinition,
+  name: string,
+  nodeSpecById: Map<string, NodeSpec>,
+  customDefinitionNameByRuntimeId: Map<string, string>,
+): DslGroupDefinition => {
+  const proxies = proxyAliasesForGroup(definition);
+  const promotions = definition.promotions ?? [];
+  const handleMap = new HandleMap();
+  const nodes = new Map<string, DslNode>();
+
+  for (const node of definition.internal_graph.nodes) {
+    if (node.type_id === 'group_input' || node.type_id === 'group_output') continue;
+    const handle = handleMap.getOrCreate(node.id, node.type_id);
+    nodes.set(handle, internalNodeToDslNode(node, handle, nodeSpecById, customDefinitionNameByRuntimeId, promotions));
+  }
+
+  const connections: DslConnection[] = definition.internal_graph.connections.map(connection => ({
+    fromHandle: proxies.get(connection.from_node) ?? handleMap.getOrCreate(connection.from_node, definition.internal_graph.nodes.find(node => node.id === connection.from_node)?.type_id ?? 'node'),
+    fromPort: connection.from_port,
+    toHandle: proxies.get(connection.to_node) ?? handleMap.getOrCreate(connection.to_node, definition.internal_graph.nodes.find(node => node.id === connection.to_node)?.type_id ?? 'node'),
+    toPort: connection.to_port,
+    line: 1,
+  }));
+
+  return {
+    kind: 'group',
+    name,
+    line: 1,
+    inputs: (definition.explicit_inputs ?? inferGroupInputs(definition, nodeSpecById)).map(portToDslDeclaration),
+    outputs: (definition.explicit_outputs ?? inferGroupOutputs(definition, nodeSpecById)).map(portToDslDeclaration),
+    params: promotions.map(promotionToParamDeclaration),
+    graph: { nodes, connections },
+  };
+};
+
+const runtimeIdForCustomDefinition = (definition: DslCustomNodeDefinition): string =>
+  definition.kind === 'group' ? `group::${pascalToSnake(definition.name)}` : pascalToSnake(definition.name);
+
+const collectReachableCustomDefinitionIds = (
+  nodes: Map<string, NodeInstance>,
+  groupDefinitions: SerializableGroupDefinition[],
+  customNodes: Map<string, DslCustomNodeDefinition> | undefined,
+): Set<string> => {
+  const reachable = new Set<string>();
+  const groupById = new Map(groupDefinitions.map(definition => [definition.id, definition]));
+  const customByRuntimeId = new Map<string, DslCustomNodeDefinition>();
+  for (const definition of customNodes?.values() ?? []) {
+    customByRuntimeId.set(runtimeIdForCustomDefinition(definition), definition);
+  }
+
+  const visit = (typeId: string) => {
+    if (reachable.has(typeId)) return;
+    if (!typeId.startsWith('group::') && !customByRuntimeId.has(typeId)) return;
+    reachable.add(typeId);
+
+    const runtimeGroup = groupById.get(typeId);
+    for (const internal of runtimeGroup?.internal_graph.nodes ?? []) {
+      visit(internal.type_id);
+    }
+
+    const customDefinition = customByRuntimeId.get(typeId);
+    if (customDefinition?.kind === 'group') {
+      for (const internal of customDefinition.graph.nodes.values()) {
+        visit(internal.nodeTypeId);
+      }
+    }
+  };
+
+  for (const node of nodes.values()) {
+    visit(node.typeId);
+  }
+
+  return reachable;
 };
 
 const GPU_SCRIPT_DEFAULT_DISPLAY_NAME = 'GPU Script';
@@ -339,12 +617,53 @@ export function serializeGraph(input: SerializerInput): string {
   const { nodes, connections, nodeSpecs, handleMap } = input;
   if (nodes.size === 0) return '';
   const nodeSpecById = new Map(nodeSpecs.map((spec) => [spec.id, spec]));
+  const reachableCustomDefinitionIds = input.pruneUnusedCustomDefinitions
+    ? collectReachableCustomDefinitionIds(nodes, input.groupDefinitions ?? [], input.customNodes)
+    : null;
+  const customDefinitionNameByRuntimeId = new Map<string, string>();
+  const usedDefinitionNames = new Set<string>();
+  for (const entry of input.customDefinitionNames ?? []) {
+    customDefinitionNameByRuntimeId.set(entry.runtimeId, entry.name);
+  }
+  const activeCustomNodes = new Map<string, DslCustomNodeDefinition>();
+  for (const definition of input.customNodes?.values() ?? []) {
+    const runtimeId = runtimeIdForCustomDefinition(definition);
+    if (reachableCustomDefinitionIds && !reachableCustomDefinitionIds.has(runtimeId)) continue;
+    activeCustomNodes.set(runtimeId, definition);
+    usedDefinitionNames.add(definition.name);
+    customDefinitionNameByRuntimeId.set(runtimeId, definition.name);
+  }
+
+  const liftedGroupDefs = new Map<string, DslGroupDefinition>();
+  for (const definition of input.groupDefinitions ?? []) {
+    if (definition.is_builtin) continue;
+    if (reachableCustomDefinitionIds && !reachableCustomDefinitionIds.has(definition.id)) continue;
+    if (activeCustomNodes.has(definition.id)) continue;
+    const name = definitionNameForGroup(definition, customDefinitionNameByRuntimeId, usedDefinitionNames);
+    customDefinitionNameByRuntimeId.set(definition.id, name);
+    liftedGroupDefs.set(definition.id, runtimeGroupDefinitionToDsl(definition, name, nodeSpecById, customDefinitionNameByRuntimeId));
+  }
 
   // Collect gpu_script node definitions to lift into top-level blocks
   const liftedGpuDefs = new Map<string, DslGpuDefinition>();
   let gpuNodeCounter = 0;
 
-  const orderedNodes = topologicalOrder(nodes, connections, handleMap);
+  const customHandleBaseForNode = (node: NodeInstance): string | null => {
+    const customName = customDefinitionNameByRuntimeId.get(node.typeId);
+    if (!customName) return null;
+    const existingHandle = handleMap.getHandle(node.id);
+    if (existingHandle && /^user\d+$/.test(existingHandle)) {
+      handleMap.removeByNodeId(node.id);
+    }
+    return displayNameToHandleBase(customName);
+  };
+
+  for (const node of nodes.values()) {
+    const base = customHandleBaseForNode(node);
+    if (base) handleMap.getOrCreateWithBase(node.id, base);
+  }
+
+  const orderedNodes = topologicalOrder(nodes, connections, handleMap, customHandleBaseForNode);
 
   const nodeLines = orderedNodes.map((node) => {
     // gpu_script nodes: lift to a top-level `node Name = gpu { ... }` definition
@@ -380,11 +699,12 @@ export function serializeGraph(input: SerializerInput): string {
       }
     }
 
-    const handle = handleMap.getOrCreate(node.id, node.typeId);
+    const customDefinitionName = customDefinitionNameByRuntimeId.get(node.typeId);
+    const handle = customDefinitionName
+      ? handleMap.getOrCreateWithBase(node.id, displayNameToHandleBase(customDefinitionName))
+      : handleMap.getOrCreate(node.id, node.typeId);
     const spec = nodeSpecById.get(node.typeId);
-    const rawId = spec ? spec.id : node.typeId;
-    const strippedId = rawId.replace(/^gpu_kernel::/, '');
-    const typeName = snakeToPascal(strippedId);
+    const typeName = customDefinitionName ?? typeNameForNodeTypeId(spec ? spec.id : node.typeId, nodeSpecById, customDefinitionNameByRuntimeId);
 
     const params: string[] = formatVirtualAssetParamEntries(node, spec);
     if (spec) {
@@ -421,8 +741,9 @@ export function serializeGraph(input: SerializerInput): string {
 
   // Merge lifted gpu_script definitions with any explicit customNodes
   const allDefs = new Map<string, DslCustomNodeDefinition>([
+    ...liftedGroupDefs,
     ...liftedGpuDefs,
-    ...(input.customNodes ?? new Map()),
+    ...activeCustomNodes,
   ]);
   if (allDefs.size === 0) return graphBlock;
 

@@ -1,4 +1,4 @@
-import type { Connection, NodeInstance, NodeSpec, ParamDefault, ParamSpec, ParamValue, PortSpec, TransactionOptions, DiagnosticItem } from '../../store/types';
+import type { Connection, DslShadowCustomDefinitionName, NodeInstance, NodeSpec, ParamDefault, ParamSpec, ParamValue, PortSpec, TransactionOptions, DiagnosticItem } from '../../store/types';
 import { createParamValue, isConnectableParam } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
 import { autoLayoutGraph } from '../autoLayout';
@@ -20,7 +20,7 @@ export type ApplyResult =
   | { success: true; evalErrors?: DiagnosticItem[] }
   | { success: false; error: string };
 export type ApplyDslResult =
-  | { success: true; updatedDsl: string; evalErrors?: DiagnosticItem[]; sourceMap?: DslSourceMap }
+  | { success: true; updatedDsl: string; evalErrors?: DiagnosticItem[]; sourceMap?: DslSourceMap; customDefinitionNames?: DslShadowCustomDefinitionName[] }
   | { success: false; errors: (ParseError | ValidationError)[] };
 
 export interface ParseError {
@@ -224,7 +224,7 @@ const emptyInternalNode = (id: string, typeId: string) => ({
   input_defaults: {},
 });
 
-const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition) => {
+const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition, runtimeIdOverride?: string) => {
   const spec = customDefinitionToNodeSpec(definition);
   const paramSpecByKey = new Map(spec.params.map(param => [param.key, param]));
   const nodes = [
@@ -264,7 +264,7 @@ const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition) => {
   );
 
   return {
-    id: spec.id,
+    id: runtimeIdOverride ?? spec.id,
     name: spec.display_name,
     category: spec.category,
     description: spec.description,
@@ -284,9 +284,36 @@ const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition) => {
   };
 };
 
+const inferCustomDefinitionNames = (
+  ast: DslAst,
+  currentNodes: Map<string, NodeInstance>,
+  handleMap: HandleMap,
+  existing: DslShadowCustomDefinitionName[] = [],
+): {
+  names: DslShadowCustomDefinitionName[];
+  groupRuntimeIdByDefinitionName: Map<string, string>;
+} => {
+  const namesByRuntimeId = new Map(existing.map(entry => [entry.runtimeId, entry.name]));
+  const groupRuntimeIdByDefinitionName = new Map<string, string>();
+  for (const node of ast.nodes.values()) {
+    const nodeId = handleMap.getNodeId(node.handle);
+    const currentNode = nodeId ? currentNodes.get(nodeId) : undefined;
+    if (!currentNode?.typeId.startsWith('group::')) continue;
+    const definition = ast.customNodes?.get(node.nodeType);
+    if (definition?.kind !== 'group') continue;
+    groupRuntimeIdByDefinitionName.set(definition.name, currentNode.typeId);
+    namesByRuntimeId.set(currentNode.typeId, definition.name);
+  }
+  return {
+    names: Array.from(namesByRuntimeId.entries()).map(([runtimeId, name]) => ({ runtimeId, name })),
+    groupRuntimeIdByDefinitionName,
+  };
+};
+
 const registerCustomDefinitions = async (
   ast: DslAst,
   gpuScriptInstances: Map<string, string>,
+  groupRuntimeIdByDefinitionName: Map<string, string> = new Map(),
 ): Promise<ValidationError[]> => {
   const errors: ValidationError[] = [];
   const definitions = ast.customNodes ? Array.from(ast.customNodes.values()) : [];
@@ -296,7 +323,10 @@ const registerCustomDefinitions = async (
     if (definition.kind === 'gpu' && gpuScriptInstances.has(definition.name)) continue;
     const spec = definition.kind === 'gpu'
       ? await store.registerGpuKernel(JSON.stringify(gpuDefinitionToManifest(definition)))
-      : await store.registerGroupDefinition(JSON.stringify(groupDefinitionToRuntimeJson(definition)));
+      : await store.registerGroupDefinition(JSON.stringify(groupDefinitionToRuntimeJson(
+          definition,
+          groupRuntimeIdByDefinitionName.get(definition.name),
+        )));
     if (!spec) {
       errors.push({
         line: definition.line,
@@ -595,6 +625,12 @@ export const applyDsl = async (
 
   // Identify which gpu definitions map to existing gpu_script node instances
   const gpuScriptInstances = findGpuScriptInstanceMap(parseResult.ast, currentNodes, handleMap);
+  const customDefinitionNameResolution = inferCustomDefinitionNames(
+    parseResult.ast,
+    currentNodes,
+    handleMap,
+    useGraphStore.getState().dslShadow?.customDefinitionNames,
+  );
 
   // Recompile existing instances with the updated definition (ports + code)
   const instanceErrors = await recompileGpuScriptInstances(parseResult.ast, gpuScriptInstances, currentNodes);
@@ -603,7 +639,11 @@ export const applyDsl = async (
   }
 
   // Register truly new named kernels and group definitions (not existing instances)
-  const customDefinitionErrors = await registerCustomDefinitions(parseResult.ast, gpuScriptInstances);
+  const customDefinitionErrors = await registerCustomDefinitions(
+    parseResult.ast,
+    gpuScriptInstances,
+    customDefinitionNameResolution.groupRuntimeIdByDefinitionName,
+  );
   if (customDefinitionErrors.length > 0) {
     return { success: false, errors: customDefinitionErrors };
   }
@@ -618,6 +658,9 @@ export const applyDsl = async (
     nodes: nodesForDiff,
     connections: connectionsForDiff,
     nodeSpecs: validationSpecs,
+    groupDefinitions: storeAfterCompile.customGroupDefinitions,
+    customDefinitionNames: customDefinitionNameResolution.names,
+    pruneUnusedCustomDefinitions: true,
   });
   const reparsedCurrent = parseDsl(currentDsl, validationSpecs, parseContext);
   if (reparsedCurrent.errors.length > 0 || !reparsedCurrent.ast) {
@@ -651,7 +694,16 @@ export const applyDsl = async (
     connections: store.connections,
     nodeSpecs: store.nodeSpecs.length > 0 ? store.nodeSpecs : validationSpecs,
     customNodes: parseResult.ast.customNodes,
+    groupDefinitions: store.customGroupDefinitions,
+    customDefinitionNames: customDefinitionNameResolution.names,
+    pruneUnusedCustomDefinitions: true,
   });
 
-  return { success: true, updatedDsl, evalErrors: applyResult.evalErrors, sourceMap: parseResult.sourceMap };
+  return {
+    success: true,
+    updatedDsl,
+    evalErrors: applyResult.evalErrors,
+    sourceMap: parseResult.sourceMap,
+    customDefinitionNames: customDefinitionNameResolution.names,
+  };
 };

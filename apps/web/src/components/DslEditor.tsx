@@ -39,9 +39,9 @@ const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
  * Returns empty string when specs/nodes aren't ready yet.
  */
 function serializeCurrent(): string {
-  const { nodes, connections, nodeSpecs, dslShadow } = useGraphStore.getState();
+  const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = useGraphStore.getState();
   if (nodeSpecs.length === 0 || nodes.size === 0) return '';
-  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections)) {
+  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections, customGroupDefinitions)) {
     return dslShadow.text;
   }
   return serializeGraph({
@@ -49,6 +49,9 @@ function serializeCurrent(): string {
     connections,
     nodeSpecs,
     handleMap: handleMapFromShadow(nodes, dslShadow),
+    groupDefinitions: customGroupDefinitions,
+    customDefinitionNames: dslShadow?.customDefinitionNames,
+    pruneUnusedCustomDefinitions: true,
   });
 }
 
@@ -350,6 +353,7 @@ export const DslEditor: React.FC = () => {
           handleMap,
           appliedParse.ast,
           result.sourceMap ?? appliedParse.sourceMap,
+          result.customDefinitionNames,
         );
         // Show eval errors as warning markers if the render produced errors
         if (result.evalErrors && result.evalErrors.length > 0) {
@@ -427,19 +431,22 @@ export const DslEditor: React.FC = () => {
     let prevNodes = useGraphStore.getState().nodes;
     let prevConnections = useGraphStore.getState().connections;
     let prevNodeSpecs = useGraphStore.getState().nodeSpecs;
+    let prevCustomGroupDefinitions = useGraphStore.getState().customGroupDefinitions;
 
     const unsubscribe = useGraphStore.subscribe((state) => {
       // Only act when the relevant slices actually changed
       if (
         state.nodes === prevNodes &&
         state.connections === prevConnections &&
-        state.nodeSpecs === prevNodeSpecs
+        state.nodeSpecs === prevNodeSpecs &&
+        state.customGroupDefinitions === prevCustomGroupDefinitions
       ) {
         return;
       }
       prevNodes = state.nodes;
       prevConnections = state.connections;
       prevNodeSpecs = state.nodeSpecs;
+      prevCustomGroupDefinitions = state.customGroupDefinitions;
 
       const editor = editorRef.current;
       if (!editor) return;
@@ -447,10 +454,10 @@ export const DslEditor: React.FC = () => {
       // Don't re-serialize when the change originated from the DSL editor itself
       if (state.lastTransactionOrigin === 'dsl') return;
 
-      const { nodes, connections, nodeSpecs, dslShadow } = state;
+      const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = state;
       if (nodeSpecs.length === 0 || nodes.size === 0) return;
 
-      const graphHash = graphSemanticHash(nodes, connections);
+      const graphHash = graphSemanticHash(nodes, connections, customGroupDefinitions);
       const handleMap = handleMapFromShadow(nodes, dslShadow);
       const serializedDsl = dslShadow?.status === 'valid' && dslShadow.graphHash === graphHash
         ? dslShadow.text
@@ -459,6 +466,9 @@ export const DslEditor: React.FC = () => {
             connections,
             nodeSpecs,
             handleMap,
+            groupDefinitions: customGroupDefinitions,
+            customDefinitionNames: dslShadow?.customDefinitionNames,
+            pruneUnusedCustomDefinitions: true,
           });
       const serializedParse = parseDsl(serializedDsl, nodeSpecs, { currentNodes: nodes, handleMap });
       const reconciledDsl = dslShadow?.text && dslShadow.graphHash !== graphHash
@@ -480,6 +490,8 @@ export const DslEditor: React.FC = () => {
             text: newDsl,
             nodes,
             connections,
+            customGroupDefinitions,
+            customDefinitionNames: dslShadow?.customDefinitionNames,
             graphRevision: state.graphRevision,
             handleMap,
             ast: parseResult.ast,

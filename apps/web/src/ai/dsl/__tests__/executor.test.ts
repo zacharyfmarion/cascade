@@ -56,6 +56,7 @@ const createInitialState = () => ({
   nodeTimings: new Map(),
   nodeErrors: new Map(),
   dslShadow: null,
+  customGroupDefinitions: [],
   graphRevision: 0,
   lastTransactionOrigin: null,
 });
@@ -195,6 +196,7 @@ describe('applyDsl', () => {
     );
 
     expect(result.success).toBe(true);
+    if (!result.success) throw new Error('Expected applyDsl to succeed');
     expect(registerGroupDefinition).toHaveBeenCalledOnce();
     const definition = JSON.parse(registerGroupDefinition.mock.calls[0]?.[0] ?? '{}') as {
       id?: string;
@@ -205,6 +207,76 @@ describe('applyDsl', () => {
       { group_param_key: 'amount', internal_node_id: 'blur', internal_param_key: 'amount' },
     ]);
     expect(useGraphStore.getState().nodes.get(handleMap.getNodeId('blur1') ?? '')?.typeId).toBe('group::soft_blur');
+  });
+
+  it('treats a DSL group definition rename as a rename of the existing runtime group', async () => {
+    const store = useGraphStore.getState();
+    await store.registerGroupDefinition(JSON.stringify({
+      id: 'group::user_mock',
+      name: 'Node Group',
+      category: 'User',
+      description: 'User-defined group',
+      internal_graph: {
+        nodes: [
+          { id: 'blur', type_id: 'gaussian_blur', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'blur', to_port: 'image' },
+          { from_node: 'blur', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    }));
+    const groupNodeId = await useGraphStore.getState().addNode('group::user_mock', { x: 0, y: 0 });
+    const handleMap = new HandleMap();
+    handleMap.set('node_group1', groupNodeId);
+    const registerGroupDefinition = vi.spyOn(mockEngine as EngineBridge, 'registerGroupDefinition');
+
+    const result = await applyDsl(
+      [
+        'node CloudyAdjustment = group {',
+        '  inputs {',
+        '    image image',
+        '  }',
+        '',
+        '  outputs {',
+        '    image image',
+        '  }',
+        '',
+        '  graph {',
+        '    blur = GaussianBlur()',
+        '    input.image -> blur.image',
+        '    blur.image -> output.image',
+        '  }',
+        '}',
+        '',
+        'graph {',
+        '  node_group1 = CloudyAdjustment()',
+        '}',
+      ].join('\n'),
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error('Expected applyDsl to succeed');
+    expect(registerGroupDefinition).toHaveBeenCalledOnce();
+    const definition = JSON.parse(registerGroupDefinition.mock.calls[0]?.[0] ?? '{}') as { id?: string; name?: string };
+    expect(definition.id).toBe('group::user_mock');
+    expect(definition.name).toBe('Cloudy Adjustment');
+    expect(useGraphStore.getState().nodes.get(groupNodeId)?.typeId).toBe('group::user_mock');
+    expect(useGraphStore.getState().nodeSpecs.find(spec => spec.id === 'group::user_mock')?.display_name).toBe('Cloudy Adjustment');
+    expect(result.customDefinitionNames).toContainEqual({
+      runtimeId: 'group::user_mock',
+      name: 'CloudyAdjustment',
+    });
   });
 });
 

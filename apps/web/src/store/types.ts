@@ -149,6 +149,44 @@ export interface Connection {
   toPort: string;
 }
 
+export interface SerializableInternalNode {
+  id: string;
+  type_id: string;
+  params?: Record<string, ParamValue>;
+  input_defaults?: Record<string, ParamValue>;
+  position?: [number, number] | { x: number; y: number };
+  muted?: boolean;
+}
+
+export interface SerializableInternalConnection {
+  from_node: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+}
+
+export interface SerializablePromotion {
+  group_param_key: string;
+  internal_node_id: string;
+  internal_param_key: string;
+  spec: ParamSpec;
+}
+
+export interface SerializableGroupDefinition {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  internal_graph: {
+    nodes: SerializableInternalNode[];
+    connections: SerializableInternalConnection[];
+  };
+  promotions?: SerializablePromotion[];
+  is_builtin?: boolean;
+  explicit_inputs?: PortSpec[] | null;
+  explicit_outputs?: PortSpec[] | null;
+}
+
 // Render result from engine — discriminated union over all value types
 export type ViewerResult =
   | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }

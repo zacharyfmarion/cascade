@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { DslShadowDocument } from '../../types';
+import type { DslShadowCustomDefinitionName, DslShadowDocument } from '../../types';
 import { buildDslShadowFromText, graphSemanticHash, handleMapFromShadow, reconcileDslShadowText } from '../../../ai/dsl/shadow';
 import { serializeGraph } from '../../../ai/dsl/serializer';
 import { parseDsl } from '../../../ai/dsl/parser';
@@ -18,6 +18,7 @@ export interface DslSliceActions {
     handleMap: HandleMap,
     ast: DslAst | null,
     sourceMap?: DslSourceMap,
+    customDefinitionNames?: DslShadowCustomDefinitionName[],
   ) => void;
   refreshDslShadowFromGraph: (reason?: string) => void;
   clearDslShadow: () => void;
@@ -35,13 +36,15 @@ export const createDslSlice: StateCreator<
 
   getDslShadow: () => get().dslShadow,
 
-  setDslShadowFromEditor: (text, handleMap, ast, sourceMap) => {
+  setDslShadowFromEditor: (text, handleMap, ast, sourceMap, customDefinitionNames) => {
     const state = get();
     set({
       dslShadow: buildDslShadowFromText({
         text,
         nodes: state.nodes,
         connections: state.connections,
+        customGroupDefinitions: state.customGroupDefinitions,
+        customDefinitionNames: customDefinitionNames ?? state.dslShadow?.customDefinitionNames,
         graphRevision: state.graphRevision,
         handleMap,
         ast,
@@ -58,6 +61,9 @@ export const createDslSlice: StateCreator<
       connections: state.connections,
       nodeSpecs: state.nodeSpecs,
       handleMap,
+      groupDefinitions: state.customGroupDefinitions,
+      customDefinitionNames: state.dslShadow?.customDefinitionNames,
+      pruneUnusedCustomDefinitions: true,
       customNodes: state.dslShadow?.status === 'valid'
         ? parseDsl(state.dslShadow.text, state.nodeSpecs, { currentNodes: state.nodes, handleMap }).ast?.customNodes
         : undefined,
@@ -79,6 +85,8 @@ export const createDslSlice: StateCreator<
         text,
         nodes: state.nodes,
         connections: state.connections,
+        customGroupDefinitions: state.customGroupDefinitions,
+        customDefinitionNames: state.dslShadow?.customDefinitionNames,
         graphRevision: state.graphRevision,
         handleMap,
         ast: parseResult.ast,
@@ -96,9 +104,10 @@ export const markDslShadowForGraphChange = (
   shadow: DslShadowDocument | null,
   nodes: GraphState['nodes'],
   connections: GraphState['connections'],
+  customGroupDefinitions: GraphState['customGroupDefinitions'] = [],
 ): DslShadowDocument | null => {
   if (!shadow) return null;
-  const graphHash = graphSemanticHash(nodes, connections);
+  const graphHash = graphSemanticHash(nodes, connections, customGroupDefinitions);
   if (shadow.graphHash === graphHash) return shadow;
   return { ...shadow, graphHash, status: 'stale' };
 };

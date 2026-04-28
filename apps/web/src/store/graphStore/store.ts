@@ -22,6 +22,7 @@ import type {
   ParamValue,
   ViewerResult,
   EditingContext,
+  SerializableGroupDefinition,
 
   Frame,
   TransactionOptions,
@@ -106,6 +107,7 @@ export interface GraphState {
   nodeTimings: Map<string, number>;
   nodeErrors: Map<string, EngineError>;
   dslShadow: DslShadowDocument | null;
+  customGroupDefinitions: SerializableGroupDefinition[];
   aiNodeStatuses: Record<string, string>;
   aiNodeStale: Record<string, boolean>;
   refreshAiNodeStale: () => void;

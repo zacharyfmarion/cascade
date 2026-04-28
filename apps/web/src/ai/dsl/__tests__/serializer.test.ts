@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { serializeGraph, serializeCustomDefinition, type SerializerInput } from '../serializer';
 import { HandleMap } from '../handleMap';
-import type { Connection, NodeInstance, NodeSpec } from '../../../store/types';
+import type { Connection, NodeInstance, NodeSpec, SerializableGroupDefinition } from '../../../store/types';
 import type {
   DslConnection,
   DslGroupDefinition,
@@ -103,6 +103,50 @@ const loaderSpecs: NodeSpec[] = [
   },
 ];
 
+const glowSpec: NodeSpec = {
+  id: 'gpu_kernel::glow',
+  display_name: 'Glow',
+  category: 'GPU',
+  description: 'Adds glow',
+  inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  params: [
+    {
+      key: 'threshold',
+      label: 'Threshold',
+      ty: 'Float',
+      default: { Float: 0.5 },
+      min: 0,
+      max: 1,
+      step: 0.01,
+      ui_hint: { type: 'Slider' },
+      promotable: true,
+    },
+    {
+      key: 'radius',
+      label: 'Radius',
+      ty: 'Float',
+      default: { Float: 4 },
+      min: 0,
+      max: 64,
+      step: 0.1,
+      ui_hint: { type: 'Slider' },
+      promotable: true,
+    },
+    {
+      key: 'intensity',
+      label: 'Intensity',
+      ty: 'Float',
+      default: { Float: 1 },
+      min: 0,
+      max: 4,
+      step: 0.01,
+      ui_hint: { type: 'Slider' },
+      promotable: true,
+    },
+  ],
+};
+
 describe('serializeGraph', () => {
   it('serializes empty graph to empty string', () => {
     const input = buildInput(new Map(), []);
@@ -114,6 +158,72 @@ describe('serializeGraph', () => {
     nodes.set('node-1', makeNodeInstance({ id: 'node-1', typeId: 'viewer' }));
     const output = serializeGraph(buildInput(nodes, []));
     expect(output).toBe(graph(['viewer1 = Viewer()']));
+  });
+
+  it('serializes runtime group definitions created from selected nodes', () => {
+    const specs: NodeSpec[] = [
+      ...mockSpecs,
+      glowSpec,
+      {
+        id: 'group::user_123',
+        display_name: 'Node Group',
+        category: 'User',
+        description: 'User-defined group',
+        inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [],
+      },
+    ];
+    const nodes = new Map<string, NodeInstance>([
+      ['load-node', makeNodeInstance({ id: 'load-node', typeId: 'load_image' })],
+      ['group-node', makeNodeInstance({ id: 'group-node', typeId: 'group::user_123' })],
+      ['viewer-node', makeNodeInstance({ id: 'viewer-node', typeId: 'viewer' })],
+    ]);
+    const connections: Connection[] = [
+      { id: 'c1', fromNode: 'load-node', fromPort: 'image', toNode: 'group-node', toPort: 'image' },
+      { id: 'c2', fromNode: 'group-node', fromPort: 'image', toNode: 'viewer-node', toPort: 'image' },
+    ];
+    const groupDefinition: SerializableGroupDefinition = {
+      id: 'group::user_123',
+      name: 'Node Group',
+      category: 'User',
+      description: 'User-defined group',
+      internal_graph: {
+        nodes: [
+          { id: 'pixelate1', type_id: 'gpu_kernel::pixelate', params: { pixel_size: { Int: 2 } }, input_defaults: {}, position: [0, 0] },
+          { id: 'glow1', type_id: 'gpu_kernel::glow', params: { threshold: { Float: 0.28 }, radius: { Float: 12 }, intensity: { Float: 0.62 } }, input_defaults: {}, position: [200, 0] },
+          { id: 'gi', type_id: 'group_input', params: {}, input_defaults: {}, position: [-200, 0] },
+          { id: 'go', type_id: 'group_output', params: {}, input_defaults: {}, position: [400, 0] },
+        ],
+        connections: [
+          { from_node: 'gi', from_port: 'image', to_node: 'pixelate1', to_port: 'image' },
+          { from_node: 'pixelate1', from_port: 'image', to_node: 'glow1', to_port: 'image' },
+          { from_node: 'glow1', from_port: 'image', to_node: 'go', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: null,
+      explicit_outputs: null,
+    };
+
+    const output = serializeGraph({
+      nodes,
+      connections,
+      nodeSpecs: specs,
+      handleMap: new HandleMap(),
+      groupDefinitions: [groupDefinition],
+    });
+
+    expect(output).toContain('node NodeGroup = group {');
+    expect(output).toContain('inputs {\n    image image\n  }');
+    expect(output).toContain('outputs {\n    image image\n  }');
+    expect(output).toContain('pixelate1 = Pixelate(pixel_size: 2)');
+    expect(output).toContain('glow1 = Glow(threshold: 0.28, radius: 12.0, intensity: 0.62)');
+    expect(output).toContain('input.image -> pixelate1.image');
+    expect(output).toContain('glow1.image -> output.image');
+    expect(output).toContain('node_group1 = NodeGroup()');
+    expect(output).not.toContain('User123');
   });
 
   it('serializes load image paths as inline asset constructors', () => {
@@ -859,6 +969,169 @@ describe('serializeGraph with customNodes', () => {
     };
     const output = serializeGraph(input);
     expect(output.startsWith('graph {')).toBe(true);
+  });
+
+  it('prunes stale group definitions after a DSL group rename', () => {
+    const activeGroup = minimalGroup();
+    activeGroup.name = 'CurvesGroup';
+    const staleGroup = minimalGroup();
+    staleGroup.name = 'NodeGroup';
+
+    const runtimeActive: SerializableGroupDefinition = {
+      id: 'group::curves_group',
+      name: 'Curves Group',
+      category: 'Custom',
+      description: 'Active renamed group',
+      internal_graph: {
+        nodes: [
+          { id: 'curves1', type_id: 'curves', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'curves1', to_port: 'image' },
+          { from_node: 'curves1', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+    const runtimeStale: SerializableGroupDefinition = {
+      ...runtimeActive,
+      id: 'group::user_old',
+      name: 'Node Group',
+      description: 'Stale pre-rename group',
+    };
+    const nodes = new Map<string, NodeInstance>([
+      ['group-node', makeNodeInstance({ id: 'group-node', typeId: 'group::curves_group' })],
+    ]);
+    const output = serializeGraph({
+      nodes,
+      connections: [],
+      nodeSpecs: mockSpecs,
+      handleMap: new HandleMap(),
+      groupDefinitions: [runtimeStale, runtimeActive],
+      customNodes: new Map([
+        ['NodeGroup', staleGroup],
+        ['CurvesGroup', activeGroup],
+      ]),
+      customDefinitionNames: [{ runtimeId: 'group::user_old', name: 'NodeGroup' }],
+      pruneUnusedCustomDefinitions: true,
+    });
+
+    expect(output).toContain('node CurvesGroup = group {');
+    expect(output).toContain('curves_group1 = CurvesGroup()');
+    expect(output).not.toContain('node NodeGroup = group');
+    expect(output).not.toContain('node NodeGroup2 = group');
+  });
+
+  it('uses the custom group definition name for instance handles when the runtime spec is still generic', () => {
+    const runtimeGroup: SerializableGroupDefinition = {
+      id: 'group::user_123',
+      name: 'Node Group',
+      category: 'Custom',
+      description: 'Runtime group with a shadow name',
+      internal_graph: {
+        nodes: [
+          { id: 'curves1', type_id: 'curves', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'curves1', to_port: 'image' },
+          { from_node: 'curves1', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+    const staleRuntimeSpec: NodeSpec = {
+      id: 'group::user_123',
+      display_name: 'Node Group',
+      category: 'Custom',
+      description: 'Runtime group with a shadow name',
+      inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      params: [],
+    };
+    const nodes = new Map<string, NodeInstance>([
+      ['group-node', makeNodeInstance({ id: 'group-node', typeId: 'group::user_123' })],
+    ]);
+
+    const output = serializeGraph({
+      nodes,
+      connections: [],
+      nodeSpecs: [...mockSpecs, staleRuntimeSpec],
+      handleMap: new HandleMap(),
+      groupDefinitions: [runtimeGroup],
+      customDefinitionNames: [{ runtimeId: 'group::user_123', name: 'CloudyAdjustment' }],
+      pruneUnusedCustomDefinitions: true,
+    });
+
+    expect(output).toContain('node CloudyAdjustment = group {');
+    expect(output).toContain('cloudy_adjustment1 = CloudyAdjustment()');
+    expect(output).not.toContain('node_group1 = CloudyAdjustment()');
+  });
+
+  it('keeps nested group definitions that are referenced by a reachable group', () => {
+    const child: SerializableGroupDefinition = {
+      id: 'group::child_group',
+      name: 'Child Group',
+      category: 'Custom',
+      description: 'Nested group',
+      internal_graph: {
+        nodes: [
+          { id: 'curves1', type_id: 'curves', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'curves1', to_port: 'image' },
+          { from_node: 'curves1', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    };
+    const parent: SerializableGroupDefinition = {
+      ...child,
+      id: 'group::parent_group',
+      name: 'Parent Group',
+      description: 'Reachable parent group',
+      internal_graph: {
+        nodes: [
+          { id: 'child1', type_id: 'group::child_group', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [
+          { from_node: 'input', from_port: 'image', to_node: 'child1', to_port: 'image' },
+          { from_node: 'child1', from_port: 'image', to_node: 'output', to_port: 'image' },
+        ],
+      },
+    };
+    const nodes = new Map<string, NodeInstance>([
+      ['group-node', makeNodeInstance({ id: 'group-node', typeId: 'group::parent_group' })],
+    ]);
+    const output = serializeGraph({
+      nodes,
+      connections: [],
+      nodeSpecs: mockSpecs,
+      handleMap: new HandleMap(),
+      groupDefinitions: [child, parent],
+      pruneUnusedCustomDefinitions: true,
+    });
+
+    expect(output).toContain('node ChildGroup = group {');
+    expect(output).toContain('node ParentGroup = group {');
+    expect(output).toContain('child1 = ChildGroup()');
+    expect(output).toContain('parent_group1 = ParentGroup()');
   });
 });
 

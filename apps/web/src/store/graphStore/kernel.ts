@@ -8,6 +8,7 @@ import type {
   EditingContext,
   GroupInternalGraph,
   Frame,
+  SerializableGroupDefinition,
 } from '../types';
 import { isPixelResult } from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
@@ -165,6 +166,7 @@ export type GraphConnectionData = {
 export type SerializableGraphData = {
   nodes?: GraphNodeData[];
   connections?: GraphConnectionData[];
+  group_definitions?: SerializableGroupDefinition[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -180,6 +182,13 @@ export const extractGraphData = (value: unknown): SerializableGraphData => {
     return isRecord(value.graph) ? value.graph as SerializableGraphData : {};
   }
   return isRecord(value) ? value as SerializableGraphData : {};
+};
+
+export const extractCustomGroupDefinitions = (value: unknown): SerializableGroupDefinition[] => {
+  const graph = extractGraphData(value);
+  return Array.isArray(graph.group_definitions)
+    ? graph.group_definitions.filter(definition => !definition.is_builtin)
+    : [];
 };
 
 export const extractFrames = (value: unknown): Frame[] => {

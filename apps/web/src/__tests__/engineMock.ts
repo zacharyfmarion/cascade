@@ -1,5 +1,5 @@
 import type { EngineBridge, AddNodeResult, NodeInterfaceChange } from '../engine/bridge';
-import type { GroupInternalGraph, InternalGraphNode, NodeSpec, ParamValue, ViewerResult } from '../store/types';
+import type { GroupInternalGraph, InternalGraphNode, NodeSpec, ParamValue, SerializableGroupDefinition, ViewerResult } from '../store/types';
 import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec, parseGpuScriptManifestJson } from '../ai/gpuScript';
 
 const NODE_SPECS: NodeSpec[] = [
@@ -190,10 +190,30 @@ export function createMockEngine(): EngineBridge & {
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
   const groupGraphs = new Map<string, GroupInternalGraph>();
+  const groupDefinitions: SerializableGroupDefinition[] = [];
   const extraSpecs: NodeSpec[] = [];
   let graphState: unknown = { nodes: [], connections: [] };
   let renderResult: ViewerResult | null = null;
   const renderCalls: string[] = [];
+
+  const syncGraphState = () => {
+    graphState = {
+      nodes: Array.from(nodes.entries()).map(([id, node]) => ({
+        id,
+        type_id: node.typeId,
+        position: [0, 0],
+        params: node.params,
+        input_defaults: {},
+      })),
+      connections: connections.map(connection => ({
+        from_node: connection.fromNode,
+        from_port: connection.fromPort,
+        to_node: connection.toNode,
+        to_port: connection.toPort,
+      })),
+      group_definitions: [...groupDefinitions],
+    };
+  };
 
   return {
     _nodes: nodes,
@@ -226,9 +246,11 @@ export function createMockEngine(): EngineBridge & {
         name: string;
         category: string;
         description: string;
+        internal_graph?: SerializableGroupDefinition['internal_graph'];
+        is_builtin?: boolean;
         explicit_inputs?: NodeSpec['inputs'];
         explicit_outputs?: NodeSpec['outputs'];
-        promotions?: Array<{ spec: NodeSpec['params'][number] }>;
+        promotions?: SerializableGroupDefinition['promotions'];
       };
       const spec: NodeSpec = {
         id: definition.id,
@@ -245,6 +267,44 @@ export function createMockEngine(): EngineBridge & {
       } else {
         extraSpecs.push(spec);
       }
+      const existingDef = groupDefinitions.findIndex(item => item.id === definition.id);
+      const storedDefinition: SerializableGroupDefinition = {
+        id: definition.id,
+        name: definition.name,
+        category: definition.category,
+        description: definition.description,
+        internal_graph: definition.internal_graph ?? { nodes: [], connections: [] },
+        promotions: definition.promotions,
+        is_builtin: definition.is_builtin ?? false,
+        explicit_inputs: definition.explicit_inputs ?? null,
+        explicit_outputs: definition.explicit_outputs ?? null,
+      };
+      if (existingDef >= 0) groupDefinitions[existingDef] = storedDefinition;
+      else groupDefinitions.push(storedDefinition);
+      syncGraphState();
+      return spec;
+    },
+
+    renameGroup: async (groupDefId: string, newName: string): Promise<NodeSpec> => {
+      const definition = groupDefinitions.find(item => item.id === groupDefId);
+      if (!definition) throw new Error('Group definition not found');
+      definition.name = newName;
+      const spec: NodeSpec = {
+        id: definition.id,
+        display_name: newName,
+        category: definition.category,
+        description: definition.description,
+        inputs: definition.explicit_inputs ?? [],
+        outputs: definition.explicit_outputs ?? [],
+        params: (definition.promotions ?? []).map(promotion => promotion.spec),
+      };
+      const existing = extraSpecs.findIndex(s => s.id === spec.id);
+      if (existing >= 0) {
+        extraSpecs[existing] = spec;
+      } else {
+        extraSpecs.push(spec);
+      }
+      syncGraphState();
       return spec;
     },
 
@@ -262,6 +322,7 @@ export function createMockEngine(): EngineBridge & {
         params.__script_manifest = { String: JSON.stringify(buildDefaultGpuScriptManifest(actualTypeId)) };
       }
       nodes.set(id, { typeId: actualTypeId, params });
+      syncGraphState();
       return { id, typeId: actualTypeId };
     },
 
@@ -274,15 +335,18 @@ export function createMockEngine(): EngineBridge & {
       for (let i = toRemove.length - 1; i >= 0; i--) {
         connections.splice(toRemove[i], 1);
       }
+      syncGraphState();
     },
 
     connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => {
       connections.push({ fromNode, fromPort, toNode, toPort });
+      syncGraphState();
     },
 
     disconnect: (toNode: string, toPort: string) => {
       const idx = connections.findIndex(c => c.toNode === toNode && c.toPort === toPort);
       if (idx >= 0) connections.splice(idx, 1);
+      syncGraphState();
     },
 
     setParam: (nodeId: string, key: string, value: ParamValue) => {
@@ -431,6 +495,96 @@ export function createMockEngine(): EngineBridge & {
     renderViewer: (viewerNodeId: string, _frame: number): ViewerResult | null => {
       renderCalls.push(viewerNodeId);
       return renderResult;
+    },
+
+    createGroupFromNodes: async (nodeIds: string[], name: string) => {
+      const groupDefinitionId = 'group::user_mock';
+      const groupNodeId = `node-${++nodeCounter}`;
+      const selected = new Set(nodeIds);
+      const internalConnections = connections
+        .filter(connection => selected.has(connection.fromNode) && selected.has(connection.toNode))
+        .map(connection => ({
+          from_node: connection.fromNode,
+          from_port: connection.fromPort,
+          to_node: connection.toNode,
+          to_port: connection.toPort,
+        }));
+      const incoming = connections.filter(connection => !selected.has(connection.fromNode) && selected.has(connection.toNode));
+      const outgoing = connections.filter(connection => selected.has(connection.fromNode) && !selected.has(connection.toNode));
+      const inputs = incoming.map(connection => ({ name: connection.toPort, label: connection.toPort, ty: 'Image' as const }));
+      const outputs = outgoing.map(connection => ({ name: connection.fromPort, label: connection.fromPort, ty: 'Image' as const }));
+      for (const connection of incoming) {
+        internalConnections.push({
+          from_node: 'gi',
+          from_port: connection.toPort,
+          to_node: connection.toNode,
+          to_port: connection.toPort,
+        });
+      }
+      for (const connection of outgoing) {
+        internalConnections.push({
+          from_node: connection.fromNode,
+          from_port: connection.fromPort,
+          to_node: 'go',
+          to_port: connection.fromPort,
+        });
+      }
+      const definition: SerializableGroupDefinition = {
+        id: groupDefinitionId,
+        name,
+        category: 'User',
+        description: 'User-defined group',
+        internal_graph: {
+          nodes: [
+            ...nodeIds.flatMap(id => {
+              const node = nodes.get(id);
+              return node ? [{
+                id,
+                type_id: node.typeId,
+                params: node.params,
+                input_defaults: {},
+                position: [0, 0] as [number, number],
+              }] : [];
+            }),
+            { id: 'gi', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+            { id: 'go', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+          ],
+          connections: internalConnections,
+        },
+        promotions: [],
+        is_builtin: false,
+        explicit_inputs: null,
+        explicit_outputs: null,
+      };
+      groupDefinitions.splice(0, groupDefinitions.length, definition);
+      const newSpec: NodeSpec = {
+        id: groupDefinitionId,
+        display_name: name,
+        category: 'User',
+        description: 'User-defined group',
+        inputs,
+        outputs,
+        params: [],
+      };
+      extraSpecs.push(newSpec);
+      for (const id of nodeIds) nodes.delete(id);
+      connections.splice(0, connections.length, ...[
+        ...incoming.map(connection => ({
+          fromNode: connection.fromNode,
+          fromPort: connection.fromPort,
+          toNode: groupNodeId,
+          toPort: connection.toPort,
+        })),
+        ...outgoing.map(connection => ({
+          fromNode: groupNodeId,
+          fromPort: connection.fromPort,
+          toNode: connection.toNode,
+          toPort: connection.toPort,
+        })),
+      ]);
+      nodes.set(groupNodeId, { typeId: groupDefinitionId, params: {} });
+      syncGraphState();
+      return { groupDefinitionId, groupNodeId, removedNodeIds: nodeIds, newSpec };
     },
 
     exportGraph: () => graphState,

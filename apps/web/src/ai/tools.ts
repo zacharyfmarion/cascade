@@ -20,8 +20,8 @@ export { resetSharedHandleMap as resetHandleMap } from './dsl/instance';
 
 
 function getCurrentDsl(): string {
-  const { nodes, connections, nodeSpecs, dslShadow } = useGraphStore.getState();
-  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections)) {
+  const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = useGraphStore.getState();
+  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections, customGroupDefinitions)) {
     return dslShadow.text;
   }
   return serializeGraph({
@@ -29,6 +29,9 @@ function getCurrentDsl(): string {
     connections,
     nodeSpecs,
     handleMap: handleMapFromShadow(nodes, dslShadow),
+    groupDefinitions: customGroupDefinitions,
+    customDefinitionNames: dslShadow?.customDefinitionNames,
+    pruneUnusedCustomDefinitions: true,
   });
 }
 

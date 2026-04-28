@@ -73,6 +73,7 @@ const createInitialState = () => ({
   nodeTimings: new Map(),
   nodeErrors: new Map(),
   dslShadow: null,
+  customGroupDefinitions: [],
   graphRevision: 0,
   lastTransactionOrigin: null,
 });

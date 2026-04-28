@@ -67,8 +67,8 @@ export const createProjectSlice: StateCreator<
     const shadow = state.dslShadow;
     if (!shadow || shadow.status !== 'valid') return undefined;
     if (
-      shadow.graphHash !== graphSemanticHash(state.nodes, state.connections)
-      && !dslShadowMatchesGraph(shadow, state.nodes, state.connections, state.nodeSpecs)
+      shadow.graphHash !== graphSemanticHash(state.nodes, state.connections, state.customGroupDefinitions)
+      && !dslShadowMatchesGraph(shadow, state.nodes, state.connections, state.nodeSpecs, state.customGroupDefinitions)
     ) {
       return undefined;
     }
@@ -97,6 +97,7 @@ export const createProjectSlice: StateCreator<
         frames: new Map(),
         selectedFrameId: null,
         dslShadow: null,
+        customGroupDefinitions: [],
         renderResults: new Map(),
         editingStack: [{ id: 'root', label: 'Root' }],
         dirty: false,
@@ -192,6 +193,7 @@ export const createProjectSlice: StateCreator<
                   state.connections,
                   state.nodeSpecs,
                   state.graphRevision,
+                  state.customGroupDefinitions,
                 ),
               });
             } catch (e) {
@@ -244,6 +246,7 @@ export const createProjectSlice: StateCreator<
                 state.connections,
                 state.nodeSpecs,
                 state.graphRevision,
+                state.customGroupDefinitions,
               ),
             });
           } catch (e) {

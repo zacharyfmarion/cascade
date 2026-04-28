@@ -85,14 +85,35 @@ const getGpuScriptSpecFromNode = (node: NodeInstance): NodeSpec | undefined => {
   return buildGpuScriptNodeSpec({ ...manifest, id: node.typeId });
 };
 
+const definitionNameToDisplayName = (name: string): string =>
+  name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    || name;
+
+const getShadowGroupDisplayName = (
+  node: NodeInstance,
+  dslShadow: DslShadowDocument | null,
+): string | undefined => {
+  if (!node.typeId.startsWith('group::')) return undefined;
+  const name = dslShadow?.customDefinitionNames.find(entry => entry.runtimeId === node.typeId)?.name;
+  return name ? definitionNameToDisplayName(name) : undefined;
+};
+
 const getCanvasNodeSpec = (
   node: NodeInstance,
   nodeSpecs: NodeSpec[],
   nodeSpecsById: Map<string, NodeSpec>,
-): NodeSpec | undefined =>
-  nodeSpecsById.get(node.id)
+  dslShadow?: DslShadowDocument | null,
+): NodeSpec | undefined => {
+  const spec = nodeSpecsById.get(node.id)
   ?? nodeSpecs.find(s => s.id === node.typeId)
   ?? getGpuScriptSpecFromNode(node);
+  const shadowDisplayName = getShadowGroupDisplayName(node, dslShadow ?? null);
+  return spec && shadowDisplayName ? { ...spec, display_name: shadowDisplayName } : spec;
+};
 
 interface ClipboardEntry {
   typeId: string;
@@ -105,7 +126,7 @@ import { CanvasContextMenu } from './CanvasContextMenu';
 import type { ContextMenuState } from './CanvasContextMenu';
 import { autoLayoutGraph, registerNodeSizeProvider, unregisterNodeSizeProvider } from '../ai/autoLayout';
 import { shortcutDispatcher } from '../shortcuts/dispatcher';
-import type { NodeInstance, NodeSpec, ParamValue } from '../store/types';
+import type { DslShadowDocument, NodeInstance, NodeSpec, ParamValue } from '../store/types';
 import {
   buildDefaultGpuScriptManifest,
   buildGpuScriptNodeSpec,
@@ -118,6 +139,7 @@ export const NodeCanvas: React.FC = () => {
   const connectionsStore = useGraphStore(s => s.connections);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const nodeSpecsById = useGraphStore(s => s.nodeSpecsById);
+  const dslShadow = useGraphStore(s => s.dslShadow);
   const { screenToFlowPosition, getNodes, getEdges, fitView } = useReactFlow();
 
   const nodeTypes = useMemo((): NodeTypes => {
@@ -360,7 +382,7 @@ export const NodeCanvas: React.FC = () => {
   // rapid Zustand updates (e.g. 60fps param drags with GPU nodes).
   const derivedNodes = useMemo((): FlowNode[] => {
     const nextNodes: FlowNode[] = Array.from(nodesStore.values()).map(node => {
-      const spec = getCanvasNodeSpec(node, nodeSpecs, nodeSpecsById);
+      const spec = getCanvasNodeSpec(node, nodeSpecs, nodeSpecsById, dslShadow);
       return {
         id: node.id,
         type: node.typeId,
@@ -399,7 +421,7 @@ export const NodeCanvas: React.FC = () => {
       });
     }
     return nextNodes;
-  }, [nodesStore, nodeSpecs, nodeSpecsById, framesStore, selectionState]);
+  }, [nodesStore, nodeSpecs, nodeSpecsById, dslShadow, framesStore, selectionState]);
   // Synchronous state reset: when store-derived nodes change, push to
   // React state immediately (during render, not after paint).  React
   // supports this pattern — it discards the stale render and restarts

@@ -5,6 +5,7 @@ import type {
   DslShadowHandleEntry,
   NodeInstance,
   NodeSpec,
+  SerializableGroupDefinition,
 } from '../../store/types';
 import { HandleMap } from './handleMap';
 import { parseDsl, customDefinitionToNodeSpec } from './parser';
@@ -29,7 +30,39 @@ const stableStringify = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
-export const graphSemanticHash = (nodes: Map<string, NodeInstance>, connections: Connection[]): string => {
+const displayNameToPascal = (displayName: string): string =>
+  displayName
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('');
+
+const reachableRuntimeGroupIds = (
+  nodes: Map<string, NodeInstance>,
+  customGroupDefinitions: SerializableGroupDefinition[],
+): Set<string> => {
+  const definitionsById = new Map(customGroupDefinitions.map(definition => [definition.id, definition]));
+  const reachable = new Set<string>();
+  const visit = (typeId: string) => {
+    if (!typeId.startsWith('group::') || reachable.has(typeId)) return;
+    reachable.add(typeId);
+    const definition = definitionsById.get(typeId);
+    for (const internal of definition?.internal_graph.nodes ?? []) {
+      visit(internal.type_id);
+    }
+  };
+  for (const node of nodes.values()) {
+    visit(node.typeId);
+  }
+  return reachable;
+};
+
+export const graphSemanticHash = (
+  nodes: Map<string, NodeInstance>,
+  connections: Connection[],
+  customGroupDefinitions: SerializableGroupDefinition[] = [],
+): string => {
   const nodeEntries = Array.from(nodes.values())
     .map(node => ({
       id: node.id,
@@ -47,7 +80,19 @@ export const graphSemanticHash = (nodes: Map<string, NodeInstance>, connections:
       toPort: conn.toPort,
     }))
     .sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
-  return stableStringify({ nodes: nodeEntries, connections: connectionEntries });
+  const reachableGroups = reachableRuntimeGroupIds(nodes, customGroupDefinitions);
+  const groupDefinitions = customGroupDefinitions
+    .filter(definition => reachableGroups.has(definition.id))
+    .map(definition => ({
+      id: definition.id,
+      name: definition.name,
+      internalGraph: definition.internal_graph,
+      promotions: definition.promotions ?? [],
+      explicitInputs: definition.explicit_inputs ?? null,
+      explicitOutputs: definition.explicit_outputs ?? null,
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  return stableStringify({ nodes: nodeEntries, connections: connectionEntries, groupDefinitions });
 };
 
 const paramValueFingerprint = (value: DslParamValue): unknown => {
@@ -165,6 +210,7 @@ export const dslShadowMatchesGraph = (
   nodes: Map<string, NodeInstance>,
   connections: Connection[],
   nodeSpecs: NodeSpec[],
+  customGroupDefinitions: SerializableGroupDefinition[] = [],
 ): boolean => {
   if (shadow.status === 'invalid') return false;
   const handleMap = handleMapFromShadow(nodes, shadow);
@@ -181,6 +227,9 @@ export const dslShadowMatchesGraph = (
     connections,
     nodeSpecs: [...nodeSpecs, ...shadowCustomSpecs],
     handleMap,
+    groupDefinitions: customGroupDefinitions,
+    customDefinitionNames: shadow.customDefinitionNames,
+    pruneUnusedCustomDefinitions: true,
   });
   const canonicalParse = parseDsl(canonical, [...nodeSpecs, ...shadowCustomSpecs], { currentNodes: nodes, handleMap });
   if (canonicalParse.errors.length > 0 || !canonicalParse.ast) return false;
@@ -230,6 +279,26 @@ export const customDefinitionNamesFromAst = (ast: DslAst | null): DslShadowCusto
   }));
 };
 
+const mergeCustomDefinitionNames = (
+  ast: DslAst | null,
+  customGroupDefinitions: SerializableGroupDefinition[],
+  existing: DslShadowCustomDefinitionName[] = [],
+): DslShadowCustomDefinitionName[] => {
+  const merged = new Map<string, string>();
+  for (const entry of customDefinitionNamesFromAst(ast)) {
+    merged.set(entry.runtimeId, entry.name);
+  }
+  const existingByRuntimeId = new Map(existing.map(entry => [entry.runtimeId, entry.name]));
+  for (const definition of customGroupDefinitions) {
+    if (definition.is_builtin) continue;
+    const name = existingByRuntimeId.get(definition.id)
+      ?? displayNameToPascal(definition.name)
+      ?? definition.id.replace(/^group::/, '');
+    if (name) merged.set(definition.id, name);
+  }
+  return Array.from(merged.entries()).map(([runtimeId, name]) => ({ runtimeId, name }));
+};
+
 const isRuntimeDslMetadata = (value: unknown): value is RuntimeDslMetadata => {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
@@ -262,6 +331,7 @@ export const hydrateDslShadowMetadata = (
   connections: Connection[],
   nodeSpecs: NodeSpec[],
   graphRevision: number,
+  customGroupDefinitions: SerializableGroupDefinition[] = [],
 ): DslShadowDocument | null => {
   if (!isRuntimeDslMetadata(value)) return null;
   const handles = value.handles.flatMap(entry => (
@@ -274,7 +344,7 @@ export const hydrateDslShadowMetadata = (
       ? [{ runtimeId: entry.runtime_id, name: entry.name }]
       : []
   ));
-  const graphHash = graphSemanticHash(nodes, connections);
+  const graphHash = graphSemanticHash(nodes, connections, customGroupDefinitions);
   const baseShadow: DslShadowDocument = {
     version: 1,
     text: value.text,
@@ -294,7 +364,7 @@ export const hydrateDslShadowMetadata = (
     : [];
   const validation = validateAst(parseResult.ast, [...nodeSpecs, ...customSpecs]);
   const status = validation.valid
-    ? (baseShadow.graphHash === graphHash || dslShadowMatchesGraph(baseShadow, nodes, connections, nodeSpecs) ? 'valid' : baseShadow.status)
+    ? (baseShadow.graphHash === graphHash || dslShadowMatchesGraph(baseShadow, nodes, connections, nodeSpecs, customGroupDefinitions) ? 'valid' : baseShadow.status)
     : 'invalid';
   return {
     ...baseShadow,
@@ -307,6 +377,8 @@ export const buildDslShadowFromText = (input: {
   text: string;
   nodes: Map<string, NodeInstance>;
   connections: Connection[];
+  customGroupDefinitions?: SerializableGroupDefinition[];
+  customDefinitionNames?: DslShadowCustomDefinitionName[];
   graphRevision: number;
   handleMap: HandleMap;
   ast: DslAst | null;
@@ -314,10 +386,10 @@ export const buildDslShadowFromText = (input: {
 }): DslShadowDocument => ({
   version: 1,
   text: input.text,
-  graphHash: graphSemanticHash(input.nodes, input.connections),
+  graphHash: graphSemanticHash(input.nodes, input.connections, input.customGroupDefinitions ?? []),
   graphRevision: input.graphRevision,
   handles: handleEntriesFromMap(input.handleMap),
-  customDefinitionNames: customDefinitionNamesFromAst(input.ast),
+  customDefinitionNames: mergeCustomDefinitionNames(input.ast, input.customGroupDefinitions ?? [], input.customDefinitionNames),
   status: 'valid',
   sourceMap: input.sourceMap,
 });

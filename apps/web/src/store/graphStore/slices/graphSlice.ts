@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { Connection, EditingContext, NodeInstance, NodeSpec, ParamValue, PortSpec } from '../../types';
+import type { Connection, DslShadowCustomDefinitionName, EditingContext, NodeInstance, NodeSpec, ParamValue, PortSpec } from '../../types';
 import type { NodeInterfaceChange } from '../../../engine/bridge';
 import { getUnsupportedNodeMessage, isNodeSupportedOnSurface } from '../../../platform/features';
 import { getRuntimeSurface } from '../../../platform/runtime';
@@ -9,7 +9,7 @@ import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { getNodeCategory, getPortType } from '../../../analytics/nodeGraph';
 import { trackAnalyticsEvent } from '../../../analytics/runtime';
-import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
+import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractCustomGroupDefinitions, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
 import {
   buildDefaultGpuScriptManifest,
   buildGpuScriptNodeSpec,
@@ -28,6 +28,7 @@ export interface GraphSliceState {
   editingStack: EditingContext[];
   fitViewRequestId: number;
   previewScale: number;
+  customGroupDefinitions: GraphState['customGroupDefinitions'];
 }
 
 export interface GraphSliceActions {
@@ -58,6 +59,28 @@ export interface GraphSliceActions {
 
 export type GraphSlice = GraphSliceState & GraphSliceActions;
 
+const displayNameToDefinitionName = (displayName: string): string =>
+  displayName
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('')
+  || 'NodeGroup';
+
+const upsertCustomDefinitionName = (
+  entries: DslShadowCustomDefinitionName[] = [],
+  runtimeId: string,
+  name: string,
+): DslShadowCustomDefinitionName[] => {
+  const byRuntimeId = new Map(entries.map(entry => [entry.runtimeId, entry.name]));
+  byRuntimeId.set(runtimeId, name);
+  return Array.from(byRuntimeId.entries()).map(([entryRuntimeId, entryName]) => ({
+    runtimeId: entryRuntimeId,
+    name: entryName,
+  }));
+};
+
 export const createGraphSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -70,6 +93,12 @@ export const createGraphSlice: StateCreator<
     set({ lastTransactionOrigin: 'ui', graphRevision: kernel.graphRevision });
   };
 
+  const refreshCustomGroupDefinitions = async () => {
+    const eng = getEngine();
+    const graphData = await Promise.resolve(eng.exportGraph());
+    set({ customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
+  };
+
   return {
     nodes: new Map(),
     connections: [],
@@ -79,6 +108,7 @@ export const createGraphSlice: StateCreator<
     lastError: null,
     previewScale: 1,
     fitViewRequestId: 0,
+    customGroupDefinitions: [],
     editingStack: [{ id: 'root', label: 'Root', groupNodeId: null }],
 
     addNode: async (typeId, position, initialFile?: File) => {
@@ -132,6 +162,7 @@ export const createGraphSlice: StateCreator<
           nodeSpecs: withGroupIOSpecs(specs, internalGraph),
           selectedNodeIds: new Set([internalNode.id]),
         });
+        await refreshCustomGroupDefinitions();
         return internalNode.id;
       }
 
@@ -229,6 +260,7 @@ export const createGraphSlice: StateCreator<
           nodeSpecs: withGroupIOSpecs(await Promise.resolve(eng.listNodeTypes()), internalGraph),
           selectedNodeIds: new Set(Array.from(get().selectedNodeIds).filter(nodeId => nodeId !== id)),
         });
+        await refreshCustomGroupDefinitions();
         get().triggerAffectedViewers([id]);
         return;
       }
@@ -350,6 +382,7 @@ export const createGraphSlice: StateCreator<
             connections: [...state.connections, newConnection],
             nodeSpecs: withGroupIOSpecs(specs, updatedGraph),
           }));
+          await refreshCustomGroupDefinitions();
           get().triggerAffectedViewers([fromNode, toNode]);
 
           const fromNodeType = get().nodes.get(fromNode)?.typeId ?? 'Unknown';
@@ -381,6 +414,7 @@ export const createGraphSlice: StateCreator<
         const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
         const specs = await Promise.resolve(eng.listNodeTypes());
         set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
+        await refreshCustomGroupDefinitions();
       }
       get().triggerAffectedViewers([fromNode, toNode]);
 
@@ -424,6 +458,7 @@ export const createGraphSlice: StateCreator<
           const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
           const specs = await Promise.resolve(eng.listNodeTypes());
           set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
+          await refreshCustomGroupDefinitions();
         }
         get().triggerAffectedViewers([conn.fromNode, conn.toNode]);
         trackAnalyticsEvent('nodes disconnected');
@@ -453,6 +488,9 @@ export const createGraphSlice: StateCreator<
         node.params = { ...node.params, [key]: value };
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
+      }
+      if (editingStack.length > 1) {
+        await refreshCustomGroupDefinitions();
       }
       // Fill in newValue on the delta we just pushed so redo works.
       const lastUndo = kernel.undoStack[kernel.undoStack.length - 1];
@@ -485,6 +523,9 @@ export const createGraphSlice: StateCreator<
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
       }
+      if (editingStack.length > 1) {
+        await refreshCustomGroupDefinitions();
+      }
       // Fill in newValue on the delta.
       const lastUndo = kernel.undoStack[kernel.undoStack.length - 1];
       if (lastUndo && 'kind' in lastUndo && lastUndo.kind === 'param-delta') {
@@ -509,6 +550,7 @@ export const createGraphSlice: StateCreator<
             return;
           }
           await eng.setInternalPosition(ctx.groupDefId, nodeId, position.x, position.y);
+          await refreshCustomGroupDefinitions();
         } else {
           await Promise.resolve(getEngine().setPosition(nodeId, position.x, position.y));
         }
@@ -565,6 +607,9 @@ export const createGraphSlice: StateCreator<
         }
       }
       set({ nodes: newNodes });
+      if (editingStack.length > 1) {
+        await refreshCustomGroupDefinitions();
+      }
 
       get().triggerAffectedViewers([...selectedIds]);
 
@@ -813,7 +858,12 @@ export const createGraphSlice: StateCreator<
             toPort: conn.to_port,
           });
         }
-        set({ connections: updatedConnections });
+        set({
+          connections: updatedConnections,
+          customGroupDefinitions: extractCustomGroupDefinitions(graphData),
+        });
+      } else {
+        set({ customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
       }
 
       get().triggerAllViewers();
@@ -863,6 +913,7 @@ export const createGraphSlice: StateCreator<
         nodes: newNodes,
         connections: newConnections,
         nodeSpecs: specs,
+        customGroupDefinitions: extractCustomGroupDefinitions(graphData),
         selectedNodeIds: new Set(result.restoredNodes.map(n => n.id)),
       });
 
@@ -889,7 +940,19 @@ export const createGraphSlice: StateCreator<
         ctx.groupNodeId === groupNodeId ? { ...ctx, label: newName } : ctx
       );
 
-      set({ nodeSpecs: specs, editingStack });
+      await refreshCustomGroupDefinitions();
+      const dslShadow = get().dslShadow;
+      const customDefinitionNames = upsertCustomDefinitionName(
+        dslShadow?.customDefinitionNames,
+        node.typeId,
+        displayNameToDefinitionName(newName),
+      );
+      set({
+        nodeSpecs: specs,
+        editingStack,
+        dslShadow: dslShadow ? { ...dslShadow, customDefinitionNames, status: 'stale' } : dslShadow,
+      });
+      get().refreshDslShadowFromGraph();
     },
 
     renameGpuScriptNode: async (nodeId, newName) => {
@@ -918,6 +981,7 @@ export const createGraphSlice: StateCreator<
       try {
         const newSpecs = await Promise.resolve(eng.importCustomNodes(json));
         const specs = await Promise.resolve(eng.listNodeTypes());
+        await refreshCustomGroupDefinitions();
         set({ nodeSpecs: specs });
         const names = newSpecs.map(s => s.display_name).join(', ');
         get().pushToast('success', 'Custom node imported', names);
@@ -955,7 +1019,8 @@ export const createGraphSlice: StateCreator<
       try {
         const spec = await Promise.resolve(eng.registerGroupDefinition(json));
         const specs = await Promise.resolve(eng.listNodeTypes());
-        set({ nodeSpecs: specs });
+        const graphData = await Promise.resolve(eng.exportGraph());
+        set({ nodeSpecs: specs, customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
         return spec;
       } catch (e) {
         set({ lastError: parseEngineError(e) });
@@ -1046,6 +1111,7 @@ export const createGraphSlice: StateCreator<
         connections: newConnections,
         nodeSpecs: withGroupIOSpecs(specs, internalGraph),
       });
+      await refreshCustomGroupDefinitions();
     },
 
     applyNodeInterfaceChange: (nodeId, change) => {

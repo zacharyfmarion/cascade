@@ -67,6 +67,7 @@ const createInitialState = () => ({
   nodeTimings: new Map(),
   nodeErrors: new Map(),
   dslShadow: null,
+  customGroupDefinitions: [],
   graphRevision: 0,
   lastTransactionOrigin: null,
 });
@@ -488,6 +489,60 @@ describe('graphStore group editing state', () => {
   it('exitGroup at root is a no-op', () => {
     useGraphStore.getState().exitGroup();
     expect(useGraphStore.getState().editingStack.length).toBe(1);
+  });
+
+  it('createGroup stores runtime group definitions for DSL serialization', async () => {
+    const store = useGraphStore.getState();
+    const load = await store.addNode('load_image', { x: 0, y: 0 });
+    const blur = await store.addNode('gaussian_blur', { x: 100, y: 0 });
+    const curves = await store.addNode('curves', { x: 200, y: 0 });
+    const viewer = await store.addNode('viewer', { x: 300, y: 0 });
+    await store.setParam(blur, 'amount', { Float: 2 } as ParamValue);
+    await store.connect(load, 'image', blur, 'image');
+    await store.connect(blur, 'image', curves, 'image');
+    await store.connect(curves, 'image', viewer, 'image');
+
+    await store.createGroup([blur, curves], 'Node Group');
+    useGraphStore.getState().refreshDslShadowFromGraph();
+
+    const state = useGraphStore.getState();
+    expect(state.customGroupDefinitions).toHaveLength(1);
+    expect(state.dslShadow?.text).toContain('node NodeGroup = group {');
+    expect(state.dslShadow?.text).toContain('blur1 = GaussianBlur(amount: 2.0)');
+    expect(state.dslShadow?.text).toContain('curves1 = Curves()');
+    expect(state.dslShadow?.text).toContain('input.image -> blur1.image');
+    expect(state.dslShadow?.text).toContain('curves1.image -> output.image');
+    expect(state.dslShadow?.text).toContain('node_group1 = NodeGroup()');
+    expect(state.dslShadow?.customDefinitionNames).toContainEqual({
+      runtimeId: 'group::user_mock',
+      name: 'NodeGroup',
+    });
+  });
+
+  it('renaming a group node updates the DSL definition name', async () => {
+    const store = useGraphStore.getState();
+    const load = await store.addNode('load_image', { x: 0, y: 0 });
+    const blur = await store.addNode('gaussian_blur', { x: 200, y: 0 });
+    const viewer = await store.addNode('viewer', { x: 400, y: 0 });
+    await store.connect(load, 'image', blur, 'image');
+    await store.connect(blur, 'image', viewer, 'image');
+
+    await store.createGroup([blur], 'Node Group');
+    useGraphStore.getState().refreshDslShadowFromGraph();
+    const groupNodeId = Array.from(useGraphStore.getState().nodes.entries())
+      .find(([, node]) => node.typeId.startsWith('group::'))?.[0];
+    expect(groupNodeId).toBeDefined();
+
+    await useGraphStore.getState().renameGroup(groupNodeId!, 'Cloudy Adjustment');
+
+    const state = useGraphStore.getState();
+    expect(state.dslShadow?.customDefinitionNames).toContainEqual({
+      runtimeId: 'group::user_mock',
+      name: 'CloudyAdjustment',
+    });
+    expect(state.dslShadow?.text).toContain('node CloudyAdjustment = group {');
+    expect(state.dslShadow?.text).toContain('CloudyAdjustment()');
+    expect(state.dslShadow?.text).not.toContain('node NodeGroup = group');
   });
 });
 

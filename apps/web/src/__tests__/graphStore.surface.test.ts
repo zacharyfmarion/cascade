@@ -33,6 +33,7 @@ const EXPECTED_KEYS: string[] = [
   'colorManagement',
   'connections',
   'currentFrame',
+  'customGroupDefinitions',
   'dirty',
   'dslShadow',
   'editingStack',

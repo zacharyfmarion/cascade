@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseDsl } from '../parser';
-import { dslShadowMatchesGraph, hydrateDslShadowMetadata, reconcileDslShadowText } from '../shadow';
-import type { Connection, DslShadowDocument, NodeInstance, NodeSpec } from '../../../store/types';
+import { dslShadowMatchesGraph, graphSemanticHash, hydrateDslShadowMetadata, reconcileDslShadowText } from '../shadow';
+import type { Connection, DslShadowDocument, NodeInstance, NodeSpec, SerializableGroupDefinition } from '../../../store/types';
 
 const specs: NodeSpec[] = [
   {
@@ -247,6 +247,87 @@ describe('reconcileDslShadowText', () => {
 });
 
 describe('DSL shadow graph matching', () => {
+  it('includes custom group definitions in the semantic hash', () => {
+    const nodes = new Map<string, NodeInstance>([
+      ['group-node', {
+        id: 'group-node',
+        typeId: 'group::user_123',
+        params: {},
+        inputDefaults: {},
+        position: { x: 0, y: 0 },
+        muted: false,
+      }],
+    ]);
+    const baseDefinition: SerializableGroupDefinition = {
+      id: 'group::user_123',
+      name: 'Node Group',
+      category: 'User',
+      description: '',
+      internal_graph: {
+        nodes: [
+          { id: 'blur-internal', type_id: 'gaussian_blur', params: { amount: { Float: 1 } }, input_defaults: {}, position: [0, 0] },
+          { id: 'gi', type_id: 'group_input', params: {}, input_defaults: {}, position: [0, 0] },
+          { id: 'go', type_id: 'group_output', params: {}, input_defaults: {}, position: [0, 0] },
+        ],
+        connections: [],
+      },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: null,
+      explicit_outputs: null,
+    };
+    const editedDefinition: SerializableGroupDefinition = {
+      ...baseDefinition,
+      internal_graph: {
+        ...baseDefinition.internal_graph,
+        nodes: baseDefinition.internal_graph.nodes.map(node => (
+          node.id === 'blur-internal'
+            ? { ...node, params: { amount: { Float: 2 } } }
+            : node
+        )),
+      },
+    };
+
+    expect(graphSemanticHash(nodes, [], [baseDefinition]))
+      .not.toBe(graphSemanticHash(nodes, [], [editedDefinition]));
+  });
+
+  it('ignores unused runtime group definitions in the semantic hash', () => {
+    const nodes = new Map<string, NodeInstance>([
+      ['group-node', {
+        id: 'group-node',
+        typeId: 'group::active',
+        params: {},
+        inputDefaults: {},
+        position: { x: 0, y: 0 },
+        muted: false,
+      }],
+    ]);
+    const active: SerializableGroupDefinition = {
+      id: 'group::active',
+      name: 'Active',
+      category: 'User',
+      description: '',
+      internal_graph: { nodes: [], connections: [] },
+      promotions: [],
+      is_builtin: false,
+      explicit_inputs: null,
+      explicit_outputs: null,
+    };
+    const stale: SerializableGroupDefinition = {
+      ...active,
+      id: 'group::stale',
+      name: 'Stale',
+      internal_graph: {
+        nodes: [{ id: 'blur1', type_id: 'gaussian_blur', params: { amount: { Float: 99 } }, input_defaults: {}, position: [0, 0] }],
+        connections: [],
+      },
+    };
+
+    expect(graphSemanticHash(nodes, [], [active]))
+      .toBe(graphSemanticHash(nodes, [], [active, stale]));
+  });
+
   it('treats saved GPU DSL with comments as current when graph manifests only differ by serialization defaults', () => {
     const shadow = gpuShadow();
 

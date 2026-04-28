@@ -1,7 +1,7 @@
 import type { NodeInstance, NodeSpec, ParamValue } from '../types';
 import type { GraphState } from './store';
 import { makeEngineError } from '../../engine/engineError';
-import { extractGraphData, getEngine, normalizeParamValue } from './kernel';
+import { extractCustomGroupDefinitions, extractGraphData, getEngine, normalizeParamValue } from './kernel';
 import type { SerializableGraphData } from './kernel';
 import { syncAllCommitted } from './nodeDraftStore';
 
@@ -121,6 +121,7 @@ export async function hydrateRootGraphFromEngine(
     connections,
     nodeSpecs,
     nodeSpecsById,
+    customGroupDefinitions: extractCustomGroupDefinitions(graphData),
     selectedNodeIds: new Set(),
     renderResults: new Map(),
     editingStack: createRootEditingStack(),
