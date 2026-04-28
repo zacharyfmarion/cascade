@@ -2107,7 +2107,9 @@ impl Engine {
             .as_any()
             .downcast_ref::<LoadImageSequence>()
             .ok_or_else(|| CascadeError::Other("Node is not LoadImageSequence".to_string()))?;
-        seq_node.set_directory(directory)
+        let info = seq_node.set_directory(directory)?;
+        self.graph.mark_dirty(id);
+        Ok(info)
     }
 
     pub fn get_sequence_info(

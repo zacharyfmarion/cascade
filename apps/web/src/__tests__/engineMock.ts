@@ -191,6 +191,7 @@ export function createMockEngine(): EngineBridge & {
   _renderResult: ViewerResult | null;
   _setRenderResult: (r: ViewerResult | null) => void;
   _renderCalls: string[];
+  _sequenceFrameLoads: Array<{ nodeId: string; frame: number; data: Uint8Array }>;
   _clearRenderCalls: () => void;
   _groupGraphs: Map<string, GroupInternalGraph>;
 } {
@@ -203,6 +204,7 @@ export function createMockEngine(): EngineBridge & {
   let graphState: unknown = { nodes: [], connections: [] };
   let renderResult: ViewerResult | null = null;
   const renderCalls: string[] = [];
+  const sequenceFrameLoads: Array<{ nodeId: string; frame: number; data: Uint8Array }> = [];
 
   const syncGraphState = () => {
     graphState = {
@@ -230,6 +232,7 @@ export function createMockEngine(): EngineBridge & {
     _renderResult: renderResult,
     _setRenderResult: (r: ViewerResult | null) => { renderResult = r; },
     _renderCalls: renderCalls,
+    _sequenceFrameLoads: sequenceFrameLoads,
     _clearRenderCalls: () => { renderCalls.length = 0; },
     _groupGraphs: groupGraphs,
 
@@ -647,6 +650,18 @@ export function createMockEngine(): EngineBridge & {
       syncGraphState();
       return { groupDefinitionId, groupNodeId, removedNodeIds: nodeIds, newSpec };
     },
+
+    loadSequenceFrameData: (nodeId: string, frame: number, data: Uint8Array): NodeInterfaceChange => {
+      sequenceFrameLoads.push({ nodeId, frame, data });
+      const spec = NODE_SPECS.find(s => s.id === 'load_image_sequence');
+      return {
+        newSpec: spec ?? NODE_SPECS[0],
+        removedOutputPorts: [],
+        prunedConnections: [],
+      };
+    },
+
+    setSequenceInfo: () => {},
 
     exportGraph: () => graphState,
 

@@ -151,7 +151,8 @@ export const createRenderSlice: StateCreator<
       if (!sequenceFrameManager.hasSequence(nodeId)) continue;
       const data = await sequenceFrameManager.getFrameData(nodeId, frame);
       if (data) {
-        await eng.loadSequenceFrameData(nodeId, frame, data);
+        const change = await eng.loadSequenceFrameData(nodeId, frame, data);
+        get().applyNodeInterfaceChange(nodeId, change);
       }
     }
   };
@@ -200,6 +201,8 @@ export const createRenderSlice: StateCreator<
       kernel.renderLock = kernel.renderLock.then(async () => {
         if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
         try {
+          await pushSequenceFrames(frame);
+          if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
           const result = await renderViewerForCurrentContext(viewerNodeId, frame, scale);
           const scaled = result ? await downscaleRenderResult(result, scale) : null;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
