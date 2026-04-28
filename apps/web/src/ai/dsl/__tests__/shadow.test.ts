@@ -239,6 +239,134 @@ describe('reconcileDslShadowText', () => {
     expect(reconciled).toBe(newText);
   });
 
+  it('removes deleted node and connection lines', () => {
+    const oldText = [
+      'graph {',
+      '  blur1 = GaussianBlur()',
+      '  viewer1 = Viewer()',
+      '  blur1.image -> viewer1.image',
+      '}',
+    ].join('\n');
+    const newText = [
+      'graph {',
+      '  viewer1 = Viewer()',
+      '}',
+    ].join('\n');
+
+    const oldParse = parseDsl(oldText, specs);
+    const newParse = parseDsl(newText, specs);
+    const reconciled = reconcileDslShadowText(oldText, oldParse.sourceMap, newText, newParse.sourceMap);
+
+    expect(reconciled).toBe(newText);
+  });
+
+  it('falls back when custom group definition names change', () => {
+    const oldText = [
+      'node NiceGroup = group {',
+      '  inputs {',
+      '    image image',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '}',
+      '',
+      'graph {',
+      '  group1 = NiceGroup()',
+      '}',
+    ].join('\n');
+    const newText = oldText.replaceAll('NiceGroup', 'BetterGroup');
+
+    const oldParse = parseDsl(oldText, specs);
+    const newParse = parseDsl(newText, specs);
+    const reconciled = reconcileDslShadowText(oldText, oldParse.sourceMap, newText, newParse.sourceMap);
+
+    expect(reconciled).toBeNull();
+  });
+
+  it('falls back when GPU script code changes outside the shadow text', () => {
+    const oldText = [
+      'node GpuNode1 = gpu {',
+      '  inputs {',
+      '    image image',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  # keep this definition comment',
+      '  code """',
+      '  return color;',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  gpu1 = GpuNode1()',
+      '}',
+    ].join('\n');
+    const newText = oldText.replace('return color;', 'return color * 2.0;');
+
+    const oldParse = parseDsl(oldText, gpuSpecs);
+    const newParse = parseDsl(newText, gpuSpecs);
+    const reconciled = reconcileDslShadowText(oldText, oldParse.sourceMap, newText, newParse.sourceMap);
+
+    expect(reconciled).toBeNull();
+  });
+
+  it('preserves custom definition comments when only the root graph changes', () => {
+    const oldText = [
+      'node GpuNode1 = gpu {',
+      '  inputs {',
+      '    image image',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  # keep this definition comment',
+      '  code """',
+      '  return color;',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  gpu1 = GpuNode1()',
+      '}',
+    ].join('\n');
+    const newText = [
+      'node GpuNode1 = gpu {',
+      '  inputs {',
+      '    image image',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  code """',
+      '  return color;',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  gpu1 = GpuNode1()',
+      '  viewer1 = Viewer()',
+      '  gpu1.image -> viewer1.value',
+      '}',
+    ].join('\n');
+
+    const oldParse = parseDsl(oldText, gpuSpecs);
+    const newParse = parseDsl(newText, gpuSpecs);
+    const reconciled = reconcileDslShadowText(oldText, oldParse.sourceMap, newText, newParse.sourceMap);
+
+    expect(reconciled).toContain('# keep this definition comment');
+    expect(reconciled).toContain('  viewer1 = Viewer()');
+    expect(reconciled).toContain('  gpu1.image -> viewer1.value');
+  });
+
   it('falls back to canonical serialization when new custom definitions are introduced', () => {
     const oldText = [
       'graph {',

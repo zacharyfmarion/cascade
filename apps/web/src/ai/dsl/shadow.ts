@@ -476,6 +476,96 @@ const collectCustomDefinitionNames = (text: string): Set<string> => {
   return names;
 };
 
+type ScannerStringMode = 'none' | 'double' | 'triple';
+
+const advanceDefinitionScanner = (
+  text: string,
+  index: number,
+  stringMode: ScannerStringMode,
+  escaped: boolean,
+): { nextIndex: number; stringMode: ScannerStringMode; escaped: boolean } => {
+  if (stringMode === 'triple') {
+    return text.startsWith('"""', index)
+      ? { nextIndex: index + 3, stringMode: 'none', escaped: false }
+      : { nextIndex: index + 1, stringMode: 'triple', escaped: false };
+  }
+  const char = text[index];
+  if (stringMode === 'double') {
+    if (char === '\\' && !escaped) return { nextIndex: index + 1, stringMode: 'double', escaped: true };
+    if (char === '"' && !escaped) return { nextIndex: index + 1, stringMode: 'none', escaped: false };
+    return { nextIndex: index + 1, stringMode: 'double', escaped: false };
+  }
+  if (text.startsWith('"""', index)) return { nextIndex: index + 3, stringMode: 'triple', escaped: false };
+  if (char === '"') return { nextIndex: index + 1, stringMode: 'double', escaped: false };
+  return { nextIndex: index + 1, stringMode, escaped };
+};
+
+const findCustomDefinitionEnd = (text: string, openIndex: number): number | null => {
+  let depth = 0;
+  let stringMode: ScannerStringMode = 'none';
+  let escaped = false;
+  for (let index = openIndex; index < text.length;) {
+    const char = text[index];
+    if (stringMode === 'none') {
+      if (char === '#') {
+        const nextLine = text.indexOf('\n', index);
+        index = nextLine === -1 ? text.length : nextLine + 1;
+        continue;
+      }
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth === 0) return index + 1;
+      }
+    }
+    const next = advanceDefinitionScanner(text, index, stringMode, escaped);
+    stringMode = next.stringMode;
+    escaped = next.escaped;
+    index = next.nextIndex;
+  }
+  return null;
+};
+
+const normalizeCustomDefinitionBlock = (block: string): string => {
+  let result = '';
+  let stringMode: ScannerStringMode = 'none';
+  let escaped = false;
+  for (let index = 0; index < block.length;) {
+    const char = block[index];
+    if (stringMode === 'none') {
+      if (char === '#') {
+        const nextLine = block.indexOf('\n', index);
+        index = nextLine === -1 ? block.length : nextLine + 1;
+        continue;
+      }
+      if (/\s/.test(char)) {
+        index += 1;
+        continue;
+      }
+    }
+    const next = advanceDefinitionScanner(block, index, stringMode, escaped);
+    result += block.slice(index, next.nextIndex);
+    stringMode = next.stringMode;
+    escaped = next.escaped;
+    index = next.nextIndex;
+  }
+  return result;
+};
+
+const collectCustomDefinitionBlocks = (text: string): Map<string, string> | null => {
+  const blocks = new Map<string, string>();
+  const definitionRegex = /^\s*node\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:group|gpu)\s*\{/gm;
+  let match: RegExpExecArray | null;
+  while ((match = definitionRegex.exec(text)) !== null) {
+    const openIndex = match.index + match[0].lastIndexOf('{');
+    const endIndex = findCustomDefinitionEnd(text, openIndex);
+    if (endIndex === null) return null;
+    blocks.set(match[1], normalizeCustomDefinitionBlock(text.slice(match.index, endIndex)));
+    definitionRegex.lastIndex = endIndex;
+  }
+  return blocks;
+};
+
 export const reconcileDslShadowText = (
   oldText: string,
   oldSourceMap: DslSourceMap | undefined,
@@ -490,6 +580,12 @@ export const reconcileDslShadowText = (
     || [...newDefinitions].some(name => !oldDefinitions.has(name))
   ) {
     return null;
+  }
+  const oldDefinitionBlocks = collectCustomDefinitionBlocks(oldText);
+  const newDefinitionBlocks = collectCustomDefinitionBlocks(newText);
+  if (!oldDefinitionBlocks || !newDefinitionBlocks) return null;
+  for (const [name, newBlock] of newDefinitionBlocks) {
+    if (oldDefinitionBlocks.get(name) !== newBlock) return null;
   }
   const oldLines = oldText.split('\n');
   const replacements = new Map<number, string | null>();
