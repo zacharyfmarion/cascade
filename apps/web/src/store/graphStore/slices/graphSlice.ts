@@ -802,6 +802,7 @@ export const createGraphSlice: StateCreator<
       }
 
       await get().pushUndo();
+      tagUiOrigin();
       const result = await eng.createGroupFromNodes(nodeIds, name ?? 'Node Group');
 
       const newNodes = new Map(get().nodes);
@@ -866,6 +867,7 @@ export const createGraphSlice: StateCreator<
         set({ customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
       }
 
+      get().refreshDslShadowFromGraph();
       get().triggerAllViewers();
     },
 
@@ -877,6 +879,7 @@ export const createGraphSlice: StateCreator<
       }
 
       await get().pushUndo();
+      tagUiOrigin();
       const result = await eng.ungroupNode(groupNodeId);
 
       const newNodes = new Map(get().nodes);
@@ -917,6 +920,7 @@ export const createGraphSlice: StateCreator<
         selectedNodeIds: new Set(result.restoredNodes.map(n => n.id)),
       });
 
+      get().refreshDslShadowFromGraph();
       get().triggerAllViewers();
     },
 
@@ -931,6 +935,7 @@ export const createGraphSlice: StateCreator<
       }
 
       await get().pushUndo();
+      tagUiOrigin();
       await eng.renameGroup(node.typeId, newName);
 
       const specs = await Promise.resolve(eng.listNodeTypes());

@@ -525,11 +525,13 @@ describe('graphStore group editing state', () => {
     await store.connect(load, 'image', blur, 'image');
     await store.connect(blur, 'image', curves, 'image');
     await store.connect(curves, 'image', viewer, 'image');
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
 
     await store.createGroup([blur, curves], 'Node Group');
-    useGraphStore.getState().refreshDslShadowFromGraph();
 
     const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
     expect(state.customGroupDefinitions).toHaveLength(1);
     expect(state.dslShadow?.text).toContain('node NodeGroup = group {');
     expect(state.dslShadow?.text).toContain('blur1 = GaussianBlur(amount: 2.0)');
