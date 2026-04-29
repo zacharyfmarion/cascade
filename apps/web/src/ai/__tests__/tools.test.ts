@@ -116,6 +116,7 @@ describe('Cascade AI tools', () => {
     expect(useGraphStore.getState().nodeSpecs.some(spec => spec.id === 'invert_image')).toBe(true);
     expect(Array.from(useGraphStore.getState().nodes.values()).some(node => node.typeId === 'invert_image')).toBe(true);
     expect(useGraphStore.getState().dslShadow?.text).toBe(dsl);
+    expect(useGraphStore.getState().lastTransactionOrigin).toBe('ai');
   });
 
   it('rejects custom GPU definitions that collide with built-in node names', async () => {

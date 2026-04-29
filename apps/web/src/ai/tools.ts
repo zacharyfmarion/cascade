@@ -285,7 +285,7 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
   const { nodeSpecs, nodes, connections, dslShadow } = useGraphStore.getState();
   const handleMap = handleMapFromShadow(nodes, dslShadow);
 
-  const result = await applyDsl(newDsl, handleMap, nodeSpecs, nodes, connections);
+  const result = await applyDsl(newDsl, handleMap, nodeSpecs, nodes, connections, { origin: 'ai', awaitRender: true });
   if (!result.success) {
     return {
       success: false,

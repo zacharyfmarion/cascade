@@ -251,4 +251,39 @@ describe('DslEditor', () => {
       expect(useGraphStore.getState().dslShadow).toBeNull();
     });
   });
+
+  it('syncs AI-origin graph changes into the editor from the DSL shadow', async () => {
+    resetStore(new Map());
+    render(React.createElement(DslEditor));
+    const editor = await screen.findByLabelText('DSL editor') as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe('graph {\n\n}'));
+
+    const nodes = new Map([['blur-node', blurNode(3)]]);
+    const handleMap = new HandleMap();
+    handleMap.set('blur1', 'blur-node');
+    const shadowText = 'graph {\n  blur1 = GaussianBlur(amount: 3.0)\n}';
+    const parseResult = parseDsl(shadowText, mockSpecs, { currentNodes: nodes, handleMap });
+    const shadow = buildDslShadowFromText({
+      text: shadowText,
+      nodes,
+      connections: [],
+      graphRevision: 2,
+      handleMap,
+      ast: parseResult.ast,
+      sourceMap: parseResult.sourceMap,
+    });
+
+    act(() => {
+      useGraphStore.setState({
+        nodes,
+        dslShadow: shadow,
+        graphRevision: 2,
+        lastTransactionOrigin: 'ai',
+      });
+    });
+
+    await waitFor(() => {
+      expect(editor.value).toBe(shadowText);
+    });
+  });
 });

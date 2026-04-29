@@ -607,6 +607,7 @@ export const applyDsl = async (
   nodeSpecs: NodeSpec[],
   currentNodes: Map<string, NodeInstance>,
   currentConnections: Connection[],
+  txOptions: TransactionOptions = { origin: 'dsl', awaitRender: true },
 ): Promise<ApplyDslResult> => {
   const parseContext = { currentNodes, handleMap };
   const parseResult = parseDsl(newDslText, nodeSpecs, parseContext);
@@ -682,7 +683,7 @@ export const applyDsl = async (
       return { success: false, errors: semanticErrors };
     }
   }
-  const applyResult = await applyMutations(mutations, handleMap, validationSpecs, { origin: 'dsl', awaitRender: true });
+  const applyResult = await applyMutations(mutations, handleMap, validationSpecs, txOptions);
   if (!applyResult.success) {
     return { success: false, errors: [{ line: getApplyFailureLine(mutations, normalizedNewAst), message: applyResult.error }] };
   }
