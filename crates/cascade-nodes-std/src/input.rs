@@ -727,7 +727,7 @@ impl Node for LoadImageSequence {
                 ParamSpec {
                     key: "directory".to_string(),
                     label: "Directory".to_string(),
-                    ty: ValueType::Int,
+                    ty: ValueType::String,
                     default: ParamDefault::String(String::new()),
                     min: None,
                     max: None,
@@ -738,7 +738,7 @@ impl Node for LoadImageSequence {
                 ParamSpec {
                     key: "pattern".to_string(),
                     label: "Pattern".to_string(),
-                    ty: ValueType::Int,
+                    ty: ValueType::String,
                     default: ParamDefault::String("frame_{frame}.png".to_string()),
                     min: None,
                     max: None,
@@ -1219,5 +1219,36 @@ impl Node for LoadImageBatch {
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_image_sequence_asset_params_are_strings() {
+        let spec = LoadImageSequence::new().spec();
+        let directory = spec
+            .params
+            .iter()
+            .find(|param| param.key == "directory")
+            .expect("directory param should exist");
+        let pattern = spec
+            .params
+            .iter()
+            .find(|param| param.key == "pattern")
+            .expect("pattern param should exist");
+
+        assert_eq!(directory.ty, ValueType::String);
+        assert!(matches!(
+            &directory.default,
+            ParamDefault::String(value) if value.is_empty()
+        ));
+        assert_eq!(pattern.ty, ValueType::String);
+        assert!(matches!(
+            &pattern.default,
+            ParamDefault::String(value) if value == "frame_{frame}.png"
+        ));
     }
 }
