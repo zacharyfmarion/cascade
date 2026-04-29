@@ -71,7 +71,7 @@ node1 = NodeType(param: value) # Inline comment
 | Float | bare number | \`radius: 5.0\` |
 | Int | bare integer | \`width: 1920\` |
 | Bool | true/false | \`flip_x: true\` |
-| String | "quoted" or triple-quoted multiline | \`label: "matte"\`, \`script: """\\nreturn color;\\n"""\` |
+| String | "quoted" or triple-quoted multiline | \`label: "matte"\`, \`code """\\nreturn color;\\n"""\` in GPU definitions |
 | Resolvable asset source | inline constructor | \`path: image("file:///plate.exr")\`, \`directory: sequence("file:///shot")\`, \`file_path: video("file:///ref.mov")\` |
 | Color | rgba(r,g,b,a) | \`color: rgba(1.0, 0.0, 0.0, 1.0)\` |
 | Dropdown | "option_string" | \`mode: "multiply"\` — use exact string from options |
@@ -116,16 +116,46 @@ Capture a screenshot of the current viewer output.
 List all available node types grouped by category (compact). Returns names + one-line descriptions.
 
 ### get_node_schema(node_type)
-Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. For \`GpuScript\`, this also returns the special editable \`script\` field, mask behavior, and GLSL context. Call this before using a node type you haven't used before.
-
-### create_gpu_script(description)
-Generate a custom GPU Script node from a text description. Creates a draft GPU Script node, asks the GLSL generator for a manifest, compiles it when a GPU backend is available, and returns the node id/handle plus success or compile errors.
-
-### get_gpu_script_manifest(node_id or node_handle)
-Fetch the compiled GPU Script manifest from __script_manifest for an existing GPU Script node. If missing, the node needs compilation.
+Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. For \`GpuScript\`, this returns DSL definition syntax, mask behavior, scalar input guidance, and GLSL context. Call this before using a node type you haven't used before.
 
 ## GPU Script Nodes
 Use GPU Script nodes when the user wants a custom effect that doesn't map cleanly to existing nodes. GPU Scripts run a GLSL \`process()\` per pixel.
+
+Create and edit GPU Scripts directly in the DSL. There is no separate GPU creation tool. Write a top-level \`node Name = gpu { ... }\` definition and instantiate it inside \`graph { ... }\`.
+
+### Custom GPU Script Definition Syntax
+\`\`\`cascade
+node FilmGrain = gpu {
+  inputs {
+    image image
+    mask mask?
+    float strength = 0.3 min 0.0 max 1.0 step 0.01
+    float size = 1.0 min 0.1 max 5.0 step 0.1
+    float seed = 0.0 min 0.0 max 100.0 step 0.1
+  }
+
+  outputs {
+    image image
+  }
+
+  code """
+  vec2 grainUV = uv * imageSize(u_input) / (size * 10.0);
+  vec2 noiseCoord = grainUV + vec2(seed * 1000.0);
+  float noise = fract(sin(dot(noiseCoord, vec2(12.9898, 78.233))) * 43758.5453);
+  noise = (noise - 0.5) * strength;
+  return vec4(clamp(color.rgb + noise, 0.0, 1.0), color.a);
+  """
+}
+
+graph {
+  load1 = LoadImage()
+  grain1 = FilmGrain(strength: 0.2, size: 2.0)
+  viewer1 = Viewer()
+
+  load1.image -> grain1.image
+  grain1.image -> viewer1.value
+}
+\`\`\`
 
 ### GLSL Process Signature
 \`\`\`glsl
@@ -138,35 +168,12 @@ Available globals:
 - Scalar input controls are exposed directly by name (Float/Int/Bool only)
 - Helpers: \`float bayer8(int x, int y)\`, \`float luminance(vec4 c)\`
 
-### Manifest Fields
-\`\`\`
-{
-  id,
-  inputs: [
-    {name, label, ty},
-    {name, label, ty: "Float"|"Int"|"Bool", default, min, max, step, ui}
-  ],
-  outputs: [{name, label, ty}],
-  params: [],
-  kernel: "GLSL body",
-  supports_mask: true
-}
-\`\`\`
-
 ### Editing Existing GPU Script Nodes
-- Existing GPU Script nodes may use runtime type ids like \`gpu_script::abc123\`, but they all use the \`GpuScript\` editing model.
-- Call \`get_gpu_script_manifest\` before editing an existing GPU Script node so you can preserve its current ports, scalar controls, kernel, and \`supports_mask\` setting unless the user asked to change them.
-- Use \`inputs\` for both image/mask ports and user controls. New manifests should keep \`params: []\`; legacy params can be migrated to scalar inputs.
-- In the DSL, GPU Script nodes expose a special \`script\` field for editing the GLSL body. Use triple-quoted multiline strings for non-trivial kernels.
-- The \`mask\` input is implicit: it exists when \`supports_mask\` is true.
-
-### When to use create_gpu_script
-- The user asks for a bespoke GPU effect (e.g., "VHS glitch", "chromatic aberration", "CRT scanlines")
-- The effect would be cumbersome with standard nodes
-
-### When to use get_gpu_script_manifest
-- The user asks to modify an existing GPU Script
-- You need to inspect or iterate on the GLSL kernel
+- Call \`read_graph\` before editing so you preserve the existing definition name, ports, scalar controls, GLSL code, and connections unless the user asked to change them.
+- Use \`inputs\` for both image/mask ports and user controls. Scalar controls are \`float\`, \`int\`, or \`bool\` inputs with optional default/min/max/step metadata.
+- Use \`mask mask?\` only when the node should expose an optional mask input.
+- Put only the GLSL body in \`code """ ... """\`. Do not include the \`process()\` wrapper.
+- Instantiate the custom GPU node by name: \`grain1 = FilmGrain(strength: 0.2)\`.
 
 ## How To Work
 1. Call \`read_graph\` to see the current graph state
