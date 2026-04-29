@@ -58,6 +58,21 @@ describe('GPU script AI schema', () => {
     expect(prompt).not.toContain('Manifest Fields');
   });
 
+  it('tells the AI the supported custom group DSL syntax', () => {
+    const prompt = buildSystemPrompt(useGraphStore.getState().nodeSpecs);
+
+    expect(prompt).toContain('node InvertAndCurves = group {');
+    expect(prompt).toContain('input.image -> invert1.image');
+    expect(prompt).toContain('curves1.image -> output.image');
+    expect(prompt).toContain('Do not use `connections { ... }`');
+    expect(prompt).toContain('`GroupInput()`');
+    expect(prompt).toContain('`GroupOutput()`');
+
+    expect(cascadeTools.read_graph.description).toContain('input.port and output.port');
+    expect(cascadeTools.write_graph.description).toContain('never use connections { ... }');
+    expect(cascadeTools.edit_graph.description).toContain('GroupInput()');
+  });
+
   it('does not expose GPU-script-specific tools to the model', () => {
     expect(Object.keys(cascadeTools)).not.toContain('create_gpu_script');
     expect(Object.keys(cascadeTools)).not.toContain('get_gpu_script_manifest');

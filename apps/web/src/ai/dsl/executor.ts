@@ -214,12 +214,14 @@ const recompileGpuScriptInstances = async (
   return errors;
 };
 
-const emptyInternalNode = (id: string, typeId: string) => ({
+const GROUP_INTERNAL_X_SPACING = 240;
+
+const emptyInternalNode = (id: string, typeId: string, position: [number, number] = [0, 0]) => ({
   id,
   type_id: typeId,
   params: {},
   muted: false,
-  position: [0, 0],
+  position,
   image_data: null,
   input_defaults: {},
 });
@@ -227,10 +229,11 @@ const emptyInternalNode = (id: string, typeId: string) => ({
 const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition, runtimeIdOverride?: string) => {
   const spec = customDefinitionToNodeSpec(definition);
   const paramSpecByKey = new Map(spec.params.map(param => [param.key, param]));
+  const internalDslNodes = Array.from(definition.graph.nodes.values());
   const nodes = [
-    emptyInternalNode('input', 'group_input'),
-    emptyInternalNode('output', 'group_output'),
-    ...Array.from(definition.graph.nodes.values()).map((node, index) => {
+    emptyInternalNode('input', 'group_input', [-GROUP_INTERNAL_X_SPACING, 0]),
+    emptyInternalNode('output', 'group_output', [internalDslNodes.length * GROUP_INTERNAL_X_SPACING, 0]),
+    ...internalDslNodes.map((node, index) => {
       const params: Record<string, ParamValue> = {};
       const inputDefaults: Record<string, ParamValue> = {};
       for (const [paramKey, paramValue] of node.params.entries()) {
@@ -242,7 +245,7 @@ const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition, runtimeIdO
         type_id: node.nodeTypeId,
         params,
         muted: node.muted,
-        position: [index * 220, 0],
+        position: [index * GROUP_INTERNAL_X_SPACING, 0],
         image_data: null,
         input_defaults: inputDefaults,
       };

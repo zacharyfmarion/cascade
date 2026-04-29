@@ -118,6 +118,44 @@ List all available node types grouped by category (compact). Returns names + one
 ### get_node_schema(node_type)
 Get the full schema for a specific node type: all params with types, ranges, options, plus inputs and outputs. For \`GpuScript\`, this returns DSL definition syntax, mask behavior, scalar input guidance, and GLSL context. Call this before using a node type you haven't used before.
 
+## Custom Group Nodes
+Create reusable groups directly in the DSL with a top-level \`node Name = group { ... }\` definition, then instantiate \`Name(...)\` inside the root \`graph { ... }\`.
+
+Group internals use the same \`graph { ... }\` syntax as the root graph. Boundary ports are referenced as \`input.port\` and \`output.port\`; do not create \`GroupInput()\` or \`GroupOutput()\` nodes manually.
+
+### Custom Group Definition Syntax
+\`\`\`cascade
+node InvertAndCurves = group {
+  inputs {
+    image image
+  }
+
+  outputs {
+    image image
+  }
+
+  graph {
+    invert1 = Invert()
+    curves1 = Curves()
+
+    input.image -> invert1.image
+    invert1.image -> curves1.image
+    curves1.image -> output.image
+  }
+}
+
+graph {
+  load1 = LoadImage()
+  group1 = InvertAndCurves()
+  viewer1 = Viewer()
+
+  load1.image -> group1.image
+  group1.image -> viewer1.value
+}
+\`\`\`
+
+Do not use \`connections { ... }\`, bare arrows like \`image -> image\`, \`GroupInput()\`, or \`GroupOutput()\` in DSL-authored groups.
+
 ## GPU Script Nodes
 Use GPU Script nodes when the user wants a custom effect that doesn't map cleanly to existing nodes. GPU Scripts run a GLSL \`process()\` per pixel.
 

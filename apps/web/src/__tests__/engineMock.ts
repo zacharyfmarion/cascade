@@ -378,6 +378,34 @@ export function createMockEngine(): EngineBridge & {
 
     getGroupInternalGraph: async (groupNodeId: string): Promise<GroupInternalGraph> => {
       let graph = groupGraphs.get(groupNodeId);
+      const groupInstance = nodes.get(groupNodeId);
+      const groupDefinition = groupDefinitions.find(definition => definition.id === groupInstance?.typeId);
+      if (!graph && groupDefinition) {
+        graph = {
+          groupDefId: groupDefinition.id,
+          name: groupDefinition.name,
+          nodes: groupDefinition.internal_graph.nodes.map(node => ({
+            id: node.id,
+            typeId: node.type_id,
+            params: node.params ?? {},
+            inputDefaults: node.input_defaults ?? {},
+            position: Array.isArray(node.position)
+              ? { x: node.position[0], y: node.position[1] }
+              : { x: node.position?.x ?? 0, y: node.position?.y ?? 0 },
+            muted: node.muted ?? false,
+          })),
+          connections: groupDefinition.internal_graph.connections.map(connection => ({
+            id: crypto.randomUUID(),
+            fromNode: connection.from_node,
+            fromPort: connection.from_port,
+            toNode: connection.to_node,
+            toPort: connection.to_port,
+          })),
+          inputs: groupDefinition.explicit_inputs ?? [],
+          outputs: groupDefinition.explicit_outputs ?? [],
+        };
+        groupGraphs.set(groupNodeId, graph);
+      }
       if (!graph) {
         graph = {
           groupDefId: 'group::test',

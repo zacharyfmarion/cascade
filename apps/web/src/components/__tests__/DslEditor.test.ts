@@ -9,7 +9,7 @@ import { mockSpecs, makeNodeInstance } from '../../ai/dsl/__tests__/helpers';
 import { HandleMap } from '../../ai/dsl/handleMap';
 import { parseDsl } from '../../ai/dsl/parser';
 import { buildDslShadowFromText } from '../../ai/dsl/shadow';
-import type { Connection, NodeInstance, ParamValue } from '../../store/types';
+import type { Connection, NodeInstance, NodeSpec, ParamValue, SerializableGroupDefinition } from '../../store/types';
 
 const monacoHarness = vi.hoisted(() => ({
   setModelMarkers: vi.fn(),
@@ -108,6 +108,7 @@ const resetStore = (
     graphRevision: 1,
     lastTransactionOrigin: null,
     nodeErrors: new Map(),
+    editingStack: [{ id: 'root', label: 'Root' }],
   });
 };
 
@@ -117,6 +118,58 @@ const blurNode = (amount: number): NodeInstance => makeNodeInstance({
   params: { amount: { Float: amount } },
   inputDefaults: { amount: { Float: amount } },
 });
+
+const groupSpec: NodeSpec = {
+  id: 'group::soft_blur',
+  display_name: 'Soft Blur',
+  category: 'User',
+  description: 'User-defined group',
+  inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  params: [],
+};
+
+const groupInputSpec: NodeSpec = {
+  id: 'group_input',
+  display_name: 'Group Input',
+  category: 'Group',
+  description: 'Inputs to this group',
+  inputs: [],
+  outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  params: [],
+};
+
+const groupOutputSpec: NodeSpec = {
+  id: 'group_output',
+  display_name: 'Group Output',
+  category: 'Group',
+  description: 'Outputs from this group',
+  inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  outputs: [],
+  params: [],
+};
+
+const softBlurDefinition: SerializableGroupDefinition = {
+  id: 'group::soft_blur',
+  name: 'SoftBlur',
+  category: 'User',
+  description: 'User-defined group',
+  internal_graph: {
+    nodes: [
+      { id: 'input', type_id: 'group_input', params: {}, input_defaults: {}, position: [-240, 0] },
+      { id: 'blur', type_id: 'gaussian_blur', params: {}, input_defaults: {}, position: [0, 0] },
+      { id: 'output', type_id: 'group_output', params: {}, input_defaults: {}, position: [240, 0] },
+    ],
+    connections: [
+      { from_node: 'input', from_port: 'image', to_node: 'blur', to_port: 'image' },
+      { from_node: 'blur', from_port: 'image', to_node: 'output', to_port: 'image' },
+    ],
+  },
+  promotions: [],
+  is_builtin: false,
+  explicit_inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  explicit_outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+};
 
 describe('DslEditor', () => {
   beforeEach(() => {
@@ -327,6 +380,59 @@ describe('DslEditor', () => {
 
     await waitFor(() => {
       expect(editor.value).toBe(shadowText);
+    });
+  });
+
+  it('keeps showing document DSL when the active canvas is inside a group', async () => {
+    const rootSpecs = [...mockSpecs, groupSpec];
+    const rootNodes = new Map<string, NodeInstance>([
+      ['group-node', makeNodeInstance({ id: 'group-node', typeId: 'group::soft_blur' })],
+    ]);
+    const internalNodes = new Map<string, NodeInstance>([
+      ['input', makeNodeInstance({ id: 'input', typeId: 'group_input', position: { x: -240, y: 0 } })],
+      ['blur', makeNodeInstance({ id: 'blur', typeId: 'gaussian_blur', position: { x: 0, y: 0 } })],
+      ['output', makeNodeInstance({ id: 'output', typeId: 'group_output', position: { x: 240, y: 0 } })],
+    ]);
+    const internalConnections: Connection[] = [
+      { id: 'c1', fromNode: 'input', fromPort: 'image', toNode: 'blur', toPort: 'image' },
+      { id: 'c2', fromNode: 'blur', fromPort: 'image', toNode: 'output', toPort: 'image' },
+    ];
+
+    useGraphStore.setState({
+      nodes: internalNodes,
+      connections: internalConnections,
+      selectedNodeIds: new Set(),
+      nodeSpecs: [...rootSpecs, groupInputSpec, groupOutputSpec],
+      nodeSpecsById: new Map([...rootSpecs, groupInputSpec, groupOutputSpec].map(spec => [spec.id, spec])),
+      customGroupDefinitions: [softBlurDefinition],
+      dslShadow: null,
+      graphRevision: 2,
+      lastTransactionOrigin: 'ui',
+      nodeErrors: new Map(),
+      editingStack: [
+        { id: 'root', label: 'Root' },
+        {
+          id: 'group::soft_blur',
+          label: 'Soft Blur',
+          groupNodeId: 'group-node',
+          groupDefId: 'group::soft_blur',
+          savedNodes: rootNodes,
+          savedConnections: [],
+          savedNodeSpecs: rootSpecs,
+        },
+      ],
+    });
+
+    render(React.createElement(DslEditor));
+    const editor = await screen.findByLabelText('DSL editor') as HTMLTextAreaElement;
+
+    await waitFor(() => {
+      expect(editor.value).toContain('node Softblur = group {');
+      expect(editor.value).toContain('input.image -> blur1.image');
+      expect(editor.value).toContain('blur1.image -> output.image');
+      expect(editor.value).toContain('= Softblur()');
+      expect(editor.value).not.toContain('GroupInput()');
+      expect(editor.value).not.toContain('GroupOutput()');
     });
   });
 });

@@ -10,7 +10,7 @@ import { applyDsl } from '../ai/dsl/executor';
 import { customDefinitionToNodeSpec, parseDsl } from '../ai/dsl/parser';
 import { validateAst } from '../ai/dsl/validator';
 import type { DslSourceMap } from '../ai/dsl/types';
-import type { DiagnosticItem, NodeInstance } from '../store/types';
+import type { Connection, DiagnosticItem, NodeInstance, NodeSpec } from '../store/types';
 import type { EngineError } from '../engine/engineError';
 
 const APPLY_DEBOUNCE_MS = 600;
@@ -35,12 +35,35 @@ const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   tabSize: 2,
 };
 
+interface DocumentDslState {
+  nodes: Map<string, NodeInstance>;
+  connections: Connection[];
+  nodeSpecs: NodeSpec[];
+  dslShadow: ReturnType<typeof useGraphStore.getState>['dslShadow'];
+  customGroupDefinitions: ReturnType<typeof useGraphStore.getState>['customGroupDefinitions'];
+  graphRevision: number;
+  isGroupContext: boolean;
+}
+
+function getDocumentDslState(state = useGraphStore.getState()): DocumentDslState {
+  const rootSnapshot = state.editingStack.length > 1 ? state.editingStack[1] : null;
+  return {
+    nodes: rootSnapshot?.savedNodes ?? state.nodes,
+    connections: rootSnapshot?.savedConnections ?? state.connections,
+    nodeSpecs: rootSnapshot?.savedNodeSpecs ?? state.nodeSpecs,
+    dslShadow: state.dslShadow,
+    customGroupDefinitions: state.customGroupDefinitions,
+    graphRevision: state.graphRevision,
+    isGroupContext: state.editingStack.length > 1,
+  };
+}
+
 /**
  * Serialize the current graph state to DSL text.
  * Returns empty string when specs/nodes aren't ready yet.
  */
 function serializeCurrent(): string {
-  const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = useGraphStore.getState();
+  const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = getDocumentDslState();
   if (nodeSpecs.length === 0) return '';
   if (nodes.size === 0) return EMPTY_GRAPH_DSL;
   if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections, customGroupDefinitions)) {
@@ -297,7 +320,7 @@ export const DslEditor: React.FC = () => {
   // ─── Validate only (show markers without applying) ──────────────────
   const validateAndMark = useCallback(
     (text: string) => {
-      const { nodeSpecs, nodes, dslShadow } = useGraphStore.getState();
+      const { nodeSpecs, nodes, dslShadow } = getDocumentDslState();
       if (nodeSpecs.length === 0) return;
       const handleMap = handleMapFromShadow(nodes, dslShadow);
 
@@ -330,9 +353,14 @@ export const DslEditor: React.FC = () => {
   // ─── Apply DSL text to the graph ────────────────────────────────────
   const applyDslToGraph = useCallback(
     async (text: string) => {
-      const { nodes, connections, nodeSpecs } = useGraphStore.getState();
+      const documentState = getDocumentDslState();
+      const { nodes, connections, nodeSpecs, isGroupContext } = documentState;
       if (nodeSpecs.length === 0) return;
-      const handleMap = handleMapFromShadow(nodes, useGraphStore.getState().dslShadow);
+      if (isGroupContext) {
+        setEvalMarkers([{ line: 1, message: 'Exit the group to apply document DSL edits.' }]);
+        return;
+      }
+      const handleMap = handleMapFromShadow(nodes, documentState.dslShadow);
       const result = await applyDsl(
         text,
         handleMap,
@@ -435,6 +463,7 @@ export const DslEditor: React.FC = () => {
     let prevNodeSpecs = useGraphStore.getState().nodeSpecs;
     let prevCustomGroupDefinitions = useGraphStore.getState().customGroupDefinitions;
     let prevDslShadow = useGraphStore.getState().dslShadow;
+    let prevEditingStack = useGraphStore.getState().editingStack;
 
     const unsubscribe = useGraphStore.subscribe((state) => {
       // Only act when the relevant slices actually changed
@@ -443,7 +472,8 @@ export const DslEditor: React.FC = () => {
         state.connections === prevConnections &&
         state.nodeSpecs === prevNodeSpecs &&
         state.customGroupDefinitions === prevCustomGroupDefinitions &&
-        state.dslShadow === prevDslShadow
+        state.dslShadow === prevDslShadow &&
+        state.editingStack === prevEditingStack
       ) {
         return;
       }
@@ -452,6 +482,7 @@ export const DslEditor: React.FC = () => {
       prevNodeSpecs = state.nodeSpecs;
       prevCustomGroupDefinitions = state.customGroupDefinitions;
       prevDslShadow = state.dslShadow;
+      prevEditingStack = state.editingStack;
 
       const editor = editorRef.current;
       if (!editor) return;
@@ -459,11 +490,19 @@ export const DslEditor: React.FC = () => {
       // Don't re-serialize when the change originated from the DSL editor itself
       if (state.lastTransactionOrigin === 'dsl') return;
 
-      const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = state;
+      const {
+        nodes,
+        connections,
+        nodeSpecs,
+        dslShadow,
+        customGroupDefinitions,
+        graphRevision,
+        isGroupContext,
+      } = getDocumentDslState(state);
       if (nodeSpecs.length === 0) return;
 
       if (nodes.size === 0) {
-        if (dslShadow) {
+        if (!isGroupContext && dslShadow) {
           useGraphStore.setState({ dslShadow: null });
         }
         if (lastPushedDslRef.current === EMPTY_GRAPH_DSL) return;
@@ -500,7 +539,7 @@ export const DslEditor: React.FC = () => {
         : null;
       const newDsl = reconciledDsl ?? serializedDsl;
 
-      if (!dslShadow || dslShadow.text !== newDsl || dslShadow.graphHash !== graphHash || dslShadow.status !== 'valid') {
+      if (!isGroupContext && (!dslShadow || dslShadow.text !== newDsl || dslShadow.graphHash !== graphHash || dslShadow.status !== 'valid')) {
         const parseResult = newDsl === serializedDsl
           ? serializedParse
           : parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
@@ -511,7 +550,7 @@ export const DslEditor: React.FC = () => {
             connections,
             customGroupDefinitions,
             customDefinitionNames: dslShadow?.customDefinitionNames,
-            graphRevision: state.graphRevision,
+            graphRevision,
             handleMap,
             ast: parseResult.ast,
             sourceMap: parseResult.sourceMap,

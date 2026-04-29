@@ -223,12 +223,47 @@ describe('applyDsl', () => {
     const definition = JSON.parse(registerGroupDefinition.mock.calls[0]?.[0] ?? '{}') as {
       id?: string;
       promotions?: Array<{ group_param_key?: string; internal_node_id?: string; internal_param_key?: string }>;
+      internal_graph?: {
+        nodes?: Array<{ id: string; type_id: string; position: [number, number] }>;
+        connections?: Array<{ from_node: string; from_port: string; to_node: string; to_port: string }>;
+      };
     };
     expect(definition.id).toBe('group::soft_blur');
     expect(definition.promotions).toMatchObject([
       { group_param_key: 'amount', internal_node_id: 'blur', internal_param_key: 'amount' },
     ]);
-    expect(useGraphStore.getState().nodes.get(handleMap.getNodeId('blur1') ?? '')?.typeId).toBe('group::soft_blur');
+    const internalNodes = definition.internal_graph?.nodes ?? [];
+    const inputNode = internalNodes.find(node => node.id === 'input');
+    const blurNode = internalNodes.find(node => node.id === 'blur');
+    const outputNode = internalNodes.find(node => node.id === 'output');
+    expect(inputNode).toMatchObject({ type_id: 'group_input', position: [-240, 0] });
+    expect(blurNode).toMatchObject({ type_id: 'gaussian_blur', position: [0, 0] });
+    expect(outputNode).toMatchObject({ type_id: 'group_output', position: [240, 0] });
+    expect(definition.internal_graph?.connections).toMatchObject([
+      { from_node: 'input', from_port: 'image', to_node: 'blur', to_port: 'image' },
+      { from_node: 'blur', from_port: 'image', to_node: 'output', to_port: 'image' },
+    ]);
+    const groupNodeId = handleMap.getNodeId('blur1') ?? '';
+    expect(useGraphStore.getState().nodes.get(groupNodeId)?.typeId).toBe('group::soft_blur');
+
+    await useGraphStore.getState().enterGroup(groupNodeId);
+    const enteredState = useGraphStore.getState();
+    expect(enteredState.nodes.get('input')).toMatchObject({
+      typeId: 'group_input',
+      position: { x: -240, y: 0 },
+    });
+    expect(enteredState.nodes.get('blur')).toMatchObject({
+      typeId: 'gaussian_blur',
+      position: { x: 0, y: 0 },
+    });
+    expect(enteredState.nodes.get('output')).toMatchObject({
+      typeId: 'group_output',
+      position: { x: 240, y: 0 },
+    });
+    expect(enteredState.connections).toEqual(expect.arrayContaining([
+      expect.objectContaining({ fromNode: 'input', fromPort: 'image', toNode: 'blur', toPort: 'image' }),
+      expect.objectContaining({ fromNode: 'blur', fromPort: 'image', toNode: 'output', toPort: 'image' }),
+    ]));
   });
 
   it('treats a DSL group definition rename as a rename of the existing runtime group', async () => {
