@@ -30,7 +30,9 @@ export function useShortcuts(): void {
       // General
       shortcutDispatcher.register('edit.undo', () => undo()),
       shortcutDispatcher.register('edit.redo', () => redo()),
+      shortcutDispatcher.register('file.new', () => handleMenuAction('file.new')),
       shortcutDispatcher.register('file.save', () => handleMenuAction('file.save')),
+      shortcutDispatcher.register('file.saveAs', () => handleMenuAction('file.saveAs')),
       shortcutDispatcher.register('file.open', () => handleMenuAction('file.open')),
       shortcutDispatcher.register('file.settings', () => handleMenuAction('file.settings')),
       shortcutDispatcher.register('help.shortcuts', () => openShortcuts()),

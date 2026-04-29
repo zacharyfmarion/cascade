@@ -32,7 +32,9 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
   // ── General ──────────────────────────────────────────────────────
   { id: 'edit.undo',       label: 'Undo',                 category: 'General',    keys: [mod('z')],              context: 'app' },
   { id: 'edit.redo',       label: 'Redo',                 category: 'General',    keys: [modShift('z')],         context: 'app' },
-  { id: 'file.save',       label: 'Save Project',         category: 'General',    keys: [mod('s')],              context: 'global' },
+  { id: 'file.new',        label: 'New Project',          category: 'General',    keys: [mod('n')],              context: 'global' },
+  { id: 'file.save',       label: 'Save',                 category: 'General',    keys: [mod('s')],              context: 'global' },
+  { id: 'file.saveAs',     label: 'Save As',              category: 'General',    keys: [modShift('s')],         context: 'global' },
   { id: 'file.open',       label: 'Open Project',         category: 'General',    keys: [mod('o')],              context: 'global' },
   { id: 'file.settings',   label: 'Settings',             category: 'General',    keys: [mod(',')],              context: 'global' },
   { id: 'help.shortcuts',  label: 'Show Shortcuts',       category: 'General',    keys: [key('?')],              context: 'app' },

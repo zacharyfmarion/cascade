@@ -12,6 +12,11 @@ let mockEngine = createMockEngine();
 let addOutputPort: string;
 let addInputPort: string;
 const trackAnalyticsEvent = vi.fn();
+const dialogMocks = vi.hoisted(() => ({
+  save: vi.fn(),
+  open: vi.fn(),
+  close: vi.fn(),
+}));
 
 const setTauriMode = (enabled: boolean) => {
   if (enabled) {
@@ -30,6 +35,18 @@ vi.mock('../engine/wasmEngine', () => ({
 
 vi.mock('../analytics/runtime', () => ({
   trackAnalyticsEvent,
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  save: dialogMocks.save,
+  open: dialogMocks.open,
+}));
+
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    close: dialogMocks.close,
+    onCloseRequested: vi.fn(async () => vi.fn()),
+  }),
 }));
 
 type GraphStore = typeof import('../store/graphStore')['useGraphStore'];
@@ -54,6 +71,9 @@ const createInitialState = () => ({
   isRendering: false,
   previewScale: 1,
   dirty: false,
+  currentProjectPath: null,
+  currentProjectName: 'Untitled',
+  unsavedChangesPrompt: null,
   hasSequenceNodes: false,
   sequenceLength: 0,
   sequenceStart: 0,
@@ -83,6 +103,9 @@ beforeEach(async () => {
   setTauriMode(false);
   mockEngine = createMockEngine();
   trackAnalyticsEvent.mockClear();
+  dialogMocks.save.mockReset();
+  dialogMocks.open.mockReset();
+  dialogMocks.close.mockReset();
   const mod = await import('../store/graphStore');
   useGraphStore = mod.useGraphStore;
   addOutputPort = mod.ADD_OUTPUT_PORT;
@@ -700,6 +723,192 @@ describe('graphStore project hydration', () => {
     outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
     params: [],
   };
+
+  it('requestNewProject prompts when dirty and cancel preserves the graph', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+
+    await useGraphStore.getState().requestNewProject();
+    expect(useGraphStore.getState().unsavedChangesPrompt).toEqual({ kind: 'new' });
+
+    await useGraphStore.getState().resolveUnsavedChanges('cancel');
+    const state = useGraphStore.getState();
+    expect(state.unsavedChangesPrompt).toBeNull();
+    expect(state.nodes.has(nodeId)).toBe(true);
+    expect(state.dirty).toBe(true);
+  });
+
+  it('requestNewProject discard clears both store and engine graph', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+
+    await useGraphStore.getState().requestNewProject();
+    await useGraphStore.getState().resolveUnsavedChanges('discard');
+
+    expect(useGraphStore.getState().nodes.size).toBe(0);
+    expect(useGraphStore.getState().dirty).toBe(false);
+    expect((mockEngine.exportGraph() as { nodes?: unknown[] }).nodes).toEqual([]);
+  });
+
+  it('requestOpenProject prompts when dirty and discard loads the selected web file', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    const file = new File([JSON.stringify({
+      cascade: { format_version: '1.3.0' },
+      graph: {
+        nodes: [{
+          id: 'load-node',
+          type_id: 'load_image',
+          position: [12, 24],
+          params: {},
+        }],
+        connections: [],
+      },
+    })], 'loaded_project.casc', { type: 'application/json' });
+
+    await useGraphStore.getState().requestOpenProject(file);
+    expect(useGraphStore.getState().unsavedChangesPrompt).toMatchObject({ kind: 'open' });
+
+    await useGraphStore.getState().resolveUnsavedChanges('discard');
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(state.unsavedChangesPrompt).toBeNull();
+    expect(state.nodes.has('load-node')).toBe(true);
+    expect(state.currentProjectName).toBe('loaded_project');
+    expect(state.currentProjectPath).toBeNull();
+    expect(state.dirty).toBe(false);
+  });
+
+  it('desktop Save uses the current project path', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({
+      currentProjectPath: '/tmp/current.casc',
+      currentProjectName: 'current',
+      dirty: true,
+    });
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(true);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined);
+    expect(useGraphStore.getState().dirty).toBe(false);
+  });
+
+  it('desktop Save As updates the current project identity', async () => {
+    setTauriMode(true);
+    dialogMocks.save.mockResolvedValue('/tmp/saved_as.casc');
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({ dirty: true, currentProjectName: 'Untitled' });
+
+    const saved = await useGraphStore.getState().saveProjectAs();
+
+    expect(saved).toBe(true);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined);
+    expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/saved_as.casc');
+    expect(useGraphStore.getState().currentProjectName).toBe('saved_as');
+  });
+
+  it('web Save downloads a project and marks it clean without tracking a path', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    useGraphStore.setState({
+      currentProjectName: 'web_project',
+      currentProjectPath: '/desktop/path/should-not-stick.casc',
+      dirty: true,
+    });
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cascade-project');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveProject();
+
+      expect(saved).toBe(true);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(link.download).toBe('web_project.casc');
+      expect(link.href).toBe('blob:cascade-project');
+      expect(click).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:cascade-project');
+      expect(useGraphStore.getState().dirty).toBe(false);
+      expect(useGraphStore.getState().currentProjectPath).toBeNull();
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('desktop Open uses the native dialog, hydrates identity, and clears dirty state', async () => {
+    setTauriMode(true);
+    dialogMocks.open.mockResolvedValue('/tmp/opened_project.casc');
+    mockEngine.loadProject = vi.fn(async () => {
+      const graph = {
+        nodes: [{
+          id: 'opened-node',
+          type_id: 'gaussian_blur',
+          position: [16, 32],
+          params: {},
+        }],
+        connections: [],
+      };
+      mockEngine.importGraph(graph);
+      return { cascade: { format_version: '1.3.0' }, graph };
+    });
+    useGraphStore.setState({ dirty: true });
+
+    const loaded = await useGraphStore.getState().loadProjectFromPath?.();
+
+    const state = useGraphStore.getState();
+    expect(loaded).toBe(true);
+    expect(mockEngine.loadProject).toHaveBeenCalledWith('/tmp/opened_project.casc');
+    expect(state.nodes.has('opened-node')).toBe(true);
+    expect(state.currentProjectPath).toBe('/tmp/opened_project.casc');
+    expect(state.currentProjectName).toBe('opened_project');
+    expect(state.dirty).toBe(false);
+  });
+
+  it('desktop dev Save blocks when the native engine graph diverges from visible state', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    useGraphStore.setState({
+      nodes: new Map(),
+      currentProjectPath: '/tmp/diverged.casc',
+      dirty: true,
+    });
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(saveProject).not.toHaveBeenCalled();
+    expect(useGraphStore.getState().lastError?.code).toBe('PROJECT_GRAPH_DIVERGED');
+    expect(useGraphStore.getState().dirty).toBe(true);
+  });
+
+  it('desktop startup hydration restores visible state from a persistent native engine graph', async () => {
+    setTauriMode(true);
+    mockEngine.importGraph({
+      nodes: [{
+        id: 'crop-node',
+        type_id: 'gaussian_blur',
+        position: [30, 40],
+        params: { amount: { Float: 2 } },
+      }],
+      connections: [],
+    });
+    useGraphStore.setState({ nodes: new Map(), connections: [], dirty: false });
+
+    const hydrated = await useGraphStore.getState().hydrateProjectFromEngine();
+
+    const state = useGraphStore.getState();
+    expect(hydrated).toBe(true);
+    expect(state.nodes.has('crop-node')).toBe(true);
+    expect(state.nodes.get('crop-node')?.position).toEqual({ x: 30, y: 40 });
+    expect(state.dirty).toBe(false);
+  });
 
   it('loadProject refreshes custom group specs from the engine and clears stale per-instance specs', async () => {
     const loadedGraph = {

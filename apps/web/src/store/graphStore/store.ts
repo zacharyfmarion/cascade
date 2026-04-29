@@ -49,6 +49,7 @@ import { createBatchExportSlice } from './slices/batchExportSlice';
 import type { SequenceVideoSlice } from './slices/sequenceVideoSlice';
 import { createSequenceVideoSlice } from './slices/sequenceVideoSlice';
 import type { ProjectSlice } from './slices/projectSlice';
+import type { PendingProjectAction, UnsavedChangesChoice } from './slices/projectSlice';
 import { createProjectSlice } from './slices/projectSlice';
 import type { AssetsSlice } from './slices/assetsSlice';
 import { createAssetsSlice } from './slices/assetsSlice';
@@ -92,6 +93,9 @@ export interface GraphState {
   isRendering: boolean;
   previewScale: number;
   dirty: boolean;
+  currentProjectPath: string | null;
+  currentProjectName: string;
+  unsavedChangesPrompt: PendingProjectAction | null;
   fitViewRequestId: number;
 
   hasSequenceNodes: boolean;
@@ -144,9 +148,18 @@ export interface GraphState {
   loadPaletteFile: (nodeId: string, file: File) => void;
   triggerRender: (viewerNodeId: string) => void;
   newProject: () => Promise<void>;
-  saveProject: () => void;
+  saveProject: () => Promise<boolean>;
+  saveProjectAs: () => Promise<boolean>;
   loadProject: (file: File) => void;
-  loadProjectFromPath?: () => void;
+  loadProjectFromPath?: () => Promise<boolean>;
+  requestNewProject: () => Promise<void>;
+  requestOpenProject: (file?: File) => Promise<void>;
+  requestSaveProject: () => Promise<boolean>;
+  requestSaveProjectAs: () => Promise<boolean>;
+  requestCloseProject: () => Promise<void>;
+  resolveUnsavedChanges: (choice: UnsavedChangesChoice) => Promise<void>;
+  dismissUnsavedChangesPrompt: () => void;
+  hydrateProjectFromEngine: () => Promise<boolean>;
   exportImage: (nodeId: string) => void;
   exportExr: (nodeId: string) => void;
   setCurrentFrame: (frame: number) => void;
@@ -253,6 +266,10 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         kernel.engine = await createEngine();
         const specs = await kernel.engine.listNodeTypes();
         set({ engineReady: true, nodeSpecs: specs });
+
+        if (isDesktopRuntime()) {
+          await get().hydrateProjectFromEngine();
+        }
 
         const settings = useSettingsStore.getState();
 
