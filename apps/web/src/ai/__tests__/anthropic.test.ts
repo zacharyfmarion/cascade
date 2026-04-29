@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ANTHROPIC_DIRECT_MESSAGES_URL,
+  ANTHROPIC_BROWSER_ACCESS_HEADER,
   ANTHROPIC_PROXY_BASE_URL,
   ANTHROPIC_PROXY_MESSAGES_URL,
   createAnthropicMessagesRequest,
@@ -13,40 +14,42 @@ describe('Anthropic transport settings', () => {
     vi.unstubAllGlobals();
   });
 
-  it('uses the local Vite proxy for web chat requests', () => {
-    expect(createAnthropicProviderSettings('test-key', false)).toEqual({
-      apiKey: 'test-key',
-      baseURL: ANTHROPIC_PROXY_BASE_URL,
-    });
-  });
-
-  it('keeps desktop chat requests on the default provider endpoint', () => {
+  it('uses the local Vite proxy for dev chat requests', () => {
     expect(createAnthropicProviderSettings('test-key', true)).toEqual({
       apiKey: 'test-key',
+      baseURL: ANTHROPIC_PROXY_BASE_URL,
+      headers: { [ANTHROPIC_BROWSER_ACCESS_HEADER]: 'true' },
     });
   });
 
-  it('routes web message requests through the proxy without direct-browser CORS headers', () => {
-    const request = createAnthropicMessagesRequest('test-key', false);
+  it('keeps production chat requests on the direct browser-access endpoint', () => {
+    expect(createAnthropicProviderSettings('test-key', false)).toEqual({
+      apiKey: 'test-key',
+      headers: { [ANTHROPIC_BROWSER_ACCESS_HEADER]: 'true' },
+    });
+  });
+
+  it('routes dev message requests through the proxy with Anthropic browser-access headers', () => {
+    const request = createAnthropicMessagesRequest('test-key', true);
 
     expect(request.url).toBe(ANTHROPIC_PROXY_MESSAGES_URL);
     expect(request.headers).toMatchObject({
       'Content-Type': 'application/json',
       'x-api-key': 'test-key',
       'anthropic-version': '2023-06-01',
+      [ANTHROPIC_BROWSER_ACCESS_HEADER]: 'true',
     });
-    expect(request.headers).not.toHaveProperty('anthropic-dangerous-direct-browser-access');
   });
 
-  it('keeps desktop message requests direct for the Tauri runtime', () => {
-    const request = createAnthropicMessagesRequest('test-key', true);
+  it('keeps production message requests direct with Anthropic browser-access headers', () => {
+    const request = createAnthropicMessagesRequest('test-key', false);
 
     expect(request.url).toBe(ANTHROPIC_DIRECT_MESSAGES_URL);
     expect(request.headers).toMatchObject({
       'Content-Type': 'application/json',
       'x-api-key': 'test-key',
       'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
+      [ANTHROPIC_BROWSER_ACCESS_HEADER]: 'true',
     });
   });
 
@@ -70,6 +73,6 @@ describe('Anthropic transport settings', () => {
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(ANTHROPIC_PROXY_MESSAGES_URL);
-    expect(init.headers).not.toHaveProperty('anthropic-dangerous-direct-browser-access');
+    expect(init.headers).toHaveProperty(ANTHROPIC_BROWSER_ACCESS_HEADER, 'true');
   });
 });
