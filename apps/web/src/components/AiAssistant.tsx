@@ -34,6 +34,44 @@ const toToolAction = (part: ToolUiPart): ToolAction => {
   };
 };
 
+const createCascadeChat = (apiKey: string, model: string, nodeSpecs: ReturnType<typeof getAuthoringNodeSpecs>) =>
+  new Chat({ transport: createCascadeTransport(apiKey, model, nodeSpecs) });
+
+type CascadeChat = ReturnType<typeof createCascadeChat>;
+
+let activeChatEntry: {
+  configKey: string;
+  specSignature: string;
+  chat: CascadeChat;
+} | null = null;
+
+const getActiveChatEntry = (
+  apiKey: string | undefined,
+  model: string,
+  nodeSpecs: ReturnType<typeof getAuthoringNodeSpecs>,
+  configKey: string,
+  specSignature: string,
+) => {
+  if (!apiKey) {
+    activeChatEntry = null;
+    return null;
+  }
+  const canRefreshForSpecs =
+    activeChatEntry?.chat.status === 'ready' && activeChatEntry.chat.messages.length === 0;
+  if (
+    !activeChatEntry
+    || activeChatEntry.configKey !== configKey
+    || (activeChatEntry.specSignature !== specSignature && canRefreshForSpecs)
+  ) {
+    activeChatEntry = {
+      configKey,
+      specSignature,
+      chat: createCascadeChat(apiKey, model, nodeSpecs),
+    };
+  }
+  return activeChatEntry;
+};
+
 export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) => {
   const apiKey = useSettingsStore(s => s.anthropicApiKey);
   const model = useSettingsStore(s => s.aiAssistantModel);
@@ -47,16 +85,18 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const transport = useMemo(() => {
-    if (!apiKey) return null;
-    return createCascadeTransport(apiKey, model, authoringNodeSpecs);
-  }, [apiKey, model, authoringNodeSpecs]);
-
-  const chat = useMemo(() => {
-    if (!transport) return null;
-    return new Chat({ transport });
-  }, [transport]);
-
+  const specSignature = useMemo(
+    () => authoringNodeSpecs
+      .map(spec => `${spec.id}:${spec.inputs.length}:${spec.outputs.length}:${spec.params.length}:${spec.supported_surfaces?.join(',') ?? ''}`)
+      .join('|'),
+    [authoringNodeSpecs],
+  );
+  const configKey = `${apiKey ?? ''}\0${model}\0${runtimeSurface}`;
+  const chatEntry = useMemo(
+    () => getActiveChatEntry(apiKey, model, authoringNodeSpecs, configKey, specSignature),
+    [apiKey, authoringNodeSpecs, configKey, model, specSignature],
+  );
+  const chat = chatEntry?.chat ?? null;
   const chatOptions = useMemo(() => (chat ? { chat } : undefined), [chat]);
   const { messages, sendMessage, status, stop, error } = useChat(chatOptions);
 
