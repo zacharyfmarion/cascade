@@ -11,6 +11,7 @@ import type {
   DslPortDeclaration,
 } from '../types';
 import { mockSpecs } from './helpers';
+import type { NodeSpec } from '../../../store/types';
 
 function makeNode(
   handle: string,
@@ -220,6 +221,16 @@ const makeGroupDef = (overrides: Partial<DslGroupDefinition> = {}): DslGroupDefi
   ...overrides,
 });
 
+const invertSpec: NodeSpec = {
+  id: 'gpu_kernel::invert',
+  display_name: 'Invert',
+  category: 'Color',
+  description: 'Invert colors',
+  inputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+  params: [],
+};
+
 const withCustom = (definitions: (DslGpuDefinition | DslGroupDefinition)[]): DslAst => ({
   nodes: new Map(),
   connections: [],
@@ -229,6 +240,21 @@ const withCustom = (definitions: (DslGpuDefinition | DslGroupDefinition)[]): Dsl
 describe('validateAst — GPU custom definitions', () => {
   it('passes a well-formed GPU definition without errors', () => {
     const result = validateAst(withCustom([makeGpuDef()]), mockSpecs);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('rejects GPU definitions that collide with a built-in node name', () => {
+    const result = validateAst(withCustom([makeGpuDef({ name: 'Invert' })]), [...mockSpecs, invertSpec]);
+
+    expect(result.errors.some(e =>
+      e.message.includes('Custom node "Invert" conflicts with a built-in node type')
+      && e.message.includes('InvertImage')
+    )).toBe(true);
+  });
+
+  it('accepts GPU definitions with distinct names near built-in node names', () => {
+    const result = validateAst(withCustom([makeGpuDef({ name: 'InvertImage' })]), [...mockSpecs, invertSpec]);
+
     expect(result.errors).toHaveLength(0);
   });
 
@@ -293,6 +319,14 @@ describe('validateAst — group custom definitions', () => {
   it('passes a well-formed group definition without errors', () => {
     const result = validateAst(withCustom([makeGroupDef()]), mockSpecs);
     expect(result.errors).toHaveLength(0);
+  });
+
+  it('rejects group definitions that collide with a built-in node name', () => {
+    const result = validateAst(withCustom([makeGroupDef({ name: 'Invert' })]), [...mockSpecs, invertSpec]);
+
+    expect(result.errors.some(e =>
+      e.message.includes('Custom node "Invert" conflicts with a built-in node type')
+    )).toBe(true);
   });
 
   it('errors when group has no outputs', () => {

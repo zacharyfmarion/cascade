@@ -20,6 +20,7 @@ export interface ProjectSliceState {
   dirty: boolean;
   currentProjectPath: string | null;
   currentProjectName: string;
+  projectSessionRevision: number;
   unsavedChangesPrompt: PendingProjectAction | null;
 }
 
@@ -244,6 +245,7 @@ export const createProjectSlice: StateCreator<
     set({
       currentProjectPath: identity.path,
       currentProjectName: identity.name,
+      projectSessionRevision: get().projectSessionRevision + 1,
       dslShadow: hydrateDslShadowMetadata(
         data.dsl,
         state.nodes,
@@ -342,6 +344,7 @@ export const createProjectSlice: StateCreator<
     dirty: false,
     currentProjectPath: null,
     currentProjectName: 'Untitled',
+    projectSessionRevision: 0,
     unsavedChangesPrompt: null,
 
     newProject: async () => {
@@ -383,6 +386,7 @@ export const createProjectSlice: StateCreator<
         aiNodeStale: {},
         currentProjectPath: null,
         currentProjectName: 'Untitled',
+        projectSessionRevision: get().projectSessionRevision + 1,
         unsavedChangesPrompt: null,
       });
       rememberDesktopPath(null);

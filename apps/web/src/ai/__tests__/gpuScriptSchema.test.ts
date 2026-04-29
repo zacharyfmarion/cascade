@@ -36,6 +36,7 @@ describe('GPU script AI schema', () => {
 
     const editingNotes = result.editing_notes as string[];
     expect(editingNotes.some((note) => note.includes('node Name = gpu'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('InvertImage'))).toBe(true);
     expect(editingNotes.some((note) => note.includes('read_graph'))).toBe(true);
     expect(editingNotes.some((note) => note.includes('write_graph'))).toBe(true);
     expect(editingNotes.some((note) => note.includes('get_gpu_script_manifest'))).toBe(false);
@@ -51,6 +52,7 @@ describe('GPU script AI schema', () => {
     expect(prompt).toContain('GpuScript');
     expect(prompt).toContain('Scalar input controls are exposed directly by name');
     expect(prompt).toContain('There is no separate GPU creation tool');
+    expect(prompt).toContain('use `InvertImage`');
     expect(prompt).not.toContain('create_gpu_script');
     expect(prompt).not.toContain('get_gpu_script_manifest');
     expect(prompt).not.toContain('Manifest Fields');

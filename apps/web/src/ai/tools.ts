@@ -5,13 +5,10 @@ import { getRuntimeSurface } from '../platform/runtime';
 import { useGraphStore } from '../store/graphStore';
 import type { NodeSpec, ParamSpec, PortSpec } from '../store/types';
 import { serializeGraph } from './dsl/serializer';
-import { customDefinitionToNodeSpec, parseDsl } from './dsl/parser';
-import { validateAst } from './dsl/validator';
-import { diffAst } from './dsl/differ';
-import { applyMutations } from './dsl/executor';
+import { parseDsl } from './dsl/parser';
+import { applyDsl } from './dsl/executor';
 import { captureViewerThumbnail } from './viewerSnapshot';
 import { snakeToPascal, labelToSnake, pascalToSnake } from './dsl/types';
-import type { DslAst } from './dsl/types';
 import { graphSemanticHash, handleMapFromShadow } from './dsl/shadow';
 import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from './gpuScript';
 
@@ -34,15 +31,6 @@ function getCurrentDsl(): string {
   });
 }
 
-
-function getCurrentAst(): DslAst {
-  const { nodeSpecs, nodes } = useGraphStore.getState();
-  const dslText = getCurrentDsl();
-  const handleMap = handleMapFromShadow(nodes, useGraphStore.getState().dslShadow);
-  const result = parseDsl(dslText, nodeSpecs, { currentNodes: nodes, handleMap });
-
-  return result.ast ?? { nodes: new Map(), connections: [] };
-}
 
 function getAuthoringSpecs(): NodeSpec[] {
   const { nodeSpecs } = useGraphStore.getState();
@@ -158,6 +146,7 @@ function buildGpuScriptSchema(specs: NodeSpec[], requestedType: string): Record<
     },
     editing_notes: [
       'Create and edit GPU Scripts by writing top-level DSL definitions: node Name = gpu { ... }, then instantiate Name(...) inside graph { ... }.',
+      'Use a custom definition name that does not match a built-in node type. For example, use InvertImage instead of Invert.',
       'Use read_graph before editing existing GPU Scripts so you can preserve their definition name, ports, scalar controls, GLSL code, and connections unless the user asked to change them.',
       'Use write_graph for new complete graphs or edit_graph for targeted changes. There is no separate GPU creation tool.',
       'Declare image and mask ports in inputs. Optional ports use a trailing ?. Use mask mask? only when the graph needs an exposed mask input.',
@@ -293,66 +282,37 @@ const toolExecutors = {
 
 
 async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
-  const { nodeSpecs, nodes, dslShadow } = useGraphStore.getState();
+  const { nodeSpecs, nodes, connections, dslShadow } = useGraphStore.getState();
   const handleMap = handleMapFromShadow(nodes, dslShadow);
 
-
-  const parseResult = parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
-  if (parseResult.errors.length > 0) {
-    return {
-      success: false,
-      errors: parseResult.errors.map(e => ({
-        line: e.line,
-        message: e.message,
-        ...(e.suggestion ? { suggestion: e.suggestion } : {}),
-      })),
-    };
-  }
-  if (!parseResult.ast) {
-    return { success: false, errors: [{ line: 0, message: 'Failed to parse DSL' }] };
-  }
-
-
-  const customSpecs = parseResult.ast.customNodes
-    ? Array.from(parseResult.ast.customNodes.values()).map(customDefinitionToNodeSpec)
-    : [];
-  const validation = validateAst(parseResult.ast, [...nodeSpecs, ...customSpecs]);
-  if (!validation.valid) {
-    return {
-      success: false,
-      errors: validation.errors.map(e => ({
-        line: e.line,
-        message: e.message,
-        ...(e.suggestion ? { suggestion: e.suggestion } : {}),
-      })),
-    };
-  }
-
-
-  const currentAst = getCurrentAst();
-  const mutations = diffAst(currentAst, parseResult.ast);
-
-  if (mutations.length === 0) {
-    const updatedDsl = getCurrentDsl();
-    return { success: true, graph: updatedDsl, mutations_applied: 0 };
-  }
-
-
-  const result = await applyMutations(mutations, handleMap, nodeSpecs);
+  const result = await applyDsl(newDsl, handleMap, nodeSpecs, nodes, connections);
   if (!result.success) {
     return {
       success: false,
-      error: result.error,
+      errors: result.errors.map(e => ({
+        line: e.line,
+        message: e.message,
+        ...(e.suggestion ? { suggestion: e.suggestion } : {}),
+      })),
     };
   }
 
   const updatedState = useGraphStore.getState();
-  updatedState.setDslShadowFromEditor(newDsl, handleMap, parseResult.ast, parseResult.sourceMap);
-  const updatedDsl = getCurrentDsl();
+  const appliedParse = parseDsl(newDsl, updatedState.nodeSpecs, {
+    currentNodes: updatedState.nodes,
+    handleMap,
+  });
+  updatedState.setDslShadowFromEditor(
+    newDsl,
+    handleMap,
+    appliedParse.ast,
+    result.sourceMap ?? appliedParse.sourceMap,
+    result.customDefinitionNames,
+  );
+
   const response: Record<string, unknown> = {
     success: true,
-    graph: updatedDsl,
-    mutations_applied: mutations.length,
+    graph: result.updatedDsl,
   };
   if (result.evalErrors && result.evalErrors.length > 0) {
     response.eval_errors = result.evalErrors.map(e => ({

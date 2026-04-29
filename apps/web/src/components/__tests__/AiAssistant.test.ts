@@ -97,6 +97,7 @@ describe('AiAssistant', () => {
     });
     useGraphStore.setState({
       nodeSpecs: [blurSpec],
+      projectSessionRevision: 0,
     });
   });
 
@@ -131,5 +132,24 @@ describe('AiAssistant', () => {
     });
 
     expect(createdChats).toHaveLength(2);
+  });
+
+  it('resets the chat when the project session changes', async () => {
+    render(React.createElement(AiAssistant, { isOpen: true, onToggle: vi.fn() }));
+    expect(createdChats).toHaveLength(1);
+
+    createdChats[0].messages = [{
+      id: 'user-1',
+      role: 'user',
+      parts: [{ type: 'text', text: 'old project request' }],
+    }];
+
+    act(() => {
+      useGraphStore.setState({ projectSessionRevision: 1 });
+    });
+
+    expect(createdChats).toHaveLength(2);
+    expect(screen.queryByText('old project request')).toBeNull();
+    expect(await screen.findByText('What would you like to build?')).toBeTruthy();
   });
 });

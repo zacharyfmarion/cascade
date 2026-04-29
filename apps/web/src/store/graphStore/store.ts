@@ -95,6 +95,7 @@ export interface GraphState {
   dirty: boolean;
   currentProjectPath: string | null;
   currentProjectName: string;
+  projectSessionRevision: number;
   unsavedChangesPrompt: PendingProjectAction | null;
   fitViewRequestId: number;
 

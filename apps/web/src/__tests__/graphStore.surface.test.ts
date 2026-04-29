@@ -57,6 +57,7 @@ const EXPECTED_KEYS: string[] = [
   'nodes',
   'playbackFps',
   'previewScale',
+  'projectSessionRevision',
   'renderProgress',
   'renderResults',
   'selectedFrameId',

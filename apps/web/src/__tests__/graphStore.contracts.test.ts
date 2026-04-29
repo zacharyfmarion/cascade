@@ -60,6 +60,7 @@ const createInitialState = () => ({
   isRendering: false,
   previewScale: 1,
   dirty: false,
+  projectSessionRevision: 0,
   hasSequenceNodes: false,
   sequenceLength: 0,
   sequenceStart: 0,

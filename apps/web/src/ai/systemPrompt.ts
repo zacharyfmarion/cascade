@@ -123,6 +123,8 @@ Use GPU Script nodes when the user wants a custom effect that doesn't map cleanl
 
 Create and edit GPU Scripts directly in the DSL. There is no separate GPU creation tool. Write a top-level \`node Name = gpu { ... }\` definition and instantiate it inside \`graph { ... }\`.
 
+Custom GPU/group definition names must not match built-in node type names. For example, use \`InvertImage\`, \`FilmInvert\`, or \`CustomInvert\` instead of \`Invert\`.
+
 ### Custom GPU Script Definition Syntax
 \`\`\`cascade
 node FilmGrain = gpu {
@@ -170,6 +172,7 @@ Available globals:
 
 ### Editing Existing GPU Script Nodes
 - Call \`read_graph\` before editing so you preserve the existing definition name, ports, scalar controls, GLSL code, and connections unless the user asked to change them.
+- Use distinct custom definition names that do not collide with built-ins, e.g. \`node InvertImage = gpu { ... }\` and \`invert1 = InvertImage()\`.
 - Use \`inputs\` for both image/mask ports and user controls. Scalar controls are \`float\`, \`int\`, or \`bool\` inputs with optional default/min/max/step metadata.
 - Use \`mask mask?\` only when the node should expose an optional mask input.
 - Put only the GLSL body in \`code """ ... """\`. Do not include the \`process()\` wrapper.

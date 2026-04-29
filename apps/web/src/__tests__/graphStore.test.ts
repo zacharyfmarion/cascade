@@ -73,6 +73,7 @@ const createInitialState = () => ({
   dirty: false,
   currentProjectPath: null,
   currentProjectName: 'Untitled',
+  projectSessionRevision: 0,
   unsavedChangesPrompt: null,
   hasSequenceNodes: false,
   sequenceLength: 0,
@@ -739,17 +740,20 @@ describe('graphStore project hydration', () => {
 
   it('requestNewProject discard clears both store and engine graph', async () => {
     await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    const initialSessionRevision = useGraphStore.getState().projectSessionRevision;
 
     await useGraphStore.getState().requestNewProject();
     await useGraphStore.getState().resolveUnsavedChanges('discard');
 
     expect(useGraphStore.getState().nodes.size).toBe(0);
     expect(useGraphStore.getState().dirty).toBe(false);
+    expect(useGraphStore.getState().projectSessionRevision).toBe(initialSessionRevision + 1);
     expect((mockEngine.exportGraph() as { nodes?: unknown[] }).nodes).toEqual([]);
   });
 
   it('requestOpenProject prompts when dirty and discard loads the selected web file', async () => {
     await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    const initialSessionRevision = useGraphStore.getState().projectSessionRevision;
     const file = new File([JSON.stringify({
       cascade: { format_version: '1.3.0' },
       graph: {
@@ -775,6 +779,7 @@ describe('graphStore project hydration', () => {
     expect(state.currentProjectName).toBe('loaded_project');
     expect(state.currentProjectPath).toBeNull();
     expect(state.dirty).toBe(false);
+    expect(state.projectSessionRevision).toBe(initialSessionRevision + 1);
   });
 
   it('desktop Save uses the current project path', async () => {

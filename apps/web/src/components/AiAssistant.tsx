@@ -77,6 +77,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
   const model = useSettingsStore(s => s.aiAssistantModel);
   const openSettings = useSettingsStore(s => s.openSettings);
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
+  const projectSessionRevision = useGraphStore(s => s.projectSessionRevision);
   const runtimeSurface = getRuntimeSurface();
   const authoringNodeSpecs = useMemo(
     () => getAuthoringNodeSpecs(nodeSpecs, runtimeSurface),
@@ -91,7 +92,7 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
       .join('|'),
     [authoringNodeSpecs],
   );
-  const configKey = `${apiKey ?? ''}\0${model}\0${runtimeSurface}`;
+  const configKey = `${apiKey ?? ''}\0${model}\0${runtimeSurface}\0${projectSessionRevision}`;
   const chatEntry = useMemo(
     () => getActiveChatEntry(apiKey, model, authoringNodeSpecs, configKey, specSignature),
     [apiKey, authoringNodeSpecs, configKey, model, specSignature],

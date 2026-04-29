@@ -1,6 +1,7 @@
 import type { NodeSpec, ParamSpec, ValueType } from '../../store/types';
 import type {
   DslAst,
+  DslCustomNodeDefinition,
   DslGroupDefinition,
   DslGpuDefinition,
   DslNode,
@@ -10,6 +11,11 @@ import type {
   ValidationWarning,
 } from './types';
 import { snakeToPascal } from './types';
+
+const CUSTOM_SPEC_DESCRIPTIONS = new Set([
+  'Custom GPU node defined in DSL',
+  'Custom group node defined in DSL',
+]);
 
 export const levenshteinDistance = (a: string, b: string): number => {
   const aLen = a.length;
@@ -459,18 +465,56 @@ const validateGroupDefinition = (
 
 const validateCustomDefinitions = (
   ast: DslAst,
+  nodeSpecs: NodeSpec[],
   specById: Map<string, NodeSpec>,
   errors: ValidationError[],
   warnings: ValidationWarning[],
 ) => {
   if (!ast.customNodes) return;
   for (const definition of ast.customNodes.values()) {
+    validateCustomDefinitionNameCollision(definition, nodeSpecs, errors);
     if (definition.kind === 'gpu') {
       validateGpuDefinition(definition, errors, warnings);
     } else {
       validateGroupDefinition(definition, specById, errors, warnings);
     }
   }
+};
+
+const typeNamesForSpec = (spec: NodeSpec): string[] => {
+  const names = new Set<string>();
+  names.add(snakeToPascal(spec.id));
+  if (spec.id.startsWith('gpu_kernel::')) {
+    names.add(snakeToPascal(spec.id.slice('gpu_kernel::'.length)));
+  }
+  if (spec.display_name) {
+    names.add(spec.display_name
+      .split(/[^A-Za-z0-9]+/)
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(''));
+  }
+  return Array.from(names).filter(Boolean);
+};
+
+const isDslGeneratedCustomSpec = (spec: NodeSpec): boolean =>
+  CUSTOM_SPEC_DESCRIPTIONS.has(spec.description);
+
+const validateCustomDefinitionNameCollision = (
+  definition: DslCustomNodeDefinition,
+  nodeSpecs: NodeSpec[],
+  errors: ValidationError[],
+) => {
+  const collidingSpec = nodeSpecs.find(spec =>
+    !isDslGeneratedCustomSpec(spec)
+    && typeNamesForSpec(spec).includes(definition.name)
+  );
+  if (!collidingSpec) return;
+
+  addError(errors, {
+    line: definition.line,
+    message: `Line ${definition.line}: Custom node "${definition.name}" conflicts with a built-in node type. Use a distinct name such as "${definition.name}Image".`,
+  });
 };
 
 const validateWarnings = (ast: DslAst, warnings: ValidationWarning[]) => {
@@ -500,7 +544,7 @@ export const validateAst = (ast: DslAst, nodeSpecs: NodeSpec[]): ValidationResul
   const warnings: ValidationWarning[] = [];
   const specById = new Map(nodeSpecs.map(spec => [spec.id, spec]));
 
-  validateCustomDefinitions(ast, specById, errors, warnings);
+  validateCustomDefinitions(ast, nodeSpecs, specById, errors, warnings);
   validateNodeTypes(ast, specById, errors);
   validateConnections(ast, errors);
   validateWarnings(ast, warnings);
