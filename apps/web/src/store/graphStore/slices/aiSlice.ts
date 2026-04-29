@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { NodeSpec, ParamDefault, ParamValue, PortSpec } from '../../types';
-import { getEngine, withGroupIOSpecs } from '../kernel';
+import { getEngine, markGraphMutation, withGroupIOSpecs } from '../kernel';
 import { formatGpuScriptCompileError } from '../../../engine/gpuScriptErrors';
 
 export interface AiSliceState {
@@ -156,7 +156,9 @@ export const createAiSlice: StateCreator<
       // Also store in nodeSpecsById so the spec survives any subsequent listNodeTypes() resets
       const newSpecsById = new Map(get().nodeSpecsById);
       newSpecsById.set(nodeId, spec);
+      markGraphMutation(set, 'ui');
       set({ nodeSpecs: nextSpecs, nodes: newNodes, nodeSpecsById: newSpecsById, dirty: true });
+      get().refreshDslShadowFromGraph();
       get().triggerAffectedViewers([nodeId]);
       return spec;
     } catch (error) {

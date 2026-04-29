@@ -3,6 +3,8 @@ import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInt
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
 import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../ai/gpuScript';
+import { serializeGraph } from '../ai/dsl/serializer';
+import { HandleMap } from '../ai/dsl/handleMap';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -569,6 +571,60 @@ describe('graphStore group editing state', () => {
     expect(state.dslShadow?.text).toContain('node CloudyAdjustment = group {');
     expect(state.dslShadow?.text).toContain('CloudyAdjustment()');
     expect(state.dslShadow?.text).not.toContain('node NodeGroup = group');
+  });
+});
+
+describe('graphStore DSL shadow hardening', () => {
+  it('live param commits retag stale DSL-origin state and refresh DSL shadow', async () => {
+    const store = useGraphStore.getState();
+    const blur = await store.addNode('gaussian_blur', { x: 0, y: 0 });
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.setParamLive(blur, 'amount', { Float: 2 } as ParamValue);
+    await flushPromises(3);
+    await store.setParamCommit(blur, 'amount', { Float: 2 } as ParamValue);
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.nodes.get(blur)?.params.amount).toEqual({ Float: 2 });
+    expect(state.nodeSpecs.find(spec => spec.id === 'gaussian_blur')?.params.find(param => param.key === 'amount')?.default).toEqual({ Float: 0.5 });
+    expect(serializeGraph({
+      nodes: state.nodes,
+      connections: state.connections,
+      nodeSpecs: state.nodeSpecs,
+      handleMap: new HandleMap(),
+    })).toContain('GaussianBlur(amount: 2.0)');
+    expect(state.dslShadow?.text).toContain('blur1 = GaussianBlur(amount: 2.0)');
+  });
+
+  it('loading an image path retags stale DSL-origin state and refreshes asset DSL', async () => {
+    const store = useGraphStore.getState();
+    const load = await store.addNode('load_image', { x: 0, y: 0 });
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.loadImagePath(load, '/tmp/plate.png');
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.dslShadow?.text).toContain('load1 = LoadImage(path: image("file:///tmp/plate.png"))');
+  });
+
+  it('loading a video path persists file_path for DSL and save projection', async () => {
+    setTauriMode(true);
+    const store = useGraphStore.getState();
+    const video = await store.addNode('load_video', { x: 0, y: 0 });
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.loadVideoFile(video, '/tmp/reference.mov');
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.nodes.get(video)?.params.file_path).toEqual({ String: 'file:///tmp/reference.mov' });
+    expect(state.dslShadow?.text).toContain('load1 = LoadVideo(file_path: video("file:///tmp/reference.mov"))');
   });
 });
 

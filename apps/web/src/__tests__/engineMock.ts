@@ -107,11 +107,19 @@ const NODE_SPECS: NodeSpec[] = [
     outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
     params: [
       {
+        key: 'directory',
+        label: 'Directory',
+        ty: 'String',
+        default: { String: '' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+      {
         key: 'pattern',
         label: 'Pattern',
-        ty: 'Float',
-        default: { String: '' },
-        ui_hint: { type: 'FilePicker' },
+        ty: 'String',
+        default: { String: 'frame_{frame}.png' },
+        ui_hint: { type: 'Hidden' },
         promotable: true,
       },
     ],
@@ -515,6 +523,14 @@ export function createMockEngine(): EngineBridge & {
         prunedConnections: [],
       };
     },
+
+    loadVideoFile: async () => ({
+      width: 1920,
+      height: 1080,
+      fps: 24,
+      frame_count: 48,
+      duration_secs: 2,
+    }),
 
     getImageData: (nodeId: string): Uint8Array | null => {
       return imageDataStore.get(nodeId) ?? null;

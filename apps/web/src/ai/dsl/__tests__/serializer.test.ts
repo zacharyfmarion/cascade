@@ -400,6 +400,21 @@ describe('serializeGraph', () => {
     expect(output).toBe(graph(['blur1 = GaussianBlur(amount: 5.0)']));
   });
 
+  it('serializes connectable params from node params when no input default is present', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-1',
+      makeNodeInstance({
+        id: 'node-1',
+        typeId: 'gaussian_blur',
+        params: { amount: { Float: 2.0 } },
+        inputDefaults: {},
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe(graph(['blur1 = GaussianBlur(amount: 2.0)']));
+  });
+
   it('omits params when value matches default', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set(

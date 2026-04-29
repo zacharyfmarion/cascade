@@ -4,7 +4,7 @@ import type { ParamValue } from '../../types';
 import type { SequenceInfo, VideoInfo } from '../../../engine/bridge';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { makeEngineError } from '../../../engine/engineError';
-import { getEngine, isSequenceInfo, kernel } from '../kernel';
+import { getEngine, isSequenceInfo, kernel, markGraphMutation } from '../kernel';
 import { useSettingsStore } from '../../settingsStore';
 
 export interface SequenceVideoSliceState {
@@ -155,7 +155,18 @@ export const createSequenceVideoSlice: StateCreator<
         };
         const newInfoMap = new Map(get().sequenceInfoMap);
         newInfoMap.set(nodeId, seqInfo);
-        set({ sequenceInfoMap: newInfoMap, dirty: true });
+        const newNodes = new Map(get().nodes);
+        const node = newNodes.get(nodeId);
+        if (node) {
+          const source = path.startsWith('file://') ? path : `file://${path}`;
+          newNodes.set(nodeId, {
+            ...node,
+            params: { ...node.params, file_path: { String: source } as ParamValue },
+          });
+        }
+        markGraphMutation(set, 'ui');
+        set({ nodes: newNodes, sequenceInfoMap: newInfoMap, dirty: true });
+        get().refreshDslShadowFromGraph();
         recomputeSequenceState();
 
         const { currentFrame, sequenceStart, sequenceLength } = get();

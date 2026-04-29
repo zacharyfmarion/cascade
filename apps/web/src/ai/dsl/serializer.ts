@@ -721,8 +721,9 @@ export function serializeGraph(input: SerializerInput): string {
     const params: string[] = formatVirtualAssetParamEntries(node, spec);
     if (spec) {
       for (const paramSpec of spec.params) {
-        const source = isConnectableParam(paramSpec) ? node.inputDefaults : node.params;
-        const value = source[paramSpec.key];
+        const value = isConnectableParam(paramSpec)
+          ? node.inputDefaults[paramSpec.key] ?? node.params[paramSpec.key]
+          : node.params[paramSpec.key];
         if (!shouldIncludeParam(node, paramSpec, value)) continue;
         params.push(formatParamEntry(node.typeId, paramSpec, value));
       }

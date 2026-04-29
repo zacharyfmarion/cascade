@@ -9,6 +9,7 @@ import type {
   GroupInternalGraph,
   Frame,
   SerializableGroupDefinition,
+  TransactionOrigin,
 } from '../types';
 import { isPixelResult } from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
@@ -86,6 +87,15 @@ export const cloneEditingStack = (stack: EditingContext[]): EditingContext[] =>
     savedConnections: ctx.savedConnections ? [...ctx.savedConnections] : undefined,
     savedNodeSpecs: ctx.savedNodeSpecs ? [...ctx.savedNodeSpecs] : undefined,
   }));
+
+export function markGraphMutation(
+  set: (partial: { lastTransactionOrigin: TransactionOrigin; graphRevision: number }) => void,
+  origin: TransactionOrigin = 'ui',
+): void {
+  if (kernel.renderSuspendCount > 0) return;
+  kernel.graphRevision++;
+  set({ lastTransactionOrigin: origin, graphRevision: kernel.graphRevision });
+}
 
 export const nextRenderGeneration = (viewerNodeId: string): number => {
   const next = (kernel.renderGenerations.get(viewerNodeId) ?? 0) + 1;

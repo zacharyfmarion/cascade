@@ -9,7 +9,7 @@ import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { getNodeCategory, getPortType } from '../../../analytics/nodeGraph';
 import { trackAnalyticsEvent } from '../../../analytics/runtime';
-import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractCustomGroupDefinitions, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
+import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractCustomGroupDefinitions, extractGraphData, getEngine, kernel, markGraphMutation, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
 import {
   buildDefaultGpuScriptManifest,
   buildGpuScriptNodeSpec,
@@ -88,9 +88,7 @@ export const createGraphSlice: StateCreator<
   GraphSlice
 > = (set, get) => {
   const tagUiOrigin = () => {
-    if (kernel.renderSuspendCount > 0) return;
-    kernel.graphRevision++;
-    set({ lastTransactionOrigin: 'ui', graphRevision: kernel.graphRevision });
+    markGraphMutation(set, 'ui');
   };
 
   const refreshCustomGroupDefinitions = async () => {
@@ -1074,6 +1072,7 @@ export const createGraphSlice: StateCreator<
       const resolvedOutputs = outputs ?? currentGraph.outputs;
 
       await get().pushUndo();
+      tagUiOrigin();
       const updatedSpec = await eng.updateGroupInterface(currentContext.groupDefId, resolvedInputs, resolvedOutputs);
 
       const specs = await Promise.resolve(eng.listNodeTypes());
@@ -1117,6 +1116,7 @@ export const createGraphSlice: StateCreator<
         nodeSpecs: withGroupIOSpecs(specs, internalGraph),
       });
       await refreshCustomGroupDefinitions();
+      get().refreshDslShadowFromGraph();
     },
 
     applyNodeInterfaceChange: (nodeId, change) => {
@@ -1127,6 +1127,7 @@ export const createGraphSlice: StateCreator<
       // Remove connections that were pruned by the engine
       let newConnections = get().connections;
       if (change.prunedConnections.length > 0) {
+        tagUiOrigin();
         const pruneSet = new Set(
           change.prunedConnections.map(pc => `${pc.fromNode}:${pc.fromPort}->${pc.toNode}:${pc.toPort}`)
         );
