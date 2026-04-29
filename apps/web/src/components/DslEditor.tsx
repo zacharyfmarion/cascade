@@ -434,6 +434,7 @@ export const DslEditor: React.FC = () => {
     let prevConnections = useGraphStore.getState().connections;
     let prevNodeSpecs = useGraphStore.getState().nodeSpecs;
     let prevCustomGroupDefinitions = useGraphStore.getState().customGroupDefinitions;
+    let prevDslShadow = useGraphStore.getState().dslShadow;
 
     const unsubscribe = useGraphStore.subscribe((state) => {
       // Only act when the relevant slices actually changed
@@ -441,7 +442,8 @@ export const DslEditor: React.FC = () => {
         state.nodes === prevNodes &&
         state.connections === prevConnections &&
         state.nodeSpecs === prevNodeSpecs &&
-        state.customGroupDefinitions === prevCustomGroupDefinitions
+        state.customGroupDefinitions === prevCustomGroupDefinitions &&
+        state.dslShadow === prevDslShadow
       ) {
         return;
       }
@@ -449,6 +451,7 @@ export const DslEditor: React.FC = () => {
       prevConnections = state.connections;
       prevNodeSpecs = state.nodeSpecs;
       prevCustomGroupDefinitions = state.customGroupDefinitions;
+      prevDslShadow = state.dslShadow;
 
       const editor = editorRef.current;
       if (!editor) return;
