@@ -208,7 +208,7 @@ describe('DslEditor', () => {
     });
   });
 
-  it('clears visible DSL and stale shadow when an external graph change removes all nodes', async () => {
+  it('shows canonical empty graph DSL and clears stale shadow when an external graph change removes all nodes', async () => {
     const nodes = new Map([['blur-node', blurNode(1)]]);
     resetStore(nodes);
     const handleMap = new HandleMap();
@@ -247,7 +247,7 @@ describe('DslEditor', () => {
     });
 
     await waitFor(() => {
-      expect(editor.value).toBe('');
+      expect(editor.value).toBe('graph {\n\n}');
       expect(useGraphStore.getState().dslShadow).toBeNull();
     });
   });

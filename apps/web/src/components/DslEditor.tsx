@@ -18,6 +18,7 @@ const MARKER_OWNER = 'dsl-editor';
 const EVAL_MARKER_OWNER = 'dsl-eval';
 const LANGUAGE_ID = 'cascade-dsl';
 const MONACO_THEME_ID = 'cascade-dsl';
+const EMPTY_GRAPH_DSL = 'graph {\n\n}';
 
 const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   minimap: { enabled: false },
@@ -40,7 +41,8 @@ const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
  */
 function serializeCurrent(): string {
   const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = useGraphStore.getState();
-  if (nodeSpecs.length === 0 || nodes.size === 0) return '';
+  if (nodeSpecs.length === 0) return '';
+  if (nodes.size === 0) return EMPTY_GRAPH_DSL;
   if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections, customGroupDefinitions)) {
     return dslShadow.text;
   }
@@ -461,11 +463,11 @@ export const DslEditor: React.FC = () => {
         if (dslShadow) {
           useGraphStore.setState({ dslShadow: null });
         }
-        if (lastPushedDslRef.current === '') return;
-        lastPushedDslRef.current = '';
+        if (lastPushedDslRef.current === EMPTY_GRAPH_DSL) return;
+        lastPushedDslRef.current = EMPTY_GRAPH_DSL;
         sourceMapRef.current = null;
         suppressApplyRef.current = true;
-        editor.setValue('');
+        editor.setValue(EMPTY_GRAPH_DSL);
         clearMarkers();
         clearEvalMarkers();
         return;

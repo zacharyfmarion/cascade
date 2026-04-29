@@ -5,10 +5,12 @@ if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
 }
 
-const saveMock = vi.fn();
+const dialogMocks = vi.hoisted(() => ({
+  save: vi.fn(),
+}));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
-  save: saveMock,
+  save: dialogMocks.save,
 }));
 
 let mockEngine = createMockEngine();
@@ -39,7 +41,7 @@ const setTauriMode = (enabled: boolean) => {
 beforeEach(async () => {
   vi.resetModules();
   setTauriMode(false);
-  saveMock.mockReset();
+  dialogMocks.save.mockReset();
 
   mockExportImageToPath = vi.fn().mockResolvedValue(undefined);
   mockEngine = createMockEngine();
@@ -160,44 +162,44 @@ describe('exportImage — Tauri path (isTauri = true)', () => {
   });
 
   it('opens save dialog with correct extension and calls exportImageToPath', async () => {
-    saveMock.mockResolvedValue('/tmp/export.png');
+    dialogMocks.save.mockResolvedValue('/tmp/export.png');
 
     const id = await addExportImageNode(0);
     useGraphStore.getState().exportImage(id);
     await flushPromises();
 
-    expect(saveMock).toHaveBeenCalledOnce();
-    const saveArgs = saveMock.mock.calls[0][0];
+    expect(dialogMocks.save).toHaveBeenCalledOnce();
+    const saveArgs = dialogMocks.save.mock.calls[0][0];
     expect(saveArgs.filters[0].extensions).toContain('png');
     expect(mockExportImageToPath).toHaveBeenCalledWith(id, 0, '/tmp/export.png');
   });
 
   it('uses .jpg extension for format 1', async () => {
-    saveMock.mockResolvedValue('/tmp/export.jpg');
+    dialogMocks.save.mockResolvedValue('/tmp/export.jpg');
 
     const id = await addExportImageNode(1);
     useGraphStore.getState().exportImage(id);
     await flushPromises();
 
-    const saveArgs = saveMock.mock.calls[0][0];
+    const saveArgs = dialogMocks.save.mock.calls[0][0];
     expect(saveArgs.filters[0].extensions).toContain('jpg');
     expect(mockExportImageToPath).toHaveBeenCalledWith(id, 0, '/tmp/export.jpg');
   });
 
   it('does NOT call exportImageToPath when dialog is cancelled (null)', async () => {
-    saveMock.mockResolvedValue(null);
+    dialogMocks.save.mockResolvedValue(null);
 
     const id = await addExportImageNode(0);
     useGraphStore.getState().exportImage(id);
     await flushPromises();
 
-    expect(saveMock).toHaveBeenCalledOnce();
+    expect(dialogMocks.save).toHaveBeenCalledOnce();
     expect(mockExportImageToPath).not.toHaveBeenCalled();
     expect(useGraphStore.getState().lastError).toBeNull();
   });
 
   it('sets lastError when exportImageToPath rejects', async () => {
-    saveMock.mockResolvedValue('/tmp/export.png');
+    dialogMocks.save.mockResolvedValue('/tmp/export.png');
     mockExportImageToPath.mockRejectedValue(new Error('disk full'));
 
     const id = await addExportImageNode(0);
