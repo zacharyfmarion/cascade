@@ -1,5 +1,6 @@
 import type { NodeInstance, NodeSpec, ParamValue } from '../types';
 import type { GraphState } from './store';
+import type { SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { makeEngineError } from '../../engine/engineError';
 import { extractCustomGroupDefinitions, extractGraphData, getEngine, normalizeParamValue } from './kernel';
 import type { SerializableGraphData } from './kernel';
@@ -24,6 +25,83 @@ type RootGraphBuildResult = {
 };
 
 const createRootEditingStack = (): GraphState['editingStack'] => [{ id: 'root', label: 'Root' }];
+
+const stringParam = (node: NodeInstance, key: string): string | null => {
+  const value = node.params[key];
+  return value && 'String' in value && value.String ? value.String : null;
+};
+
+const nativePathFromUri = (value: string): string =>
+  value.startsWith('file://') ? decodeURI(value.slice('file://'.length)) : value;
+
+async function hydratePersistedMediaSources(
+  nodes: Map<string, NodeInstance>,
+  set: (partial: Partial<GraphState>) => void,
+  get: () => GraphState,
+): Promise<void> {
+  const eng = getEngine();
+  const sequenceInfoMap = new Map<string, SequenceInfo | VideoInfo>();
+
+  for (const [nodeId, node] of nodes) {
+    if (node.typeId === 'load_image_sequence') {
+      const directory = stringParam(node, 'directory');
+      if (!directory || !eng.setSequenceDirectory) continue;
+      try {
+        await Promise.resolve(eng.setSequenceDirectory(nodeId, nativePathFromUri(directory)));
+        const pattern = stringParam(node, 'pattern');
+        const info = pattern && eng.getSequenceInfo
+          ? await Promise.resolve(eng.getSequenceInfo(nodeId, pattern))
+          : null;
+        if (info) sequenceInfoMap.set(nodeId, info);
+      } catch {
+        // Keep project load non-fatal if a saved media path is unavailable.
+      }
+      continue;
+    }
+
+    if (node.typeId === 'load_video') {
+      const filePath = stringParam(node, 'file_path');
+      if (!filePath || !eng.loadVideoFile) continue;
+      try {
+        const info = await Promise.resolve(eng.loadVideoFile(nodeId, nativePathFromUri(filePath)));
+        sequenceInfoMap.set(nodeId, info);
+      } catch {
+        // Keep project load non-fatal if a saved media path is unavailable.
+      }
+    }
+  }
+
+  let hasSequenceNodes = false;
+  let minStart = Infinity;
+  let maxEnd = 0;
+  for (const node of nodes.values()) {
+    if (node.typeId === 'load_image_sequence' || node.typeId === 'load_video') {
+      hasSequenceNodes = true;
+      break;
+    }
+  }
+  for (const info of sequenceInfoMap.values()) {
+    if ('first_frame' in info && info.frame_count > 0) {
+      minStart = Math.min(minStart, info.first_frame);
+      maxEnd = Math.max(maxEnd, info.last_frame);
+    } else if ('frame_count' in info && info.frame_count > 0) {
+      minStart = Math.min(minStart, 0);
+      maxEnd = Math.max(maxEnd, info.frame_count - 1);
+    }
+  }
+  if (minStart === Infinity) minStart = 0;
+
+  const currentFrame = get().currentFrame;
+  set({
+    sequenceInfoMap,
+    hasSequenceNodes,
+    sequenceStart: minStart,
+    sequenceLength: maxEnd,
+    currentFrame: maxEnd > 0 && (currentFrame < minStart || currentFrame > maxEnd)
+      ? minStart
+      : currentFrame,
+  });
+}
 
 async function buildRootGraphState(
   graphData: SerializableGraphData,
@@ -136,6 +214,7 @@ export async function hydrateRootGraphFromEngine(
   }
 
   set(nextState);
+  await hydratePersistedMediaSources(nodes, set, get);
   syncAllCommitted(nodes);
 
   if (options.triggerViewers ?? true) {

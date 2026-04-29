@@ -532,6 +532,18 @@ export function createMockEngine(): EngineBridge & {
       duration_secs: 2,
     }),
 
+    setSequenceDirectory: async () => ({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    }),
+
+    getSequenceInfo: async () => ({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    }),
+
     getImageData: (nodeId: string): Uint8Array | null => {
       return imageDataStore.get(nodeId) ?? null;
     },

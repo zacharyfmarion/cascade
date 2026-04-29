@@ -1014,6 +1014,70 @@ describe('graphStore project hydration', () => {
     expect(state.nodeSpecsById.size).toBe(0);
   });
 
+  it('loadProject rehydrates persisted image sequence runtime state before rendering', async () => {
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'seq-node',
+          type_id: 'load_image_sequence',
+          position: [0, 0],
+          params: {
+            directory: { String: '/tmp/sequence' },
+            pattern: { String: '{frame:4}.png' },
+          },
+          input_defaults: {},
+        },
+        {
+          id: 'viewer-node',
+          type_id: 'viewer',
+          position: [200, 0],
+          params: {},
+          input_defaults: {},
+        },
+      ],
+      connections: [
+        {
+          from_node: 'seq-node',
+          from_port: 'image',
+          to_node: 'viewer-node',
+          to_port: 'value',
+        },
+      ],
+    };
+    mockEngine.setSequenceDirectory = vi.fn(async () => ({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    }));
+    mockEngine.getSequenceInfo = vi.fn(async () => ({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    }));
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+      }),
+    ], 'sequence.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(mockEngine.setSequenceDirectory).toHaveBeenCalledWith('seq-node', '/tmp/sequence');
+    expect(mockEngine.getSequenceInfo).toHaveBeenCalledWith('seq-node', '{frame:4}.png');
+    expect(state.sequenceInfoMap.get('seq-node')).toEqual({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    });
+    expect(state.sequenceStart).toBe(1001);
+    expect(state.sequenceLength).toBe(1003);
+    expect(state.currentFrame).toBe(1001);
+  });
+
   it('loadProject hydrates optional DSL shadow metadata without blocking graph load', async () => {
     const loadedGraph = {
       nodes: [

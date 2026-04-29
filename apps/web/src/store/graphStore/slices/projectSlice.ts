@@ -93,6 +93,15 @@ export const createProjectSlice: StateCreator<
   const projectNameFromFile = (file: File): string =>
     file.name.replace(/\.casc$/i, '').replace(/\.json$/i, '') || 'Untitled';
 
+  const frameMapFromProjectData = (data: Record<string, unknown>): Map<string, Frame> => {
+    const framesData = extractFrames(data);
+    const frameMap = new Map<string, Frame>();
+    for (const frame of framesData) {
+      frameMap.set(frame.id, frame);
+    }
+    return frameMap;
+  };
+
   const rememberDesktopPath = (path: string | null) => {
     if (typeof localStorage === 'undefined') return;
     if (path) localStorage.setItem(desktopPathStorageKey, path);
@@ -234,13 +243,11 @@ export const createProjectSlice: StateCreator<
   const loadProjectData = async (
     data: Record<string, unknown>,
     identity: { name: string; path: string | null },
+    options: { resetRuntime?: boolean } = {},
   ) => {
-    const framesData = extractFrames(data);
-    const frameMap = new Map<string, Frame>();
-    for (const frame of framesData) {
-      frameMap.set(frame.id, frame);
+    if (options.resetRuntime ?? true) {
+      resetProjectRuntimeState(frameMapFromProjectData(data));
     }
-    resetProjectRuntimeState(frameMap);
     const state = get();
     set({
       currentProjectPath: identity.path,
@@ -281,8 +288,9 @@ export const createProjectSlice: StateCreator<
       await eng.importGraph(graphData);
     }
 
-    await hydrateRootGraphFromEngine(set, get, { resetFrames: true });
-    await loadProjectData(data, { name: projectNameFromFile(file), path: null });
+    resetProjectRuntimeState(frameMapFromProjectData(data));
+    await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
+    await loadProjectData(data, { name: projectNameFromFile(file), path: null }, { resetRuntime: false });
   };
 
   const loadProjectPath = async (path: string): Promise<boolean> => {
@@ -291,11 +299,12 @@ export const createProjectSlice: StateCreator<
       throw makeEngineError('Project loading is only available in the desktop app');
     }
     const loaded = await eng.loadProject(path);
-    await hydrateRootGraphFromEngine(set, get, { resetFrames: true });
+    resetProjectRuntimeState(frameMapFromProjectData((loaded as Record<string, unknown>) ?? {}));
+    await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
     await loadProjectData((loaded as Record<string, unknown>) ?? {}, {
       name: projectNameFromPath(path),
       path,
-    });
+    }, { resetRuntime: false });
     return true;
   };
 
