@@ -207,4 +207,48 @@ describe('DslEditor', () => {
       expect(editor.value).toContain('blur1 = GaussianBlur(amount: 2.0) # tune');
     });
   });
+
+  it('clears visible DSL and stale shadow when an external graph change removes all nodes', async () => {
+    const nodes = new Map([['blur-node', blurNode(1)]]);
+    resetStore(nodes);
+    const handleMap = new HandleMap();
+    handleMap.set('blur1', 'blur-node');
+    const shadowText = [
+      '# stale once graph is empty',
+      'graph {',
+      '  blur1 = GaussianBlur(amount: 1.0)',
+      '}',
+    ].join('\n');
+    const parseResult = parseDsl(shadowText, mockSpecs, { currentNodes: nodes, handleMap });
+    useGraphStore.setState({
+      dslShadow: buildDslShadowFromText({
+        text: shadowText,
+        nodes,
+        connections: [],
+        graphRevision: 1,
+        handleMap,
+        ast: parseResult.ast,
+        sourceMap: parseResult.sourceMap,
+      }),
+    });
+
+    render(React.createElement(DslEditor));
+    const editor = await screen.findByLabelText('DSL editor') as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toContain('blur1 = GaussianBlur'));
+
+    act(() => {
+      useGraphStore.setState({
+        nodes: new Map(),
+        connections: [],
+        dslShadow: useGraphStore.getState().dslShadow,
+        graphRevision: 2,
+        lastTransactionOrigin: 'ui',
+      });
+    });
+
+    await waitFor(() => {
+      expect(editor.value).toBe('');
+      expect(useGraphStore.getState().dslShadow).toBeNull();
+    });
+  });
 });

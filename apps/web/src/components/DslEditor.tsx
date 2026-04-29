@@ -455,7 +455,21 @@ export const DslEditor: React.FC = () => {
       if (state.lastTransactionOrigin === 'dsl') return;
 
       const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = state;
-      if (nodeSpecs.length === 0 || nodes.size === 0) return;
+      if (nodeSpecs.length === 0) return;
+
+      if (nodes.size === 0) {
+        if (dslShadow) {
+          useGraphStore.setState({ dslShadow: null });
+        }
+        if (lastPushedDslRef.current === '') return;
+        lastPushedDslRef.current = '';
+        sourceMapRef.current = null;
+        suppressApplyRef.current = true;
+        editor.setValue('');
+        clearMarkers();
+        clearEvalMarkers();
+        return;
+      }
 
       const graphHash = graphSemanticHash(nodes, connections, customGroupDefinitions);
       const handleMap = handleMapFromShadow(nodes, dslShadow);
@@ -516,7 +530,7 @@ export const DslEditor: React.FC = () => {
     });
 
     return unsubscribe;
-  }, [clearMarkers]);
+  }, [clearMarkers, clearEvalMarkers]);
 
   useEffect(() => {
     let prevNodeErrors = useGraphStore.getState().nodeErrors;
