@@ -20,6 +20,7 @@ use cascade_core::types::{
 };
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{gpu_script_passthrough_manifest, GpuContext, KernelManifest};
+use cascade_nodes_std::group::InternalOutputEvalRequest;
 use cascade_nodes_std::{
     decode_response_image, encode_image_png, register_standard_nodes, ColorPaletteNode,
     GpuScriptDraftNode, GroupNode, LoadImage, LoadImageBatch, LoadImageSequence, SequenceInfo,
@@ -66,6 +67,26 @@ fn param_default_to_value(default: &ParamDefault) -> ParamValue {
         ParamDefault::CurvePoints(value) => ParamValue::CurvePoints(value.clone()),
         ParamDefault::String(value) => ParamValue::String(value.clone()),
     }
+}
+
+fn param_value_to_runtime_value(value: &ParamValue) -> Value {
+    match value {
+        ParamValue::Float(value) => Value::Float(*value as f32),
+        ParamValue::Int(value) => Value::Int(*value as i32),
+        ParamValue::Bool(value) => Value::Bool(*value),
+        ParamValue::Color(value) => Value::Color([
+            value[0] as f32,
+            value[1] as f32,
+            value[2] as f32,
+            value[3] as f32,
+        ]),
+        ParamValue::String(value) => Value::String(value.clone()),
+        _ => Value::None,
+    }
+}
+
+fn param_default_to_runtime_value(default: &ParamDefault) -> Value {
+    param_value_to_runtime_value(&param_default_to_value(default))
 }
 
 fn extract_gpu_script_manifest(
@@ -1133,6 +1154,152 @@ impl Engine {
                 let w = (self.project_format.width() as f32 * scale).round() as u32;
                 let h = (self.project_format.height() as f32 * scale).round() as u32;
                 self.rasterize_field(field, w, h, cm)
+            }
+            Value::Float(v) => ViewerResultWasm::Float {
+                value_type: "float".to_string(),
+                value: v,
+            },
+            Value::Int(v) => ViewerResultWasm::Int {
+                value_type: "int".to_string(),
+                value: v,
+            },
+            Value::Bool(v) => ViewerResultWasm::Bool {
+                value_type: "bool".to_string(),
+                value: v,
+            },
+            Value::Color(c) => ViewerResultWasm::Color {
+                value_type: "color".to_string(),
+                value: c,
+            },
+            Value::String(ref s) => ViewerResultWasm::StringVal {
+                value_type: "string".to_string(),
+                value: s.clone(),
+            },
+            Value::Bytes(_) => ViewerResultWasm::None {
+                value_type: "bytes".to_string(),
+            },
+            Value::None => ViewerResultWasm::None {
+                value_type: "none".to_string(),
+            },
+        };
+        result.into_js()
+    }
+
+    pub async fn render_internal_viewer(
+        &mut self,
+        group_node_id: &str,
+        internal_viewer_id: &str,
+        frame: u64,
+    ) -> Result<JsValue, JsValue> {
+        self.render_internal_viewer_scaled(group_node_id, internal_viewer_id, frame, 1.0)
+            .await
+    }
+
+    pub async fn render_internal_viewer_scaled(
+        &mut self,
+        group_node_id: &str,
+        internal_viewer_id: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<JsValue, JsValue> {
+        let scale = if preview_scale <= 0.0 || preview_scale > 1.0 {
+            1.0
+        } else {
+            preview_scale
+        };
+        let group_id = parse_node_id(&self.uuid_map, group_node_id).map_err(to_js_error)?;
+        let group_instance = self
+            .graph
+            .nodes
+            .get(group_id)
+            .cloned()
+            .ok_or_else(|| JsValue::from_str("Group node not found"))?;
+        let group_node_arc = self
+            .nodes
+            .get(&group_id)
+            .cloned()
+            .ok_or_else(|| JsValue::from_str("Group node instance not found"))?;
+        let group_node = group_node_arc
+            .as_any()
+            .downcast_ref::<GroupNode>()
+            .ok_or_else(|| JsValue::from_str("Node is not a group"))?;
+        let group_spec = self
+            .registry
+            .get_spec(&group_instance.type_id)
+            .cloned()
+            .ok_or_else(|| JsValue::from_str("Unknown group node type"))?;
+
+        let frame_time = FrameTime { frame };
+        let mut inputs = HashMap::new();
+        for input in group_spec.all_inputs() {
+            if let Some((up_node, up_port)) = self.graph.get_upstream(group_id, &input.name) {
+                let eval_result = self
+                    .evaluator
+                    .evaluate(
+                        &mut self.graph,
+                        &self.registry,
+                        &self.nodes,
+                        up_node,
+                        &up_port,
+                        frame_time,
+                        &self.color_management,
+                        self.ai_provider.as_deref(),
+                        &self.project_format,
+                        &self.ai_node_cache,
+                        scale,
+                    )
+                    .await
+                    .map_err(to_js_error)?;
+                inputs.insert(input.name.clone(), eval_result.value);
+            } else if let Some(value) = group_instance.input_defaults.get(&input.name) {
+                inputs.insert(input.name.clone(), param_value_to_runtime_value(value));
+            } else if let Some(default) = &input.default {
+                inputs.insert(input.name.clone(), param_default_to_runtime_value(default));
+            }
+        }
+
+        let mut params: HashMap<String, ParamValue> = group_spec
+            .params
+            .iter()
+            .map(|param| (param.key.clone(), param_default_to_value(&param.default)))
+            .collect();
+        params.extend(group_instance.params.clone());
+
+        let eval_result = group_node
+            .evaluate_internal_output(InternalOutputEvalRequest {
+                internal_node_id: internal_viewer_id,
+                output_port: "display",
+                inputs,
+                params,
+                frame_time,
+                color_management: &self.color_management,
+                ai_provider: self.ai_provider.as_deref(),
+                project_format: &self.project_format,
+                preview_scale: scale,
+            })
+            .await
+            .map_err(to_js_error)?;
+        self.last_timings.clear();
+
+        let result = match eval_result.value {
+            Value::Image(ref image) => {
+                let pixels = Viewer::image_to_rgba8_with_display(
+                    image,
+                    &self.color_management,
+                    &self.active_display,
+                    &self.active_view,
+                );
+                ViewerResultWasm::Pixels {
+                    value_type: "image".to_string(),
+                    width: image.width,
+                    height: image.height,
+                    pixels,
+                }
+            }
+            Value::Field(ref field) => {
+                let w = (self.project_format.width() as f32 * scale).round() as u32;
+                let h = (self.project_format.height() as f32 * scale).round() as u32;
+                self.rasterize_field(field, w, h, &self.color_management)
             }
             Value::Float(v) => ViewerResultWasm::Float {
                 value_type: "float".to_string(),

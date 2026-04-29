@@ -24,6 +24,7 @@ use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{
     gpu_script_passthrough_manifest, register_gpu_nodes, GpuContext, KernelManifest,
 };
+use cascade_nodes_std::group::InternalOutputEvalRequest;
 use cascade_nodes_std::input::LoadImage as InputLoadImage;
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
@@ -72,6 +73,26 @@ fn param_default_to_value(default: &ParamDefault) -> ParamValue {
         ParamDefault::CurvePoints(value) => ParamValue::CurvePoints(value.clone()),
         ParamDefault::String(value) => ParamValue::String(value.clone()),
     }
+}
+
+fn param_value_to_runtime_value(value: &ParamValue) -> Value {
+    match value {
+        ParamValue::Float(value) => Value::Float(*value as f32),
+        ParamValue::Int(value) => Value::Int(*value as i32),
+        ParamValue::Bool(value) => Value::Bool(*value),
+        ParamValue::Color(value) => Value::Color([
+            value[0] as f32,
+            value[1] as f32,
+            value[2] as f32,
+            value[3] as f32,
+        ]),
+        ParamValue::String(value) => Value::String(value.clone()),
+        _ => Value::None,
+    }
+}
+
+fn param_default_to_runtime_value(default: &ParamDefault) -> Value {
+    param_value_to_runtime_value(&param_default_to_value(default))
 }
 
 fn extract_gpu_script_manifest(
@@ -1284,7 +1305,7 @@ impl Engine {
                 })?
         };
 
-        if from_port_spec.ty != to_port_spec.ty {
+        if !cascade_core::graph::types_compatible(&from_port_spec.ty, &to_port_spec.ty) {
             return Err(CascadeError::TypeMismatch {
                 expected: format!("{:?}", to_port_spec.ty),
                 got: format!("{:?}", from_port_spec.ty),
@@ -2244,6 +2265,104 @@ impl Engine {
                 )
             })
             .collect();
+        match eval_result.value {
+            Value::Image(image) => Ok(self.image_to_render_result(&image)),
+            _ => Err(CascadeError::Other(
+                "Viewer output is not an image".to_string(),
+            )),
+        }
+    }
+
+    pub fn render_internal_viewer(
+        &mut self,
+        group_node_id: &str,
+        internal_viewer_id: &str,
+        frame: u64,
+    ) -> Result<RenderResult, CascadeError> {
+        self.render_internal_viewer_scaled(group_node_id, internal_viewer_id, frame, 1.0)
+    }
+
+    pub fn render_internal_viewer_scaled(
+        &mut self,
+        group_node_id: &str,
+        internal_viewer_id: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<RenderResult, CascadeError> {
+        let group_id = self.parse_node_id(group_node_id)?;
+        let group_instance = self
+            .graph
+            .nodes
+            .get(group_id)
+            .cloned()
+            .ok_or(CascadeError::NodeNotFound(group_id))?;
+        let group_node_arc = self
+            .nodes
+            .get(&group_id)
+            .cloned()
+            .ok_or_else(|| CascadeError::Other("Group node instance not found".to_string()))?;
+        let group_node = group_node_arc
+            .as_any()
+            .downcast_ref::<GroupNode>()
+            .ok_or_else(|| CascadeError::Other("Node is not a group".to_string()))?;
+        let group_spec = self
+            .registry
+            .get_spec(&group_instance.type_id)
+            .cloned()
+            .ok_or_else(|| {
+                CascadeError::InvalidConnection(format!(
+                    "Unknown node type: {}",
+                    group_instance.type_id
+                ))
+            })?;
+
+        let frame_time = FrameTime { frame };
+        let mut inputs = HashMap::new();
+        for input in group_spec.all_inputs() {
+            if let Some((up_node, up_port)) = self.graph.get_upstream(group_id, &input.name) {
+                let eval_result = pollster::block_on(self.evaluator.evaluate(
+                    &mut self.graph,
+                    &self.registry,
+                    &self.nodes,
+                    up_node,
+                    &up_port,
+                    frame_time,
+                    self.color_management.as_ref(),
+                    self.ai_provider.as_deref(),
+                    &self.project_format,
+                    &HashMap::new(),
+                    preview_scale,
+                ))?;
+                inputs.insert(input.name.clone(), eval_result.value);
+            } else if let Some(value) = group_instance.input_defaults.get(&input.name) {
+                inputs.insert(input.name.clone(), param_value_to_runtime_value(value));
+            } else if let Some(default) = &input.default {
+                inputs.insert(input.name.clone(), param_default_to_runtime_value(default));
+            }
+        }
+
+        let mut params: HashMap<String, ParamValue> = group_spec
+            .params
+            .iter()
+            .map(|param| (param.key.clone(), param_default_to_value(&param.default)))
+            .collect();
+        params.extend(group_instance.params.clone());
+
+        let eval_result = pollster::block_on(group_node.evaluate_internal_output(
+            InternalOutputEvalRequest {
+                internal_node_id: internal_viewer_id,
+                output_port: "display",
+                inputs,
+                params,
+                frame_time,
+                color_management: self.color_management.as_ref(),
+                ai_provider: self.ai_provider.as_deref(),
+                project_format: &self.project_format,
+                preview_scale,
+            },
+        ))?;
+
+        self.last_timings.clear();
         match eval_result.value {
             Value::Image(image) => Ok(self.image_to_render_result(&image)),
             _ => Err(CascadeError::Other(
@@ -3413,6 +3532,99 @@ mod tests {
                     .any(|node| node.type_id == actual_type_id)),
             "exported group definition should still reference the gpu script type",
         );
+    }
+
+    #[test]
+    fn test_internal_group_viewer_accepts_any_input_connection() {
+        let mut engine = Engine::new();
+        let (solid_id, _) = engine.add_node("solid_color", 0.0, 0.0).unwrap();
+        let (raster_id, _) = engine.add_node("rasterize_field", 200.0, 0.0).unwrap();
+        engine
+            .connect(&solid_id, "field", &raster_id, "field")
+            .expect("connect solid field to rasterizer");
+
+        let group = engine
+            .create_group_from_nodes(&[&raster_id], "Raster Group")
+            .expect("create group");
+        let internal_raster_id = group.removed_node_ids[0].clone();
+        let viewer = engine
+            .add_internal_node(&group.group_definition_id, "viewer", 300.0, 0.0)
+            .expect("add internal viewer");
+
+        engine
+            .add_internal_connection(
+                &group.group_definition_id,
+                &internal_raster_id,
+                "image",
+                &viewer.id,
+                "value",
+            )
+            .expect("Image should connect to Viewer.value Any inside groups");
+    }
+
+    #[test]
+    fn test_internal_group_connection_rejects_incompatible_ports() {
+        let mut engine = Engine::new();
+        let (_solid_id, _) = engine.add_node("solid_color", 0.0, 0.0).unwrap();
+        let (raster_id, _) = engine.add_node("rasterize_field", 200.0, 0.0).unwrap();
+        let group = engine
+            .create_group_from_nodes(&[&raster_id], "Raster Group")
+            .expect("create group");
+        let internal_raster_id = group.removed_node_ids[0].clone();
+        let float_node = engine
+            .add_internal_node(&group.group_definition_id, "float_constant", 0.0, 120.0)
+            .expect("add internal float");
+
+        let err = engine
+            .add_internal_connection(
+                &group.group_definition_id,
+                &float_node.id,
+                "value",
+                &internal_raster_id,
+                "field",
+            )
+            .expect_err("Float should not connect to Field inside groups");
+        assert!(matches!(err, CascadeError::TypeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_render_internal_viewer_uses_root_group_inputs() {
+        let mut engine = Engine::new();
+        let (solid_id, _) = engine.add_node("solid_color", 0.0, 0.0).unwrap();
+        let (raster_id, _) = engine.add_node("rasterize_field", 200.0, 0.0).unwrap();
+        engine
+            .set_param(&raster_id, "width", ParamValue::Int(8))
+            .expect("set raster width");
+        engine
+            .set_param(&raster_id, "height", ParamValue::Int(6))
+            .expect("set raster height");
+        engine
+            .connect(&solid_id, "field", &raster_id, "field")
+            .expect("connect solid field to rasterizer");
+
+        let group = engine
+            .create_group_from_nodes(&[&raster_id], "Raster Group")
+            .expect("create group");
+        let internal_raster_id = group.removed_node_ids[0].clone();
+        let viewer = engine
+            .add_internal_node(&group.group_definition_id, "viewer", 300.0, 0.0)
+            .expect("add internal viewer");
+        engine
+            .add_internal_connection(
+                &group.group_definition_id,
+                &internal_raster_id,
+                "image",
+                &viewer.id,
+                "value",
+            )
+            .expect("connect rasterizer to internal viewer");
+
+        let result = engine
+            .render_internal_viewer(&group.group_node_id, &viewer.id, 0)
+            .expect("render internal viewer");
+        assert_eq!(result.width, 8);
+        assert_eq!(result.height, 6);
+        assert_eq!(result.pixels.len(), 8 * 6 * 4);
     }
 
     #[test]

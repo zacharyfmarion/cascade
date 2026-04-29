@@ -70,6 +70,7 @@ interface WorkerAPI {
   loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange>;
 
   renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null>;
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null>;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
   getImageData(nodeId: string): Promise<Uint8Array | null>;
   evaluateBytesOutput(nodeId: string, portName: string): Promise<Uint8Array>;
@@ -291,6 +292,10 @@ export class WorkerEngine implements EngineBridge {
 
   renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
     return this.getAPI().renderViewer(viewerNodeId, frame);
+  }
+
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> {
+    return this.getAPI().renderInternalViewer(groupNodeId, internalViewerId, frame, previewScale);
   }
 
   exportImage(nodeId: string, frame: number): Promise<Uint8Array> {

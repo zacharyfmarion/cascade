@@ -101,6 +101,7 @@ export interface EngineBridge {
   loadImagePath?(nodeId: string, path: string): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   loadPaletteData?(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> | [number, number, number, number][];
   renderViewer(viewerNodeId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> | ViewerResult | null;
+  renderInternalViewer?(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> | ViewerResult | null;
   exportGraph(): Promise<unknown> | unknown;
   importGraph(data: unknown): Promise<void> | void;
   exportDocument?(): Promise<unknown> | unknown;

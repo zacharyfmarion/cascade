@@ -214,6 +214,7 @@ const getEngineWithBindings = () => getEngine() as EngineInstance & {
   import_custom_nodes?: (pkg: unknown) => NodeSpec[];
   register_group_definition?: (definition: unknown) => NodeSpec;
   render_viewer_scaled?: (viewerId: string, frame: bigint, scale: number) => Promise<unknown>;
+  render_internal_viewer_scaled?: (groupNodeId: string, internalViewerId: string, frame: bigint, scale: number) => Promise<unknown>;
 };
 
 const engineAPI = {
@@ -439,6 +440,43 @@ const engineAPI = {
       // Comlink throws "Unserializable return value" if a worker result is not
       // cloneable/transferable, so we normalize image payloads to a fresh buffer first.
       const result = decodeViewerResult(raw, viewerNodeId, { copyPixels: true });
+      if (!result) {
+        return null;
+      }
+
+      const transferables = collectViewerResultTransferables(result);
+      if (transferables.length > 0) {
+        return Comlink.transfer(result, transferables);
+      }
+
+      return result;
+    });
+  },
+
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
+    return scheduler.enqueue(async (): Promise<ViewerResult | null> => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.render_internal_viewer_scaled !== 'function') {
+        throw new Error('Internal viewer rendering not supported in WASM worker');
+      }
+      const raw = await eng.render_internal_viewer_scaled(groupNodeId, internalViewerId, BigInt(frame), previewScale);
+
+      try {
+        const timingsRaw = getEngine().get_last_render_timings();
+        if (timingsRaw) {
+          if (timingsRaw instanceof Map) {
+            const obj: Record<string, number> = {};
+            (timingsRaw as Map<string, number>).forEach((v, k) => { obj[k] = v; });
+            lastTimings = obj;
+          } else {
+            lastTimings = timingsRaw as unknown as Record<string, number>;
+          }
+        }
+      } catch (e) {
+        console.warn('[WASM] Failed to get timings:', e);
+      }
+
+      const result = decodeViewerResult(raw, internalViewerId, { copyPixels: true });
       if (!result) {
         return null;
       }

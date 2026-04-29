@@ -1,6 +1,8 @@
 use crate::input::LoadImage;
+use cascade_core::ai::AiProvider;
+use cascade_core::color::ColorManagement;
 use cascade_core::error::CascadeError;
-use cascade_core::eval::Evaluator;
+use cascade_core::eval::{EvalResult, Evaluator};
 use cascade_core::graph::{Graph, NodeId};
 use cascade_core::group::{GroupDefinition, GroupInterface, InternalConnection, InternalNode};
 use cascade_core::node::{EvalContext, Node, NodeFuture, NodeRegistry};
@@ -127,6 +129,18 @@ pub struct InternalNodeState {
     pub input_defaults: HashMap<String, ParamValue>,
 }
 
+pub struct InternalOutputEvalRequest<'a> {
+    pub internal_node_id: &'a str,
+    pub output_port: &'a str,
+    pub inputs: HashMap<String, Value>,
+    pub params: HashMap<String, ParamValue>,
+    pub frame_time: FrameTime,
+    pub color_management: &'a dyn ColorManagement,
+    pub ai_provider: Option<&'a dyn AiProvider>,
+    pub project_format: &'a Format,
+    pub preview_scale: f32,
+}
+
 struct GroupNodeState {
     internal_graph: Graph,
     internal_nodes: HashMap<NodeId, Arc<dyn Node>>,
@@ -230,6 +244,88 @@ impl GroupNode {
             );
         }
         Ok(snapshot)
+    }
+
+    pub async fn evaluate_internal_output(
+        &self,
+        request: InternalOutputEvalRequest<'_>,
+    ) -> Result<EvalResult, CascadeError> {
+        let mut state_restore = {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|_| CascadeError::Other("Group state lock poisoned".to_string()))?;
+
+            let input_node = state
+                .internal_nodes
+                .get(&self.group_input_id)
+                .ok_or_else(|| CascadeError::Other("Group input node not found".to_string()))?;
+            let group_input = input_node
+                .as_any()
+                .downcast_ref::<GroupInputNode>()
+                .ok_or_else(|| CascadeError::Other("Group input node type mismatch".to_string()))?;
+            group_input.inject_inputs(request.inputs)?;
+            state.internal_graph.mark_dirty(self.group_input_id);
+
+            for promo in &self.definition.promotions {
+                if let Some(value) = request.params.get(&promo.group_param_key) {
+                    let internal_id =
+                        self.id_map.get(&promo.internal_node_id).ok_or_else(|| {
+                            CascadeError::Other(format!(
+                                "Internal node {} not found",
+                                promo.internal_node_id
+                            ))
+                        })?;
+                    state.internal_graph.set_param(
+                        *internal_id,
+                        &promo.internal_param_key,
+                        value.clone(),
+                    );
+                }
+            }
+
+            let internal_graph = std::mem::replace(&mut state.internal_graph, Graph::new());
+            let internal_nodes = std::mem::take(&mut state.internal_nodes);
+            let internal_registry =
+                std::mem::replace(&mut state.internal_registry, NodeRegistry::new());
+            let internal_evaluator =
+                std::mem::replace(&mut state.internal_evaluator, Evaluator::new());
+            GroupStateRestore::new(
+                &self.state,
+                internal_graph,
+                internal_nodes,
+                internal_registry,
+                internal_evaluator,
+            )
+        };
+
+        let internal_id = self
+            .id_map
+            .get(request.internal_node_id)
+            .copied()
+            .ok_or_else(|| {
+                CascadeError::Other(format!(
+                    "Internal node not found: {}",
+                    request.internal_node_id
+                ))
+            })?;
+
+        state_restore
+            .internal_evaluator
+            .evaluate(
+                &mut state_restore.internal_graph,
+                &state_restore.internal_registry,
+                &state_restore.internal_nodes,
+                internal_id,
+                request.output_port,
+                request.frame_time,
+                request.color_management,
+                request.ai_provider,
+                request.project_format,
+                &HashMap::new(),
+                request.preview_scale,
+            )
+            .await
     }
 
     pub fn derive_interface(

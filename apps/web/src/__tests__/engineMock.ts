@@ -525,6 +525,11 @@ export function createMockEngine(): EngineBridge & {
       return renderResult;
     },
 
+    renderInternalViewer: (groupNodeId: string, internalViewerId: string, _frame: number): ViewerResult | null => {
+      renderCalls.push(`${groupNodeId}:${internalViewerId}`);
+      return renderResult;
+    },
+
     createGroupFromNodes: async (nodeIds: string[], name: string) => {
       const groupDefinitionId = 'group::user_mock';
       const groupNodeId = `node-${++nodeCounter}`;

@@ -194,6 +194,7 @@ export class WasmEngine implements EngineBridge {
     export_group_as_package?: (groupDefId: string) => unknown;
     import_custom_nodes?: (pkg: unknown) => NodeSpec[];
     register_group_definition?: (definition: unknown) => NodeSpec;
+    render_internal_viewer_scaled?: (groupNodeId: string, internalViewerId: string, frame: bigint, scale: number) => Promise<unknown>;
   } {
     return this.getEngine() as Engine & {
       set_muted: (nodeId: string, muted: boolean) => void;
@@ -228,6 +229,7 @@ export class WasmEngine implements EngineBridge {
       export_group_as_package?: (groupDefId: string) => unknown;
       import_custom_nodes?: (pkg: unknown) => NodeSpec[];
       register_group_definition?: (definition: unknown) => NodeSpec;
+      render_internal_viewer_scaled?: (groupNodeId: string, internalViewerId: string, frame: bigint, scale: number) => Promise<unknown>;
     };
   }
 
@@ -375,6 +377,31 @@ export class WasmEngine implements EngineBridge {
       }
 
       return decodeViewerResult(raw, viewerNodeId);
+    });
+  }
+
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
+    return this.scheduler.enqueue(async (): Promise<ViewerResult | null> => {
+      const eng = this.getEngineWithBindings();
+      if (typeof eng.render_internal_viewer_scaled !== 'function') {
+        throw new Error('Internal viewer rendering not supported by WASM engine');
+      }
+      const raw = await eng.render_internal_viewer_scaled(groupNodeId, internalViewerId, BigInt(frame), previewScale);
+      try {
+        const timingsRaw = this.getEngine().get_last_render_timings();
+        if (timingsRaw) {
+          if (timingsRaw instanceof Map) {
+            const obj: Record<string, number> = {};
+            (timingsRaw as Map<string, number>).forEach((v, k) => { obj[k] = v; });
+            this.lastTimings = obj;
+          } else {
+            this.lastTimings = timingsRaw as unknown as Record<string, number>;
+          }
+        }
+      } catch (e) {
+        console.warn('[WASM] Failed to get timings:', e);
+      }
+      return decodeViewerResult(raw, internalViewerId);
     });
   }
   exportGraph(): Promise<unknown> {

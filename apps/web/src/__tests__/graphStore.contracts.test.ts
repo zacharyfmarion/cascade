@@ -177,6 +177,87 @@ describe('Rendering contracts', () => {
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
   });
 
+  it('renders local viewer nodes through the internal group render API', async () => {
+    const groupNodeId = 'group-node';
+    const groupDefId = 'group::test';
+    const internalViewerId = 'viewer-inner';
+    mockEngine._setRenderResult({
+      type: 'image',
+      nodeId: internalViewerId,
+      width: 2,
+      height: 2,
+      pixels: new Uint8ClampedArray(16),
+    });
+    useGraphStore.setState({
+      editingStack: [
+        { id: 'root', label: 'Root', groupNodeId: null },
+        { id: groupDefId, label: 'Test Group', groupNodeId, groupDefId },
+      ],
+      nodes: new Map([
+        [internalViewerId, {
+          id: internalViewerId,
+          typeId: 'viewer',
+          params: {},
+          inputDefaults: {},
+          position: { x: 0, y: 0 },
+          muted: false,
+        }],
+      ]),
+    });
+
+    mockEngine._clearRenderCalls();
+    useGraphStore.getState().triggerRender(internalViewerId);
+    await flushPromises(5);
+
+    expect(mockEngine._renderCalls).toEqual([`${groupNodeId}:${internalViewerId}`]);
+    const result = useGraphStore.getState().renderResults.get(internalViewerId);
+    expect(result?.type).toBe('image');
+    expect(result && 'width' in result ? result.width : null).toBe(2);
+  });
+
+  it('group edit mode renders local viewers for affected internal changes', async () => {
+    const groupNodeId = 'group-node';
+    const groupDefId = 'group::test';
+    const internalViewerId = 'viewer-inner';
+    mockEngine._setRenderResult({
+      type: 'image',
+      nodeId: internalViewerId,
+      width: 1,
+      height: 1,
+      pixels: new Uint8ClampedArray(4),
+    });
+    useGraphStore.setState({
+      editingStack: [
+        { id: 'root', label: 'Root', groupNodeId: null },
+        { id: groupDefId, label: 'Test Group', groupNodeId, groupDefId },
+      ],
+      nodes: new Map([
+        ['blur-inner', {
+          id: 'blur-inner',
+          typeId: 'gaussian_blur',
+          params: {},
+          inputDefaults: {},
+          position: { x: 0, y: 0 },
+          muted: false,
+        }],
+        [internalViewerId, {
+          id: internalViewerId,
+          typeId: 'viewer',
+          params: {},
+          inputDefaults: {},
+          position: { x: 200, y: 0 },
+          muted: false,
+        }],
+      ]),
+    });
+
+    mockEngine._clearRenderCalls();
+    await useGraphStore.getState().triggerAffectedViewers(['blur-inner']);
+    await flushPromises(5);
+
+    expect(mockEngine._renderCalls).toEqual([`${groupNodeId}:${internalViewerId}`]);
+  });
+
   it('cancelRender clears isRendering', async () => {
     const s = useGraphStore.getState();
     useGraphStore.setState({ isRendering: true });

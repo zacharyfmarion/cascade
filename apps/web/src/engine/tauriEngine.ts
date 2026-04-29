@@ -204,6 +204,23 @@ export class TauriEngine implements EngineBridge {
     }
   }
 
+  async renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
+    try {
+      const buf = await invoke<ArrayBuffer>('render_internal_viewer', { groupNodeId, internalViewerId, frame, previewScale });
+      if (!buf || buf.byteLength < 8) return null;
+
+      const view = new DataView(buf);
+      const width = view.getUint32(0, true);
+      const height = view.getUint32(4, true);
+      const pixels = new Uint8ClampedArray(buf, 8);
+
+      await this.fetchTimings();
+      return { type: 'image', nodeId: internalViewerId, width, height, pixels };
+    } catch {
+      return null;
+    }
+  }
+
   async exportGraph(): Promise<unknown> {
     const json = await invoke<string>('export_graph');
     return JSON.parse(json);

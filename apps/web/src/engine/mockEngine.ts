@@ -462,6 +462,10 @@ export class MockEngine implements EngineBridge {
     };
   }
 
+  renderInternalViewer(_groupNodeId: string, internalViewerId: string, frame: number): ViewerResult | null {
+    return this.renderViewer(internalViewerId, frame);
+  }
+
   exportGraph(): unknown {
     return { nodes: [], connections: [] };
   }

@@ -76,6 +76,25 @@ export const createRenderSlice: StateCreator<
     }
   };
 
+  const renderViewerForCurrentContext = async (
+    viewerNodeId: string,
+    frame: number,
+    previewScale: number,
+  ): Promise<ViewerResult | null> => {
+    const editingStack = get().editingStack;
+    if (editingStack.length > 1) {
+      const ctx = editingStack[editingStack.length - 1];
+      const eng = getEngine();
+      if (!ctx.groupNodeId || !eng.renderInternalViewer) {
+        throw new Error('Internal viewer rendering not supported by this engine');
+      }
+      return Promise.resolve(
+        eng.renderInternalViewer(ctx.groupNodeId, viewerNodeId, frame, previewScale),
+      );
+    }
+    return Promise.resolve(getEngine().renderViewer(viewerNodeId, frame, previewScale));
+  };
+
   // -- public slice ---------------------------------------------------------
 
   const triggerAllViewers = () => {
@@ -94,6 +113,10 @@ export const createRenderSlice: StateCreator<
   const triggerAffectedViewers = async (changedNodeIds: string[]) => {
     if (kernel.renderSuspendCount > 0) {
       kernel.renderNeededWhileSuspended = true;
+      return;
+    }
+    if (get().editingStack.length > 1) {
+      triggerAllViewers();
       return;
     }
     const eng = getEngine();
@@ -146,7 +169,7 @@ export const createRenderSlice: StateCreator<
       for (const [viewerId, node] of nodes) {
         if (node.typeId !== 'viewer') continue;
         try {
-          const result = await Promise.resolve(getEngine().renderViewer(viewerId, frame));
+          const result = await renderViewerForCurrentContext(viewerId, frame, scale);
           if (result) {
             const scaled = await downscaleRenderResult(result, scale);
             newResults.set(viewerId, scaled);
@@ -177,7 +200,7 @@ export const createRenderSlice: StateCreator<
       kernel.renderLock = kernel.renderLock.then(async () => {
         if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
         try {
-          const result = await Promise.resolve(getEngine().renderViewer(viewerNodeId, frame));
+          const result = await renderViewerForCurrentContext(viewerNodeId, frame, scale);
           const scaled = result ? await downscaleRenderResult(result, scale) : null;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
             const newResults = new Map(get().renderResults);
@@ -232,6 +255,8 @@ export const createRenderSlice: StateCreator<
       }
       // Fallback if engine doesn't support typesCompatible
       return fromType === toType
+        || toType === 'Any'
+        || fromType === 'Any'
         || (fromType === 'Field' && (toType === 'Image' || toType === 'Mask'))
         || ((fromType === 'Image' || fromType === 'Mask') && (toType === 'Image' || toType === 'Mask'))
         || (fromType === 'Int' && toType === 'Float')

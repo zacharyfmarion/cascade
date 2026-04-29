@@ -212,6 +212,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const lastError = useGraphStore(s => s.lastError);
   const playbackFps = useGraphStore(s => s.playbackFps);
   const targetFps = useGraphStore(s => s.fps);
+  const isEditingGroup = useGraphStore(s => s.editingStack.length > 1);
 
   const fpsIndicatorColor = useMemo(() => {
     if (playbackFps === null) return 'var(--timing-fast)';
@@ -622,7 +623,11 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
           padding: '20px',
           pointerEvents: 'none'
         }}>
-          {activeViewerId ? 'No output' : 'Add and select a Viewer node'}
+          {activeViewerId
+            ? 'No output'
+            : isEditingGroup
+              ? 'Add and connect a local Viewer node'
+              : 'Add and select a Viewer node'}
         </div>
       )}
       

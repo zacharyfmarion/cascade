@@ -222,6 +222,36 @@ fn render_viewer(
     Ok(Response::new(buf))
 }
 
+#[tauri::command]
+fn render_internal_viewer(
+    state: State<'_, EngineState>,
+    group_node_id: String,
+    internal_viewer_id: String,
+    frame: u64,
+    preview_scale: Option<f32>,
+) -> Result<Response, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let RenderResult {
+        width,
+        height,
+        pixels,
+    } = s
+        .engine
+        .render_internal_viewer_scaled(
+            &group_node_id,
+            &internal_viewer_id,
+            frame,
+            preview_scale.unwrap_or(1.0),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let mut buf = Vec::with_capacity(8 + pixels.len());
+    buf.extend_from_slice(&width.to_le_bytes());
+    buf.extend_from_slice(&height.to_le_bytes());
+    buf.extend_from_slice(&pixels);
+    Ok(Response::new(buf))
+}
+
 /// Batched: set param + render all viewers in one IPC call.
 /// Response binary format:
 /// [u32 viewer_count LE]
@@ -989,6 +1019,7 @@ pub fn run() {
             load_palette_data,
             get_image_data,
             render_viewer,
+            render_internal_viewer,
             set_param_and_render,
             set_input_default_and_render,
             export_graph,
