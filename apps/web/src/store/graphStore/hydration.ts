@@ -205,6 +205,7 @@ export async function hydrateRootGraphFromEngine(
     editingStack: createRootEditingStack(),
     dirty: false,
     lastError: null,
+    lastTransactionOrigin: null,
     fitViewRequestId: get().fitViewRequestId + 1,
   };
 

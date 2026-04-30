@@ -5,6 +5,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../ai/gpuScript';
 import { serializeGraph } from '../ai/dsl/serializer';
 import { HandleMap } from '../ai/dsl/handleMap';
+import { createBundledProjectBlob } from '../store/graphStore/projectPackage';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -1132,6 +1133,72 @@ describe('graphStore project hydration', () => {
     expect(state.dslShadow?.text).toContain('# preserved comment');
     expect(state.dslShadow?.handles).toEqual([{ nodeId: 'load-node', handle: 'load1' }]);
     expect(state.dslShadow?.status).toBe('valid');
+  });
+
+  it('loadProject clears stale DSL origin for bundled projects without a DSL shadow', async () => {
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+    const bundled = await createBundledProjectBlob({
+      cascade: { format_version: '1.3.0' },
+      graph: {
+        nodes: [
+          {
+            id: 'load-node',
+            type_id: 'load_image',
+            params: { path: { String: 'file:///Users/me/plate.png' } },
+            input_defaults: {},
+            position: [0, 0],
+            muted: false,
+          },
+          {
+            id: 'viewer-node',
+            type_id: 'viewer',
+            params: {},
+            input_defaults: {},
+            position: [240, 0],
+            muted: false,
+          },
+        ],
+        connections: [
+          {
+            from_node: 'load-node',
+            from_port: 'image',
+            to_node: 'viewer-node',
+            to_port: 'image',
+          },
+        ],
+      },
+      assets: {
+        'load-node': {
+          type: 'image',
+          source: 'embedded',
+          data: btoa('packed-image-bytes'),
+          original_filename: 'plate.png',
+          hash: '',
+        },
+      },
+    });
+    const file = new File([bundled], 'bundled.casc');
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(state.nodes.has('load-node')).toBe(true);
+    expect(state.nodes.get('load-node')?.params.path).toBeUndefined();
+    expect(state.connections).toHaveLength(1);
+    expect(state.dslShadow).toBeNull();
+    expect(state.lastTransactionOrigin).toBeNull();
+
+    const regenerated = serializeGraph({
+      nodes: state.nodes,
+      connections: state.connections,
+      nodeSpecs: state.nodeSpecs,
+      handleMap: new HandleMap(),
+      groupDefinitions: state.customGroupDefinitions,
+    });
+    expect(regenerated).toContain('LoadImage()');
+    expect(regenerated).toContain('Viewer()');
+    expect(regenerated).not.toBe('graph {\n\n}');
   });
 
   it('loadProject treats semantically matching GPU DSL shadow as valid after engine manifest normalization', async () => {

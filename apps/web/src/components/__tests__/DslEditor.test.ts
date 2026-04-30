@@ -383,6 +383,43 @@ describe('DslEditor', () => {
     });
   });
 
+  it('syncs project-loaded graph changes after a stale DSL origin is cleared', async () => {
+    resetStore(new Map());
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+    render(React.createElement(DslEditor));
+    const editor = await screen.findByLabelText('DSL editor') as HTMLTextAreaElement;
+    await waitFor(() => expect(editor.value).toBe('graph {\n\n}'));
+
+    const nodes = new Map([
+      ['load-node', makeNodeInstance({ id: 'load-node', typeId: 'load_image', params: {} })],
+      ['viewer-node', makeNodeInstance({ id: 'viewer-node', typeId: 'viewer', params: {} })],
+    ]);
+    const connections: Connection[] = [{
+      id: 'load-to-viewer',
+      fromNode: 'load-node',
+      fromPort: 'image',
+      toNode: 'viewer-node',
+      toPort: 'image',
+    }];
+
+    act(() => {
+      useGraphStore.setState({
+        nodes,
+        connections,
+        dslShadow: null,
+        graphRevision: 2,
+        lastTransactionOrigin: null,
+      });
+    });
+
+    await waitFor(() => {
+      expect(editor.value).toContain('LoadImage()');
+      expect(editor.value).toContain('Viewer()');
+      expect(editor.value).toContain('.image ->');
+      expect(editor.value).not.toBe('graph {\n\n}');
+    });
+  });
+
   it('keeps showing document DSL when the active canvas is inside a group', async () => {
     const rootSpecs = [...mockSpecs, groupSpec];
     const rootNodes = new Map<string, NodeInstance>([
