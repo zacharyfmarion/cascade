@@ -650,6 +650,52 @@ describe('Sequence state contracts', () => {
     expect(state.sequenceStart).toBe(1);
     expect(state.sequenceLength).toBe(10);
   });
+
+  it('uploads browser sequence frame data before timeline-triggered viewer renders', async () => {
+    const s = useGraphStore.getState();
+    const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+    const viewer = await s.addNode('viewer', { x: 200, y: 0 });
+    await s.connect(seqNode, 'image', viewer, 'image');
+    await s.setSequenceFiles(seqNode, [
+      new File([new Uint8Array([1])], 'frame_0001.png'),
+      new File([new Uint8Array([2])], 'frame_0002.png'),
+    ]);
+    await flushPromises(5);
+
+    mockEngine._sequenceFrameLoads.length = 0;
+    mockEngine._clearRenderCalls();
+    useGraphStore.getState().stepForward();
+    await flushPromises(5);
+
+    expect(mockEngine._sequenceFrameLoads.map(load => load.frame)).toContain(2);
+    expect(mockEngine._renderCalls).toContain(viewer);
+  });
+
+  it('playback uploads browser sequence frame data as frames advance', async () => {
+    const s = useGraphStore.getState();
+    const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+    const viewer = await s.addNode('viewer', { x: 200, y: 0 });
+    await s.connect(seqNode, 'image', viewer, 'image');
+    await s.setSequenceFiles(seqNode, [
+      new File([new Uint8Array([1])], 'frame_0001.png'),
+      new File([new Uint8Array([2])], 'frame_0002.png'),
+      new File([new Uint8Array([3])], 'frame_0003.png'),
+    ]);
+    await flushPromises(5);
+
+    mockEngine._sequenceFrameLoads.length = 0;
+    mockEngine._clearRenderCalls();
+    useGraphStore.getState().setFps(60);
+    useGraphStore.getState().play();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    useGraphStore.getState().pause();
+    await flushPromises(5);
+
+    const loadedFrames = mockEngine._sequenceFrameLoads.map(load => load.frame);
+    expect(loadedFrames).toContain(1);
+    expect(loadedFrames.some(frame => frame > 1)).toBe(true);
+    expect(mockEngine._renderCalls).toContain(viewer);
+  });
 });
 
 // ===========================================================================
@@ -871,6 +917,7 @@ describe('Asset loading contracts', () => {
 
     mockEngine._clearRenderCalls();
     await s.loadImagePath(img, '/tmp/plate.png');
+    await flushPromises(5);
 
     expect(useGraphStore.getState().nodes.get(img)?.params.path).toEqual({ String: 'file:///tmp/plate.png' });
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);

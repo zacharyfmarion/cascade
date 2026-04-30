@@ -825,6 +825,7 @@ impl Engine {
             .downcast_ref::<LoadImageSequence>()
             .ok_or_else(|| JsValue::from_str("Node is not LoadImageSequence"))?;
         let removed_ports = seq_node.set_frame_data(frame, data).map_err(to_js_error)?;
+        self.graph.mark_dirty(id);
 
         let new_spec = node.spec();
         let spec_provider = InstanceAwareSpecProvider {
@@ -972,7 +973,9 @@ impl Engine {
                 first_frame,
                 last_frame,
             })
-            .map_err(to_js_error)
+            .map_err(to_js_error)?;
+        self.graph.mark_dirty(id);
+        Ok(())
     }
 
     pub async fn render_viewer(
