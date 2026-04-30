@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGraphStore } from '../../store/graphStore';
 import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../gpuScript';
-import { executeCascadeTool } from '../tools';
+import { cascadeTools, executeCascadeTool } from '../tools';
 import { buildSystemPrompt } from '../systemPrompt';
 
 vi.mock('../../engine/wasmEngine', () => ({
@@ -24,27 +24,57 @@ describe('GPU script AI schema', () => {
 
     expect(result.type).toBe('GpuScript');
     expect(result.runtime_type).toBe('gpu_script::schema_test');
-    expect(result).toHaveProperty('editable_fields');
+    expect(result.definition_type).toBe('gpu');
+    expect(result).toHaveProperty('definition_example');
     expect(result).toHaveProperty('glsl_context');
+    expect(result).not.toHaveProperty('editable_fields');
 
-    const editableFields = result.editable_fields as Array<Record<string, unknown>>;
-    expect(editableFields.some((field) => field.key === 'script' && field.multiline === true)).toBe(true);
-    expect(editableFields.some((field) => field.key === 'supports_mask')).toBe(true);
+    const definitionExample = result.definition_example as string;
+    expect(definitionExample).toContain('node FilmGlow = gpu {');
+    expect(definitionExample).toContain('code """');
+    expect(definitionExample).toContain('glow1 = FilmGlow(gain: 1.5)');
 
     const editingNotes = result.editing_notes as string[];
-    expect(editingNotes.some((note) => note.includes('get_gpu_script_manifest'))).toBe(true);
-    expect(editingNotes.some((note) => note.includes('Scalar controls'))).toBe(true);
-    expect(editingNotes.some((note) => note.includes('params: []'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('node Name = gpu'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('InvertImage'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('read_graph'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('write_graph'))).toBe(true);
+    expect(editingNotes.some((note) => note.includes('get_gpu_script_manifest'))).toBe(false);
+    expect(editingNotes.some((note) => note.includes('create_gpu_script'))).toBe(false);
   });
 
   it('tells the AI about multiline GPU-script editing in the system prompt', () => {
     const prompt = buildSystemPrompt(useGraphStore.getState().nodeSpecs);
 
-    expect(prompt).toContain('script: """');
-    expect(prompt).toContain('supports_mask');
-    expect(prompt).toContain('get_gpu_script_manifest');
+    expect(prompt).toContain('node FilmGrain = gpu {');
+    expect(prompt).toContain('code """');
+    expect(prompt).toContain('grain1 = FilmGrain(strength: 0.2, size: 2.0)');
     expect(prompt).toContain('GpuScript');
-    expect(prompt).toContain('Scalar input controls');
-    expect(prompt).toContain('params: []');
+    expect(prompt).toContain('Scalar input controls are exposed directly by name');
+    expect(prompt).toContain('There is no separate GPU creation tool');
+    expect(prompt).toContain('use `InvertImage`');
+    expect(prompt).not.toContain('create_gpu_script');
+    expect(prompt).not.toContain('get_gpu_script_manifest');
+    expect(prompt).not.toContain('Manifest Fields');
+  });
+
+  it('tells the AI the supported custom group DSL syntax', () => {
+    const prompt = buildSystemPrompt(useGraphStore.getState().nodeSpecs);
+
+    expect(prompt).toContain('node InvertAndCurves = group {');
+    expect(prompt).toContain('input.image -> invert1.image');
+    expect(prompt).toContain('curves1.image -> output.image');
+    expect(prompt).toContain('Do not use `connections { ... }`');
+    expect(prompt).toContain('`GroupInput()`');
+    expect(prompt).toContain('`GroupOutput()`');
+
+    expect(cascadeTools.read_graph.description).toContain('input.port and output.port');
+    expect(cascadeTools.write_graph.description).toContain('never use connections { ... }');
+    expect(cascadeTools.edit_graph.description).toContain('GroupInput()');
+  });
+
+  it('does not expose GPU-script-specific tools to the model', () => {
+    expect(Object.keys(cascadeTools)).not.toContain('create_gpu_script');
+    expect(Object.keys(cascadeTools)).not.toContain('get_gpu_script_manifest');
   });
 });

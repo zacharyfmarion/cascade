@@ -8,12 +8,15 @@ import { validateAst } from '../validator';
 import { diffAst } from '../differ';
 import { mockSpecs } from './helpers';
 
+const graph = (body: string): string =>
+  `graph {\n${body.split('\n').map((line) => (line ? `  ${line}` : '')).join('\n')}\n}`;
+
 /**
  * Helper: parse + validate a DSL string, assert zero errors.
  * Returns the AST for further assertions.
  */
 function parseAndValidate(dsl: string) {
-  const parseResult = parseDsl(dsl, mockSpecs);
+  const parseResult = parseDsl(graph(dsl), mockSpecs);
   expect(parseResult.errors, `Parse errors: ${JSON.stringify(parseResult.errors)}`).toHaveLength(0);
   expect(parseResult.ast).not.toBeNull();
 
@@ -27,7 +30,7 @@ function parseAndValidate(dsl: string) {
  * Helper: parse + validate, expect specific errors.
  */
 function expectErrors(dsl: string, expectedCount?: number) {
-  const parseResult = parseDsl(dsl, mockSpecs);
+  const parseResult = parseDsl(graph(dsl), mockSpecs);
   if (parseResult.errors.length > 0) {
     return { errors: parseResult.errors, source: 'parse' as const };
   }
@@ -50,8 +53,8 @@ describe('integration: full graph DSL end-to-end', () => {
         'palette1 = ColorPalette(colors: [rgba(1.0, 0.18, 0.02, 1.0), rgba(1.0, 0.42, 0.02, 1.0), rgba(1.0, 0.62, 0.05, 1.0), rgba(1.0, 0.82, 0.18, 1.0), rgba(0.72, 0.08, 0.18, 1.0), rgba(0.42, 0.04, 0.28, 1.0), rgba(0.18, 0.02, 0.22, 1.0), rgba(0.95, 0.30, 0.08, 1.0)])',
         'viewer1 = Viewer()',
         '',
-        'pixelate1.image <- gen1.image',
-        'viewer1.image <- pixelate1.image',
+        'gen1.image -> pixelate1.image',
+        'pixelate1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -77,9 +80,9 @@ describe('integration: full graph DSL end-to-end', () => {
         'posterize1 = Posterize(levels: 8)',
         'viewer1 = Viewer()',
         '',
-        'blur1.image <- load1.image',
-        'posterize1.image <- blur1.image',
-        'viewer1.image <- posterize1.image',
+        'load1.image -> blur1.image',
+        'blur1.image -> posterize1.image',
+        'posterize1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -94,9 +97,9 @@ describe('integration: full graph DSL end-to-end', () => {
         'blend1 = Blend(mode: "multiply", opacity: 0.75)',
         'viewer1 = Viewer()',
         '',
-        'blend1.base <- load1.image',
-        'blend1.overlay <- load2.image',
-        'viewer1.image <- blend1.image',
+        'load1.image -> blend1.base',
+        'load2.image -> blend1.overlay',
+        'blend1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -110,8 +113,8 @@ describe('integration: full graph DSL end-to-end', () => {
         'ramp1 = ColorRamp(stops: [0.0: rgba(0.0, 0.0, 0.2, 1.0), 0.5: rgba(1.0, 0.5, 0.0, 1.0), 1.0: rgba(1.0, 1.0, 0.8, 1.0)])',
         'viewer1 = Viewer()',
         '',
-        'ramp1.image <- load1.image',
-        'viewer1.image <- ramp1.image',
+        'load1.image -> ramp1.image',
+        'ramp1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -129,8 +132,8 @@ describe('integration: full graph DSL end-to-end', () => {
         'curves1 = Curves(master_curve: [(0.0, 0.0), (0.25, 0.15), (0.75, 0.9), (1.0, 1.0)])',
         'viewer1 = Viewer()',
         '',
-        'curves1.image <- load1.image',
-        'viewer1.image <- curves1.image',
+        'load1.image -> curves1.image',
+        'curves1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -145,11 +148,11 @@ describe('integration: full graph DSL end-to-end', () => {
     it('muted nodes in a pipeline', () => {
       const dsl = [
         'load1 = LoadImage(path: "/photo.jpg")',
-        '@muted blur1 = GaussianBlur(amount: 5.0)',
+        'blur1 = muted(GaussianBlur(amount: 5.0))',
         'viewer1 = Viewer()',
         '',
-        'blur1.image <- load1.image',
-        'viewer1.image <- blur1.image',
+        'load1.image -> blur1.image',
+        'blur1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -163,8 +166,8 @@ describe('integration: full graph DSL end-to-end', () => {
         'pixelate1 = GpuKernel::Pixelate(pixel_size: 32)',
         'viewer1 = Viewer()',
         '',
-        'pixelate1.image <- load1.image',
-        'viewer1.image <- pixelate1.image',
+        'load1.image -> pixelate1.image',
+        'pixelate1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -181,11 +184,11 @@ describe('integration: full graph DSL end-to-end', () => {
         'posterize1 = Posterize(levels: 4)',
         'viewer1 = Viewer()',
         '',
-        'blur1.image <- load1.image',
-        'blend1.base <- blur1.image',
-        'blend1.overlay <- solid1.image',
-        'posterize1.image <- blend1.image',
-        'viewer1.image <- posterize1.image',
+        'load1.image -> blur1.image',
+        'blur1.image -> blend1.base',
+        'solid1.image -> blend1.overlay',
+        'blend1.image -> posterize1.image',
+        'posterize1.image -> viewer1.image',
       ].join('\n');
 
       const ast = parseAndValidate(dsl);
@@ -200,7 +203,7 @@ describe('integration: full graph DSL end-to-end', () => {
         'load1 = LoadImage(path: "/photo.jpg")',
         'viewer1 = Viewer()',
         '',
-        'viewer1.image <- load1.image',
+        'load1.image -> viewer1.image',
       ].join('\n');
 
       const after = [
@@ -208,7 +211,7 @@ describe('integration: full graph DSL end-to-end', () => {
         'palette1 = ColorPalette(colors: [rgba(1.0, 0.0, 0.0, 1.0), rgba(0.0, 1.0, 0.0, 1.0), rgba(0.0, 0.0, 1.0, 1.0)])',
         'viewer1 = Viewer()',
         '',
-        'viewer1.image <- load1.image',
+        'load1.image -> viewer1.image',
       ].join('\n');
 
       const beforeAst = parseAndValidate(before);
@@ -274,7 +277,7 @@ describe('integration: full graph DSL end-to-end', () => {
     it('rejects unknown node type with helpful suggestion', () => {
       // Parser catches unknown types, so validation suggestion comes from there
       const dsl = 'blur1 = GausianBlur(amount: 5.0)';
-      const parseResult = parseDsl(dsl, mockSpecs);
+      const parseResult = parseDsl(graph(dsl), mockSpecs);
       // Parser reports unknown type; validator also catches it if AST is produced
       if (parseResult.errors.length > 0) {
         expect(parseResult.errors[0].message).toContain('Unknown node type');
@@ -290,11 +293,11 @@ describe('integration: full graph DSL end-to-end', () => {
         'load2 = LoadImage()',
         'viewer1 = Viewer()',
         '',
-        'viewer1.image <- load1.image',
-        'viewer1.image <- load2.image',
+        'load1.image -> viewer1.image',
+        'load2.image -> viewer1.image',
       ].join('\n');
 
-      const parseResult = parseDsl(dsl, mockSpecs);
+      const parseResult = parseDsl(graph(dsl), mockSpecs);
       expect(parseResult.errors).toHaveLength(0);
       const validation = validateAst(parseResult.ast!, mockSpecs);
       expect(validation.errors.some(e => e.message.includes('already connected'))).toBe(true);

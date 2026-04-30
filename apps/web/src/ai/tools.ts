@@ -3,41 +3,34 @@ import { z } from 'zod';
 import { getAuthoringNodeSpecs } from '../platform/features';
 import { getRuntimeSurface } from '../platform/runtime';
 import { useGraphStore } from '../store/graphStore';
-import { useSettingsStore } from '../store/settingsStore';
 import type { NodeSpec, ParamSpec, PortSpec } from '../store/types';
 import { serializeGraph } from './dsl/serializer';
 import { parseDsl } from './dsl/parser';
-import { validateAst } from './dsl/validator';
-import { diffAst } from './dsl/differ';
-import { applyMutations } from './dsl/executor';
+import { applyDsl } from './dsl/executor';
 import { captureViewerThumbnail } from './viewerSnapshot';
 import { snakeToPascal, labelToSnake, pascalToSnake } from './dsl/types';
-import type { DslAst } from './dsl/types';
-import { getSharedHandleMap } from './dsl/instance';
-import { buildDefaultGpuScriptManifest, buildGpuScriptManifestFromGlsl, buildGpuScriptNodeSpec, generateGlslKernel } from './gpuScript';
+import { graphSemanticHash, handleMapFromShadow } from './dsl/shadow';
+import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from './gpuScript';
 
 export { resetSharedHandleMap as resetHandleMap } from './dsl/instance';
 
 
 function getCurrentDsl(): string {
-  const { nodes, connections, nodeSpecs } = useGraphStore.getState();
+  const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = useGraphStore.getState();
+  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections, customGroupDefinitions)) {
+    return dslShadow.text;
+  }
   return serializeGraph({
     nodes,
     connections,
     nodeSpecs,
-    handleMap: getSharedHandleMap(),
+    handleMap: handleMapFromShadow(nodes, dslShadow),
+    groupDefinitions: customGroupDefinitions,
+    customDefinitionNames: dslShadow?.customDefinitionNames,
+    pruneUnusedCustomDefinitions: true,
   });
 }
 
-
-function getCurrentAst(): DslAst {
-  const { nodeSpecs, nodes } = useGraphStore.getState();
-  const dslText = getCurrentDsl();
-  const handleMap = getSharedHandleMap();
-  const result = parseDsl(dslText, nodeSpecs, { currentNodes: nodes, handleMap });
-
-  return result.ast ?? { nodes: new Map(), connections: [] };
-}
 
 function getAuthoringSpecs(): NodeSpec[] {
   const { nodeSpecs } = useGraphStore.getState();
@@ -107,24 +100,41 @@ function buildGpuScriptSchema(specs: NodeSpec[], requestedType: string): Record<
     runtime_type: spec.id,
     category: spec.category,
     description: spec.description,
+    definition_type: 'gpu',
+    declaration_syntax: 'node Name = gpu { inputs { image image; float gain = 1.0 min 0.0 max 4.0 step 0.01 } outputs { image image } code """\\nreturn vec4(color.rgb * gain, color.a);\\n""" }',
+    instance_syntax: 'name1 = Name(gain: 1.5)',
+    connection_syntax: 'source.image -> name1.image',
     params: spec.params.map(formatParamSpec),
     inputs: spec.inputs.map(formatPortSpec),
     outputs: spec.outputs.map(formatPortSpec),
-    editable_fields: [
-      {
-        key: 'script',
-        type: 'String',
-        multiline: true,
-        dsl_syntax: 'Use a triple-quoted multiline string, e.g. script: """\\nfloat gain = 1.2;\\nreturn vec4(color.rgb * gain, color.a);\\n"""',
-        description: 'Editable GLSL body for process(vec4 color, vec2 uv, ivec2 pixel). Provide only the body, not the full shader.',
-      },
-      {
-        key: 'supports_mask',
-        type: 'Bool',
-        current_value: supportsMask,
-        description: 'Controls whether the implicit Mask input is exposed on the node interface.',
-      },
-    ],
+    supports_mask: supportsMask,
+    definition_example: [
+      'node FilmGlow = gpu {',
+      '  inputs {',
+      '    image image',
+      '    mask mask?',
+      '    float gain = 1.2 min 0.0 max 4.0 step 0.01',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  code """',
+      '  vec3 glow = color.rgb * gain;',
+      '  return vec4(glow, color.a);',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  load1 = LoadImage()',
+      '  glow1 = FilmGlow(gain: 1.5)',
+      '  viewer1 = Viewer()',
+      '',
+      '  load1.image -> glow1.image',
+      '  glow1.image -> viewer1.value',
+      '}',
+    ].join('\n'),
     glsl_context: {
       signature: 'vec4 process(vec4 color, vec2 uv, ivec2 pixel)',
       available_globals: [
@@ -135,11 +145,13 @@ function buildGpuScriptSchema(specs: NodeSpec[], requestedType: string): Record<
       ],
     },
     editing_notes: [
-      'Existing GPU Script nodes often use runtime type ids like gpu_script::<uuid>, but they all share the GpuScript editing model.',
-      'Use input ports for both image/mask inputs and scalar controls. Scalar controls are Float, Int, or Bool inputs with default/min/max/step/ui metadata.',
-      'New or edited GPU Script manifests should keep params: []; legacy params may be migrated into scalar inputs.',
-      'To inspect the current kernel, ports, scalar controls, and supports_mask for a specific node, call get_gpu_script_manifest with the node handle or id before editing.',
-      'When editing through the DSL, the special script field updates the GLSL body and recompiles the node.',
+      'Create and edit GPU Scripts by writing top-level DSL definitions: node Name = gpu { ... }, then instantiate Name(...) inside graph { ... }.',
+      'Use a custom definition name that does not match a built-in node type. For example, use InvertImage instead of Invert.',
+      'Use read_graph before editing existing GPU Scripts so you can preserve their definition name, ports, scalar controls, GLSL code, and connections unless the user asked to change them.',
+      'Use write_graph for new complete graphs or edit_graph for targeted changes. There is no separate GPU creation tool.',
+      'Declare image and mask ports in inputs. Optional ports use a trailing ?. Use mask mask? only when the graph needs an exposed mask input.',
+      'Declare scalar controls as Float, Int, or Bool inputs with optional default/min/max/step metadata, then set them in the node call such as FilmGlow(gain: 1.5).',
+      'Put only the GLSL body in code """ ... """. Do not include the process() wrapper.',
       'If you change ports, scalar controls, or mask support, preserve the existing interface unless the user explicitly asked for interface changes.',
     ],
   };
@@ -166,17 +178,6 @@ const getNodeSchemaSchema = z.object({
   node_type: z.string().describe('PascalCase node type name (e.g. "GaussianBlur", "BrightnessContrast")'),
 });
 
-const createGpuScriptSchema = z.object({
-  description: z.string().describe('Text description of the desired GPU effect.'),
-});
-
-const getGpuScriptManifestSchema = z.object({
-  node_id: z.string().optional().describe('Node ID for the GPU Script node.'),
-  node_handle: z.string().optional().describe('DSL handle for the GPU Script node.'),
-}).refine(value => Boolean(value.node_id || value.node_handle), {
-  message: 'Provide node_id or node_handle',
-});
-
 
 // ─── Tool type aliases ───────────────────────────────────────────
 type ReadGraphArgs = z.infer<typeof readGraphSchema>;
@@ -185,8 +186,6 @@ type WriteGraphArgs = z.infer<typeof writeGraphSchema>;
 type ViewCurrentImageArgs = z.infer<typeof viewCurrentImageSchema>;
 type ListNodeTypesArgs = z.infer<typeof listNodeTypesSchema>;
 type GetNodeSchemaArgs = z.infer<typeof getNodeSchemaSchema>;
-type CreateGpuScriptArgs = z.infer<typeof createGpuScriptSchema>;
-type GetGpuScriptManifestArgs = z.infer<typeof getGpuScriptManifestSchema>;
 
 // ─── Tool executors ──────────────────────────────────────────────
 
@@ -279,150 +278,41 @@ const toolExecutors = {
     };
   },
 
-  create_gpu_script: async ({ description }: CreateGpuScriptArgs) => {
-    const apiKey = useSettingsStore.getState().anthropicApiKey;
-    if (!apiKey) {
-      return {
-        success: false,
-        error: 'Anthropic API key is not configured. Set it in Settings → AI Assistant.',
-      };
-    }
-
-    const store = useGraphStore.getState();
-    const nodeId = await store.addNode('gpu_script', { x: 0, y: 0 });
-    const node = store.nodes.get(nodeId);
-    const typeId = node?.typeId ?? 'gpu_script';
-
-    const manifest = await generateGlslKernel(description, apiKey);
-    const compiledManifest = buildGpuScriptManifestFromGlsl(typeId, manifest);
-    const manifestJson = JSON.stringify(compiledManifest);
-    const handleMap = getSharedHandleMap();
-    const handle = handleMap.getOrCreate(nodeId, typeId);
-    store.setDslHandle(nodeId, handle);
-
-    try {
-      await store.compileScriptNode(nodeId, manifestJson);
-      return {
-        success: true,
-        node_id: nodeId,
-        handle,
-        manifest: compiledManifest,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        node_id: nodeId,
-        handle,
-        error: error instanceof Error ? error.message : String(error),
-        manifest: compiledManifest,
-      };
-    }
-  },
-
-  get_gpu_script_manifest: async ({ node_id, node_handle }: GetGpuScriptManifestArgs) => {
-    const store = useGraphStore.getState();
-    const handleMap = getSharedHandleMap();
-    const nodeId = node_id ?? (node_handle ? handleMap.getNodeId(node_handle) : undefined);
-    if (!nodeId) {
-      return { success: false, error: 'Unknown node id/handle.' };
-    }
-
-    const node = store.nodes.get(nodeId);
-    if (!node) {
-      return { success: false, error: 'Node not found.' };
-    }
-
-    if (!node.typeId.startsWith('gpu_script')) {
-      return { success: false, error: 'Node is not a GPU Script node.' };
-    }
-
-    const manifestValue = node.params['__script_manifest'];
-    if (!manifestValue || !('String' in manifestValue) || typeof manifestValue.String !== 'string') {
-      return {
-        success: false,
-        node_id: nodeId,
-        handle: node_handle ?? handleMap.getHandle(nodeId),
-        message: 'GPU Script manifest not found. Compile the script first to populate __script_manifest.',
-      };
-    }
-
-    try {
-      const parsed = JSON.parse(manifestValue.String) as Record<string, unknown>;
-      return {
-        success: true,
-        node_id: nodeId,
-        handle: node_handle ?? handleMap.getHandle(nodeId),
-        manifest: parsed,
-      };
-    } catch (error) {
-      return {
-        success: false,
-        node_id: nodeId,
-        handle: node_handle ?? handleMap.getHandle(nodeId),
-        error: `Failed to parse __script_manifest JSON: ${error instanceof Error ? error.message : String(error)}`,
-      };
-    }
-  },
 };
 
 
 async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
-  const { nodeSpecs, nodes } = useGraphStore.getState();
-  const handleMap = getSharedHandleMap();
+  const { nodeSpecs, nodes, connections, dslShadow } = useGraphStore.getState();
+  const handleMap = handleMapFromShadow(nodes, dslShadow);
 
-
-  const parseResult = parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
-  if (parseResult.errors.length > 0) {
-    return {
-      success: false,
-      errors: parseResult.errors.map(e => ({
-        line: e.line,
-        message: e.message,
-        ...(e.suggestion ? { suggestion: e.suggestion } : {}),
-      })),
-    };
-  }
-  if (!parseResult.ast) {
-    return { success: false, errors: [{ line: 0, message: 'Failed to parse DSL' }] };
-  }
-
-
-  const validation = validateAst(parseResult.ast, nodeSpecs);
-  if (!validation.valid) {
-    return {
-      success: false,
-      errors: validation.errors.map(e => ({
-        line: e.line,
-        message: e.message,
-        ...(e.suggestion ? { suggestion: e.suggestion } : {}),
-      })),
-    };
-  }
-
-
-  const currentAst = getCurrentAst();
-  const mutations = diffAst(currentAst, parseResult.ast);
-
-  if (mutations.length === 0) {
-    const updatedDsl = getCurrentDsl();
-    return { success: true, graph: updatedDsl, mutations_applied: 0 };
-  }
-
-
-  const result = await applyMutations(mutations, handleMap, nodeSpecs);
+  const result = await applyDsl(newDsl, handleMap, nodeSpecs, nodes, connections, { origin: 'ai', awaitRender: true });
   if (!result.success) {
     return {
       success: false,
-      error: result.error,
+      errors: result.errors.map(e => ({
+        line: e.line,
+        message: e.message,
+        ...(e.suggestion ? { suggestion: e.suggestion } : {}),
+      })),
     };
   }
 
+  const updatedState = useGraphStore.getState();
+  const appliedParse = parseDsl(newDsl, updatedState.nodeSpecs, {
+    currentNodes: updatedState.nodes,
+    handleMap,
+  });
+  updatedState.setDslShadowFromEditor(
+    newDsl,
+    handleMap,
+    appliedParse.ast,
+    result.sourceMap ?? appliedParse.sourceMap,
+    result.customDefinitionNames,
+  );
 
-  const updatedDsl = getCurrentDsl();
   const response: Record<string, unknown> = {
     success: true,
-    graph: updatedDsl,
-    mutations_applied: mutations.length,
+    graph: result.updatedDsl,
   };
   if (result.evalErrors && result.evalErrors.length > 0) {
     response.eval_errors = result.evalErrors.map(e => ({
@@ -438,19 +328,19 @@ async function applyNewDsl(newDsl: string): Promise<Record<string, unknown>> {
 
 export const cascadeTools = {
   read_graph: tool({
-    description: 'Get the current graph as DSL text. Shows all nodes with non-default params and all connections.',
+    description: 'Get the current graph as Cascade DSL text. The DSL uses graph { ... }, node = NodeType(...), source.output -> target.input connections, muted(NodeType(...)) wrappers, top-level custom definitions like node Name = gpu { ... } / node Name = group { inputs { ... } outputs { ... } graph { ... } }, and inline asset constructors only for resolvable asset sources. In group definitions, use input.port and output.port boundary references; never use connections { ... }, bare image -> image arrows, GroupInput(), or GroupOutput(). Web-dropped/embedded assets are omitted from loader params.',
     inputSchema: readGraphSchema,
     execute: toolExecutors.read_graph,
   }),
 
   edit_graph: tool({
-    description: 'Edit the graph by finding and replacing text in the DSL. The old_text must match exactly. The result is parsed, validated, and applied atomically. Returns the updated graph DSL or errors.',
+    description: 'Edit the graph by finding and replacing text in the Cascade DSL. Use arrow connections (source.output -> target.input), muted(...) wrappers, top-level custom definitions like node Name = gpu { ... } / node Name = group { inputs { ... } outputs { ... } graph { ... } }, and inline asset constructors only for resolvable asset sources. In group definitions, use input.port and output.port boundary references; never use connections { ... }, bare image -> image arrows, GroupInput(), or GroupOutput(). The old_text must match exactly. The result is parsed, validated, and applied atomically.',
     inputSchema: editGraphSchema,
     execute: toolExecutors.edit_graph,
   }),
 
   write_graph: tool({
-    description: 'Replace the entire graph with new DSL text. Use for building from scratch or major restructuring. The DSL is parsed, validated, diffed against the current graph, and applied with minimal mutations.',
+    description: 'Replace the entire graph with new Cascade DSL text. Use graph { ... }, node bindings, arrow connections, muted(...) wrappers, top-level custom definitions like node Name = gpu { ... } / node Name = group { inputs { ... } outputs { ... } graph { ... } }, and inline asset constructors only for resolvable asset sources. In group definitions, use input.port and output.port boundary references; never use connections { ... }, bare image -> image arrows, GroupInput(), or GroupOutput(). Do not invent file paths for web-dropped/embedded assets. Frames/layout are not represented. The DSL is parsed, validated, diffed, and applied with minimal mutations.',
     inputSchema: writeGraphSchema,
     execute: toolExecutors.write_graph,
   }),
@@ -477,19 +367,9 @@ export const cascadeTools = {
   }),
 
   get_node_schema: tool({
-    description: 'Get the full schema for a specific node type: all params with types/ranges/options, inputs, and outputs.',
+    description: 'Get the full schema for a specific node type: all params with types/ranges/options, inputs, and outputs. For GpuScript, returns the DSL node Name = gpu { ... } syntax and GLSL context needed to create or edit GPU scripts through write_graph/edit_graph.',
     inputSchema: getNodeSchemaSchema,
     execute: toolExecutors.get_node_schema,
-  }),
-  create_gpu_script: tool({
-    description: 'Generate a custom GPU Script node from a text description. Creates a draft node, compiles the GLSL manifest, and returns the node id plus status/errors.',
-    inputSchema: createGpuScriptSchema,
-    execute: toolExecutors.create_gpu_script,
-  }),
-  get_gpu_script_manifest: tool({
-    description: 'Fetch the compiled GPU Script manifest for an existing GPU Script node (from __script_manifest). Returns an error if the node has not been compiled yet.',
-    inputSchema: getGpuScriptManifestSchema,
-    execute: toolExecutors.get_gpu_script_manifest,
   }),
 };
 

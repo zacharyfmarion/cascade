@@ -1,4 +1,5 @@
 import type { RuntimeSurface } from '../platform/runtime';
+import type { DslSourceMap } from '../ai/dsl/types';
 
 export type ValueType = 'Image' | 'Mask' | 'Float' | 'Int' | 'Bool' | 'Color' | 'Field' | 'String' | 'Any';
 
@@ -117,12 +118,73 @@ export interface NodeInstance {
   dslHandle?: string;
 }
 
+export type DslShadowStatus = 'valid' | 'stale' | 'invalid';
+
+export interface DslShadowHandleEntry {
+  nodeId: string;
+  handle: string;
+}
+
+export interface DslShadowCustomDefinitionName {
+  runtimeId: string;
+  name: string;
+}
+
+export interface DslShadowDocument {
+  version: 1;
+  text: string;
+  graphHash: string;
+  graphRevision: number;
+  handles: DslShadowHandleEntry[];
+  customDefinitionNames: DslShadowCustomDefinitionName[];
+  status: DslShadowStatus;
+  sourceMap?: DslSourceMap;
+}
+
 export interface Connection {
   id: string;
   fromNode: string;
   fromPort: string;
   toNode: string;
   toPort: string;
+}
+
+export interface SerializableInternalNode {
+  id: string;
+  type_id: string;
+  params?: Record<string, ParamValue>;
+  input_defaults?: Record<string, ParamValue>;
+  position?: [number, number] | { x: number; y: number };
+  muted?: boolean;
+}
+
+export interface SerializableInternalConnection {
+  from_node: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+}
+
+export interface SerializablePromotion {
+  group_param_key: string;
+  internal_node_id: string;
+  internal_param_key: string;
+  spec: ParamSpec;
+}
+
+export interface SerializableGroupDefinition {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  internal_graph: {
+    nodes: SerializableInternalNode[];
+    connections: SerializableInternalConnection[];
+  };
+  promotions?: SerializablePromotion[];
+  is_builtin?: boolean;
+  explicit_inputs?: PortSpec[] | null;
+  explicit_outputs?: PortSpec[] | null;
 }
 
 // Render result from engine — discriminated union over all value types
@@ -167,10 +229,19 @@ export interface RestoredNode {
 export interface GroupInternalGraph {
   groupDefId: string;
   name: string;
-  nodes: { id: string; typeId: string; position: { x: number; y: number }; params: Record<string, ParamValue>; inputDefaults: Record<string, ParamValue> }[];
+  nodes: InternalGraphNode[];
   connections: Connection[];
   inputs: PortSpec[];
   outputs: PortSpec[];
+}
+
+export interface InternalGraphNode {
+  id: string;
+  typeId: string;
+  position: { x: number; y: number };
+  params: Record<string, ParamValue>;
+  inputDefaults: Record<string, ParamValue>;
+  muted?: boolean;
 }
 
 export interface EditingContext {

@@ -105,7 +105,7 @@ export function MenuBar() {
   const [openMenu, setOpenMenu] = useState<number | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const menuDef = useMemo(() => getMenuBarDef(), []);
-  const loadProject = useGraphStore(s => s.loadProject);
+  const requestOpenProject = useGraphStore(s => s.requestOpenProject);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleClose = useCallback(() => {
@@ -123,11 +123,11 @@ export function MenuBar() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-        loadProject(file);
+        void requestOpenProject(file);
         e.target.value = '';
       }
     },
-    [loadProject]
+    [requestOpenProject]
   );
 
   useEffect(() => {
@@ -175,7 +175,7 @@ export function MenuBar() {
         id="menu-file-input"
         ref={fileInputRef}
         type="file"
-          accept=".json,.casc"
+        accept=".json,.casc"
         onChange={handleFileChange}
         style={{ display: 'none' }}
       />

@@ -7,7 +7,20 @@ import type { HandleMap } from './handleMap';
  * Only connect/disconnect/addNode/removeNode are relevant — setParam
  * and setMuted don't need semantic validation.
  */
-function toEditOp(mutation: GraphMutation, index: number, handleMap: HandleMap): EditOp | null {
+function resolveValidationNodeId(
+  handle: string,
+  handleMap: HandleMap,
+  tempNodeIds: Map<string, string>,
+): string {
+  return handleMap.getNodeId(handle) ?? tempNodeIds.get(handle) ?? handle;
+}
+
+function toEditOp(
+  mutation: GraphMutation,
+  index: number,
+  handleMap: HandleMap,
+  tempNodeIds: Map<string, string>,
+): EditOp | null {
   switch (mutation.type) {
     case 'addNode':
       return {
@@ -24,14 +37,12 @@ function toEditOp(mutation: GraphMutation, index: number, handleMap: HandleMap):
       };
     }
     case 'connect': {
-      const fromId = handleMap.getNodeId(mutation.fromHandle);
-      const toId = handleMap.getNodeId(mutation.toHandle);
       return {
         type: 'connect',
         op_id: index,
-        from_node: fromId ?? mutation.fromHandle,
+        from_node: resolveValidationNodeId(mutation.fromHandle, handleMap, tempNodeIds),
         from_port: mutation.fromPort,
-        to_node: toId ?? mutation.toHandle,
+        to_node: resolveValidationNodeId(mutation.toHandle, handleMap, tempNodeIds),
         to_port: mutation.toPort,
       };
     }
@@ -93,29 +104,33 @@ export function validateSemantics(
   mutations: GraphMutation[],
   sourceMap: DslSourceMap,
   handleMap: HandleMap,
-  validateEditsFn: (editsJson: string) => EditValidationError[],
-): ValidationError[] {
+  validateEditsFn: (editsJson: string) => EditValidationError[] | Promise<EditValidationError[]>,
+): Promise<ValidationError[]> {
   // Convert mutations to EditOps, filtering out non-semantic ones
   const editOps: EditOp[] = [];
   const opIndexToMutationIndex = new Map<number, number>();
+  const tempNodeIds = new Map<string, string>();
 
   for (let i = 0; i < mutations.length; i++) {
-    const editOp = toEditOp(mutations[i], editOps.length, handleMap);
+    const mutation = mutations[i];
+    const editOp = toEditOp(mutation, editOps.length, handleMap, tempNodeIds);
     if (editOp) {
       opIndexToMutationIndex.set(editOp.op_id, i);
+      if (mutation.type === 'addNode') {
+        tempNodeIds.set(mutation.handle, `__temp_${editOp.op_id}`);
+      }
       editOps.push(editOp);
     }
   }
 
-  if (editOps.length === 0) return [];
+  if (editOps.length === 0) return Promise.resolve([]);
 
-  const rustErrors = validateEditsFn(JSON.stringify(editOps));
-
-  // Map Rust errors back to DSL line numbers
-  return rustErrors.map((err) => {
-    const mutationIndex = opIndexToMutationIndex.get(err.op_id);
-    const mutation = mutationIndex !== undefined ? mutations[mutationIndex] : undefined;
-    const line = mutation ? resolveLineFromMutation(mutation, sourceMap) : 1;
-    return { line, message: err.message };
-  });
+  return Promise.resolve(validateEditsFn(JSON.stringify(editOps))).then(rustErrors =>
+    rustErrors.map((err) => {
+      const mutationIndex = opIndexToMutationIndex.get(err.op_id);
+      const mutation = mutationIndex !== undefined ? mutations[mutationIndex] : undefined;
+      const line = mutation ? resolveLineFromMutation(mutation, sourceMap) : 1;
+      return { line, message: err.message };
+    })
+  );
 }

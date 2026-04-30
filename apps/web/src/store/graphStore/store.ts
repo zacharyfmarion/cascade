@@ -22,11 +22,13 @@ import type {
   ParamValue,
   ViewerResult,
   EditingContext,
+  SerializableGroupDefinition,
 
   Frame,
   TransactionOptions,
   TransactionResult,
   TransactionOrigin,
+  DslShadowDocument,
 } from '../types';
 import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
 import type { NodeInterfaceChange } from '../../engine/bridge';
@@ -47,6 +49,7 @@ import { createBatchExportSlice } from './slices/batchExportSlice';
 import type { SequenceVideoSlice } from './slices/sequenceVideoSlice';
 import { createSequenceVideoSlice } from './slices/sequenceVideoSlice';
 import type { ProjectSlice } from './slices/projectSlice';
+import type { PendingProjectAction, UnsavedChangesChoice } from './slices/projectSlice';
 import { createProjectSlice } from './slices/projectSlice';
 import type { AssetsSlice } from './slices/assetsSlice';
 import { createAssetsSlice } from './slices/assetsSlice';
@@ -54,6 +57,8 @@ import type { ColorSlice } from './slices/colorSlice';
 import { createColorSlice } from './slices/colorSlice';
 import type { AiSlice } from './slices/aiSlice';
 import { createAiSlice } from './slices/aiSlice';
+import type { DslSlice } from './slices/dslSlice';
+import { createDslSlice } from './slices/dslSlice';
 import type { GraphSlice } from './slices/graphSlice';
 import { createGraphSlice } from './slices/graphSlice';
 import type { UndoSlice } from './slices/undoSlice';
@@ -88,6 +93,10 @@ export interface GraphState {
   isRendering: boolean;
   previewScale: number;
   dirty: boolean;
+  currentProjectPath: string | null;
+  currentProjectName: string;
+  projectSessionRevision: number;
+  unsavedChangesPrompt: PendingProjectAction | null;
   fitViewRequestId: number;
 
   hasSequenceNodes: boolean;
@@ -102,6 +111,8 @@ export interface GraphState {
 
   nodeTimings: Map<string, number>;
   nodeErrors: Map<string, EngineError>;
+  dslShadow: DslShadowDocument | null;
+  customGroupDefinitions: SerializableGroupDefinition[];
   aiNodeStatuses: Record<string, string>;
   aiNodeStale: Record<string, boolean>;
   refreshAiNodeStale: () => void;
@@ -111,14 +122,18 @@ export interface GraphState {
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
-  setParam: (nodeId: string, key: string, value: ParamValue) => void;
+  setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void> | void;
   setDslHandle: (nodeId: string, handle: string) => void;
+  getDslShadow: () => DslShadowDocument | null;
+  setDslShadowFromEditor: DslSlice['setDslShadowFromEditor'];
+  refreshDslShadowFromGraph: (reason?: string) => void;
+  clearDslShadow: () => void;
   setParamLive: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setParamCommit: (nodeId: string, key: string, value: ParamValue) => Promise<void>;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
   setInputDefaultLive: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
   setInputDefaultCommit: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
-  setPosition: (nodeId: string, position: { x: number; y: number }) => void;
+  setPosition: (nodeId: string, position: { x: number; y: number }) => Promise<void> | void;
   selectNode: (id: string | null) => void;
   setSelectedNodes: (ids: string[]) => void;
   toggleMuteSelected: () => Promise<void>;
@@ -128,14 +143,24 @@ export interface GraphState {
   frameSelectedNodes: (nodeSizes?: Map<string, { width: number; height: number }>) => string | null;
   selectFrame: (id: string | null) => void;
   loadImageFile: (nodeId: string, file: File) => void;
+  loadImagePath: (nodeId: string, path: string) => Promise<void>;
   loadVideoFile: (nodeId: string, path: string) => Promise<VideoInfo | null>;
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
   triggerRender: (viewerNodeId: string) => void;
   newProject: () => Promise<void>;
-  saveProject: () => void;
+  saveProject: () => Promise<boolean>;
+  saveProjectAs: () => Promise<boolean>;
   loadProject: (file: File) => void;
-  loadProjectFromPath?: () => void;
+  loadProjectFromPath?: () => Promise<boolean>;
+  requestNewProject: () => Promise<void>;
+  requestOpenProject: (file?: File) => Promise<void>;
+  requestSaveProject: () => Promise<boolean>;
+  requestSaveProjectAs: () => Promise<boolean>;
+  requestCloseProject: () => Promise<void>;
+  resolveUnsavedChanges: (choice: UnsavedChangesChoice) => Promise<void>;
+  dismissUnsavedChangesPrompt: () => void;
+  hydrateProjectFromEngine: () => Promise<boolean>;
   exportImage: (nodeId: string) => void;
   exportExr: (nodeId: string) => void;
   setCurrentFrame: (frame: number) => void;
@@ -175,8 +200,11 @@ export interface GraphState {
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
+  renameGpuScriptNode: (nodeId: string, newName: string) => Promise<void>;
   isInsideGroup: () => boolean;
   updateGroupInterface: (inputs: PortSpec[] | null, outputs: PortSpec[] | null) => Promise<void>;
+  registerGpuKernel: (manifestJson: string) => Promise<NodeSpec | null>;
+  registerGroupDefinition: (json: string) => Promise<NodeSpec | null>;
   importCustomNodes: (json: string) => Promise<string[]>;
   applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
@@ -204,7 +232,7 @@ export interface GraphState {
     mutate: () => Promise<void> | void,
   ) => Promise<TransactionResult>;
   flushRender: () => Promise<Map<string, EngineError>>;
-  validateEdits: (editsJson: string) => EditValidationError[];
+  validateEdits: (editsJson: string) => EditValidationError[] | Promise<EditValidationError[]>;
   typesCompatible: (fromType: string, toType: string) => boolean;
 
   toasts: Toast[];
@@ -224,6 +252,7 @@ type CoreSlice = Omit<
   | keyof AssetsSlice
   | keyof ColorSlice
   | keyof AiSlice
+  | keyof DslSlice
   | keyof GraphSlice
   | keyof UndoSlice
   | keyof RenderSlice
@@ -238,6 +267,10 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
         kernel.engine = await createEngine();
         const specs = await kernel.engine.listNodeTypes();
         set({ engineReady: true, nodeSpecs: specs });
+
+        if (isDesktopRuntime()) {
+          await get().hydrateProjectFromEngine();
+        }
 
         const settings = useSettingsStore.getState();
 
@@ -288,6 +321,7 @@ export const useGraphStore = create<GraphState>()(
     ...createAssetsSlice(...args),
     ...createColorSlice(...args),
     ...createAiSlice(...args),
+    ...createDslSlice(...args),
     ...createUndoSlice(...args),
     ...createRenderSlice(...args),
     ...createLiveParamsSlice(...args),

@@ -5,12 +5,12 @@ import { useGraphStore } from '../store/graphStore';
 import { useThemeStore } from '../store/themeStore';
 import type { SyntaxColors } from '../themes/types';
 import { serializeGraph } from '../ai/dsl/serializer';
-import { deriveHandleMap } from '../ai/dsl/instance';
+import { buildDslShadowFromText, graphSemanticHash, handleMapFromShadow, reconcileDslShadowText } from '../ai/dsl/shadow';
 import { applyDsl } from '../ai/dsl/executor';
-import { parseDsl } from '../ai/dsl/parser';
+import { customDefinitionToNodeSpec, parseDsl } from '../ai/dsl/parser';
 import { validateAst } from '../ai/dsl/validator';
 import type { DslSourceMap } from '../ai/dsl/types';
-import type { DiagnosticItem, NodeInstance } from '../store/types';
+import type { Connection, DiagnosticItem, NodeInstance, NodeSpec } from '../store/types';
 import type { EngineError } from '../engine/engineError';
 
 const APPLY_DEBOUNCE_MS = 600;
@@ -18,6 +18,7 @@ const MARKER_OWNER = 'dsl-editor';
 const EVAL_MARKER_OWNER = 'dsl-eval';
 const LANGUAGE_ID = 'cascade-dsl';
 const MONACO_THEME_ID = 'cascade-dsl';
+const EMPTY_GRAPH_DSL = 'graph {\n\n}';
 
 const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   minimap: { enabled: false },
@@ -34,18 +35,48 @@ const EDITOR_OPTIONS: Monaco.editor.IStandaloneEditorConstructionOptions = {
   tabSize: 2,
 };
 
+interface DocumentDslState {
+  nodes: Map<string, NodeInstance>;
+  connections: Connection[];
+  nodeSpecs: NodeSpec[];
+  dslShadow: ReturnType<typeof useGraphStore.getState>['dslShadow'];
+  customGroupDefinitions: ReturnType<typeof useGraphStore.getState>['customGroupDefinitions'];
+  graphRevision: number;
+  isGroupContext: boolean;
+}
+
+function getDocumentDslState(state = useGraphStore.getState()): DocumentDslState {
+  const rootSnapshot = state.editingStack.length > 1 ? state.editingStack[1] : null;
+  return {
+    nodes: rootSnapshot?.savedNodes ?? state.nodes,
+    connections: rootSnapshot?.savedConnections ?? state.connections,
+    nodeSpecs: rootSnapshot?.savedNodeSpecs ?? state.nodeSpecs,
+    dslShadow: state.dslShadow,
+    customGroupDefinitions: state.customGroupDefinitions,
+    graphRevision: state.graphRevision,
+    isGroupContext: state.editingStack.length > 1,
+  };
+}
+
 /**
  * Serialize the current graph state to DSL text.
  * Returns empty string when specs/nodes aren't ready yet.
  */
 function serializeCurrent(): string {
-  const { nodes, connections, nodeSpecs } = useGraphStore.getState();
-  if (nodeSpecs.length === 0 || nodes.size === 0) return '';
+  const { nodes, connections, nodeSpecs, dslShadow, customGroupDefinitions } = getDocumentDslState();
+  if (nodeSpecs.length === 0) return '';
+  if (nodes.size === 0) return EMPTY_GRAPH_DSL;
+  if (dslShadow?.status === 'valid' && dslShadow.graphHash === graphSemanticHash(nodes, connections, customGroupDefinitions)) {
+    return dslShadow.text;
+  }
   return serializeGraph({
     nodes,
     connections,
     nodeSpecs,
-    handleMap: deriveHandleMap(nodes),
+    handleMap: handleMapFromShadow(nodes, dslShadow),
+    groupDefinitions: customGroupDefinitions,
+    customDefinitionNames: dslShadow?.customDefinitionNames,
+    pruneUnusedCustomDefinitions: true,
   });
 }
 
@@ -135,8 +166,8 @@ export const DslEditor: React.FC = () => {
         defaultToken: '',
         tokenPostfix: '.dsl',
 
-        keywords: ['true', 'false'],
-        builtinFunctions: ['rgba'],
+        keywords: ['cascade', 'graph', 'node', 'group', 'gpu', 'inputs', 'outputs', 'params', 'code', 'true', 'false'],
+        builtinFunctions: ['rgba', 'palette', 'ramp', 'curve', 'image', 'sequence', 'video', 'images', 'muted'],
 
         tokenizer: {
           root: [
@@ -144,21 +175,19 @@ export const DslEditor: React.FC = () => {
             [/^\s*#.*$/, 'comment'],
             [/(\s+)(#.*)$/, ['white', 'comment']],
 
-            // Annotation (@muted) — must precede handle rules
-            [/@@muted/, 'keyword.annotation'],
-
-            // Connection: handle.port <- handle.port
-            [/([a-z][a-z0-9_]*)(\.)(\w+)(\s*)(<-)(\s*)([a-z][a-z0-9_]*)(\.)(\w+)/,
+            // Connection: handle.port -> handle.port
+            [/([a-z][a-z0-9_]*)(\.)(\w+)(\s*)(->)(\s*)([a-z][a-z0-9_]*)(\.)(\w+)/,
               ['variable.handle', 'delimiter', 'variable.port', 'white',
                'operator.arrow', 'white',
                'variable.handle', 'delimiter', 'variable.port']],
 
+            // Keywords and builtin wrappers/constructors
+            [/\b(cascade|graph|node|group|gpu|inputs|outputs|params|code)\b/, 'keyword'],
+            [/\b(rgba|palette|ramp|curve|image|sequence|video|images|muted)(\()/, ['support.function', 'delimiter']],
+
             // Node declaration: handle = NodeType or handle = Ns::NodeType
             [/([a-z][a-z0-9_]*)(\s*)(=)(\s*)([A-Z][A-Za-z0-9_]*(?:::[A-Z][A-Za-z0-9_]*)*)/,
               ['variable.handle', 'white', 'delimiter', 'white', 'type.node']],
-
-            // Builtin functions: rgba(, palette(, ramp(, curve(
-            [/(rgba|palette|ramp|curve)(\()/, ['support.function', 'delimiter']],
 
             // Parameter key: word followed by colon
             [/([a-z_][a-z0-9_]*)(\s*)(:)/, ['variable.parameter', 'white', 'delimiter']],
@@ -177,8 +206,8 @@ export const DslEditor: React.FC = () => {
             // Array brackets
             [/\[|\]/, 'delimiter.bracket'],
 
-            // Remaining delimiters: = ( ) , .
-            [/[=(),.]/, 'delimiter'],
+            // Remaining delimiters: = ( ) , . { }
+            [/[=(),.{}]/, 'delimiter'],
 
             // Catch-all identifiers (unmatched lowercase words)
             [/[a-z_][a-z0-9_]*/, 'identifier'],
@@ -272,7 +301,7 @@ export const DslEditor: React.FC = () => {
   const mapEvalErrorsToMarkers = useCallback(
     (errors: Array<Pick<DiagnosticItem, 'message' | 'nodeId' | 'line'>>, nodes: Map<string, NodeInstance>) => {
       const sourceMap = sourceMapRef.current;
-      const handleMap = deriveHandleMap(nodes);
+      const handleMap = handleMapFromShadow(nodes, useGraphStore.getState().dslShadow);
       return errors.map((err) => {
         let line = err.line;
         if (err.nodeId && sourceMap) {
@@ -291,12 +320,13 @@ export const DslEditor: React.FC = () => {
   // ─── Validate only (show markers without applying) ──────────────────
   const validateAndMark = useCallback(
     (text: string) => {
-      const { nodeSpecs, nodes } = useGraphStore.getState();
+      const { nodeSpecs, nodes, dslShadow } = getDocumentDslState();
       if (nodeSpecs.length === 0) return;
+      const handleMap = handleMapFromShadow(nodes, dslShadow);
 
       const parseResult = parseDsl(text, nodeSpecs, {
         currentNodes: nodes,
-        handleMap: deriveHandleMap(nodes),
+        handleMap,
       });
       sourceMapRef.current = parseResult.sourceMap ?? null;
       if (parseResult.errors.length > 0) {
@@ -305,7 +335,10 @@ export const DslEditor: React.FC = () => {
       }
 
       if (parseResult.ast) {
-        const validation = validateAst(parseResult.ast, nodeSpecs);
+        const customSpecs = parseResult.ast.customNodes
+          ? Array.from(parseResult.ast.customNodes.values()).map(customDefinitionToNodeSpec)
+          : [];
+        const validation = validateAst(parseResult.ast, [...nodeSpecs, ...customSpecs]);
         if (!validation.valid) {
           setMarkers(validation.errors);
           return;
@@ -320,9 +353,14 @@ export const DslEditor: React.FC = () => {
   // ─── Apply DSL text to the graph ────────────────────────────────────
   const applyDslToGraph = useCallback(
     async (text: string) => {
-      const { nodes, connections, nodeSpecs } = useGraphStore.getState();
+      const documentState = getDocumentDslState();
+      const { nodes, connections, nodeSpecs, isGroupContext } = documentState;
       if (nodeSpecs.length === 0) return;
-      const handleMap = deriveHandleMap(nodes);
+      if (isGroupContext) {
+        setEvalMarkers([{ line: 1, message: 'Exit the group to apply document DSL edits.' }]);
+        return;
+      }
+      const handleMap = handleMapFromShadow(nodes, documentState.dslShadow);
       const result = await applyDsl(
         text,
         handleMap,
@@ -335,6 +373,18 @@ export const DslEditor: React.FC = () => {
         clearEvalMarkers();
       } else {
         clearMarkers();
+        const appliedState = useGraphStore.getState();
+        const appliedParse = parseDsl(text, appliedState.nodeSpecs, {
+          currentNodes: appliedState.nodes,
+          handleMap,
+        });
+        appliedState.setDslShadowFromEditor(
+          text,
+          handleMap,
+          appliedParse.ast,
+          result.sourceMap ?? appliedParse.sourceMap,
+          result.customDefinitionNames,
+        );
         // Show eval errors as warning markers if the render produced errors
         if (result.evalErrors && result.evalErrors.length > 0) {
           setEvalMarkers(mapEvalErrorsToMarkers(result.evalErrors, nodes));
@@ -411,19 +461,28 @@ export const DslEditor: React.FC = () => {
     let prevNodes = useGraphStore.getState().nodes;
     let prevConnections = useGraphStore.getState().connections;
     let prevNodeSpecs = useGraphStore.getState().nodeSpecs;
+    let prevCustomGroupDefinitions = useGraphStore.getState().customGroupDefinitions;
+    let prevDslShadow = useGraphStore.getState().dslShadow;
+    let prevEditingStack = useGraphStore.getState().editingStack;
 
     const unsubscribe = useGraphStore.subscribe((state) => {
       // Only act when the relevant slices actually changed
       if (
         state.nodes === prevNodes &&
         state.connections === prevConnections &&
-        state.nodeSpecs === prevNodeSpecs
+        state.nodeSpecs === prevNodeSpecs &&
+        state.customGroupDefinitions === prevCustomGroupDefinitions &&
+        state.dslShadow === prevDslShadow &&
+        state.editingStack === prevEditingStack
       ) {
         return;
       }
       prevNodes = state.nodes;
       prevConnections = state.connections;
       prevNodeSpecs = state.nodeSpecs;
+      prevCustomGroupDefinitions = state.customGroupDefinitions;
+      prevDslShadow = state.dslShadow;
+      prevEditingStack = state.editingStack;
 
       const editor = editorRef.current;
       if (!editor) return;
@@ -431,15 +490,73 @@ export const DslEditor: React.FC = () => {
       // Don't re-serialize when the change originated from the DSL editor itself
       if (state.lastTransactionOrigin === 'dsl') return;
 
-      const { nodes, connections, nodeSpecs } = state;
-      if (nodeSpecs.length === 0 || nodes.size === 0) return;
-
-      const newDsl = serializeGraph({
+      const {
         nodes,
         connections,
         nodeSpecs,
-        handleMap: deriveHandleMap(nodes),
-      });
+        dslShadow,
+        customGroupDefinitions,
+        graphRevision,
+        isGroupContext,
+      } = getDocumentDslState(state);
+      if (nodeSpecs.length === 0) return;
+
+      if (nodes.size === 0) {
+        if (!isGroupContext && dslShadow) {
+          useGraphStore.setState({ dslShadow: null });
+        }
+        if (lastPushedDslRef.current === EMPTY_GRAPH_DSL) return;
+        lastPushedDslRef.current = EMPTY_GRAPH_DSL;
+        sourceMapRef.current = null;
+        suppressApplyRef.current = true;
+        editor.setValue(EMPTY_GRAPH_DSL);
+        clearMarkers();
+        clearEvalMarkers();
+        return;
+      }
+
+      const graphHash = graphSemanticHash(nodes, connections, customGroupDefinitions);
+      const handleMap = handleMapFromShadow(nodes, dslShadow);
+      const serializedDsl = dslShadow?.status === 'valid' && dslShadow.graphHash === graphHash
+        ? dslShadow.text
+        : serializeGraph({
+            nodes,
+            connections,
+            nodeSpecs,
+            handleMap,
+            groupDefinitions: customGroupDefinitions,
+            customDefinitionNames: dslShadow?.customDefinitionNames,
+            pruneUnusedCustomDefinitions: true,
+          });
+      const serializedParse = parseDsl(serializedDsl, nodeSpecs, { currentNodes: nodes, handleMap });
+      const reconciledDsl = dslShadow?.text && dslShadow.graphHash !== graphHash
+        ? reconcileDslShadowText(
+            dslShadow.text,
+            dslShadow.sourceMap,
+            serializedDsl,
+            serializedParse.sourceMap,
+          )
+        : null;
+      const newDsl = reconciledDsl ?? serializedDsl;
+
+      if (!isGroupContext && (!dslShadow || dslShadow.text !== newDsl || dslShadow.graphHash !== graphHash || dslShadow.status !== 'valid')) {
+        const parseResult = newDsl === serializedDsl
+          ? serializedParse
+          : parseDsl(newDsl, nodeSpecs, { currentNodes: nodes, handleMap });
+        useGraphStore.setState({
+          dslShadow: buildDslShadowFromText({
+            text: newDsl,
+            nodes,
+            connections,
+            customGroupDefinitions,
+            customDefinitionNames: dslShadow?.customDefinitionNames,
+            graphRevision,
+            handleMap,
+            ast: parseResult.ast,
+            sourceMap: parseResult.sourceMap,
+          }),
+        });
+      }
 
       // Skip if the serialized text hasn't changed
       if (newDsl === lastPushedDslRef.current) return;
@@ -457,7 +574,7 @@ export const DslEditor: React.FC = () => {
     });
 
     return unsubscribe;
-  }, [clearMarkers]);
+  }, [clearMarkers, clearEvalMarkers]);
 
   useEffect(() => {
     let prevNodeErrors = useGraphStore.getState().nodeErrors;

@@ -17,6 +17,11 @@ export function deriveHandleMap(nodes: Map<string, NodeInstance>): HandleMap {
       map.set(node.dslHandle, nodeId);
     }
   }
+  for (const [nodeId, node] of nodes) {
+    if (!map.hasNodeId(nodeId)) {
+      map.getOrCreate(nodeId, node.typeId);
+    }
+  }
   return map;
 }
 

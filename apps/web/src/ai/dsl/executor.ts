@@ -1,24 +1,26 @@
-import type { Connection, NodeInstance, NodeSpec, ParamDefault, ParamSpec, ParamValue, TransactionOptions, DiagnosticItem } from '../../store/types';
+import type { Connection, DslShadowCustomDefinitionName, NodeInstance, NodeSpec, ParamDefault, ParamSpec, ParamValue, PortSpec, TransactionOptions, DiagnosticItem } from '../../store/types';
 import { createParamValue, isConnectableParam } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
 import { autoLayoutGraph } from '../autoLayout';
-import type { DslAst, DslNode, DslParamValue, GraphMutation, ValidationError, DslSourceMap } from './types';
+import type { DslAst, DslGroupDefinition, DslGpuDefinition, DslNode, DslParamValue, GraphMutation, ValidationError, DslSourceMap } from './types';
 import type { HandleMap } from './handleMap';
-import { parseDsl } from './parser';
+import { customDefinitionToNodeSpec, parseDsl } from './parser';
 import { validateAst } from './validator';
 import { diffAst } from './differ';
 import { validateSemantics } from './semanticValidator';
 import { serializeGraph } from './serializer';
+import type { GpuScriptManifest } from '../gpuScript';
 import {
   buildDefaultGpuScriptManifest,
   parseGpuScriptManifestJson,
 } from '../gpuScript';
+import { pascalToSnake } from './types';
 
 export type ApplyResult =
   | { success: true; evalErrors?: DiagnosticItem[] }
   | { success: false; error: string };
 export type ApplyDslResult =
-  | { success: true; updatedDsl: string; evalErrors?: DiagnosticItem[]; sourceMap?: DslSourceMap }
+  | { success: true; updatedDsl: string; evalErrors?: DiagnosticItem[]; sourceMap?: DslSourceMap; customDefinitionNames?: DslShadowCustomDefinitionName[] }
   | { success: false; errors: (ParseError | ValidationError)[] };
 
 export interface ParseError {
@@ -32,6 +34,311 @@ const getNodeSpec = (nodeSpecs: NodeSpec[], typeId: string): NodeSpec | undefine
 
 const getParamSpec = (spec: NodeSpec | undefined, key: string): ParamSpec | undefined =>
   spec?.params.find(param => param.key === key);
+
+const labelFromName = (name: string): string =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+
+const scalarDslValueToJson = (value: DslParamValue | undefined): number | boolean | string | undefined => {
+  if (!value) return undefined;
+  if (value.type === 'float' || value.type === 'int' || value.type === 'bool' || value.type === 'string') {
+    return value.value;
+  }
+  return undefined;
+};
+
+const isGpuScalarType = (valueType: string): boolean =>
+  ['float', 'int', 'bool'].includes(valueType.toLowerCase());
+
+const manifestType = (valueType: string): string => {
+  switch (valueType.toLowerCase()) {
+    case 'image': return 'Image';
+    case 'mask': return 'Mask';
+    case 'float': return 'Float';
+    case 'int': return 'Int';
+    case 'bool': return 'Bool';
+    default: return 'String';
+  }
+};
+
+const gpuDefinitionToManifest = (definition: DslGpuDefinition) => {
+  const id = pascalToSnake(definition.name);
+  const scalarInputs = definition.inputs.filter(input => isGpuScalarType(input.valueType));
+  const imageInputs = definition.inputs.filter(input => !isGpuScalarType(input.valueType));
+  return {
+    id,
+    display_name: labelFromName(id),
+    category: 'GPU',
+    description: 'Custom GPU node defined in DSL',
+    inputs: imageInputs.map(input => ({
+      name: input.name,
+      label: labelFromName(input.name),
+      ty: manifestType(input.valueType),
+      optional: input.optional,
+    })),
+    outputs: definition.outputs.map(output => ({
+      name: output.name,
+      label: labelFromName(output.name),
+      ty: manifestType(output.valueType),
+    })),
+    params: scalarInputs.map(input => ({
+      key: input.name,
+      label: labelFromName(input.name),
+      type: manifestType(input.valueType),
+      default: scalarDslValueToJson(input.defaultValue) ?? (input.valueType === 'bool' ? false : 0),
+      min: input.min,
+      max: input.max,
+      step: input.step,
+      ui: input.valueType === 'bool' ? 'Checkbox' : 'Slider',
+    })),
+    kernel: definition.code,
+    supports_mask: !imageInputs.some(input => input.name === 'mask'),
+    pixel_space_params: [],
+  };
+};
+
+// Build a GpuScriptManifest for an existing gpu_script *instance* (not a named kernel).
+// Scalars live in `inputs` (not `params`), `params` is always [].
+// Preserves `id` and `display_name` from the existing manifest so renames persist.
+const gpuDefinitionToInstanceManifest = (
+  definition: DslGpuDefinition,
+  existingManifest: GpuScriptManifest | null,
+  fallbackTypeId: string,
+): GpuScriptManifest => {
+  const hasMaskInput = definition.inputs.some(
+    input => !isGpuScalarType(input.valueType) && input.name === 'mask',
+  );
+  const inputs = definition.inputs.map(input =>
+    isGpuScalarType(input.valueType)
+      ? (() => {
+          const rawDefault = scalarDslValueToJson(input.defaultValue);
+          const numericDefault: number | boolean =
+            typeof rawDefault === 'number' || typeof rawDefault === 'boolean'
+              ? rawDefault
+              : (input.valueType === 'bool' ? false : 0);
+          return {
+            name: input.name,
+            label: labelFromName(input.name),
+            ty: manifestType(input.valueType),
+            default: numericDefault,
+            ...(input.min !== undefined ? { min: input.min } : {}),
+            ...(input.max !== undefined ? { max: input.max } : {}),
+            ...(input.step !== undefined ? { step: input.step } : {}),
+            ui: input.valueType === 'bool' ? 'Checkbox' : 'Slider',
+          };
+        })()
+      : {
+          name: input.name,
+          label: labelFromName(input.name),
+          ty: manifestType(input.valueType),
+          optional: input.optional,
+        },
+  );
+  return {
+    id: existingManifest?.id ?? fallbackTypeId,
+    display_name: existingManifest?.display_name ?? labelFromName(definition.name),
+    category: existingManifest?.category ?? 'GPU',
+    description: existingManifest?.description ?? 'Custom GPU shader node',
+    inputs,
+    outputs: definition.outputs.map(output => ({
+      name: output.name,
+      label: labelFromName(output.name),
+      ty: manifestType(output.valueType),
+    })),
+    params: [],
+    kernel: definition.code,
+    supports_mask: !hasMaskInput,
+  };
+};
+
+// Return a map from definition name to existing nodeId for gpu_script instances.
+// The parser resolves custom gpu type names to their snaked form (e.g. 'FilmGlow' → 'film_glow'),
+// so we match dslNode.nodeTypeId against the snaked name rather than the raw definition name.
+const findGpuScriptInstanceMap = (
+  ast: DslAst,
+  currentNodes: Map<string, NodeInstance>,
+  handleMap: HandleMap,
+): Map<string, string> => {
+  const instanceMap = new Map<string, string>();
+  if (!ast.customNodes) return instanceMap;
+  for (const [name, definition] of ast.customNodes.entries()) {
+    if (definition.kind !== 'gpu') continue;
+    const resolvedTypeId = pascalToSnake(name);
+    for (const dslNode of ast.nodes.values()) {
+      if (dslNode.nodeTypeId !== resolvedTypeId) continue;
+      const nodeId = handleMap.getNodeId(dslNode.handle);
+      if (!nodeId) continue;
+      if (currentNodes.get(nodeId)?.typeId.startsWith('gpu_script::')) {
+        instanceMap.set(name, nodeId);
+        break;
+      }
+    }
+  }
+  return instanceMap;
+};
+
+// Recompile existing gpu_script instances whose definition has changed in the new DSL.
+const recompileGpuScriptInstances = async (
+  ast: DslAst,
+  instanceMap: Map<string, string>,
+  currentNodes: Map<string, NodeInstance>,
+): Promise<ValidationError[]> => {
+  if (instanceMap.size === 0) return [];
+  const errors: ValidationError[] = [];
+  const store = useGraphStore.getState();
+  for (const [name, nodeId] of instanceMap.entries()) {
+    const definition = ast.customNodes?.get(name);
+    if (!definition || definition.kind !== 'gpu') continue;
+    const currentNode = currentNodes.get(nodeId);
+    const existingManifestValue = currentNode?.params['__script_manifest'];
+    const existingManifestJson =
+      existingManifestValue && 'String' in existingManifestValue ? existingManifestValue.String : undefined;
+    const existingManifest = parseGpuScriptManifestJson(existingManifestJson);
+    const newManifest = gpuDefinitionToInstanceManifest(
+      definition,
+      existingManifest,
+      currentNode?.typeId ?? 'gpu_script',
+    );
+    try {
+      await store.compileScriptNode(nodeId, JSON.stringify(newManifest));
+    } catch (e) {
+      errors.push({
+        line: definition.line,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+  return errors;
+};
+
+const GROUP_INTERNAL_X_SPACING = 240;
+
+const emptyInternalNode = (id: string, typeId: string, position: [number, number] = [0, 0]) => ({
+  id,
+  type_id: typeId,
+  params: {},
+  muted: false,
+  position,
+  image_data: null,
+  input_defaults: {},
+});
+
+const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition, runtimeIdOverride?: string) => {
+  const spec = customDefinitionToNodeSpec(definition);
+  const paramSpecByKey = new Map(spec.params.map(param => [param.key, param]));
+  const internalDslNodes = Array.from(definition.graph.nodes.values());
+  const nodes = [
+    emptyInternalNode('input', 'group_input', [-GROUP_INTERNAL_X_SPACING, 0]),
+    emptyInternalNode('output', 'group_output', [internalDslNodes.length * GROUP_INTERNAL_X_SPACING, 0]),
+    ...internalDslNodes.map((node, index) => {
+      const params: Record<string, ParamValue> = {};
+      const inputDefaults: Record<string, ParamValue> = {};
+      for (const [paramKey, paramValue] of node.params.entries()) {
+        if (paramValue.type === 'ref') continue;
+        params[paramKey] = dslParamToStoreParam(paramValue);
+      }
+      return {
+        id: node.handle,
+        type_id: node.nodeTypeId,
+        params,
+        muted: node.muted,
+        position: [index * GROUP_INTERNAL_X_SPACING, 0],
+        image_data: null,
+        input_defaults: inputDefaults,
+      };
+    }),
+  ];
+  const promotions = Array.from(definition.graph.nodes.values()).flatMap(node =>
+    Array.from(node.params.entries()).flatMap(([paramKey, paramValue]) => {
+      if (paramValue.type !== 'ref' || !paramValue.value.startsWith('param.')) return [];
+      const groupParamKey = paramValue.value.slice('param.'.length);
+      const paramSpec = paramSpecByKey.get(groupParamKey);
+      if (!paramSpec) return [];
+      return [{
+        group_param_key: groupParamKey,
+        internal_node_id: node.handle,
+        internal_param_key: paramKey,
+        spec: paramSpec,
+      }];
+    })
+  );
+
+  return {
+    id: runtimeIdOverride ?? spec.id,
+    name: spec.display_name,
+    category: spec.category,
+    description: spec.description,
+    internal_graph: {
+      nodes,
+      connections: definition.graph.connections.map(connection => ({
+        from_node: connection.fromHandle,
+        from_port: connection.fromPort,
+        to_node: connection.toHandle,
+        to_port: connection.toPort,
+      })),
+    },
+    promotions,
+    is_builtin: false,
+    explicit_inputs: spec.inputs as PortSpec[],
+    explicit_outputs: spec.outputs as PortSpec[],
+  };
+};
+
+const inferCustomDefinitionNames = (
+  ast: DslAst,
+  currentNodes: Map<string, NodeInstance>,
+  handleMap: HandleMap,
+  existing: DslShadowCustomDefinitionName[] = [],
+): {
+  names: DslShadowCustomDefinitionName[];
+  groupRuntimeIdByDefinitionName: Map<string, string>;
+} => {
+  const namesByRuntimeId = new Map(existing.map(entry => [entry.runtimeId, entry.name]));
+  const groupRuntimeIdByDefinitionName = new Map<string, string>();
+  for (const node of ast.nodes.values()) {
+    const nodeId = handleMap.getNodeId(node.handle);
+    const currentNode = nodeId ? currentNodes.get(nodeId) : undefined;
+    if (!currentNode?.typeId.startsWith('group::')) continue;
+    const definition = ast.customNodes?.get(node.nodeType);
+    if (definition?.kind !== 'group') continue;
+    groupRuntimeIdByDefinitionName.set(definition.name, currentNode.typeId);
+    namesByRuntimeId.set(currentNode.typeId, definition.name);
+  }
+  return {
+    names: Array.from(namesByRuntimeId.entries()).map(([runtimeId, name]) => ({ runtimeId, name })),
+    groupRuntimeIdByDefinitionName,
+  };
+};
+
+const registerCustomDefinitions = async (
+  ast: DslAst,
+  gpuScriptInstances: Map<string, string>,
+  groupRuntimeIdByDefinitionName: Map<string, string> = new Map(),
+): Promise<ValidationError[]> => {
+  const errors: ValidationError[] = [];
+  const definitions = ast.customNodes ? Array.from(ast.customNodes.values()) : [];
+  const store = useGraphStore.getState();
+  for (const definition of definitions) {
+    // gpu_script instances are handled by recompileGpuScriptInstances, not registered as named kernels
+    if (definition.kind === 'gpu' && gpuScriptInstances.has(definition.name)) continue;
+    const spec = definition.kind === 'gpu'
+      ? await store.registerGpuKernel(JSON.stringify(gpuDefinitionToManifest(definition)))
+      : await store.registerGroupDefinition(JSON.stringify(groupDefinitionToRuntimeJson(
+          definition,
+          groupRuntimeIdByDefinitionName.get(definition.name),
+        )));
+    if (!spec) {
+      errors.push({
+        line: definition.line,
+        message: `Failed to register custom node "${definition.name}"`,
+      });
+    }
+  }
+  return errors;
+};
 
 const paramDefaultToDsl = (paramDefault: ParamDefault): DslParamValue => {
   if ('Float' in paramDefault) return { type: 'float', value: paramDefault.Float };
@@ -54,6 +361,8 @@ const dslParamToStoreParam = (dslValue: DslParamValue): ParamValue => {
     case 'bool':
       return createParamValue('Bool', dslValue.value);
     case 'string':
+      return createParamValue('String', dslValue.value);
+    case 'ref':
       return createParamValue('String', dslValue.value);
     case 'color':
       return createParamValue('Color', dslValue.value);
@@ -78,6 +387,10 @@ const applyParamValue = async (
 ) => {
   const store = useGraphStore.getState();
   const node = store.nodes.get(nodeId);
+  if (node?.typeId === 'load_image' && paramKey === 'path' && paramValue.type === 'string') {
+    await store.loadImagePath(nodeId, paramValue.value);
+    return;
+  }
   if (node?.typeId.startsWith('gpu_script') && paramKey === 'script' && paramValue.type === 'string') {
     const manifestValue = node.params['__script_manifest'];
     const manifestJson =
@@ -194,6 +507,12 @@ const executeMutations = async (
 
   return error;
 };
+
+const mutationDiagnosticsToError = (diagnostics: DiagnosticItem[]): string | null => {
+  if (diagnostics.length === 0) return null;
+  return diagnostics.map(diagnostic => diagnostic.message).join('\n');
+};
+
 export const applyMutations = async (
   mutations: GraphMutation[],
   handleMap: HandleMap,
@@ -208,6 +527,10 @@ export const applyMutations = async (
   });
   if (mutationError) {
     return { success: false, error: mutationError };
+  }
+  const diagnosticError = mutationDiagnosticsToError(result.diagnostics.mutationErrors);
+  if (diagnosticError) {
+    return { success: false, error: diagnosticError };
   }
 
   autoLayoutGraph();
@@ -249,12 +572,45 @@ const buildAstWithDefaults = (
   return { nodes: nextNodes, connections: newAst.connections };
 };
 
+const getMutationLine = (mutation: GraphMutation, ast: DslAst): number | null => {
+  switch (mutation.type) {
+    case 'addNode':
+    case 'removeNode':
+    case 'setParam':
+    case 'setMuted':
+      return ast.nodes.get(mutation.handle)?.line ?? null;
+    case 'connect':
+      return ast.connections.find(conn =>
+        conn.fromHandle === mutation.fromHandle
+        && conn.fromPort === mutation.fromPort
+        && conn.toHandle === mutation.toHandle
+        && conn.toPort === mutation.toPort
+      )?.line ?? null;
+    case 'disconnect':
+      return ast.connections.find(conn =>
+        conn.toHandle === mutation.toHandle
+        && conn.toPort === mutation.toPort
+      )?.line ?? null;
+    default:
+      return null;
+  }
+};
+
+const getApplyFailureLine = (mutations: GraphMutation[], ast: DslAst): number => {
+  for (const mutation of mutations) {
+    const line = getMutationLine(mutation, ast);
+    if (line && line > 0) return line;
+  }
+  return 1;
+};
+
 export const applyDsl = async (
   newDslText: string,
   handleMap: HandleMap,
   nodeSpecs: NodeSpec[],
   currentNodes: Map<string, NodeInstance>,
   currentConnections: Connection[],
+  txOptions: TransactionOptions = { origin: 'dsl', awaitRender: true },
 ): Promise<ApplyDslResult> => {
   const parseContext = { currentNodes, handleMap };
   const parseResult = parseDsl(newDslText, nodeSpecs, parseContext);
@@ -262,30 +618,67 @@ export const applyDsl = async (
     return { success: false, errors: parseResult.errors };
   }
 
-  const validation = validateAst(parseResult.ast, nodeSpecs);
+  const customSpecs = parseResult.ast.customNodes
+    ? Array.from(parseResult.ast.customNodes.values()).map(customDefinitionToNodeSpec)
+    : [];
+  const validationSpecs = [...nodeSpecs, ...customSpecs];
+  const validation = validateAst(parseResult.ast, validationSpecs);
   if (!validation.valid) {
     return { success: false, errors: validation.errors };
   }
 
+  // Identify which gpu definitions map to existing gpu_script node instances
+  const gpuScriptInstances = findGpuScriptInstanceMap(parseResult.ast, currentNodes, handleMap);
+  const customDefinitionNameResolution = inferCustomDefinitionNames(
+    parseResult.ast,
+    currentNodes,
+    handleMap,
+    useGraphStore.getState().dslShadow?.customDefinitionNames,
+  );
+
+  // Recompile existing instances with the updated definition (ports + code)
+  const instanceErrors = await recompileGpuScriptInstances(parseResult.ast, gpuScriptInstances, currentNodes);
+  if (instanceErrors.length > 0) {
+    return { success: false, errors: instanceErrors };
+  }
+
+  // Register truly new named kernels and group definitions (not existing instances)
+  const customDefinitionErrors = await registerCustomDefinitions(
+    parseResult.ast,
+    gpuScriptInstances,
+    customDefinitionNameResolution.groupRuntimeIdByDefinitionName,
+  );
+  if (customDefinitionErrors.length > 0) {
+    return { success: false, errors: customDefinitionErrors };
+  }
+
+  // Use post-recompile store state so the diff baseline reflects any updated ports/code
+  const storeAfterCompile = useGraphStore.getState();
+  const nodesForDiff = gpuScriptInstances.size > 0 ? storeAfterCompile.nodes : currentNodes;
+  const connectionsForDiff = gpuScriptInstances.size > 0 ? storeAfterCompile.connections : currentConnections;
+
   const currentDsl = serializeGraph({
     handleMap,
-    nodes: currentNodes,
-    connections: currentConnections,
-    nodeSpecs,
+    nodes: nodesForDiff,
+    connections: connectionsForDiff,
+    nodeSpecs: validationSpecs,
+    groupDefinitions: storeAfterCompile.customGroupDefinitions,
+    customDefinitionNames: customDefinitionNameResolution.names,
+    pruneUnusedCustomDefinitions: true,
   });
-  const reparsedCurrent = parseDsl(currentDsl, nodeSpecs, parseContext);
+  const reparsedCurrent = parseDsl(currentDsl, validationSpecs, parseContext);
   if (reparsedCurrent.errors.length > 0 || !reparsedCurrent.ast) {
     return { success: false, errors: reparsedCurrent.errors };
   }
 
-  const normalizedNewAst = buildAstWithDefaults(reparsedCurrent.ast, parseResult.ast, nodeSpecs);
+  const normalizedNewAst = buildAstWithDefaults(reparsedCurrent.ast, parseResult.ast, validationSpecs);
   const mutations = diffAst(reparsedCurrent.ast, normalizedNewAst);
   // Semantic validation via Rust engine (type compat, port existence, cycles)
   const validateEditsFn = useGraphStore.getState().validateEdits;
   if (validateEditsFn) {
-    const semanticErrors = validateSemantics(
+    const semanticErrors = await validateSemantics(
       mutations,
-      parseResult.sourceMap ?? { nodeSpans: new Map(), connectionSpans: new Map() },
+      parseResult.sourceMap ?? { nodeSpans: new Map(), connectionSpans: new Map(), trivia: [] },
       handleMap,
       validateEditsFn,
     );
@@ -293,9 +686,9 @@ export const applyDsl = async (
       return { success: false, errors: semanticErrors };
     }
   }
-  const applyResult = await applyMutations(mutations, handleMap, nodeSpecs, { origin: 'dsl', awaitRender: true });
+  const applyResult = await applyMutations(mutations, handleMap, validationSpecs, txOptions);
   if (!applyResult.success) {
-    return { success: false, errors: [{ line: 0, message: applyResult.error }] };
+    return { success: false, errors: [{ line: getApplyFailureLine(mutations, normalizedNewAst), message: applyResult.error }] };
   }
 
   const store = useGraphStore.getState();
@@ -303,8 +696,18 @@ export const applyDsl = async (
     handleMap,
     nodes: store.nodes,
     connections: store.connections,
-    nodeSpecs,
+    nodeSpecs: store.nodeSpecs.length > 0 ? store.nodeSpecs : validationSpecs,
+    customNodes: parseResult.ast.customNodes,
+    groupDefinitions: store.customGroupDefinitions,
+    customDefinitionNames: customDefinitionNameResolution.names,
+    pruneUnusedCustomDefinitions: true,
   });
 
-  return { success: true, updatedDsl, evalErrors: applyResult.evalErrors, sourceMap: parseResult.sourceMap };
+  return {
+    success: true,
+    updatedDsl,
+    evalErrors: applyResult.evalErrors,
+    sourceMap: parseResult.sourceMap,
+    customDefinitionNames: customDefinitionNameResolution.names,
+  };
 };

@@ -29,6 +29,7 @@ import {
   kernel,
   cloneEditingStack,
   getEngine,
+  markGraphMutation,
 } from './kernel';
 import type { ParamDeltaSnapshot } from './kernel';
 import {
@@ -354,7 +355,9 @@ export async function commitParamEdit(
   if (node) {
     const updatedNode = { ...node, params: { ...node.params, [key]: value } };
     newNodes.set(nodeId, updatedNode);
+    markGraphMutation(set, 'ui');
     set({ nodes: newNodes, previewScale: 1, dirty: true });
+    get().refreshDslShadowFromGraph();
   } else {
     set({ previewScale: 1 });
   }
@@ -414,7 +417,9 @@ export async function commitInputDefault(
   if (node) {
     const updatedNode = { ...node, inputDefaults: { ...node.inputDefaults, [portName]: value } };
     newNodes.set(nodeId, updatedNode);
+    markGraphMutation(set, 'ui');
     set({ nodes: newNodes, previewScale: 1, dirty: true });
+    get().refreshDslShadowFromGraph();
   } else {
     set({ previewScale: 1 });
   }

@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { Connection, EditingContext, NodeInstance, NodeSpec, ParamValue, PortSpec } from '../../types';
+import type { Connection, DslShadowCustomDefinitionName, EditingContext, NodeInstance, NodeSpec, ParamValue, PortSpec } from '../../types';
 import type { NodeInterfaceChange } from '../../../engine/bridge';
 import { getUnsupportedNodeMessage, isNodeSupportedOnSurface } from '../../../platform/features';
 import { getRuntimeSurface } from '../../../platform/runtime';
@@ -9,7 +9,7 @@ import type { EngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { getNodeCategory, getPortType } from '../../../analytics/nodeGraph';
 import { trackAnalyticsEvent } from '../../../analytics/runtime';
-import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractGraphData, getEngine, kernel, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
+import { ADD_INPUT_PORT, ADD_OUTPUT_PORT, extractCustomGroupDefinitions, extractGraphData, getEngine, kernel, markGraphMutation, withGroupIOSpecs, pushParamDeltaSync, pushMuteDeltaSync } from '../kernel';
 import {
   buildDefaultGpuScriptManifest,
   buildGpuScriptNodeSpec,
@@ -28,6 +28,7 @@ export interface GraphSliceState {
   editingStack: EditingContext[];
   fitViewRequestId: number;
   previewScale: number;
+  customGroupDefinitions: GraphState['customGroupDefinitions'];
 }
 
 export interface GraphSliceActions {
@@ -35,9 +36,9 @@ export interface GraphSliceActions {
   removeNode: (id: string) => Promise<void>;
   connect: (fromNode: string, fromPort: string, toNode: string, toPort: string) => Promise<void>;
   disconnect: (connectionId: string) => Promise<void>;
-  setParam: (nodeId: string, key: string, value: ParamValue) => void;
+  setParam: (nodeId: string, key: string, value: ParamValue) => Promise<void> | void;
   setInputDefault: (nodeId: string, portName: string, value: ParamValue) => Promise<void>;
-  setPosition: (nodeId: string, position: { x: number; y: number }) => void;
+  setPosition: (nodeId: string, position: { x: number; y: number }) => Promise<void> | void;
   toggleMuteSelected: () => Promise<void>;
 
   isInsideGroup: () => boolean;
@@ -47,6 +48,9 @@ export interface GraphSliceActions {
   createGroup: (nodeIds: string[], name?: string) => Promise<void>;
   ungroupNode: (groupNodeId: string) => Promise<void>;
   renameGroup: (groupNodeId: string, newName: string) => Promise<void>;
+  renameGpuScriptNode: (nodeId: string, newName: string) => Promise<void>;
+  registerGpuKernel: (manifestJson: string) => Promise<NodeSpec | null>;
+  registerGroupDefinition: (json: string) => Promise<NodeSpec | null>;
   importCustomNodes: (json: string) => Promise<string[]>;
   applyNodeInterfaceChange: (nodeId: string, change: NodeInterfaceChange) => void;
   exportGroupAsPackage: (groupDefId: string) => Promise<void>;
@@ -55,6 +59,48 @@ export interface GraphSliceActions {
 
 export type GraphSlice = GraphSliceState & GraphSliceActions;
 
+const displayNameToDefinitionName = (displayName: string): string =>
+  displayName
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join('')
+  || 'NodeGroup';
+
+const displayNameToHandleBase = (displayName: string): string =>
+  displayNameToDefinitionName(displayName)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+  || 'node_group';
+
+const uniqueHandleForBase = (
+  base: string,
+  usedHandles: Set<string>,
+): string => {
+  let suffix = 1;
+  let handle = `${base}${suffix}`;
+  while (usedHandles.has(handle)) {
+    suffix += 1;
+    handle = `${base}${suffix}`;
+  }
+  return handle;
+};
+
+const upsertCustomDefinitionName = (
+  entries: DslShadowCustomDefinitionName[] = [],
+  runtimeId: string,
+  name: string,
+): DslShadowCustomDefinitionName[] => {
+  const byRuntimeId = new Map(entries.map(entry => [entry.runtimeId, entry.name]));
+  byRuntimeId.set(runtimeId, name);
+  return Array.from(byRuntimeId.entries()).map(([entryRuntimeId, entryName]) => ({
+    runtimeId: entryRuntimeId,
+    name: entryName,
+  }));
+};
+
 export const createGraphSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -62,9 +108,13 @@ export const createGraphSlice: StateCreator<
   GraphSlice
 > = (set, get) => {
   const tagUiOrigin = () => {
-    if (kernel.renderSuspendCount > 0) return;
-    kernel.graphRevision++;
-    set({ lastTransactionOrigin: 'ui', graphRevision: kernel.graphRevision });
+    markGraphMutation(set, 'ui');
+  };
+
+  const refreshCustomGroupDefinitions = async () => {
+    const eng = getEngine();
+    const graphData = await Promise.resolve(eng.exportGraph());
+    set({ customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
   };
 
   return {
@@ -76,6 +126,7 @@ export const createGraphSlice: StateCreator<
     lastError: null,
     previewScale: 1,
     fitViewRequestId: 0,
+    customGroupDefinitions: [],
     editingStack: [{ id: 'root', label: 'Root', groupNodeId: null }],
 
     addNode: async (typeId, position, initialFile?: File) => {
@@ -95,6 +146,44 @@ export const createGraphSlice: StateCreator<
       await get().pushUndo();
       tagUiOrigin();
 
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !ctx.groupNodeId || !eng.addInternalNode || !eng.getGroupInternalGraph) {
+          set({ lastError: parseEngineError(new Error('Internal group node creation not supported by this engine')) });
+          return '';
+        }
+        const internalNode = await eng.addInternalNode(ctx.groupDefId, typeId, position.x, position.y);
+        const spec = get().nodeSpecs.find(s => s.id === internalNode.typeId);
+        const params: Record<string, ParamValue> = {};
+        if (spec) {
+          spec.params.forEach(p => {
+            params[p.key] = internalNode.params[p.key] ?? p.default;
+          });
+        } else {
+          Object.assign(params, internalNode.params);
+        }
+        const newNodes = new Map(get().nodes);
+        newNodes.set(internalNode.id, {
+          id: internalNode.id,
+          typeId: internalNode.typeId,
+          params,
+          inputDefaults: internalNode.inputDefaults ?? {},
+          position: internalNode.position,
+          muted: internalNode.muted ?? false,
+        });
+        const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId);
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        set({
+          nodes: newNodes,
+          nodeSpecs: withGroupIOSpecs(specs, internalGraph),
+          selectedNodeIds: new Set([internalNode.id]),
+        });
+        await refreshCustomGroupDefinitions();
+        return internalNode.id;
+      }
+
       const result = await getEngine().addNode(typeId, position.x, position.y);
       const actualTypeId = result.typeId;
 
@@ -111,7 +200,9 @@ export const createGraphSlice: StateCreator<
           }
         }
         spec ??= buildGpuScriptNodeSpec(buildDefaultGpuScriptManifest(actualTypeId));
-        set({ nodeSpecs: [...get().nodeSpecs, spec] });
+        const nextSpecsById = new Map(get().nodeSpecsById);
+        nextSpecsById.set(result.id, spec);
+        set({ nodeSpecs: [...get().nodeSpecs, spec], nodeSpecsById: nextSpecsById });
       }
 
       if (spec) {
@@ -144,6 +235,12 @@ export const createGraphSlice: StateCreator<
         muted: false,
       });
 
+      if (spec && actualTypeId.startsWith('gpu_script::')) {
+        const nextSpecsById = new Map(get().nodeSpecsById);
+        nextSpecsById.set(result.id, spec);
+        set({ nodeSpecsById: nextSpecsById });
+      }
+
       if (initialFile) {
         pendingImageFiles.set(result.id, initialFile);
       }
@@ -163,6 +260,28 @@ export const createGraphSlice: StateCreator<
     removeNode: async (id) => {
       await get().pushUndo();
       tagUiOrigin();
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !ctx.groupNodeId || !eng.removeInternalNode || !eng.getGroupInternalGraph) {
+          set({ lastError: parseEngineError(new Error('Internal group node removal not supported by this engine')) });
+          return;
+        }
+        await eng.removeInternalNode(ctx.groupDefId, id);
+        const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId);
+        const newNodes = new Map(get().nodes);
+        newNodes.delete(id);
+        set({
+          nodes: newNodes,
+          connections: get().connections.filter(c => c.fromNode !== id && c.toNode !== id),
+          nodeSpecs: withGroupIOSpecs(await Promise.resolve(eng.listNodeTypes()), internalGraph),
+          selectedNodeIds: new Set(Array.from(get().selectedNodeIds).filter(nodeId => nodeId !== id)),
+        });
+        await refreshCustomGroupDefinitions();
+        get().triggerAffectedViewers([id]);
+        return;
+      }
       const removedNode = get().nodes.get(id);
       await getEngine().removeNode(id);
       const newNodes = new Map(get().nodes);
@@ -281,6 +400,7 @@ export const createGraphSlice: StateCreator<
             connections: [...state.connections, newConnection],
             nodeSpecs: withGroupIOSpecs(specs, updatedGraph),
           }));
+          await refreshCustomGroupDefinitions();
           get().triggerAffectedViewers([fromNode, toNode]);
 
           const fromNodeType = get().nodes.get(fromNode)?.typeId ?? 'Unknown';
@@ -312,6 +432,7 @@ export const createGraphSlice: StateCreator<
         const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
         const specs = await Promise.resolve(eng.listNodeTypes());
         set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
+        await refreshCustomGroupDefinitions();
       }
       get().triggerAffectedViewers([fromNode, toNode]);
 
@@ -355,24 +476,39 @@ export const createGraphSlice: StateCreator<
           const internalGraph = await eng.getGroupInternalGraph(ctx.groupNodeId!);
           const specs = await Promise.resolve(eng.listNodeTypes());
           set({ nodeSpecs: withGroupIOSpecs(specs, internalGraph) });
+          await refreshCustomGroupDefinitions();
         }
         get().triggerAffectedViewers([conn.fromNode, conn.toNode]);
         trackAnalyticsEvent('nodes disconnected');
       }
     },
 
-    setParam: (nodeId, key, value) => {
+    setParam: async (nodeId, key, value) => {
       // Synchronous delta undo — no Worker calls, no blocking.
       // Captures oldValue from current Zustand state before mutating.
       pushParamDeltaSync('param', nodeId, key, get, set);
       tagUiOrigin();
-      getEngine().setParam(nodeId, key, value);
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !eng.setInternalParam) {
+          set({ lastError: parseEngineError(new Error('Internal group param edits not supported by this engine')) });
+          return;
+        }
+        await eng.setInternalParam(ctx.groupDefId, nodeId, key, value);
+      } else {
+        await Promise.resolve(getEngine().setParam(nodeId, key, value));
+      }
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
       if (node) {
         node.params = { ...node.params, [key]: value };
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
+      }
+      if (editingStack.length > 1) {
+        await refreshCustomGroupDefinitions();
       }
       // Fill in newValue on the delta we just pushed so redo works.
       const lastUndo = kernel.undoStack[kernel.undoStack.length - 1];
@@ -386,13 +522,27 @@ export const createGraphSlice: StateCreator<
       // Synchronous delta undo — same pattern as setParam.
       pushParamDeltaSync('inputDefault', nodeId, portName, get, set);
       tagUiOrigin();
-      await getEngine().setInputDefault(nodeId, portName, value);
+      const editingStack = get().editingStack;
+      if (editingStack.length > 1) {
+        const ctx = editingStack[editingStack.length - 1];
+        const eng = getEngine();
+        if (!ctx.groupDefId || !eng.setInternalInputDefault) {
+          set({ lastError: parseEngineError(new Error('Internal group input default edits not supported by this engine')) });
+          return;
+        }
+        await eng.setInternalInputDefault(ctx.groupDefId, nodeId, portName, value);
+      } else {
+        await getEngine().setInputDefault(nodeId, portName, value);
+      }
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
       if (node) {
         node.inputDefaults = { ...node.inputDefaults, [portName]: value };
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
+      }
+      if (editingStack.length > 1) {
+        await refreshCustomGroupDefinitions();
       }
       // Fill in newValue on the delta.
       const lastUndo = kernel.undoStack[kernel.undoStack.length - 1];
@@ -402,14 +552,26 @@ export const createGraphSlice: StateCreator<
       get().triggerAffectedViewers([nodeId]);
     },
 
-    setPosition: (nodeId, position) => {
+    setPosition: async (nodeId, position) => {
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
       if (node) {
         node.position = position;
         newNodes.set(nodeId, { ...node });
         set({ nodes: newNodes });
-        getEngine().setPosition(nodeId, position.x, position.y);
+        const editingStack = get().editingStack;
+        if (editingStack.length > 1) {
+          const ctx = editingStack[editingStack.length - 1];
+          const eng = getEngine();
+          if (!ctx.groupDefId || !eng.setInternalPosition) {
+            set({ lastError: parseEngineError(new Error('Internal group position edits not supported by this engine')) });
+            return;
+          }
+          await eng.setInternalPosition(ctx.groupDefId, nodeId, position.x, position.y);
+          await refreshCustomGroupDefinitions();
+        } else {
+          await Promise.resolve(getEngine().setPosition(nodeId, position.x, position.y));
+        }
       }
     },
 
@@ -440,9 +602,19 @@ export const createGraphSlice: StateCreator<
       pushMuteDeltaSync(entries, get, set);
 
       const eng = getEngine();
+      const editingStack = get().editingStack;
 
       for (const id of selectedIds) {
-        await Promise.resolve(eng.setMuted(id, newMuted));
+        if (editingStack.length > 1) {
+          const ctx = editingStack[editingStack.length - 1];
+          if (!ctx.groupDefId || !eng.setInternalMuted) {
+            set({ lastError: parseEngineError(new Error('Internal group mute edits not supported by this engine')) });
+            return;
+          }
+          await eng.setInternalMuted(ctx.groupDefId, id, newMuted);
+        } else {
+          await Promise.resolve(eng.setMuted(id, newMuted));
+        }
       }
 
       const newNodes = new Map(nodes);
@@ -453,6 +625,9 @@ export const createGraphSlice: StateCreator<
         }
       }
       set({ nodes: newNodes });
+      if (editingStack.length > 1) {
+        await refreshCustomGroupDefinitions();
+      }
 
       get().triggerAffectedViewers([...selectedIds]);
 
@@ -511,7 +686,7 @@ export const createGraphSlice: StateCreator<
           params,
           inputDefaults: n.inputDefaults ?? {},
           position: n.position,
-          muted: false,
+          muted: n.muted ?? false,
         });
       }
 
@@ -609,7 +784,7 @@ export const createGraphSlice: StateCreator<
               params: n.params,
               inputDefaults: n.inputDefaults ?? {},
               position: n.position,
-              muted: false,
+              muted: n.muted ?? false,
             });
           }
 
@@ -645,6 +820,7 @@ export const createGraphSlice: StateCreator<
       }
 
       await get().pushUndo();
+      tagUiOrigin();
       const result = await eng.createGroupFromNodes(nodeIds, name ?? 'Node Group');
 
       const newNodes = new Map(get().nodes);
@@ -701,9 +877,15 @@ export const createGraphSlice: StateCreator<
             toPort: conn.to_port,
           });
         }
-        set({ connections: updatedConnections });
+        set({
+          connections: updatedConnections,
+          customGroupDefinitions: extractCustomGroupDefinitions(graphData),
+        });
+      } else {
+        set({ customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
       }
 
+      get().refreshDslShadowFromGraph();
       get().triggerAllViewers();
     },
 
@@ -715,6 +897,7 @@ export const createGraphSlice: StateCreator<
       }
 
       await get().pushUndo();
+      tagUiOrigin();
       const result = await eng.ungroupNode(groupNodeId);
 
       const newNodes = new Map(get().nodes);
@@ -751,9 +934,11 @@ export const createGraphSlice: StateCreator<
         nodes: newNodes,
         connections: newConnections,
         nodeSpecs: specs,
+        customGroupDefinitions: extractCustomGroupDefinitions(graphData),
         selectedNodeIds: new Set(result.restoredNodes.map(n => n.id)),
       });
 
+      get().refreshDslShadowFromGraph();
       get().triggerAllViewers();
     },
 
@@ -768,6 +953,7 @@ export const createGraphSlice: StateCreator<
       }
 
       await get().pushUndo();
+      tagUiOrigin();
       await eng.renameGroup(node.typeId, newName);
 
       const specs = await Promise.resolve(eng.listNodeTypes());
@@ -777,7 +963,46 @@ export const createGraphSlice: StateCreator<
         ctx.groupNodeId === groupNodeId ? { ...ctx, label: newName } : ctx
       );
 
-      set({ nodeSpecs: specs, editingStack });
+      await refreshCustomGroupDefinitions();
+      const dslShadow = get().dslShadow;
+      const customDefinitionNames = upsertCustomDefinitionName(
+        dslShadow?.customDefinitionNames,
+        node.typeId,
+        displayNameToDefinitionName(newName),
+      );
+      const usedHandles = new Set(
+        dslShadow?.handles
+          .filter(entry => entry.nodeId !== groupNodeId)
+          .map(entry => entry.handle) ?? [],
+      );
+      const nextHandle = uniqueHandleForBase(displayNameToHandleBase(newName), usedHandles);
+      const handles = [
+        ...(dslShadow?.handles.filter(entry => entry.nodeId !== groupNodeId) ?? []),
+        { nodeId: groupNodeId, handle: nextHandle },
+      ];
+      set({
+        nodeSpecs: specs,
+        editingStack,
+        dslShadow: dslShadow ? { ...dslShadow, customDefinitionNames, handles, status: 'stale' } : dslShadow,
+      });
+      get().refreshDslShadowFromGraph();
+    },
+
+    renameGpuScriptNode: async (nodeId, newName) => {
+      const node = get().nodes.get(nodeId);
+      if (!node || !node.typeId.startsWith('gpu_script::')) return;
+      const manifestValue = node.params['__script_manifest'];
+      const manifestJson = manifestValue && 'String' in manifestValue ? manifestValue.String : undefined;
+      const manifest = parseGpuScriptManifestJson(manifestJson);
+      if (!manifest) return;
+      const updatedManifest = { ...manifest, display_name: newName };
+      const updatedJson = JSON.stringify(updatedManifest);
+      await get().setParam(nodeId, '__script_manifest', { String: updatedJson });
+      const updatedSpec = buildGpuScriptNodeSpec(updatedManifest);
+      const newNodeSpecs = get().nodeSpecs.map(s => s.id === node.typeId ? updatedSpec : s);
+      const newSpecsById = new Map(get().nodeSpecsById);
+      newSpecsById.set(nodeId, updatedSpec);
+      set({ nodeSpecs: newNodeSpecs, nodeSpecsById: newSpecsById });
     },
 
     importCustomNodes: async (json) => {
@@ -789,6 +1014,7 @@ export const createGraphSlice: StateCreator<
       try {
         const newSpecs = await Promise.resolve(eng.importCustomNodes(json));
         const specs = await Promise.resolve(eng.listNodeTypes());
+        await refreshCustomGroupDefinitions();
         set({ nodeSpecs: specs });
         const names = newSpecs.map(s => s.display_name).join(', ');
         get().pushToast('success', 'Custom node imported', names);
@@ -797,6 +1023,41 @@ export const createGraphSlice: StateCreator<
         set({ lastError: parseEngineError(e) });
         get().pushToast('error', 'Import failed', e instanceof Error ? e.message : String(e));
         return [];
+      }
+    },
+
+    registerGpuKernel: async (manifestJson) => {
+      const eng = getEngine();
+      if (!eng.registerGpuKernel) {
+        set({ lastError: parseEngineError(new Error('GPU kernel registration not supported by this engine')) });
+        return null;
+      }
+      try {
+        const spec = await Promise.resolve(eng.registerGpuKernel(manifestJson));
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        set({ nodeSpecs: specs });
+        return spec;
+      } catch (e) {
+        set({ lastError: parseEngineError(e) });
+        return null;
+      }
+    },
+
+    registerGroupDefinition: async (json) => {
+      const eng = getEngine();
+      if (!eng.registerGroupDefinition) {
+        set({ lastError: parseEngineError(new Error('Group definition registration not supported by this engine')) });
+        return null;
+      }
+      try {
+        const spec = await Promise.resolve(eng.registerGroupDefinition(json));
+        const specs = await Promise.resolve(eng.listNodeTypes());
+        const graphData = await Promise.resolve(eng.exportGraph());
+        set({ nodeSpecs: specs, customGroupDefinitions: extractCustomGroupDefinitions(graphData) });
+        return spec;
+      } catch (e) {
+        set({ lastError: parseEngineError(e) });
+        return null;
       }
     },
 
@@ -841,6 +1102,7 @@ export const createGraphSlice: StateCreator<
       const resolvedOutputs = outputs ?? currentGraph.outputs;
 
       await get().pushUndo();
+      tagUiOrigin();
       const updatedSpec = await eng.updateGroupInterface(currentContext.groupDefId, resolvedInputs, resolvedOutputs);
 
       const specs = await Promise.resolve(eng.listNodeTypes());
@@ -864,7 +1126,7 @@ export const createGraphSlice: StateCreator<
           params,
           inputDefaults: n.inputDefaults ?? {},
           position: n.position,
-          muted: false,
+          muted: n.muted ?? false,
         });
       }
 
@@ -883,6 +1145,8 @@ export const createGraphSlice: StateCreator<
         connections: newConnections,
         nodeSpecs: withGroupIOSpecs(specs, internalGraph),
       });
+      await refreshCustomGroupDefinitions();
+      get().refreshDslShadowFromGraph();
     },
 
     applyNodeInterfaceChange: (nodeId, change) => {
@@ -893,6 +1157,7 @@ export const createGraphSlice: StateCreator<
       // Remove connections that were pruned by the engine
       let newConnections = get().connections;
       if (change.prunedConnections.length > 0) {
+        tagUiOrigin();
         const pruneSet = new Set(
           change.prunedConnections.map(pc => `${pc.fromNode}:${pc.fromPort}->${pc.toNode}:${pc.toPort}`)
         );

@@ -11,6 +11,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { AboutModal } from './components/AboutModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { MenuBar } from './components/MenuBar';
+import { UnsavedChangesModal } from './components/UnsavedChangesModal';
 import { ToastHost } from './components/ui/ToastHost';
 import { TooltipProvider } from './components/ui/Tooltip';
 import { isFeatureVisible } from './platform/features';
@@ -44,6 +45,27 @@ function useBeforeUnload() {
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
+}
+
+function useDesktopCloseGuard() {
+  useEffect(() => {
+    if (getRuntimeSurface() !== 'desktop') return;
+
+    let unlisten: (() => void) | null = null;
+    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
+      getCurrentWindow().onCloseRequested((event) => {
+        if (!useGraphStore.getState().dirty) return;
+        event.preventDefault();
+        void useGraphStore.getState().requestCloseProject();
+      }).then((fn) => {
+        unlisten = fn;
+      });
+    });
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 }
 
 function Toolbar() {
@@ -91,6 +113,7 @@ function App() {
   const saveLayout = useLayoutStore(s => s.saveLayout);
 
   useBeforeUnload();
+  useDesktopCloseGuard();
   useShortcuts();
   useTauriMenuListener();
 
@@ -183,6 +206,7 @@ function App() {
       <SettingsModal />
       <ShortcutsModal />
       <AboutModal />
+      <UnsavedChangesModal />
       <ToastHost />
     </TooltipProvider>
   );

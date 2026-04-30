@@ -262,8 +262,8 @@ describe('DSL roundtrip', () => {
     const parsed = parseDsl(text, mockSpecs);
     expect(parsed.errors).toHaveLength(0);
     expect(parsed.ast?.connections).toHaveLength(4);
-    expect(parsed.ast?.connections.map((c) => `${c.toHandle}.${c.toPort}<- ${c.fromHandle}.${c.fromPort}`)).toContain(
-      'blend1.base<- load1.image'
+    expect(parsed.ast?.connections.map((c) => `${c.fromHandle}.${c.fromPort} -> ${c.toHandle}.${c.toPort}`)).toContain(
+      'load1.image -> blend1.base'
     );
   });
 

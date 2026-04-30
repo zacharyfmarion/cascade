@@ -1,8 +1,8 @@
 mod menu;
 
 use cascade_runtime::{
-    migrations, AssetReference, CascadeDocument, Engine, NodeSpec, PortSpec, RenderResult,
-    SerializableGraph, UiNodeSpec,
+    migrations, AssetReference, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
+    RenderResult, SerializableGraph, UiNodeSpec,
 };
 use std::sync::Mutex;
 use std::time::Instant;
@@ -150,6 +150,22 @@ fn load_image_data(
 }
 
 #[tauri::command]
+fn load_image_path(
+    state: State<'_, EngineState>,
+    node_id: String,
+    path: String,
+) -> Result<String, String> {
+    let normalized = path.strip_prefix("file://").unwrap_or(&path);
+    let data = std::fs::read(normalized).map_err(|e| e.to_string())?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let change = s
+        .engine
+        .load_image_data(&node_id, &data)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&change).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn load_palette_data(
     state: State<'_, EngineState>,
     request: tauri::ipc::Request,
@@ -197,6 +213,36 @@ fn render_viewer(
     } = s
         .engine
         .render_viewer(&viewer_node_id, frame)
+        .map_err(|e| e.to_string())?;
+
+    let mut buf = Vec::with_capacity(8 + pixels.len());
+    buf.extend_from_slice(&width.to_le_bytes());
+    buf.extend_from_slice(&height.to_le_bytes());
+    buf.extend_from_slice(&pixels);
+    Ok(Response::new(buf))
+}
+
+#[tauri::command]
+fn render_internal_viewer(
+    state: State<'_, EngineState>,
+    group_node_id: String,
+    internal_viewer_id: String,
+    frame: u64,
+    preview_scale: Option<f32>,
+) -> Result<Response, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let RenderResult {
+        width,
+        height,
+        pixels,
+    } = s
+        .engine
+        .render_internal_viewer_scaled(
+            &group_node_id,
+            &internal_viewer_id,
+            frame,
+            preview_scale.unwrap_or(1.0),
+        )
         .map_err(|e| e.to_string())?;
 
     let mut buf = Vec::with_capacity(8 + pixels.len());
@@ -317,9 +363,16 @@ fn import_graph(state: State<'_, EngineState>, data: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn save_project(state: State<'_, EngineState>, path: String) -> Result<(), String> {
+fn save_project(
+    state: State<'_, EngineState>,
+    path: String,
+    dsl: Option<serde_json::Value>,
+) -> Result<(), String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut document = s.engine.export_document();
+    if let Some(dsl) = dsl {
+        document.dsl = serde_json::from_value(dsl).ok();
+    }
 
     let file_path = std::path::Path::new(&path);
     if let Some(stem) = file_path.file_stem().and_then(|s| s.to_str()) {
@@ -360,6 +413,19 @@ fn save_project(state: State<'_, EngineState>, path: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn migrate_document(json: String) -> Result<String, String> {
+    let mut value: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    migrations::migrate_document(&mut value).map_err(|e| e.to_string())?;
+    serde_json::to_string(&value).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn needs_migration(json: String) -> Result<bool, String> {
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    Ok(migrations::needs_migration(&value))
+}
+
+#[tauri::command]
 fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let file_path = std::path::Path::new(&path);
@@ -370,8 +436,9 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         migrations::migrate_document(&mut doc_value).map_err(|e| e.to_string())?;
 
         // Deserialize the migrated document
-        let document: CascadeDocument =
+        let mut document: CascadeDocument =
             serde_json::from_value(doc_value).map_err(|e| e.to_string())?;
+        let dsl = document.dsl.take();
 
         let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
         let assets: Vec<(String, String, String)> = document
@@ -402,8 +469,9 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
             }
         }
 
-        let graph = s.engine.export_graph();
-        serde_json::to_string(&graph).map_err(|e| e.to_string())
+        let mut exported = s.engine.export_document();
+        exported.dsl = dsl;
+        serde_json::to_string(&exported).map_err(|e| e.to_string())
     } else {
         // Fallback: try to load as SerializableGraph (without migration)
         let graph: SerializableGraph = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -658,6 +726,116 @@ fn remove_internal_connection(
 }
 
 #[tauri::command]
+fn add_internal_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    type_id: String,
+    x: f64,
+    y: f64,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .add_internal_node(&group_def_id, &type_id, x, y)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_internal_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .remove_internal_node(&group_def_id, &node_id)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_param(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    key: String,
+    value: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let value: ParamValue = serde_json::from_str(&value).map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_param(&group_def_id, &node_id, &key, value)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_input_default(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    port_name: String,
+    value: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let value: ParamValue = serde_json::from_str(&value).map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_input_default(&group_def_id, &node_id, &port_name, value)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_position(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    x: f64,
+    y: f64,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_position(&group_def_id, &node_id, x, y)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_internal_muted(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    muted: bool,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .set_internal_muted(&group_def_id, &node_id, muted)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn compile_internal_script_node(
+    state: State<'_, EngineState>,
+    group_def_id: String,
+    node_id: String,
+    manifest_json: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let result = s
+        .engine
+        .compile_internal_script_node(&group_def_id, &node_id, &manifest_json)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&result).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn rename_group(
     state: State<'_, EngineState>,
     group_def_id: String,
@@ -690,6 +868,19 @@ fn import_custom_nodes(state: State<'_, EngineState>, json: String) -> Result<St
         .import_custom_nodes(&json)
         .map_err(|e| e.to_string())?;
     serde_json::to_string(&specs).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn register_group_definition(
+    state: State<'_, EngineState>,
+    json: String,
+) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let spec = s
+        .engine
+        .register_group_definition_json(&json)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&spec).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -824,14 +1015,18 @@ pub fn run() {
             set_position,
             set_muted,
             load_image_data,
+            load_image_path,
             load_palette_data,
             get_image_data,
             render_viewer,
+            render_internal_viewer,
             set_param_and_render,
             set_input_default_and_render,
             export_graph,
             import_graph,
             save_project,
+            migrate_document,
+            needs_migration,
             load_project,
             compile_script_node,
             get_node_spec,
@@ -851,9 +1046,17 @@ pub fn run() {
             update_group_interface,
             add_internal_connection,
             remove_internal_connection,
+            add_internal_node,
+            remove_internal_node,
+            set_internal_param,
+            set_internal_input_default,
+            set_internal_position,
+            set_internal_muted,
+            compile_internal_script_node,
             rename_group,
             export_group_as_package,
             import_custom_nodes,
+            register_group_definition,
             list_custom_nodes,
             remove_custom_node,
             set_ai_api_key,

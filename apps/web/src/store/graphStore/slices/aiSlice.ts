@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { NodeSpec, ParamDefault, ParamValue, PortSpec } from '../../types';
-import { getEngine } from '../kernel';
+import { getEngine, markGraphMutation, withGroupIOSpecs } from '../kernel';
 import { formatGpuScriptCompileError } from '../../../engine/gpuScriptErrors';
 
 export interface AiSliceState {
@@ -116,9 +116,19 @@ export const createAiSlice: StateCreator<
 
   compileScriptNode: async (nodeId, manifestJson) => {
     const eng = getEngine();
-    if (!eng.compileScriptNode) throw new Error("Engine doesn't support script compilation");
+    const editingStack = get().editingStack;
+    const groupContext = editingStack.length > 1 ? editingStack[editingStack.length - 1] : null;
+    if (groupContext) {
+      if (!groupContext.groupDefId || !groupContext.groupNodeId || !eng.compileInternalScriptNode || !eng.getGroupInternalGraph) {
+        throw new Error("Engine doesn't support internal script compilation");
+      }
+    } else if (!eng.compileScriptNode) {
+      throw new Error("Engine doesn't support script compilation");
+    }
     try {
-      const spec = await eng.compileScriptNode(nodeId, manifestJson);
+      const spec = groupContext
+        ? await eng.compileInternalScriptNode!(groupContext.groupDefId!, nodeId, manifestJson)
+        : await eng.compileScriptNode!(nodeId, manifestJson);
       const specs = await eng.listNodeTypes();
       const existingIdx = specs.findIndex(s => s.id === spec.id);
       if (existingIdx >= 0) {
@@ -140,7 +150,15 @@ export const createAiSlice: StateCreator<
         });
       }
 
-      set({ nodeSpecs: specs, nodes: newNodes, dirty: true });
+      const nextSpecs = groupContext && eng.getGroupInternalGraph
+        ? withGroupIOSpecs(specs, await eng.getGroupInternalGraph(groupContext.groupNodeId!))
+        : specs;
+      // Also store in nodeSpecsById so the spec survives any subsequent listNodeTypes() resets
+      const newSpecsById = new Map(get().nodeSpecsById);
+      newSpecsById.set(nodeId, spec);
+      markGraphMutation(set, 'ui');
+      set({ nodeSpecs: nextSpecs, nodes: newNodes, nodeSpecsById: newSpecsById, dirty: true });
+      get().refreshDslShadowFromGraph();
       get().triggerAffectedViewers([nodeId]);
       return spec;
     } catch (error) {

@@ -1,7 +1,6 @@
 import { useGraphStore } from '../store/graphStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLayoutStore } from '../store/layoutStore';
-import { isDesktopRuntime } from '../platform/runtime';
 import type { WorkspacePreset } from '../store/layoutStore';
 import { isTextInputFocused } from '../shortcuts/focusDetection';
 
@@ -46,8 +45,11 @@ export function getMenuBarDef(): MenuDef[] {
     {
       label: 'File',
       items: [
-        { type: 'action', id: 'file.save', label: 'Save Project', shortcut: `${mod}+S` },
+        { type: 'action', id: 'file.new', label: 'New Project', shortcut: `${mod}+N` },
         { type: 'action', id: 'file.open', label: 'Open Project', shortcut: `${mod}+O` },
+        { type: 'separator' },
+        { type: 'action', id: 'file.save', label: 'Save', shortcut: `${mod}+S` },
+        { type: 'action', id: 'file.saveAs', label: 'Save As...', shortcut: `${mod}+Shift+S` },
         { type: 'separator' },
         { type: 'action', id: 'file.settings', label: 'Settings', shortcut: `${mod}+,` },
       ],
@@ -98,15 +100,20 @@ export function handleMenuAction(id: string): void {
   const layoutStore = useLayoutStore.getState();
 
   switch (id) {
+    case 'app.quit':
+      void graphStore.requestCloseProject();
+      break;
+    case 'file.new':
+      void graphStore.requestNewProject();
+      break;
     case 'file.save':
-      graphStore.saveProject();
+      void graphStore.requestSaveProject();
+      break;
+    case 'file.saveAs':
+      void graphStore.requestSaveProjectAs();
       break;
     case 'file.open':
-      if (isDesktopRuntime() && graphStore.loadProjectFromPath) {
-        graphStore.loadProjectFromPath();
-      } else {
-        document.getElementById('menu-file-input')?.click();
-      }
+      void graphStore.requestOpenProject();
       break;
     case 'file.settings':
       settingsStore.openSettings();

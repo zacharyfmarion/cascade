@@ -10,6 +10,9 @@ import { useGraphStore, getEngine } from '../store/graphStore';
 import { kernel } from '../store/graphStore/kernel';
 import { useLayoutStore } from '../store/layoutStore';
 import type { NodeSpec, ParamValue } from '../store/types';
+import { applyDsl } from '../ai/dsl/executor';
+import { handleMapFromShadow } from '../ai/dsl/shadow';
+import { parseDsl } from '../ai/dsl/parser';
 
 export interface CascadeTestHarness {
   /** Wait for the WASM engine to be fully initialized */
@@ -46,10 +49,11 @@ export interface CascadeTestHarness {
   // --- Groups ---
   createGroup(nodeIds: string[], name?: string): Promise<string | null>;
   enterGroup(groupNodeId: string): Promise<void>;
-  exitGroup(): void;
+  exitGroup(): Promise<void>;
   getEditingStack(): Array<{ id: string; label: string }>;
   ungroupNode(groupNodeId: string): Promise<void>;
   renameGroup(groupNodeId: string, newName: string): Promise<void>;
+  renameGpuScriptNode(nodeId: string, newName: string): Promise<void>;
   exportGroupAsPackage(groupDefId: string): unknown;
   getNodeParams(nodeId: string): Record<string, unknown>;
   duplicateNode(nodeId: string): Promise<string | null>;
@@ -65,6 +69,11 @@ export interface CascadeTestHarness {
   // --- Save/Load ---
   saveProject(): unknown;
   loadProject(data: unknown): Promise<void>;
+
+  // --- DSL ---
+  getDslText(): string | null;
+  getDslShadow(): unknown;
+  applyDslText(text: string): Promise<{ success: boolean; errors?: Array<{ line: number; message: string }> }>;
 
   // --- Export ---
   exportImage(nodeId: string): Promise<void>;
@@ -374,10 +383,10 @@ function createTestHarness(): CascadeTestHarness {
     async enterGroup(groupNodeId: string): Promise<void> {
       await useGraphStore.getState().enterGroup(groupNodeId);
     },
-    exitGroup(): void {
+    async exitGroup(): Promise<void> {
       const s = useGraphStore.getState();
       if (s.editingStack.length > 1) {
-        s.navigateToBreadcrumb(0);
+        await s.navigateToBreadcrumb(0);
       }
     },
     getEditingStack(): Array<{ id: string; label: string }> {
@@ -391,6 +400,9 @@ function createTestHarness(): CascadeTestHarness {
     },
     async renameGroup(groupNodeId: string, newName: string): Promise<void> {
       await useGraphStore.getState().renameGroup(groupNodeId, newName);
+    },
+    async renameGpuScriptNode(nodeId: string, newName: string): Promise<void> {
+      await useGraphStore.getState().renameGpuScriptNode(nodeId, newName);
     },
     exportGroupAsPackage(groupDefId: string): unknown {
       return useGraphStore.getState().exportGroupAsPackage(groupDefId);
@@ -437,8 +449,50 @@ function createTestHarness(): CascadeTestHarness {
       const jsonStr = typeof data === 'string' ? data : JSON.stringify(data);
       const file = new File([jsonStr], 'test-project.json', { type: 'application/json' });
       useGraphStore.getState().loadProject(file);
-      // loadProject reads file async — wait a tick for state to settle
-      await new Promise(resolve => setTimeout(resolve, 200));
+      const expectsDsl = typeof data === 'object' && data !== null && 'dsl' in data;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (!expectsDsl || useGraphStore.getState().dslShadow) break;
+      }
+      await this.waitForRenderIdle();
+    },
+
+    // --- DSL ---
+    getDslText(): string | null {
+      const shadow = useGraphStore.getState().dslShadow;
+      if (shadow?.status === 'valid') {
+        return shadow.text;
+      }
+      useGraphStore.getState().refreshDslShadowFromGraph('e2e');
+      return useGraphStore.getState().dslShadow?.text ?? null;
+    },
+    getDslShadow(): unknown {
+      const shadow = useGraphStore.getState().dslShadow;
+      if (!shadow) return null;
+      return {
+        ...shadow,
+        sourceMap: undefined,
+      };
+    },
+    async applyDslText(text: string): Promise<{ success: boolean; errors?: Array<{ line: number; message: string }> }> {
+      const state = useGraphStore.getState();
+      const handleMap = handleMapFromShadow(state.nodes, state.dslShadow);
+      const result = await applyDsl(text, handleMap, state.nodeSpecs, state.nodes, state.connections);
+      if (!result.success) return { success: false, errors: result.errors };
+      const nextState = useGraphStore.getState();
+      const parseResult = parseDsl(text, nextState.nodeSpecs, {
+        currentNodes: nextState.nodes,
+        handleMap,
+      });
+      nextState.setDslShadowFromEditor(
+        text,
+        handleMap,
+        parseResult.ast,
+        result.sourceMap ?? parseResult.sourceMap,
+        result.customDefinitionNames,
+      );
+      await this.waitForRenderIdle();
+      return { success: true };
     },
 
     // --- Export ---

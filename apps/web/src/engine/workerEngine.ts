@@ -32,6 +32,7 @@ import type {
   CreateGroupResult,
   UngroupResult,
   GroupInternalGraph,
+  InternalGraphNode,
   CustomNodeInfo,
 } from '../store/types';
 
@@ -69,6 +70,7 @@ interface WorkerAPI {
   loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange>;
 
   renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null>;
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null>;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
   getImageData(nodeId: string): Promise<Uint8Array | null>;
   evaluateBytesOutput(nodeId: string, portName: string): Promise<Uint8Array>;
@@ -104,6 +106,13 @@ interface WorkerAPI {
     toPort: string,
   ): Promise<NodeSpec>;
   removeInternalConnection(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec>;
+  addInternalNode(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode>;
+  removeInternalNode(groupDefId: string, nodeId: string): Promise<NodeSpec>;
+  setInternalParam(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalInputDefault(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalPosition(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec>;
+  setInternalMuted(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec>;
+  compileInternalScriptNode(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec>;
   renameGroup(groupDefId: string, newName: string): Promise<NodeSpec>;
 
   getLastRenderTimings(): Promise<Record<string, number>>;
@@ -120,6 +129,7 @@ interface WorkerAPI {
   validateEdits(editsJson: string): Promise<EditValidationError[]>;
   exportGroupAsPackage(groupDefId: string): Promise<unknown>;
   importCustomNodes(json: string): Promise<NodeSpec[]>;
+  registerGroupDefinition(json: string): Promise<NodeSpec>;
   listCustomNodes(): Promise<CustomNodeInfo[]>;
   removeCustomNode(groupDefId: string): Promise<void>;
 
@@ -284,6 +294,10 @@ export class WorkerEngine implements EngineBridge {
     return this.getAPI().renderViewer(viewerNodeId, frame);
   }
 
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> {
+    return this.getAPI().renderInternalViewer(groupNodeId, internalViewerId, frame, previewScale);
+  }
+
   exportImage(nodeId: string, frame: number): Promise<Uint8Array> {
     return this.getAPI().exportImage(nodeId, frame);
   }
@@ -426,6 +440,34 @@ export class WorkerEngine implements EngineBridge {
     return this.getAPI().removeInternalConnection(groupDefId, toNode, toPort);
   }
 
+  addInternalNode(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode> {
+    return this.getAPI().addInternalNode(groupDefId, typeId, x, y);
+  }
+
+  removeInternalNode(groupDefId: string, nodeId: string): Promise<NodeSpec> {
+    return this.getAPI().removeInternalNode(groupDefId, nodeId);
+  }
+
+  setInternalParam(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec> {
+    return this.getAPI().setInternalParam(groupDefId, nodeId, key, value);
+  }
+
+  setInternalInputDefault(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec> {
+    return this.getAPI().setInternalInputDefault(groupDefId, nodeId, portName, value);
+  }
+
+  setInternalPosition(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec> {
+    return this.getAPI().setInternalPosition(groupDefId, nodeId, x, y);
+  }
+
+  setInternalMuted(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec> {
+    return this.getAPI().setInternalMuted(groupDefId, nodeId, muted);
+  }
+
+  compileInternalScriptNode(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec> {
+    return this.getAPI().compileInternalScriptNode(groupDefId, nodeId, manifestJson);
+  }
+
   renameGroup(groupDefId: string, newName: string): Promise<NodeSpec> {
     return this.getAPI().renameGroup(groupDefId, newName);
   }
@@ -498,6 +540,10 @@ export class WorkerEngine implements EngineBridge {
 
   importCustomNodes(json: string): Promise<NodeSpec[]> {
     return this.getAPI().importCustomNodes(json);
+  }
+
+  registerGroupDefinition(json: string): Promise<NodeSpec> {
+    return this.getAPI().registerGroupDefinition(json);
   }
 
   listCustomNodes(): Promise<CustomNodeInfo[]> {

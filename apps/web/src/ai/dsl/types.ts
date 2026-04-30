@@ -1,6 +1,52 @@
 export interface DslAst {
   nodes: Map<string, DslNode>;
   connections: DslConnection[];
+  customNodes?: Map<string, DslCustomNodeDefinition>;
+}
+
+export type DslCustomNodeDefinition = DslGroupDefinition | DslGpuDefinition;
+
+export interface DslPortDeclaration {
+  valueType: string;
+  name: string;
+  optional: boolean;
+  defaultValue?: DslParamValue;
+  min?: number;
+  max?: number;
+  step?: number;
+  line: number;
+}
+
+export interface DslParamDeclaration {
+  valueType: string;
+  name: string;
+  defaultValue: DslParamValue;
+  min?: number;
+  max?: number;
+  step?: number;
+  line: number;
+}
+
+export interface DslGpuDefinition {
+  kind: 'gpu';
+  name: string;
+  line: number;
+  inputs: DslPortDeclaration[];
+  outputs: DslPortDeclaration[];
+  code: string;
+}
+
+export interface DslGroupDefinition {
+  kind: 'group';
+  name: string;
+  line: number;
+  inputs: DslPortDeclaration[];
+  outputs: DslPortDeclaration[];
+  params: DslParamDeclaration[];
+  graph: {
+    nodes: Map<string, DslNode>;
+    connections: DslConnection[];
+  };
 }
 
 export interface DslNode {
@@ -17,6 +63,7 @@ export type DslParamValue =
   | { type: 'int'; value: number }
   | { type: 'bool'; value: boolean }
   | { type: 'string'; value: string }
+  | { type: 'ref'; value: string }
   | { type: 'color'; value: [number, number, number, number] }
   | { type: 'ramp'; value: { position: number; color: [number, number, number, number] }[] }
   | { type: 'curve'; value: { x: number; y: number }[] }
@@ -38,9 +85,21 @@ export interface DslSourceSpan {
   endCol: number;
 }
 
+export type DslTriviaTargetKind = 'node' | 'connection';
+
+export interface DslSourceTrivia {
+  kind: 'comment' | 'blank';
+  text: string;
+  span: DslSourceSpan;
+  inline: boolean;
+  targetKind?: DslTriviaTargetKind;
+  targetKey?: string;
+}
+
 export interface DslSourceMap {
   nodeSpans: Map<string, DslSourceSpan>;
   connectionSpans: Map<string, DslSourceSpan>;
+  trivia: DslSourceTrivia[];
 }
 
 export type GraphMutation =

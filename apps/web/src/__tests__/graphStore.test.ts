@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
-import { buildDefaultGpuScriptManifest, buildGpuScriptManifest } from '../ai/gpuScript';
+import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../ai/gpuScript';
+import { serializeGraph } from '../ai/dsl/serializer';
+import { HandleMap } from '../ai/dsl/handleMap';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -12,6 +14,11 @@ let mockEngine = createMockEngine();
 let addOutputPort: string;
 let addInputPort: string;
 const trackAnalyticsEvent = vi.fn();
+const dialogMocks = vi.hoisted(() => ({
+  save: vi.fn(),
+  open: vi.fn(),
+  close: vi.fn(),
+}));
 
 const setTauriMode = (enabled: boolean) => {
   if (enabled) {
@@ -30,6 +37,18 @@ vi.mock('../engine/wasmEngine', () => ({
 
 vi.mock('../analytics/runtime', () => ({
   trackAnalyticsEvent,
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  save: dialogMocks.save,
+  open: dialogMocks.open,
+}));
+
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    close: dialogMocks.close,
+    onCloseRequested: vi.fn(async () => vi.fn()),
+  }),
 }));
 
 type GraphStore = typeof import('../store/graphStore')['useGraphStore'];
@@ -54,6 +73,10 @@ const createInitialState = () => ({
   isRendering: false,
   previewScale: 1,
   dirty: false,
+  currentProjectPath: null,
+  currentProjectName: 'Untitled',
+  projectSessionRevision: 0,
+  unsavedChangesPrompt: null,
   hasSequenceNodes: false,
   sequenceLength: 0,
   sequenceStart: 0,
@@ -66,6 +89,8 @@ const createInitialState = () => ({
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
+  dslShadow: null,
+  customGroupDefinitions: [],
   graphRevision: 0,
   lastTransactionOrigin: null,
 });
@@ -81,6 +106,9 @@ beforeEach(async () => {
   setTauriMode(false);
   mockEngine = createMockEngine();
   trackAnalyticsEvent.mockClear();
+  dialogMocks.save.mockReset();
+  dialogMocks.open.mockReset();
+  dialogMocks.close.mockReset();
   const mod = await import('../store/graphStore');
   useGraphStore = mod.useGraphStore;
   addOutputPort = mod.ADD_OUTPUT_PORT;
@@ -488,6 +516,117 @@ describe('graphStore group editing state', () => {
     useGraphStore.getState().exitGroup();
     expect(useGraphStore.getState().editingStack.length).toBe(1);
   });
+
+  it('createGroup stores runtime group definitions for DSL serialization', async () => {
+    const store = useGraphStore.getState();
+    const load = await store.addNode('load_image', { x: 0, y: 0 });
+    const blur = await store.addNode('gaussian_blur', { x: 100, y: 0 });
+    const curves = await store.addNode('curves', { x: 200, y: 0 });
+    const viewer = await store.addNode('viewer', { x: 300, y: 0 });
+    await store.setParam(blur, 'amount', { Float: 2 } as ParamValue);
+    await store.connect(load, 'image', blur, 'image');
+    await store.connect(blur, 'image', curves, 'image');
+    await store.connect(curves, 'image', viewer, 'image');
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.createGroup([blur, curves], 'Node Group');
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.customGroupDefinitions).toHaveLength(1);
+    expect(state.dslShadow?.text).toContain('node NodeGroup = group {');
+    expect(state.dslShadow?.text).toContain('blur1 = GaussianBlur(amount: 2.0)');
+    expect(state.dslShadow?.text).toContain('curves1 = Curves()');
+    expect(state.dslShadow?.text).toContain('input.image -> blur1.image');
+    expect(state.dslShadow?.text).toContain('curves1.image -> output.image');
+    expect(state.dslShadow?.text).toContain('node_group1 = NodeGroup()');
+    expect(state.dslShadow?.customDefinitionNames).toContainEqual({
+      runtimeId: 'group::user_mock',
+      name: 'NodeGroup',
+    });
+  });
+
+  it('renaming a group node updates the DSL definition name', async () => {
+    const store = useGraphStore.getState();
+    const load = await store.addNode('load_image', { x: 0, y: 0 });
+    const blur = await store.addNode('gaussian_blur', { x: 200, y: 0 });
+    const viewer = await store.addNode('viewer', { x: 400, y: 0 });
+    await store.connect(load, 'image', blur, 'image');
+    await store.connect(blur, 'image', viewer, 'image');
+
+    await store.createGroup([blur], 'Node Group');
+    useGraphStore.getState().refreshDslShadowFromGraph();
+    const groupNodeId = Array.from(useGraphStore.getState().nodes.entries())
+      .find(([, node]) => node.typeId.startsWith('group::'))?.[0];
+    expect(groupNodeId).toBeDefined();
+
+    await useGraphStore.getState().renameGroup(groupNodeId!, 'Cloudy Adjustment');
+
+    const state = useGraphStore.getState();
+    expect(state.dslShadow?.customDefinitionNames).toContainEqual({
+      runtimeId: 'group::user_mock',
+      name: 'CloudyAdjustment',
+    });
+    expect(state.dslShadow?.text).toContain('node CloudyAdjustment = group {');
+    expect(state.dslShadow?.text).toContain('cloudy_adjustment1 = CloudyAdjustment()');
+    expect(state.dslShadow?.text).not.toContain('node_group1 = CloudyAdjustment()');
+    expect(state.dslShadow?.text).not.toContain('node NodeGroup = group');
+  });
+});
+
+describe('graphStore DSL shadow hardening', () => {
+  it('live param commits retag stale DSL-origin state and refresh DSL shadow', async () => {
+    const store = useGraphStore.getState();
+    const blur = await store.addNode('gaussian_blur', { x: 0, y: 0 });
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.setParamLive(blur, 'amount', { Float: 2 } as ParamValue);
+    await flushPromises(3);
+    await store.setParamCommit(blur, 'amount', { Float: 2 } as ParamValue);
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.nodes.get(blur)?.params.amount).toEqual({ Float: 2 });
+    expect(state.nodeSpecs.find(spec => spec.id === 'gaussian_blur')?.params.find(param => param.key === 'amount')?.default).toEqual({ Float: 0.5 });
+    expect(serializeGraph({
+      nodes: state.nodes,
+      connections: state.connections,
+      nodeSpecs: state.nodeSpecs,
+      handleMap: new HandleMap(),
+    })).toContain('GaussianBlur(amount: 2.0)');
+    expect(state.dslShadow?.text).toContain('blur1 = GaussianBlur(amount: 2.0)');
+  });
+
+  it('loading an image path retags stale DSL-origin state and refreshes asset DSL', async () => {
+    const store = useGraphStore.getState();
+    const load = await store.addNode('load_image', { x: 0, y: 0 });
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.loadImagePath(load, '/tmp/plate.png');
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.dslShadow?.text).toContain('load1 = LoadImage(path: image("file:///tmp/plate.png"))');
+  });
+
+  it('loading a video path persists file_path for DSL and save projection', async () => {
+    setTauriMode(true);
+    const store = useGraphStore.getState();
+    const video = await store.addNode('load_video', { x: 0, y: 0 });
+    store.refreshDslShadowFromGraph();
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+
+    await store.loadVideoFile(video, '/tmp/reference.mov');
+
+    const state = useGraphStore.getState();
+    expect(state.lastTransactionOrigin).toBe('ui');
+    expect(state.nodes.get(video)?.params.file_path).toEqual({ String: 'file:///tmp/reference.mov' });
+    expect(state.dslShadow?.text).toContain('load1 = LoadVideo(file_path: video("file:///tmp/reference.mov"))');
+  });
 });
 
 describe('graphStore helper behaviors', () => {
@@ -620,6 +759,18 @@ describe('graphStore helper behaviors', () => {
     expect(state.nodes.get(nodeId)?.inputDefaults.amount).toEqual({ Float: 0.75 } as ParamValue);
     expect(state.nodes.get(nodeId)?.inputDefaults.old_control).toBeUndefined();
   });
+
+  it('addNode stores gpu script specs by instance id for canvas rendering', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gpu_script', { x: 0, y: 0 });
+    const state = useGraphStore.getState();
+    const node = state.nodes.get(nodeId);
+
+    expect(node?.typeId.startsWith('gpu_script::')).toBe(true);
+    expect(state.nodeSpecsById.get(nodeId)?.id).toBe(node?.typeId);
+    expect(state.nodeSpecsById.get(nodeId)?.outputs).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'image', ty: 'Image' })]),
+    );
+  });
 });
 
 describe('graphStore project hydration', () => {
@@ -632,6 +783,196 @@ describe('graphStore project hydration', () => {
     outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
     params: [],
   };
+
+  it('requestNewProject prompts when dirty and cancel preserves the graph', async () => {
+    const nodeId = await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+
+    await useGraphStore.getState().requestNewProject();
+    expect(useGraphStore.getState().unsavedChangesPrompt).toEqual({ kind: 'new' });
+
+    await useGraphStore.getState().resolveUnsavedChanges('cancel');
+    const state = useGraphStore.getState();
+    expect(state.unsavedChangesPrompt).toBeNull();
+    expect(state.nodes.has(nodeId)).toBe(true);
+    expect(state.dirty).toBe(true);
+  });
+
+  it('requestNewProject discard clears both store and engine graph', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    const initialSessionRevision = useGraphStore.getState().projectSessionRevision;
+
+    await useGraphStore.getState().requestNewProject();
+    await useGraphStore.getState().resolveUnsavedChanges('discard');
+
+    expect(useGraphStore.getState().nodes.size).toBe(0);
+    expect(useGraphStore.getState().dirty).toBe(false);
+    expect(useGraphStore.getState().projectSessionRevision).toBe(initialSessionRevision + 1);
+    expect((mockEngine.exportGraph() as { nodes?: unknown[] }).nodes).toEqual([]);
+  });
+
+  it('requestOpenProject prompts when dirty and discard loads the selected web file', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    const initialSessionRevision = useGraphStore.getState().projectSessionRevision;
+    const file = new File([JSON.stringify({
+      cascade: { format_version: '1.3.0' },
+      graph: {
+        nodes: [{
+          id: 'load-node',
+          type_id: 'load_image',
+          position: [12, 24],
+          params: {},
+        }],
+        connections: [],
+      },
+    })], 'loaded_project.casc', { type: 'application/json' });
+
+    await useGraphStore.getState().requestOpenProject(file);
+    expect(useGraphStore.getState().unsavedChangesPrompt).toMatchObject({ kind: 'open' });
+
+    await useGraphStore.getState().resolveUnsavedChanges('discard');
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(state.unsavedChangesPrompt).toBeNull();
+    expect(state.nodes.has('load-node')).toBe(true);
+    expect(state.currentProjectName).toBe('loaded_project');
+    expect(state.currentProjectPath).toBeNull();
+    expect(state.dirty).toBe(false);
+    expect(state.projectSessionRevision).toBe(initialSessionRevision + 1);
+  });
+
+  it('desktop Save uses the current project path', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({
+      currentProjectPath: '/tmp/current.casc',
+      currentProjectName: 'current',
+      dirty: true,
+    });
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(true);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined);
+    expect(useGraphStore.getState().dirty).toBe(false);
+  });
+
+  it('desktop Save As updates the current project identity', async () => {
+    setTauriMode(true);
+    dialogMocks.save.mockResolvedValue('/tmp/saved_as.casc');
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({ dirty: true, currentProjectName: 'Untitled' });
+
+    const saved = await useGraphStore.getState().saveProjectAs();
+
+    expect(saved).toBe(true);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined);
+    expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/saved_as.casc');
+    expect(useGraphStore.getState().currentProjectName).toBe('saved_as');
+  });
+
+  it('web Save downloads a project and marks it clean without tracking a path', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    useGraphStore.setState({
+      currentProjectName: 'web_project',
+      currentProjectPath: '/desktop/path/should-not-stick.casc',
+      dirty: true,
+    });
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cascade-project');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveProject();
+
+      expect(saved).toBe(true);
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      expect(link.download).toBe('web_project.casc');
+      expect(link.href).toBe('blob:cascade-project');
+      expect(click).toHaveBeenCalledTimes(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:cascade-project');
+      expect(useGraphStore.getState().dirty).toBe(false);
+      expect(useGraphStore.getState().currentProjectPath).toBeNull();
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('desktop Open uses the native dialog, hydrates identity, and clears dirty state', async () => {
+    setTauriMode(true);
+    dialogMocks.open.mockResolvedValue('/tmp/opened_project.casc');
+    mockEngine.loadProject = vi.fn(async () => {
+      const graph = {
+        nodes: [{
+          id: 'opened-node',
+          type_id: 'gaussian_blur',
+          position: [16, 32],
+          params: {},
+        }],
+        connections: [],
+      };
+      mockEngine.importGraph(graph);
+      return { cascade: { format_version: '1.3.0' }, graph };
+    });
+    useGraphStore.setState({ dirty: true });
+
+    const loaded = await useGraphStore.getState().loadProjectFromPath?.();
+
+    const state = useGraphStore.getState();
+    expect(loaded).toBe(true);
+    expect(mockEngine.loadProject).toHaveBeenCalledWith('/tmp/opened_project.casc');
+    expect(state.nodes.has('opened-node')).toBe(true);
+    expect(state.currentProjectPath).toBe('/tmp/opened_project.casc');
+    expect(state.currentProjectName).toBe('opened_project');
+    expect(state.dirty).toBe(false);
+  });
+
+  it('desktop dev Save blocks when the native engine graph diverges from visible state', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    useGraphStore.setState({
+      nodes: new Map(),
+      currentProjectPath: '/tmp/diverged.casc',
+      dirty: true,
+    });
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(saveProject).not.toHaveBeenCalled();
+    expect(useGraphStore.getState().lastError?.code).toBe('PROJECT_GRAPH_DIVERGED');
+    expect(useGraphStore.getState().dirty).toBe(true);
+  });
+
+  it('desktop startup hydration restores visible state from a persistent native engine graph', async () => {
+    setTauriMode(true);
+    mockEngine.importGraph({
+      nodes: [{
+        id: 'crop-node',
+        type_id: 'gaussian_blur',
+        position: [30, 40],
+        params: { amount: { Float: 2 } },
+      }],
+      connections: [],
+    });
+    useGraphStore.setState({ nodes: new Map(), connections: [], dirty: false });
+
+    const hydrated = await useGraphStore.getState().hydrateProjectFromEngine();
+
+    const state = useGraphStore.getState();
+    expect(hydrated).toBe(true);
+    expect(state.nodes.has('crop-node')).toBe(true);
+    expect(state.nodes.get('crop-node')?.position).toEqual({ x: 30, y: 40 });
+    expect(state.dirty).toBe(false);
+  });
 
   it('loadProject refreshes custom group specs from the engine and clears stale per-instance specs', async () => {
     const loadedGraph = {
@@ -672,6 +1013,228 @@ describe('graphStore project hydration', () => {
     expect(state.nodes.get('group-node')?.typeId).toBe(customGroupSpec.id);
     expect(state.nodeSpecs.some(spec => spec.id === customGroupSpec.id)).toBe(true);
     expect(state.nodeSpecsById.size).toBe(0);
+  });
+
+  it('loadProject rehydrates persisted image sequence runtime state before rendering', async () => {
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'seq-node',
+          type_id: 'load_image_sequence',
+          position: [0, 0],
+          params: {
+            directory: { String: '/tmp/sequence' },
+            pattern: { String: '{frame:4}.png' },
+          },
+          input_defaults: {},
+        },
+        {
+          id: 'viewer-node',
+          type_id: 'viewer',
+          position: [200, 0],
+          params: {},
+          input_defaults: {},
+        },
+      ],
+      connections: [
+        {
+          from_node: 'seq-node',
+          from_port: 'image',
+          to_node: 'viewer-node',
+          to_port: 'value',
+        },
+      ],
+    };
+    mockEngine.setSequenceDirectory = vi.fn(async () => ({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    }));
+    mockEngine.getSequenceInfo = vi.fn(async () => ({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    }));
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+      }),
+    ], 'sequence.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(mockEngine.setSequenceDirectory).toHaveBeenCalledWith('seq-node', '/tmp/sequence');
+    expect(mockEngine.getSequenceInfo).toHaveBeenCalledWith('seq-node', '{frame:4}.png');
+    expect(state.sequenceInfoMap.get('seq-node')).toEqual({
+      frame_count: 3,
+      first_frame: 1001,
+      last_frame: 1003,
+    });
+    expect(state.sequenceStart).toBe(1001);
+    expect(state.sequenceLength).toBe(1003);
+    expect(state.currentFrame).toBe(1001);
+  });
+
+  it('loadProject hydrates optional DSL shadow metadata without blocking graph load', async () => {
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'load-node',
+          type_id: 'load_image',
+          position: [0, 0],
+          params: {},
+          input_defaults: {},
+        },
+      ],
+      connections: [],
+    };
+    const dsl = {
+      version: 1,
+      text: '# preserved comment\ngraph {\n  load1 = LoadImage()\n}',
+      graph_hash: 'old-hash',
+      handles: [{ node_id: 'load-node', handle: 'load1' }],
+      custom_definition_names: [],
+    };
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+        dsl,
+      }),
+    ], 'dsl-shadow.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.nodes.has('load-node')).toBe(true);
+    expect(state.dslShadow?.text).toContain('# preserved comment');
+    expect(state.dslShadow?.handles).toEqual([{ nodeId: 'load-node', handle: 'load1' }]);
+    expect(state.dslShadow?.status).toBe('valid');
+  });
+
+  it('loadProject treats semantically matching GPU DSL shadow as valid after engine manifest normalization', async () => {
+    const gpuManifest = {
+      id: 'gpu_script::saved',
+      display_name: 'GPU Script',
+      category: 'GPU',
+      description: 'Custom GPU shader node',
+      inputs: [
+        { name: 'image', label: 'Image', ty: 'Image', optional: false },
+        { name: 'age', label: 'Age', ty: 'Float', optional: false, default: 0, ui: 'Slider' },
+      ],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image', optional: false }],
+      params: [],
+      kernel: '  return color * 2;',
+      supports_mask: true,
+      pixel_space_params: [],
+    };
+    const loadedGraph = {
+      nodes: [
+        {
+          id: 'gpu-node',
+          type_id: 'gpu_script::saved',
+          position: [0, 0],
+          params: { __script_manifest: { String: JSON.stringify(gpuManifest) } },
+          input_defaults: { age: { Float: 0 } },
+        },
+        { id: 'load-node', type_id: 'load_image', position: [0, 0], params: {}, input_defaults: {} },
+        { id: 'viewer-node', type_id: 'viewer', position: [0, 0], params: {}, input_defaults: {} },
+      ],
+      connections: [
+        { from_node: 'load-node', from_port: 'image', to_node: 'gpu-node', to_port: 'image' },
+        { from_node: 'gpu-node', from_port: 'image', to_node: 'viewer-node', to_port: 'value' },
+      ],
+    };
+    const dslText = [
+      'node GpuNode1 = gpu {',
+      '  inputs {',
+      '    image image',
+      '    float age',
+      '  }',
+      '',
+      '  outputs {',
+      '    image image',
+      '  }',
+      '',
+      '  # keep my shader note',
+      '  code """',
+      '  return color * 2;',
+      '  """',
+      '}',
+      '',
+      'graph {',
+      '  gpu1 = GpuNode1()',
+      '  load1 = LoadImage()',
+      '  load1.image -> gpu1.image',
+      '  viewer1 = Viewer()',
+      '  gpu1.image -> viewer1.value',
+      '}',
+    ].join('\n');
+
+    mockEngine.getNodeSpec = async (nodeId: string): Promise<NodeSpec> => {
+      if (nodeId === 'gpu-node') {
+        return buildGpuScriptNodeSpec(gpuManifest);
+      }
+      const node = loadedGraph.nodes.find(item => item.id === nodeId);
+      const spec = NODE_SPECS.find(item => item.id === node?.type_id);
+      if (!spec) throw new Error(`Unknown node ${nodeId}`);
+      return spec;
+    };
+
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+        dsl: {
+          version: 1,
+          text: dslText,
+          graph_hash: 'legacy-hash-from-before-manifest-normalization',
+          handles: [
+            { node_id: 'gpu-node', handle: 'gpu1' },
+            { node_id: 'load-node', handle: 'load1' },
+            { node_id: 'viewer-node', handle: 'viewer1' },
+          ],
+          custom_definition_names: [{ runtime_id: 'gpu_node_1', name: 'GpuNode1' }],
+        },
+      }),
+    ], 'gpu-dsl-shadow.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.dslShadow?.status).toBe('valid');
+    expect(state.dslShadow?.text).toContain('# keep my shader note');
+    expect(state.dslShadow?.text).toContain('return color * 2;');
+  });
+
+  it('loadProject ignores malformed DSL shadow metadata', async () => {
+    const loadedGraph = {
+      nodes: [],
+      connections: [],
+    };
+    const file = new File([
+      JSON.stringify({
+        cascade: { format_version: '1.3.0' },
+        graph: loadedGraph,
+        dsl: 'not valid metadata',
+      }),
+    ], 'bad-dsl-shadow.casc', { type: 'application/json' });
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.lastError).toBeNull();
+    expect(state.dslShadow).toBeNull();
   });
 
   it('loadProject preserves the current graph on invalid JSON', async () => {

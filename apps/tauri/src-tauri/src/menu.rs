@@ -3,7 +3,9 @@ use tauri::{App, Emitter};
 
 pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let app_about = PredefinedMenuItem::about(app, None, None)?;
-    let app_quit = PredefinedMenuItem::quit(app, None)?;
+    let app_quit = MenuItemBuilder::with_id("app.quit", "Quit Cascade")
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)?;
     let app_menu = SubmenuBuilder::new(app, "Cascade")
         .item(&app_about)
         .separator()
@@ -13,6 +15,12 @@ pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     let file_save = MenuItemBuilder::with_id("file.save", "Save Project")
         .accelerator("CmdOrCtrl+S")
         .build(app)?;
+    let file_save_as = MenuItemBuilder::with_id("file.saveAs", "Save As...")
+        .accelerator("CmdOrCtrl+Shift+S")
+        .build(app)?;
+    let file_new = MenuItemBuilder::with_id("file.new", "New Project")
+        .accelerator("CmdOrCtrl+N")
+        .build(app)?;
     let file_open = MenuItemBuilder::with_id("file.open", "Open Project")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
@@ -21,8 +29,11 @@ pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
 
     let file_menu = SubmenuBuilder::new(app, "File")
-        .item(&file_save)
+        .item(&file_new)
         .item(&file_open)
+        .separator()
+        .item(&file_save)
+        .item(&file_save_as)
         .separator()
         .item(&file_settings)
         .build()?;

@@ -429,6 +429,15 @@ export class MockEngine implements EngineBridge {
     };
   }
 
+  loadImagePath(_nodeId: string, _path: string): NodeInterfaceChange {
+    const spec = NODE_SPECS.find(n => n.id === 'load_image');
+    return {
+      newSpec: spec ?? NODE_SPECS[0],
+      removedOutputPorts: [],
+      prunedConnections: [],
+    };
+  }
+
   renderViewer(viewerNodeId: string, _frame: number): ViewerResult | null {
     const width = 200;
     const height = 150;
@@ -451,6 +460,10 @@ export class MockEngine implements EngineBridge {
       height,
       pixels,
     };
+  }
+
+  renderInternalViewer(_groupNodeId: string, internalViewerId: string, frame: number): ViewerResult | null {
+    return this.renderViewer(internalViewerId, frame);
   }
 
   exportGraph(): unknown {

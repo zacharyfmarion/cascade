@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo, InternalGraphNode } from '../store/types';
 
 export interface ColorSpaceInfo {
   id: string;
@@ -98,13 +98,15 @@ export interface EngineBridge {
   compileScriptNode?(nodeId: string, manifestJson: string): Promise<NodeSpec> | NodeSpec;
   setDslHandle?(nodeId: string, handle: string): Promise<void> | void;
   loadImageData(nodeId: string, data: Uint8Array): Promise<NodeInterfaceChange> | NodeInterfaceChange;
+  loadImagePath?(nodeId: string, path: string): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   loadPaletteData?(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]> | [number, number, number, number][];
   renderViewer(viewerNodeId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> | ViewerResult | null;
+  renderInternalViewer?(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> | ViewerResult | null;
   exportGraph(): Promise<unknown> | unknown;
   importGraph(data: unknown): Promise<void> | void;
   exportDocument?(): Promise<unknown> | unknown;
   importDocument?(data: unknown): Promise<void> | void;
-  saveProject?(path: string): Promise<void>;
+  saveProject?(path: string, dsl?: unknown): Promise<void>;
   loadProject?(path: string): Promise<unknown>;
   getImageData?(nodeId: string): Promise<Uint8Array | null> | Uint8Array | null;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
@@ -127,6 +129,13 @@ export interface EngineBridge {
   updateGroupInterface?(groupDefId: string, inputs: PortSpec[], outputs: PortSpec[]): Promise<NodeSpec>;
   addInternalConnection?(groupDefId: string, fromNode: string, fromPort: string, toNode: string, toPort: string): Promise<NodeSpec>;
   removeInternalConnection?(groupDefId: string, toNode: string, toPort: string): Promise<NodeSpec>;
+  addInternalNode?(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode>;
+  removeInternalNode?(groupDefId: string, nodeId: string): Promise<NodeSpec>;
+  setInternalParam?(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalInputDefault?(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec>;
+  setInternalPosition?(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec>;
+  setInternalMuted?(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec>;
+  compileInternalScriptNode?(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec>;
   renameGroup?(groupDefId: string, newName: string): Promise<NodeSpec>;
   getLastRenderTimings?(): Record<string, number> | Promise<Record<string, number>>;
   setAiApiKey?(provider: string, key: string): Promise<void> | void;
@@ -143,11 +152,12 @@ export interface EngineBridge {
   validateEdits?(editsJson: string): EditValidationError[] | Promise<EditValidationError[]>;
   exportGroupAsPackage?(groupDefId: string): Promise<unknown> | unknown;
   importCustomNodes?(json: string): Promise<NodeSpec[]> | NodeSpec[];
+  registerGroupDefinition?(json: string): Promise<NodeSpec> | NodeSpec;
   listCustomNodes?(): Promise<CustomNodeInfo[]>;
   removeCustomNode?(groupDefId: string): Promise<void>;
   typesCompatible?(fromType: string, toType: string): boolean | Promise<boolean>;
-  migrateDocument?(jsonStr: string): string;
-  needsMigration?(jsonStr: string): boolean;
+  migrateDocument?(jsonStr: string): string | Promise<string>;
+  needsMigration?(jsonStr: string): boolean | Promise<boolean>;
   getNodeSpec?(nodeId: string): Promise<NodeSpec> | NodeSpec;
   evaluateBytesOutput?(nodeId: string, portName: string): Promise<Uint8Array> | Uint8Array;
   /** Wait for all queued engine operations to complete. */

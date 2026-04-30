@@ -60,6 +60,7 @@ const createInitialState = () => ({
   isRendering: false,
   previewScale: 1,
   dirty: false,
+  projectSessionRevision: 0,
   hasSequenceNodes: false,
   sequenceLength: 0,
   sequenceStart: 0,
@@ -72,6 +73,8 @@ const createInitialState = () => ({
   editingStack: [{ id: 'root', label: 'Root' }],
   nodeTimings: new Map(),
   nodeErrors: new Map(),
+  dslShadow: null,
+  customGroupDefinitions: [],
   graphRevision: 0,
   lastTransactionOrigin: null,
 });
@@ -172,6 +175,87 @@ describe('Rendering contracts', () => {
     await flushPromises(5);
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
+  });
+
+  it('renders local viewer nodes through the internal group render API', async () => {
+    const groupNodeId = 'group-node';
+    const groupDefId = 'group::test';
+    const internalViewerId = 'viewer-inner';
+    mockEngine._setRenderResult({
+      type: 'image',
+      nodeId: internalViewerId,
+      width: 2,
+      height: 2,
+      pixels: new Uint8ClampedArray(16),
+    });
+    useGraphStore.setState({
+      editingStack: [
+        { id: 'root', label: 'Root', groupNodeId: null },
+        { id: groupDefId, label: 'Test Group', groupNodeId, groupDefId },
+      ],
+      nodes: new Map([
+        [internalViewerId, {
+          id: internalViewerId,
+          typeId: 'viewer',
+          params: {},
+          inputDefaults: {},
+          position: { x: 0, y: 0 },
+          muted: false,
+        }],
+      ]),
+    });
+
+    mockEngine._clearRenderCalls();
+    useGraphStore.getState().triggerRender(internalViewerId);
+    await flushPromises(5);
+
+    expect(mockEngine._renderCalls).toEqual([`${groupNodeId}:${internalViewerId}`]);
+    const result = useGraphStore.getState().renderResults.get(internalViewerId);
+    expect(result?.type).toBe('image');
+    expect(result && 'width' in result ? result.width : null).toBe(2);
+  });
+
+  it('group edit mode renders local viewers for affected internal changes', async () => {
+    const groupNodeId = 'group-node';
+    const groupDefId = 'group::test';
+    const internalViewerId = 'viewer-inner';
+    mockEngine._setRenderResult({
+      type: 'image',
+      nodeId: internalViewerId,
+      width: 1,
+      height: 1,
+      pixels: new Uint8ClampedArray(4),
+    });
+    useGraphStore.setState({
+      editingStack: [
+        { id: 'root', label: 'Root', groupNodeId: null },
+        { id: groupDefId, label: 'Test Group', groupNodeId, groupDefId },
+      ],
+      nodes: new Map([
+        ['blur-inner', {
+          id: 'blur-inner',
+          typeId: 'gaussian_blur',
+          params: {},
+          inputDefaults: {},
+          position: { x: 0, y: 0 },
+          muted: false,
+        }],
+        [internalViewerId, {
+          id: internalViewerId,
+          typeId: 'viewer',
+          params: {},
+          inputDefaults: {},
+          position: { x: 200, y: 0 },
+          muted: false,
+        }],
+      ]),
+    });
+
+    mockEngine._clearRenderCalls();
+    await useGraphStore.getState().triggerAffectedViewers(['blur-inner']);
+    await flushPromises(5);
+
+    expect(mockEngine._renderCalls).toEqual([`${groupNodeId}:${internalViewerId}`]);
   });
 
   it('cancelRender clears isRendering', async () => {
@@ -779,6 +863,18 @@ describe('Asset loading contracts', () => {
 
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
   });
+
+  it('loadImagePath stores a resolvable file URI and triggers viewer render', async () => {
+    const s = useGraphStore.getState();
+    const img = await s.addNode('load_image', { x: 0, y: 0 });
+    await s.addNode('viewer', { x: 200, y: 0 });
+
+    mockEngine._clearRenderCalls();
+    await s.loadImagePath(img, '/tmp/plate.png');
+
+    expect(useGraphStore.getState().nodes.get(img)?.params.path).toEqual({ String: 'file:///tmp/plate.png' });
+    expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
+  });
 });
 
 describe('Full undo/redo chain contracts', () => {
@@ -1270,5 +1366,40 @@ describe('Project lifecycle contracts', () => {
     expect(s.dirty).toBe(false);
     // Graph should be restored (nodes were rebuilt from serialized data)
     expect(s.nodes.size).toBe(nodesArr.length);
+  });
+
+  it('group edit mode routes node and param edits through internal graph APIs', async () => {
+    const groupNodeId = 'group-node';
+    const groupDefId = 'group::test';
+    mockEngine._groupGraphs.set(groupNodeId, {
+      groupDefId,
+      name: 'Test Group',
+      nodes: [],
+      connections: [],
+      inputs: [],
+      outputs: [],
+    });
+    useGraphStore.setState({
+      editingStack: [
+        { id: 'root', label: 'Root', groupNodeId: null },
+        { id: groupDefId, label: 'Test Group', groupNodeId, groupDefId },
+      ],
+    });
+
+    const addInternalNode = vi.spyOn(mockEngine, 'addInternalNode');
+    const setInternalParam = vi.spyOn(mockEngine, 'setInternalParam');
+    const removeInternalNode = vi.spyOn(mockEngine, 'removeInternalNode');
+
+    const nodeId = await useGraphStore.getState().addNode('gaussian_blur', { x: 42, y: 24 });
+    expect(addInternalNode).toHaveBeenCalledWith(groupDefId, 'gaussian_blur', 42, 24);
+    expect(useGraphStore.getState().nodes.get(nodeId)?.typeId).toBe('gaussian_blur');
+
+    await useGraphStore.getState().setParam(nodeId, 'amount', { Float: 2.5 });
+    expect(setInternalParam).toHaveBeenCalledWith(groupDefId, nodeId, 'amount', { Float: 2.5 });
+    expect(mockEngine._groupGraphs.get(groupNodeId)?.nodes.find(node => node.id === nodeId)?.params.amount).toEqual({ Float: 2.5 });
+
+    await useGraphStore.getState().removeNode(nodeId);
+    expect(removeInternalNode).toHaveBeenCalledWith(groupDefId, nodeId);
+    expect(useGraphStore.getState().nodes.has(nodeId)).toBe(false);
   });
 });

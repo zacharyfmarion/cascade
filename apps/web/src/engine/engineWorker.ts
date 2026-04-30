@@ -4,7 +4,7 @@ type WasmModule = typeof import('../wasm-pkg/cascade_wasm');
 type EngineInstance = InstanceType<WasmModule['Engine']>;
 import * as Comlink from 'comlink';
 import type { AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange } from './bridge';
-import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph } from '../store/types';
+import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, InternalGraphNode } from '../store/types';
 import { extractParamValue } from '../store/types';
 import {
   collectViewerResultTransferables,
@@ -34,13 +34,28 @@ const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ?
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
 
+const normalizeWasmInternalNode = (nodeEntry: unknown): InternalGraphNode => {
+  const nodeRecord = asRecord(nodeEntry) as WasmEngineGroupNode;
+  const position = Array.isArray(nodeRecord.position)
+    ? { x: nodeRecord.position[0], y: nodeRecord.position[1] }
+    : nodeRecord.position ?? { x: 0, y: 0 };
+  return {
+    id: String(nodeRecord.id ?? ''),
+    typeId: String(nodeRecord.typeId ?? ''),
+    position,
+    params: asParamValueRecord(nodeRecord.params),
+    inputDefaults: asParamValueRecord(nodeRecord.inputDefaults ?? nodeRecord.input_defaults),
+    muted: Boolean(nodeRecord.muted),
+  };
+};
+
 const isDocumentEnvelope = (value: unknown): value is DocumentEnvelope => isRecord(value) && ('cascade' in value || 'compositor' in value) && 'graph' in value;
 
 const extractGraphData = (value: unknown): unknown => isDocumentEnvelope(value) ? value.graph : value;
 
 const createDocumentEnvelope = (graph: unknown) => ({
   cascade: {
-    format_version: '1.1.0',
+    format_version: '1.3.0',
     app_version: '',
     created_at: '',
     modified_at: '',
@@ -66,7 +81,9 @@ type WasmEngineGroupNode = {
   typeId: string;
   position: [number, number] | { x: number; y: number };
   params?: Record<string, ParamValue>;
+  inputDefaults?: Record<string, ParamValue>;
   input_defaults?: Record<string, ParamValue>;
+  muted?: boolean;
 };
 
 type WasmEngineGroupConnection = {
@@ -177,6 +194,13 @@ const getEngineWithBindings = () => getEngine() as EngineInstance & {
   ungroup_node?: (groupNodeId: string) => unknown;
   get_group_internal_graph?: (groupNodeId: string) => unknown;
   update_group_interface?: (groupDefId: string, inputs: PortSpec[], outputs: PortSpec[]) => NodeSpec;
+  add_internal_node?: (groupDefId: string, typeId: string, x: number, y: number) => unknown;
+  remove_internal_node?: (groupDefId: string, nodeId: string) => NodeSpec;
+  set_internal_param?: (groupDefId: string, nodeId: string, key: string, value: ParamValue) => NodeSpec;
+  set_internal_input_default?: (groupDefId: string, nodeId: string, portName: string, value: ParamValue) => NodeSpec;
+  set_internal_position?: (groupDefId: string, nodeId: string, x: number, y: number) => NodeSpec;
+  set_internal_muted?: (groupDefId: string, nodeId: string, muted: boolean) => NodeSpec;
+  compile_internal_script_node?: (groupDefId: string, nodeId: string, manifestJson: string) => NodeSpec;
   rename_group?: (groupDefId: string, newName: string) => NodeSpec;
   set_ai_api_key?: (provider: string, key: string) => void;
   is_ai_configured?: () => boolean;
@@ -188,7 +212,9 @@ const getEngineWithBindings = () => getEngine() as EngineInstance & {
   set_project_format?: (width: number, height: number) => void;
   export_group_as_package?: (groupDefId: string) => unknown;
   import_custom_nodes?: (pkg: unknown) => NodeSpec[];
+  register_group_definition?: (definition: unknown) => NodeSpec;
   render_viewer_scaled?: (viewerId: string, frame: bigint, scale: number) => Promise<unknown>;
+  render_internal_viewer_scaled?: (groupNodeId: string, internalViewerId: string, frame: bigint, scale: number) => Promise<unknown>;
 };
 
 const engineAPI = {
@@ -427,6 +453,43 @@ const engineAPI = {
     });
   },
 
+  renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
+    return scheduler.enqueue(async (): Promise<ViewerResult | null> => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.render_internal_viewer_scaled !== 'function') {
+        throw new Error('Internal viewer rendering not supported in WASM worker');
+      }
+      const raw = await eng.render_internal_viewer_scaled(groupNodeId, internalViewerId, BigInt(frame), previewScale);
+
+      try {
+        const timingsRaw = getEngine().get_last_render_timings();
+        if (timingsRaw) {
+          if (timingsRaw instanceof Map) {
+            const obj: Record<string, number> = {};
+            (timingsRaw as Map<string, number>).forEach((v, k) => { obj[k] = v; });
+            lastTimings = obj;
+          } else {
+            lastTimings = timingsRaw as unknown as Record<string, number>;
+          }
+        }
+      } catch (e) {
+        console.warn('[WASM] Failed to get timings:', e);
+      }
+
+      const result = decodeViewerResult(raw, internalViewerId, { copyPixels: true });
+      if (!result) {
+        return null;
+      }
+
+      const transferables = collectViewerResultTransferables(result);
+      if (transferables.length > 0) {
+        return Comlink.transfer(result, transferables);
+      }
+
+      return result;
+    });
+  },
+
   exportGraph(): Promise<unknown> {
     return scheduler.enqueue(() =>
       getEngine().export_graph()
@@ -641,19 +704,7 @@ const engineAPI = {
       const restoredRaw = Array.isArray(rawRecord.restoredNodes) ? rawRecord.restoredNodes : [];
       return {
         removedGroupNodeId: String(rawRecord.removedGroupNodeId ?? ''),
-        restoredNodes: restoredRaw.map((nodeEntry: unknown) => {
-          const nodeRecord = asRecord(nodeEntry) as WasmEngineGroupNode;
-          const position = Array.isArray(nodeRecord.position)
-            ? { x: nodeRecord.position[0], y: nodeRecord.position[1] }
-            : nodeRecord.position ?? { x: 0, y: 0 };
-          return {
-            id: String(nodeRecord.id ?? ''),
-            typeId: String(nodeRecord.typeId ?? ''),
-            position,
-            params: asParamValueRecord(nodeRecord.params),
-            inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
-          };
-        }),
+        restoredNodes: restoredRaw.map(normalizeWasmInternalNode),
       };
     });
   },
@@ -671,19 +722,7 @@ const engineAPI = {
       return {
         groupDefId: String(rawRecord.groupDefId ?? ''),
         name: String(rawRecord.name ?? ''),
-        nodes: rawNodes.map((nodeEntry) => {
-          const nodeRecord = asRecord(nodeEntry) as WasmEngineGroupNode;
-          const position = Array.isArray(nodeRecord.position)
-            ? { x: nodeRecord.position[0], y: nodeRecord.position[1] }
-            : nodeRecord.position ?? { x: 0, y: 0 };
-          return {
-            id: String(nodeRecord.id ?? ''),
-            typeId: String(nodeRecord.typeId ?? ''),
-            position,
-            params: asParamValueRecord(nodeRecord.params),
-            inputDefaults: asParamValueRecord(nodeRecord.input_defaults),
-          };
-        }),
+        nodes: rawNodes.map(normalizeWasmInternalNode),
         connections: rawConnections.map((connEntry: unknown) => {
           const connRecord = asRecord(connEntry) as WasmEngineGroupConnection;
           return {
@@ -720,6 +759,76 @@ const engineAPI = {
     return scheduler.enqueue(() =>
       getEngine().remove_internal_connection(groupDefId, toNode, toPort) as NodeSpec
     );
+  },
+
+  addInternalNode(groupDefId: string, typeId: string, x: number, y: number): Promise<InternalGraphNode> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.add_internal_node !== 'function') {
+        throw new Error('Internal group node creation not yet supported in WASM engine');
+      }
+      return normalizeWasmInternalNode(eng.add_internal_node(groupDefId, typeId, x, y));
+    });
+  },
+
+  removeInternalNode(groupDefId: string, nodeId: string): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.remove_internal_node !== 'function') {
+        throw new Error('Internal group node removal not yet supported in WASM engine');
+      }
+      return eng.remove_internal_node(groupDefId, nodeId);
+    });
+  },
+
+  setInternalParam(groupDefId: string, nodeId: string, key: string, value: ParamValue): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.set_internal_param !== 'function') {
+        throw new Error('Internal group param edits not yet supported in WASM engine');
+      }
+      return eng.set_internal_param(groupDefId, nodeId, key, value);
+    });
+  },
+
+  setInternalInputDefault(groupDefId: string, nodeId: string, portName: string, value: ParamValue): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.set_internal_input_default !== 'function') {
+        throw new Error('Internal group input default edits not yet supported in WASM engine');
+      }
+      return eng.set_internal_input_default(groupDefId, nodeId, portName, value);
+    });
+  },
+
+  setInternalPosition(groupDefId: string, nodeId: string, x: number, y: number): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.set_internal_position !== 'function') {
+        throw new Error('Internal group position edits not yet supported in WASM engine');
+      }
+      return eng.set_internal_position(groupDefId, nodeId, x, y);
+    });
+  },
+
+  setInternalMuted(groupDefId: string, nodeId: string, muted: boolean): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.set_internal_muted !== 'function') {
+        throw new Error('Internal group mute edits not yet supported in WASM engine');
+      }
+      return eng.set_internal_muted(groupDefId, nodeId, muted);
+    });
+  },
+
+  compileInternalScriptNode(groupDefId: string, nodeId: string, manifestJson: string): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      if (typeof eng.compile_internal_script_node !== 'function') {
+        throw new Error('Internal GPU script compilation not yet supported in WASM engine');
+      }
+      return eng.compile_internal_script_node(groupDefId, nodeId, manifestJson);
+    });
   },
 
   renameGroup(groupDefId: string, newName: string): Promise<NodeSpec> {
@@ -823,6 +932,16 @@ const engineAPI = {
       const eng = getEngineWithBindings();
       const pkg = JSON.parse(json);
       return eng.import_custom_nodes?.(pkg) ?? [];
+    });
+  },
+
+  registerGroupDefinition(json: string): Promise<NodeSpec> {
+    return scheduler.enqueue(() => {
+      const eng = getEngineWithBindings();
+      const definition = JSON.parse(json);
+      const spec = eng.register_group_definition?.(definition);
+      if (!spec) throw new Error('Group definition registration not supported');
+      return spec;
     });
   },
 
