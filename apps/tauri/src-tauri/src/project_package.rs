@@ -58,6 +58,55 @@ pub fn read_asset_blob(path: &Path) -> Result<AssetBlob, String> {
     Ok(make_asset_blob(path, bytes))
 }
 
+pub fn strip_packed_asset_params(document: &mut CascadeDocument) -> bool {
+    let mut packed_types_by_node: HashMap<String, Vec<String>> = HashMap::new();
+    for (key, asset_ref) in &document.assets {
+        if asset_ref.source != "packed" {
+            continue;
+        }
+        let node_id = key
+            .split_once(':')
+            .map_or(key.as_str(), |(node_id, _)| node_id);
+        packed_types_by_node
+            .entry(node_id.to_string())
+            .or_default()
+            .push(asset_ref.asset_type.clone());
+    }
+
+    let mut stripped = false;
+    for node in &mut document.graph.nodes {
+        let Some(packed_types) = packed_types_by_node.get(&node.id) else {
+            continue;
+        };
+        match node.type_id.as_str() {
+            "load_image" if packed_types.iter().any(|asset_type| asset_type == "image") => {
+                stripped = node.params.remove("path").is_some() || stripped;
+                stripped = node.params.remove("image_data").is_some() || stripped;
+            }
+            "load_image_sequence"
+                if packed_types.iter().any(|asset_type| {
+                    asset_type == "image_sequence" || asset_type == "image_sequence_frame"
+                }) =>
+            {
+                stripped = node.params.remove("directory").is_some() || stripped;
+                stripped = node.params.remove("pattern").is_some() || stripped;
+            }
+            "load_video" if packed_types.iter().any(|asset_type| asset_type == "video") => {
+                stripped = node.params.remove("file_path").is_some() || stripped;
+            }
+            "load_image_batch"
+                if packed_types
+                    .iter()
+                    .any(|asset_type| asset_type == "image_batch") =>
+            {
+                stripped = node.params.remove("files").is_some() || stripped;
+            }
+            _ => {}
+        }
+    }
+    stripped
+}
+
 pub fn write_project_package(
     path: &Path,
     document: &CascadeDocument,
@@ -126,8 +175,8 @@ pub fn read_project_package_bytes(bytes: &[u8]) -> Result<PackageRead, String> {
 mod tests {
     use super::*;
     use cascade_runtime::{
-        DocumentHeader, ProjectMetadata, SerializableConnection, SerializableGraph,
-        SerializableNode,
+        AssetReference, DocumentHeader, ParamValue, ProjectMetadata, SerializableConnection,
+        SerializableGraph, SerializableNode,
     };
     use std::collections::HashMap;
 
@@ -160,6 +209,16 @@ mod tests {
             scripts: HashMap::new(),
             view: None,
             dsl: None,
+        }
+    }
+
+    fn asset_ref(asset_type: &str, source: &str, path: &str) -> AssetReference {
+        AssetReference {
+            asset_type: asset_type.to_string(),
+            source: source.to_string(),
+            path: path.to_string(),
+            original_filename: String::new(),
+            hash: String::new(),
         }
     }
 
@@ -199,6 +258,99 @@ mod tests {
         assert_eq!(package.assets.len(), 2);
         assert_eq!(package.assets.get(&a.package_path), Some(&vec![1, 2, 3, 4]));
         assert_eq!(package.assets.get(&c.package_path), Some(&vec![9, 8, 7]));
+    }
+
+    #[test]
+    fn strip_packed_asset_params_removes_active_loader_paths() {
+        let mut document = empty_document();
+        document.graph.nodes[0].params.insert(
+            "path".to_string(),
+            ParamValue::String("file:///Users/me/plate.png".to_string()),
+        );
+        document.graph.nodes[0].params.insert(
+            "image_data".to_string(),
+            ParamValue::String("duplicated-bytes".to_string()),
+        );
+        document.graph.nodes.push(SerializableNode {
+            id: "seq".to_string(),
+            type_id: "load_image_sequence".to_string(),
+            params: HashMap::from([
+                (
+                    "directory".to_string(),
+                    ParamValue::String("/Users/me/frames".to_string()),
+                ),
+                (
+                    "pattern".to_string(),
+                    ParamValue::String("frame_{frame}.png".to_string()),
+                ),
+            ]),
+            input_defaults: HashMap::new(),
+            position: (0.0, 0.0),
+            muted: false,
+        });
+        document.graph.nodes.push(SerializableNode {
+            id: "video".to_string(),
+            type_id: "load_video".to_string(),
+            params: HashMap::from([(
+                "file_path".to_string(),
+                ParamValue::String("/Users/me/clip.mov".to_string()),
+            )]),
+            input_defaults: HashMap::new(),
+            position: (0.0, 0.0),
+            muted: false,
+        });
+        document.assets.insert(
+            "load".to_string(),
+            asset_ref("image", "packed", "assets/image.png"),
+        );
+        document.assets.insert(
+            "seq:frame_0001.png".to_string(),
+            asset_ref("image_sequence_frame", "packed", "assets/frame.png"),
+        );
+        document.assets.insert(
+            "video".to_string(),
+            asset_ref("video", "packed", "assets/clip.mov"),
+        );
+
+        assert!(strip_packed_asset_params(&mut document));
+
+        let image_params = &document.graph.nodes[0].params;
+        assert!(!image_params.contains_key("path"));
+        assert!(!image_params.contains_key("image_data"));
+        let sequence_params = &document
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "seq")
+            .expect("sequence node")
+            .params;
+        assert!(!sequence_params.contains_key("directory"));
+        assert!(!sequence_params.contains_key("pattern"));
+        let video_params = &document
+            .graph
+            .nodes
+            .iter()
+            .find(|node| node.id == "video")
+            .expect("video node")
+            .params;
+        assert!(!video_params.contains_key("file_path"));
+    }
+
+    #[test]
+    fn strip_packed_asset_params_leaves_external_loader_paths() {
+        let mut document = empty_document();
+        document.graph.nodes[0].params.insert(
+            "path".to_string(),
+            ParamValue::String("/Users/me/plate.png".to_string()),
+        );
+        document.assets.insert(
+            "load".to_string(),
+            asset_ref("image", "external", "/Users/me/plate.png"),
+        );
+
+        assert!(!strip_packed_asset_params(&mut document));
+
+        assert!(document.graph.nodes[0].params.contains_key("path"));
     }
 
     #[test]

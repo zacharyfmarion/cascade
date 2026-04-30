@@ -43,6 +43,59 @@ const extensionFromAsset = (asset: Record<string, unknown>): string => {
   return 'bin';
 };
 
+const packedAssetNodeId = (key: string): string => key.split(':', 1)[0] ?? key;
+
+const removeStringParams = (params: Record<string, unknown> | undefined, keys: string[]): boolean => {
+  if (!params) return false;
+  let removed = false;
+  for (const key of keys) {
+    if (key in params) {
+      delete params[key];
+      removed = true;
+    }
+  }
+  return removed;
+};
+
+const stripPackedAssetParams = (doc: Record<string, unknown>): boolean => {
+  if (!isRecord(doc.assets) || !isRecord(doc.graph) || !Array.isArray(doc.graph.nodes)) return false;
+
+  const packedTypesByNode = new Map<string, Set<string>>();
+  for (const [key, rawAsset] of Object.entries(doc.assets)) {
+    if (!isRecord(rawAsset) || rawAsset.source !== 'packed') continue;
+    const assetType = typeof rawAsset.type === 'string'
+      ? rawAsset.type
+      : typeof rawAsset.asset_type === 'string'
+        ? rawAsset.asset_type
+        : '';
+    const nodeId = packedAssetNodeId(key);
+    const types = packedTypesByNode.get(nodeId) ?? new Set<string>();
+    types.add(assetType);
+    packedTypesByNode.set(nodeId, types);
+  }
+
+  let stripped = false;
+  for (const rawNode of doc.graph.nodes) {
+    if (!isRecord(rawNode) || typeof rawNode.id !== 'string' || typeof rawNode.type_id !== 'string') continue;
+    const packedTypes = packedTypesByNode.get(rawNode.id);
+    if (!packedTypes || !isRecord(rawNode.params)) continue;
+
+    if (rawNode.type_id === 'load_image' && packedTypes.has('image')) {
+      stripped = removeStringParams(rawNode.params, ['path', 'image_data']) || stripped;
+    } else if (
+      rawNode.type_id === 'load_image_sequence'
+      && (packedTypes.has('image_sequence') || packedTypes.has('image_sequence_frame'))
+    ) {
+      stripped = removeStringParams(rawNode.params, ['directory', 'pattern']) || stripped;
+    } else if (rawNode.type_id === 'load_video' && packedTypes.has('video')) {
+      stripped = removeStringParams(rawNode.params, ['file_path']) || stripped;
+    } else if (rawNode.type_id === 'load_image_batch' && packedTypes.has('image_batch')) {
+      stripped = removeStringParams(rawNode.params, ['files']) || stripped;
+    }
+  }
+  return stripped;
+};
+
 export const isBundledProjectBytes = (bytes: Uint8Array): boolean => (
   bytes.length >= 4
   && bytes[0] === 0x50
@@ -117,6 +170,9 @@ export const createBundledProjectBlob = async (projectDoc: Record<string, unknow
   }
 
   doc.assets = packedAssets;
+  if (stripPackedAssetParams(doc)) {
+    delete doc.dsl;
+  }
   zip.file(MANIFEST_NAME, JSON.stringify(doc, null, 2));
   return zip.generateAsync({ type: 'blob' });
 };

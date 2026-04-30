@@ -53,6 +53,91 @@ describe('projectPackage', () => {
     expect(zip.file(asset.path as string)).not.toBeNull();
   });
 
+  it('removes stale loader paths from graph params when assets are packed', async () => {
+    const blob = await createBundledProjectBlob({
+      cascade: { format_version: '1.3.0' },
+      dsl: {
+        version: 1,
+        text: 'load1 = LoadImage(path: image("file:///Users/me/plate.png"))',
+        graph_hash: 'stale',
+        handles: [],
+        custom_definition_names: [],
+      },
+      graph: {
+        nodes: [
+          {
+            id: 'load1',
+            type_id: 'load_image',
+            params: {
+              path: { String: 'file:///Users/me/plate.png' },
+              image_data: { String: btoa('duplicated-image') },
+            },
+            input_defaults: {},
+            position: [0, 0],
+            muted: false,
+          },
+          {
+            id: 'seq1',
+            type_id: 'load_image_sequence',
+            params: {
+              directory: { String: '/Users/me/frames' },
+              pattern: { String: 'frame_{frame}.png' },
+            },
+            input_defaults: {},
+            position: [0, 0],
+            muted: false,
+          },
+          {
+            id: 'video1',
+            type_id: 'load_video',
+            params: { file_path: { String: '/Users/me/clip.mov' } },
+            input_defaults: {},
+            position: [0, 0],
+            muted: false,
+          },
+        ],
+      },
+      assets: {
+        load1: {
+          type: 'image',
+          source: 'embedded',
+          data: btoa('image-bytes'),
+          original_filename: 'plate.png',
+          hash: '',
+        },
+        'seq1:frame_0001.png': {
+          type: 'image_sequence_frame',
+          source: 'embedded',
+          data: btoa('frame-bytes'),
+          original_filename: 'frame_0001.png',
+          hash: '',
+        },
+        video1: {
+          type: 'video',
+          source: 'embedded',
+          data: btoa('video-bytes'),
+          original_filename: 'clip.mov',
+          hash: '',
+        },
+      },
+    });
+
+    const zip = await JSZip.loadAsync(await blobBytes(blob));
+    const packedDoc = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
+      graph: { nodes: Array<{ id: string; params: Record<string, unknown> }> };
+      assets: Record<string, { source: string; path: string }>;
+      dsl?: unknown;
+    };
+
+    expect(packedDoc.assets.load1.source).toBe('packed');
+    expect(packedDoc.assets['seq1:frame_0001.png'].source).toBe('packed');
+    expect(packedDoc.assets.video1.source).toBe('packed');
+    expect(packedDoc.graph.nodes.find(node => node.id === 'load1')?.params).toEqual({});
+    expect(packedDoc.graph.nodes.find(node => node.id === 'seq1')?.params).toEqual({});
+    expect(packedDoc.graph.nodes.find(node => node.id === 'video1')?.params).toEqual({});
+    expect(packedDoc.dsl).toBeUndefined();
+  });
+
   it('deduplicates identical asset bytes inside the package', async () => {
     const data = btoa('same-media');
     const blob = await createBundledProjectBlob({

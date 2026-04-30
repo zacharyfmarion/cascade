@@ -463,6 +463,9 @@ fn save_project(
     let mut package_assets = Vec::new();
     if bundle_media.unwrap_or(false) {
         collect_packed_assets(&s.engine, &mut document, &mut package_assets)?;
+        if project_package::strip_packed_asset_params(&mut document) {
+            document.dsl = None;
+        }
         project_package::write_project_package(file_path, &document, &package_assets)?;
         return Ok(());
     }
