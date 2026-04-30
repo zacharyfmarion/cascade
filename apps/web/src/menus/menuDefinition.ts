@@ -50,6 +50,7 @@ export function getMenuBarDef(): MenuDef[] {
         { type: 'separator' },
         { type: 'action', id: 'file.save', label: 'Save', shortcut: `${mod}+S` },
         { type: 'action', id: 'file.saveAs', label: 'Save As...', shortcut: `${mod}+Shift+S` },
+        { type: 'action', id: 'file.saveBundled', label: 'Save Bundled Copy...' },
         { type: 'separator' },
         { type: 'action', id: 'file.settings', label: 'Settings', shortcut: `${mod}+,` },
       ],
@@ -111,6 +112,9 @@ export function handleMenuAction(id: string): void {
       break;
     case 'file.saveAs':
       void graphStore.requestSaveProjectAs();
+      break;
+    case 'file.saveBundled':
+      void graphStore.requestSaveBundledProject();
       break;
     case 'file.open':
       void graphStore.requestOpenProject();

@@ -854,7 +854,7 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveProject();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined, { bundleMedia: false });
     expect(useGraphStore.getState().dirty).toBe(false);
   });
 
@@ -868,9 +868,24 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveProjectAs();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined, { bundleMedia: false });
     expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/saved_as.casc');
     expect(useGraphStore.getState().currentProjectName).toBe('saved_as');
+  });
+
+  it('desktop Save Bundled Copy requests bundled media', async () => {
+    setTauriMode(true);
+    dialogMocks.save.mockResolvedValue('/tmp/bundled.casc');
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({ dirty: true, currentProjectName: 'current' });
+
+    const saved = await useGraphStore.getState().saveBundledProject();
+
+    expect(saved).toBe(true);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/bundled.casc', undefined, { bundleMedia: true });
+    expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/bundled.casc');
+    expect(useGraphStore.getState().dirty).toBe(false);
   });
 
   it('web Save downloads a project and marks it clean without tracking a path', async () => {

@@ -151,12 +151,14 @@ export interface GraphState {
   newProject: () => Promise<void>;
   saveProject: () => Promise<boolean>;
   saveProjectAs: () => Promise<boolean>;
+  saveBundledProject: () => Promise<boolean>;
   loadProject: (file: File) => void;
   loadProjectFromPath?: () => Promise<boolean>;
   requestNewProject: () => Promise<void>;
   requestOpenProject: (file?: File) => Promise<void>;
   requestSaveProject: () => Promise<boolean>;
   requestSaveProjectAs: () => Promise<boolean>;
+  requestSaveBundledProject: () => Promise<boolean>;
   requestCloseProject: () => Promise<void>;
   resolveUnsavedChanges: (choice: UnsavedChangesChoice) => Promise<void>;
   dismissUnsavedChangesPrompt: () => void;

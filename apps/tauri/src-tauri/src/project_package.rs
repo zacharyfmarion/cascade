@@ -1,0 +1,223 @@
+use cascade_runtime::CascadeDocument;
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{Cursor, Read, Write};
+use std::path::Path;
+use zip::write::SimpleFileOptions;
+
+pub const MANIFEST_NAME: &str = "cascade.json";
+
+#[derive(Debug, Clone)]
+pub struct AssetBlob {
+    pub package_path: String,
+    pub hash: String,
+    pub bytes: Vec<u8>,
+}
+
+pub struct PackageRead {
+    pub document: CascadeDocument,
+    pub assets: HashMap<String, Vec<u8>>,
+}
+
+pub fn is_zip_project_bytes(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"PK\x03\x04")
+        || bytes.starts_with(b"PK\x05\x06")
+        || bytes.starts_with(b"PK\x07\x08")
+}
+
+pub fn asset_extension(path: &Path) -> String {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            ext.chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .collect::<String>()
+                .to_ascii_lowercase()
+        })
+        .filter(|ext| !ext.is_empty())
+        .unwrap_or_else(|| "bin".to_string())
+}
+
+pub fn make_asset_blob(path: &Path, bytes: Vec<u8>) -> AssetBlob {
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let hash = format!("{:x}", hasher.finalize());
+    let ext = asset_extension(path);
+    let package_path = format!("assets/{hash}.{ext}");
+    AssetBlob {
+        package_path,
+        hash,
+        bytes,
+    }
+}
+
+pub fn read_asset_blob(path: &Path) -> Result<AssetBlob, String> {
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("Failed to read asset {}: {e}", path.display()))?;
+    Ok(make_asset_blob(path, bytes))
+}
+
+pub fn write_project_package(
+    path: &Path,
+    document: &CascadeDocument,
+    assets: &[AssetBlob],
+) -> Result<(), String> {
+    let file =
+        File::create(path).map_err(|e| format!("Failed to create {}: {e}", path.display()))?;
+    let mut writer = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    writer
+        .start_file(MANIFEST_NAME, options)
+        .map_err(|e| e.to_string())?;
+    let json = serde_json::to_vec_pretty(document).map_err(|e| e.to_string())?;
+    writer.write_all(&json).map_err(|e| e.to_string())?;
+
+    let mut written = std::collections::HashSet::new();
+    for asset in assets {
+        if !written.insert(asset.package_path.clone()) {
+            continue;
+        }
+        writer
+            .start_file(&asset.package_path, options)
+            .map_err(|e| e.to_string())?;
+        writer.write_all(&asset.bytes).map_err(|e| e.to_string())?;
+    }
+
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn read_project_package(path: &Path) -> Result<PackageRead, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("Failed to read project {}: {e}", path.display()))?;
+    read_project_package_bytes(&bytes)
+}
+
+pub fn read_project_package_bytes(bytes: &[u8]) -> Result<PackageRead, String> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
+    let mut manifest = String::new();
+    archive
+        .by_name(MANIFEST_NAME)
+        .map_err(|e| format!("Missing {MANIFEST_NAME}: {e}"))?
+        .read_to_string(&mut manifest)
+        .map_err(|e| e.to_string())?;
+    let document: CascadeDocument = serde_json::from_str(&manifest).map_err(|e| e.to_string())?;
+
+    let mut assets = HashMap::new();
+    for index in 0..archive.len() {
+        let mut file = archive.by_index(index).map_err(|e| e.to_string())?;
+        let name = file.name().to_string();
+        if !name.starts_with("assets/") || name.ends_with('/') {
+            continue;
+        }
+        let mut asset_bytes = Vec::new();
+        file.read_to_end(&mut asset_bytes)
+            .map_err(|e| e.to_string())?;
+        assets.insert(name, asset_bytes);
+    }
+
+    Ok(PackageRead { document, assets })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cascade_runtime::{
+        DocumentHeader, ProjectMetadata, SerializableConnection, SerializableGraph,
+        SerializableNode,
+    };
+    use std::collections::HashMap;
+
+    fn empty_document() -> CascadeDocument {
+        CascadeDocument {
+            cascade: DocumentHeader {
+                format_version: "1.4.0".to_string(),
+                app_version: String::new(),
+                created_at: String::new(),
+                modified_at: String::new(),
+            },
+            project: ProjectMetadata {
+                name: "Test".to_string(),
+                author: String::new(),
+                description: String::new(),
+            },
+            graph: SerializableGraph {
+                nodes: vec![SerializableNode {
+                    id: "load".to_string(),
+                    type_id: "load_image".to_string(),
+                    params: HashMap::new(),
+                    input_defaults: HashMap::new(),
+                    position: (0.0, 0.0),
+                    muted: false,
+                }],
+                connections: Vec::<SerializableConnection>::new(),
+                group_definitions: vec![],
+            },
+            assets: HashMap::new(),
+            scripts: HashMap::new(),
+            view: None,
+            dsl: None,
+        }
+    }
+
+    #[test]
+    fn detects_zip_project_magic_bytes() {
+        assert!(is_zip_project_bytes(b"PK\x03\x04abc"));
+        assert!(is_zip_project_bytes(b"PK\x05\x06"));
+        assert!(!is_zip_project_bytes(br#"{"cascade":{}}"#));
+    }
+
+    #[test]
+    fn asset_blob_uses_content_hash_and_sanitized_extension() {
+        let blob = make_asset_blob(Path::new("/tmp/Plate.PNG"), b"same bytes".to_vec());
+        let duplicate = make_asset_blob(Path::new("/other/name.png"), b"same bytes".to_vec());
+
+        assert_eq!(blob.hash, duplicate.hash);
+        assert_eq!(blob.package_path, duplicate.package_path);
+        assert!(blob.package_path.starts_with("assets/"));
+        assert!(blob.package_path.ends_with(".png"));
+    }
+
+    #[test]
+    fn zip_package_roundtrips_manifest_and_deduped_assets() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("project.casc");
+        let document = empty_document();
+        let a = make_asset_blob(Path::new("a.png"), vec![1, 2, 3, 4]);
+        let b = make_asset_blob(Path::new("b.png"), vec![1, 2, 3, 4]);
+        let c = make_asset_blob(Path::new("c.jpg"), vec![9, 8, 7]);
+
+        write_project_package(&path, &document, &[a.clone(), b, c.clone()]).expect("write package");
+
+        let raw = std::fs::read(&path).expect("read package");
+        assert!(is_zip_project_bytes(&raw));
+        let package = read_project_package_bytes(&raw).expect("read package bytes");
+        assert_eq!(package.document.project.name, "Test");
+        assert_eq!(package.assets.len(), 2);
+        assert_eq!(package.assets.get(&a.package_path), Some(&vec![1, 2, 3, 4]));
+        assert_eq!(package.assets.get(&c.package_path), Some(&vec![9, 8, 7]));
+    }
+
+    #[test]
+    fn missing_manifest_is_reported() {
+        let mut cursor = Cursor::new(Vec::<u8>::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut cursor);
+            let options = SimpleFileOptions::default();
+            writer
+                .start_file("not-cascade.json", options)
+                .expect("start");
+            writer.write_all(b"{}").expect("write");
+            writer.finish().expect("finish");
+        }
+
+        let err = match read_project_package_bytes(&cursor.into_inner()) {
+            Ok(_) => panic!("missing manifest should fail"),
+            Err(err) => err,
+        };
+        assert!(err.contains("Missing cascade.json"));
+    }
+}

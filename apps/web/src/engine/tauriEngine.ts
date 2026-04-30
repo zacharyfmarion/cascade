@@ -263,8 +263,8 @@ export class TauriEngine implements EngineBridge {
     await invoke('import_graph', { data: JSON.stringify(graph) });
   }
 
-  async saveProject(path: string, dsl?: unknown): Promise<void> {
-    await invoke('save_project', { path, dsl });
+  async saveProject(path: string, dsl?: unknown, options?: { bundleMedia?: boolean }): Promise<void> {
+    await invoke('save_project', { path, dsl, bundleMedia: options?.bundleMedia ?? false });
   }
 
   async loadProject(path: string): Promise<unknown> {

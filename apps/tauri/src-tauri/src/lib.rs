@@ -1,9 +1,12 @@
 mod menu;
+mod project_package;
 
 use cascade_runtime::{
     migrations, AssetReference, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
     SerializableGraph, UiNodeSpec, ViewerRenderResult,
 };
+use project_package::{read_asset_blob, AssetBlob};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
 use tauri::ipc::Response;
@@ -39,6 +42,61 @@ fn viewer_render_result_size(result: &ViewerRenderResult) -> usize {
         ViewerRenderResult::Compare(render) => {
             1 + 8 + render.before_pixels.len() + render.after_pixels.len()
         }
+    }
+}
+
+fn strip_file_url(path: &str) -> String {
+    path.strip_prefix("file://").unwrap_or(path).to_string()
+}
+
+fn param_string(
+    params: &std::collections::HashMap<String, ParamValue>,
+    key: &str,
+) -> Option<String> {
+    match params.get(key) {
+        Some(ParamValue::String(value)) if !value.is_empty() => Some(value.clone()),
+        _ => None,
+    }
+}
+
+fn resolve_project_path(project_dir: &Path, path: &str) -> PathBuf {
+    let stripped = strip_file_url(path);
+    let path = PathBuf::from(stripped);
+    if path.is_absolute() {
+        path
+    } else {
+        project_dir.join(path)
+    }
+}
+
+fn original_filename(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn external_asset_ref(asset_type: &str, path: String, original_filename: String) -> AssetReference {
+    AssetReference {
+        asset_type: asset_type.to_string(),
+        source: "external".to_string(),
+        path,
+        original_filename,
+        hash: String::new(),
+    }
+}
+
+fn packed_asset_ref(
+    asset_type: &str,
+    blob: &AssetBlob,
+    original_filename: String,
+) -> AssetReference {
+    AssetReference {
+        asset_type: asset_type.to_string(),
+        source: "packed".to_string(),
+        path: blob.package_path.clone(),
+        original_filename,
+        hash: blob.hash.clone(),
     }
 }
 
@@ -182,12 +240,20 @@ fn load_image_path(
     node_id: String,
     path: String,
 ) -> Result<String, String> {
-    let normalized = path.strip_prefix("file://").unwrap_or(&path);
-    let data = std::fs::read(normalized).map_err(|e| e.to_string())?;
+    let normalized = strip_file_url(&path);
+    let data = std::fs::read(&normalized).map_err(|e| e.to_string())?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let change = s
         .engine
         .load_image_data(&node_id, &data)
+        .map_err(|e| e.to_string())?;
+    let source = if path.starts_with("file://") {
+        path
+    } else {
+        format!("file://{normalized}")
+    };
+    s.engine
+        .set_param(&node_id, "path", ParamValue::String(source))
         .map_err(|e| e.to_string())?;
     serde_json::to_string(&change).map_err(|e| e.to_string())
 }
@@ -380,6 +446,7 @@ fn save_project(
     state: State<'_, EngineState>,
     path: String,
     dsl: Option<serde_json::Value>,
+    bundle_media: Option<bool>,
 ) -> Result<(), String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut document = s.engine.export_document();
@@ -393,36 +460,155 @@ fn save_project(
     }
 
     let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
-    let assets_dir = project_dir.join("assets");
-
-    for node in &document.graph.nodes {
-        if node.type_id == "load_image" {
-            if let Ok(bytes) = s.engine.get_image_data(&node.id) {
-                if !assets_dir.exists() {
-                    std::fs::create_dir_all(&assets_dir).map_err(|e| e.to_string())?;
-                }
-
-                let asset_filename = format!("{}.png", node.id);
-                let asset_path = assets_dir.join(&asset_filename);
-                std::fs::write(&asset_path, &bytes).map_err(|e| e.to_string())?;
-
-                document.assets.insert(
-                    node.id.clone(),
-                    AssetReference {
-                        asset_type: "image".to_string(),
-                        source: "embedded".to_string(),
-                        path: format!("assets/{}", asset_filename),
-                        original_filename: String::new(),
-                        hash: String::new(),
-                    },
-                );
-            }
-        }
+    let mut package_assets = Vec::new();
+    if bundle_media.unwrap_or(false) {
+        collect_packed_assets(&s.engine, &mut document, &mut package_assets)?;
+        project_package::write_project_package(file_path, &document, &package_assets)?;
+        return Ok(());
     }
 
+    collect_external_asset_refs(project_dir, &mut document);
     let json = serde_json::to_string_pretty(&document).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn collect_external_asset_refs(project_dir: &Path, document: &mut CascadeDocument) {
+    document.assets.clear();
+    for node in &document.graph.nodes {
+        match node.type_id.as_str() {
+            "load_image" => {
+                if let Some(path) = param_string(&node.params, "path") {
+                    let resolved = resolve_project_path(project_dir, &path);
+                    document.assets.insert(
+                        node.id.clone(),
+                        external_asset_ref("image", path, original_filename(&resolved)),
+                    );
+                }
+            }
+            "load_image_sequence" => {
+                if let Some(directory) = param_string(&node.params, "directory") {
+                    let pattern = param_string(&node.params, "pattern").unwrap_or_default();
+                    document.assets.insert(
+                        node.id.clone(),
+                        external_asset_ref("image_sequence", directory, pattern),
+                    );
+                }
+            }
+            "load_video" => {
+                if let Some(path) = param_string(&node.params, "file_path") {
+                    let resolved = resolve_project_path(project_dir, &path);
+                    document.assets.insert(
+                        node.id.clone(),
+                        external_asset_ref("video", path, original_filename(&resolved)),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_packed_assets(
+    engine: &Engine,
+    document: &mut CascadeDocument,
+    package_assets: &mut Vec<AssetBlob>,
+) -> Result<(), String> {
+    document.assets.clear();
+    for node in &document.graph.nodes {
+        match node.type_id.as_str() {
+            "load_image" => {
+                if let Some(path) = param_string(&node.params, "path") {
+                    let source_path = PathBuf::from(strip_file_url(&path));
+                    let blob = read_asset_blob(&source_path)?;
+                    document.assets.insert(
+                        node.id.clone(),
+                        packed_asset_ref("image", &blob, original_filename(&source_path)),
+                    );
+                    package_assets.push(blob);
+                } else if let Ok(bytes) = engine.get_image_data(&node.id) {
+                    let fallback = PathBuf::from(format!("{}.image", node.id));
+                    let blob = project_package::make_asset_blob(&fallback, bytes);
+                    document.assets.insert(
+                        node.id.clone(),
+                        packed_asset_ref("image", &blob, String::new()),
+                    );
+                    package_assets.push(blob);
+                }
+            }
+            "load_image_sequence" => {
+                let Some(directory) = param_string(&node.params, "directory") else {
+                    continue;
+                };
+                let dir = PathBuf::from(strip_file_url(&directory));
+                let pattern = param_string(&node.params, "pattern")
+                    .unwrap_or_else(|| "frame_{frame}.png".to_string());
+                let regex = sequence_pattern_regex(&pattern)?;
+                let mut entries = std::fs::read_dir(&dir)
+                    .map_err(|e| {
+                        format!("Failed to read sequence directory {}: {e}", dir.display())
+                    })?
+                    .flatten()
+                    .filter_map(|entry| {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if regex.is_match(&name) {
+                            Some((name, entry.path()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                entries.sort_by(|a, b| a.0.cmp(&b.0));
+                if entries.is_empty() {
+                    return Err(format!(
+                        "No sequence frames matched '{}' in {}",
+                        pattern,
+                        dir.display()
+                    ));
+                }
+                for (filename, path) in entries {
+                    let blob = read_asset_blob(&path)?;
+                    document.assets.insert(
+                        format!("{}:{filename}", node.id),
+                        packed_asset_ref("image_sequence_frame", &blob, filename),
+                    );
+                    package_assets.push(blob);
+                }
+            }
+            "load_video" => {
+                if let Some(path) = param_string(&node.params, "file_path") {
+                    let source_path = PathBuf::from(strip_file_url(&path));
+                    let blob = read_asset_blob(&source_path)?;
+                    document.assets.insert(
+                        node.id.clone(),
+                        packed_asset_ref("video", &blob, original_filename(&source_path)),
+                    );
+                    package_assets.push(blob);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn sequence_pattern_regex(pattern: &str) -> Result<regex::Regex, String> {
+    let normalized = if let Some(start) = pattern.find("{frame:") {
+        let after = &pattern[start..];
+        if let Some(end) = after.find('}') {
+            let mut result = pattern[..start].to_string();
+            result.push_str("{frame}");
+            result.push_str(&pattern[start + end + 1..]);
+            result
+        } else {
+            pattern.to_string()
+        }
+    } else {
+        pattern.to_string()
+    };
+    let escaped = regex::escape(&normalized);
+    let with_capture = escaped.replace("\\{frame\\}", "\\d+");
+    regex::Regex::new(&format!("^{with_capture}$")).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -442,49 +628,28 @@ fn needs_migration(json: String) -> Result<bool, String> {
 fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let file_path = std::path::Path::new(&path);
-    let json = std::fs::read_to_string(file_path).map_err(|e| e.to_string())?;
+    let bytes = std::fs::read(file_path).map_err(|e| e.to_string())?;
+
+    if project_package::is_zip_project_bytes(&bytes) {
+        let package = project_package::read_project_package(file_path)?;
+        return import_project_document(
+            &mut s.engine,
+            file_path,
+            package.document,
+            Some(package.assets),
+        );
+    }
+
+    let json = String::from_utf8(bytes).map_err(|e| e.to_string())?;
 
     if let Ok(mut doc_value) = serde_json::from_str::<serde_json::Value>(&json) {
         // Apply migrations to transform old documents to current version
         migrations::migrate_document(&mut doc_value).map_err(|e| e.to_string())?;
 
         // Deserialize the migrated document
-        let mut document: CascadeDocument =
+        let document: CascadeDocument =
             serde_json::from_value(doc_value).map_err(|e| e.to_string())?;
-        let dsl = document.dsl.take();
-
-        let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
-        let assets: Vec<(String, String, String)> = document
-            .assets
-            .iter()
-            .map(|(node_id, asset_ref)| {
-                (
-                    node_id.clone(),
-                    asset_ref.asset_type.clone(),
-                    asset_ref.path.clone(),
-                )
-            })
-            .collect();
-
-        s.engine
-            .import_document(document)
-            .map_err(|e| e.to_string())?;
-
-        for (node_id, asset_type, asset_path) in assets {
-            if asset_type == "image" && !asset_path.is_empty() {
-                let asset_path = project_dir.join(&asset_path);
-                if asset_path.exists() {
-                    let bytes = std::fs::read(&asset_path).map_err(|e| e.to_string())?;
-                    s.engine
-                        .load_image_data(&node_id, &bytes)
-                        .map_err(|e| e.to_string())?;
-                }
-            }
-        }
-
-        let mut exported = s.engine.export_document();
-        exported.dsl = dsl;
-        serde_json::to_string(&exported).map_err(|e| e.to_string())
+        import_project_document(&mut s.engine, file_path, document, None)
     } else {
         // Fallback: try to load as SerializableGraph (without migration)
         let graph: SerializableGraph = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -492,6 +657,168 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         let exported = s.engine.export_graph();
         serde_json::to_string(&exported).map_err(|e| e.to_string())
     }
+}
+
+fn import_project_document(
+    engine: &mut Engine,
+    file_path: &Path,
+    mut document: CascadeDocument,
+    packed_assets: Option<std::collections::HashMap<String, Vec<u8>>>,
+) -> Result<String, String> {
+    let dsl = document.dsl.take();
+    let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+    let assets: Vec<(String, AssetReference)> = document
+        .assets
+        .iter()
+        .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
+        .collect();
+
+    engine
+        .import_document(document)
+        .map_err(|e| e.to_string())?;
+
+    for (asset_key, asset_ref) in assets {
+        hydrate_asset(
+            engine,
+            project_dir,
+            file_path,
+            &asset_key,
+            &asset_ref,
+            packed_assets.as_ref(),
+        )?;
+    }
+
+    let mut exported = engine.export_document();
+    exported.dsl = dsl;
+    serde_json::to_string(&exported).map_err(|e| e.to_string())
+}
+
+fn clone_asset_reference(asset_ref: &AssetReference) -> AssetReference {
+    AssetReference {
+        asset_type: asset_ref.asset_type.clone(),
+        source: asset_ref.source.clone(),
+        path: asset_ref.path.clone(),
+        original_filename: asset_ref.original_filename.clone(),
+        hash: asset_ref.hash.clone(),
+    }
+}
+
+fn hydrate_asset(
+    engine: &mut Engine,
+    project_dir: &Path,
+    project_path: &Path,
+    asset_key: &str,
+    asset_ref: &AssetReference,
+    packed_assets: Option<&std::collections::HashMap<String, Vec<u8>>>,
+) -> Result<(), String> {
+    match asset_ref.asset_type.as_str() {
+        "image" => {
+            let bytes = read_project_asset_bytes(project_dir, asset_ref, packed_assets)?;
+            engine
+                .load_image_data(asset_key, &bytes)
+                .map_err(|e| e.to_string())?;
+        }
+        "image_sequence" => {
+            let directory = resolve_project_path(project_dir, &asset_ref.path);
+            if directory.exists() {
+                engine
+                    .set_sequence_directory(asset_key, directory.to_string_lossy().as_ref())
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        "image_sequence_frame" => {
+            let Some(packed_assets) = packed_assets else {
+                return Ok(());
+            };
+            let Some((node_id, _)) = asset_key.split_once(':') else {
+                return Ok(());
+            };
+            let Some(bytes) = packed_assets.get(&asset_ref.path) else {
+                return Err(format!(
+                    "Packed asset {} missing from project",
+                    asset_ref.path
+                ));
+            };
+            let temp_path = write_packed_asset_to_temp(project_path, asset_ref, bytes)?;
+            let directory = temp_path
+                .parent()
+                .ok_or_else(|| "Packed sequence temp path has no parent".to_string())?;
+            engine
+                .set_sequence_directory(node_id, directory.to_string_lossy().as_ref())
+                .map_err(|e| e.to_string())?;
+        }
+        "video" => {
+            let path = if asset_ref.source == "packed" {
+                let bytes = read_project_asset_bytes(project_dir, asset_ref, packed_assets)?;
+                write_packed_asset_to_temp(project_path, asset_ref, &bytes)?
+            } else {
+                resolve_project_path(project_dir, &asset_ref.path)
+            };
+            if path.exists() {
+                load_video_asset(engine, asset_key, &path)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(all(feature = "video", target_os = "macos"))]
+fn load_video_asset(engine: &mut Engine, node_id: &str, path: &Path) -> Result<(), String> {
+    engine
+        .load_video_file(node_id, path.to_string_lossy().as_ref())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(all(feature = "video", target_os = "macos")))]
+fn load_video_asset(_engine: &mut Engine, _node_id: &str, _path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn read_project_asset_bytes(
+    project_dir: &Path,
+    asset_ref: &AssetReference,
+    packed_assets: Option<&std::collections::HashMap<String, Vec<u8>>>,
+) -> Result<Vec<u8>, String> {
+    if asset_ref.source == "packed" {
+        let assets = packed_assets.ok_or_else(|| "Project asset package is missing".to_string())?;
+        assets
+            .get(&asset_ref.path)
+            .cloned()
+            .ok_or_else(|| format!("Packed asset {} missing from project", asset_ref.path))
+    } else {
+        let asset_path = resolve_project_path(project_dir, &asset_ref.path);
+        std::fs::read(&asset_path)
+            .map_err(|e| format!("Failed to read asset {}: {e}", asset_path.display()))
+    }
+}
+
+fn write_packed_asset_to_temp(
+    project_path: &Path,
+    asset_ref: &AssetReference,
+    bytes: &[u8],
+) -> Result<PathBuf, String> {
+    let project_stem = project_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("project");
+    let filename = if asset_ref.original_filename.is_empty() {
+        Path::new(&asset_ref.path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("asset.bin")
+            .to_string()
+    } else {
+        asset_ref.original_filename.clone()
+    };
+    let dir = std::env::temp_dir()
+        .join("cascade-packed-assets")
+        .join(format!("{}-{}", project_stem, std::process::id()));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(filename);
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path)
 }
 
 #[tauri::command]
@@ -571,6 +898,9 @@ fn set_sequence_directory(
         .engine
         .set_sequence_directory(&node_id, &directory)
         .map_err(|e| e.to_string())?;
+    s.engine
+        .set_param(&node_id, "directory", ParamValue::String(directory))
+        .map_err(|e| e.to_string())?;
     serde_json::to_string(&info).map_err(|e| e.to_string())
 }
 
@@ -594,12 +924,33 @@ fn load_video_file(
     node_id: String,
     path: String,
 ) -> Result<String, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    let info = s
-        .engine
-        .load_video_file(&node_id, &path)
-        .map_err(|e| e.to_string())?;
-    serde_json::to_string(&info).map_err(|e| e.to_string())
+    #[cfg(all(feature = "video", target_os = "macos"))]
+    {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        let info = s
+            .engine
+            .load_video_file(&node_id, &path)
+            .map_err(|e| e.to_string())?;
+        let source = if path.starts_with("file://") {
+            path
+        } else {
+            format!("file://{path}")
+        };
+        s.engine
+            .set_param(&node_id, "file_path", ParamValue::String(source))
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&info).map_err(|e| e.to_string())
+    }
+    #[cfg(not(all(feature = "video", target_os = "macos")))]
+    {
+        let _ = state;
+        let _ = node_id;
+        let _ = path;
+        Err(
+            "Video loading is only available on macOS desktop builds with video enabled"
+                .to_string(),
+        )
+    }
 }
 
 #[tauri::command]
@@ -615,14 +966,14 @@ fn render_video(
     #[allow(unused_variables)] state: State<'_, EngineState>,
     #[allow(unused_variables)] node_id: String,
 ) -> Result<String, String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(all(feature = "video", target_os = "macos"))]
     {
         let mut s = state.lock().map_err(|e| e.to_string())?;
         s.engine
             .start_render_video(&node_id)
             .map_err(|e| e.to_string())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(all(feature = "video", target_os = "macos")))]
     {
         Err("Video export is only available on macOS".to_string())
     }

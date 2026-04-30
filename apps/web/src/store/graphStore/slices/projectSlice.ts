@@ -8,6 +8,7 @@ import type { SerializableGraphData } from '../kernel';
 import { hydrateRootGraphFromEngine } from '../hydration';
 import { syncAllCommitted } from '../nodeDraftStore';
 import { dslShadowMatchesGraph, graphSemanticHash, hydrateDslShadowMetadata, serializeDslShadowMetadata } from '../../../ai/dsl/shadow';
+import { createBundledProjectBlob, readCascadeProjectFile } from '../projectPackage';
 
 export type PendingProjectAction =
   | { kind: 'new' }
@@ -28,12 +29,14 @@ export interface ProjectSliceActions {
   newProject: () => Promise<void>;
   saveProject: () => Promise<boolean>;
   saveProjectAs: () => Promise<boolean>;
+  saveBundledProject: () => Promise<boolean>;
   loadProject: (file: File) => void;
   loadProjectFromPath?: () => Promise<boolean>;
   requestNewProject: () => Promise<void>;
   requestOpenProject: (file?: File) => Promise<void>;
   requestSaveProject: () => Promise<boolean>;
   requestSaveProjectAs: () => Promise<boolean>;
+  requestSaveBundledProject: () => Promise<boolean>;
   requestCloseProject: () => Promise<void>;
   resolveUnsavedChanges: (choice: UnsavedChangesChoice) => Promise<void>;
   dismissUnsavedChangesPrompt: () => void;
@@ -201,27 +204,42 @@ export const createProjectSlice: StateCreator<
     return false;
   };
 
-  const saveWebProject = async (): Promise<boolean> => {
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const currentProjectDocument = async (): Promise<Record<string, unknown>> => {
     const eng = getEngine();
     const projectDoc = eng.exportDocument
       ? await Promise.resolve(eng.exportDocument())
       : createDocumentEnvelope(await Promise.resolve(eng.exportGraph()));
-    const projectRecord = attachProjectMetadata(projectDoc);
+    return attachProjectMetadata(projectDoc);
+  };
+
+  const saveWebProject = async (): Promise<boolean> => {
+    const projectRecord = await currentProjectDocument();
     const json = JSON.stringify(projectRecord, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${get().currentProjectName || 'project'}.casc`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${get().currentProjectName || 'project'}.casc`);
     set({ dirty: false, currentProjectPath: null });
     return true;
   };
 
-  const saveDesktopProjectToPath = async (path: string): Promise<boolean> => {
+  const saveWebBundledProject = async (): Promise<boolean> => {
+    const blob = await createBundledProjectBlob(await currentProjectDocument());
+    downloadBlob(blob, `${get().currentProjectName || 'project'}.casc`);
+    set({ dirty: false, currentProjectPath: null });
+    return true;
+  };
+
+  const saveDesktopProjectToPath = async (path: string, bundleMedia = false): Promise<boolean> => {
     if (!await assertDesktopGraphInSync()) return false;
-    await getEngine().saveProject?.(path, currentSerializableDslShadow());
+    await getEngine().saveProject?.(path, currentSerializableDslShadow(), { bundleMedia });
     rememberDesktopPath(path);
     set({
       currentProjectPath: path,
@@ -267,8 +285,8 @@ export const createProjectSlice: StateCreator<
   };
 
   const loadProjectFile = async (file: File) => {
-    const text = await file.text();
-    let data = JSON.parse(text) as Record<string, unknown>;
+    let data = await readCascadeProjectFile(file);
+    const text = JSON.stringify(data);
     const eng = getEngine();
 
     if (await Promise.resolve(eng?.needsMigration?.(text))) {
@@ -434,6 +452,22 @@ export const createProjectSlice: StateCreator<
       }
     },
 
+    saveBundledProject: async () => {
+      try {
+        if (isTauri() && getEngine().saveProject) {
+          const path = await chooseDesktopSavePath();
+          if (!path) return false;
+          return await saveDesktopProjectToPath(path, true);
+        }
+        return await saveWebBundledProject();
+      } catch (e) {
+        const error = parseEngineError(e);
+        set({ lastError: error });
+        get().pushToast('error', 'Bundled project save failed', error.message);
+        return false;
+      }
+    },
+
     loadProjectFromPath: async () => {
       if (!isTauri() || !getEngine().loadProject) {
         set({ lastError: makeEngineError('Project loading is only available in the desktop app') });
@@ -483,6 +517,8 @@ export const createProjectSlice: StateCreator<
     requestSaveProject: () => get().saveProject(),
 
     requestSaveProjectAs: () => get().saveProjectAs(),
+
+    requestSaveBundledProject: () => get().saveBundledProject(),
 
     requestCloseProject: async () => {
       if (get().dirty) {
