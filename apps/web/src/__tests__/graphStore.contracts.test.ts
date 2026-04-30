@@ -917,6 +917,7 @@ describe('Asset loading contracts', () => {
 
     mockEngine._clearRenderCalls();
     await s.loadImagePath(img, '/tmp/plate.png');
+    await flushPromises(5);
 
     expect(useGraphStore.getState().nodes.get(img)?.params.path).toEqual({ String: 'file:///tmp/plate.png' });
     expect(mockEngine._renderCalls.length).toBeGreaterThan(0);
