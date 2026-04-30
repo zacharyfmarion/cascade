@@ -49,7 +49,7 @@ export interface CascadeTestHarness {
   // --- Groups ---
   createGroup(nodeIds: string[], name?: string): Promise<string | null>;
   enterGroup(groupNodeId: string): Promise<void>;
-  exitGroup(): void;
+  exitGroup(): Promise<void>;
   getEditingStack(): Array<{ id: string; label: string }>;
   ungroupNode(groupNodeId: string): Promise<void>;
   renameGroup(groupNodeId: string, newName: string): Promise<void>;
@@ -383,10 +383,10 @@ function createTestHarness(): CascadeTestHarness {
     async enterGroup(groupNodeId: string): Promise<void> {
       await useGraphStore.getState().enterGroup(groupNodeId);
     },
-    exitGroup(): void {
+    async exitGroup(): Promise<void> {
       const s = useGraphStore.getState();
       if (s.editingStack.length > 1) {
-        s.navigateToBreadcrumb(0);
+        await s.navigateToBreadcrumb(0);
       }
     },
     getEditingStack(): Array<{ id: string; label: string }> {

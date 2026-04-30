@@ -68,6 +68,26 @@ const displayNameToDefinitionName = (displayName: string): string =>
     .join('')
   || 'NodeGroup';
 
+const displayNameToHandleBase = (displayName: string): string =>
+  displayNameToDefinitionName(displayName)
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase()
+  || 'node_group';
+
+const uniqueHandleForBase = (
+  base: string,
+  usedHandles: Set<string>,
+): string => {
+  let suffix = 1;
+  let handle = `${base}${suffix}`;
+  while (usedHandles.has(handle)) {
+    suffix += 1;
+    handle = `${base}${suffix}`;
+  }
+  return handle;
+};
+
 const upsertCustomDefinitionName = (
   entries: DslShadowCustomDefinitionName[] = [],
   runtimeId: string,
@@ -950,10 +970,20 @@ export const createGraphSlice: StateCreator<
         node.typeId,
         displayNameToDefinitionName(newName),
       );
+      const usedHandles = new Set(
+        dslShadow?.handles
+          .filter(entry => entry.nodeId !== groupNodeId)
+          .map(entry => entry.handle) ?? [],
+      );
+      const nextHandle = uniqueHandleForBase(displayNameToHandleBase(newName), usedHandles);
+      const handles = [
+        ...(dslShadow?.handles.filter(entry => entry.nodeId !== groupNodeId) ?? []),
+        { nodeId: groupNodeId, handle: nextHandle },
+      ];
       set({
         nodeSpecs: specs,
         editingStack,
-        dslShadow: dslShadow ? { ...dslShadow, customDefinitionNames, status: 'stale' } : dslShadow,
+        dslShadow: dslShadow ? { ...dslShadow, customDefinitionNames, handles, status: 'stale' } : dslShadow,
       });
       get().refreshDslShadowFromGraph();
     },

@@ -569,7 +569,8 @@ describe('graphStore group editing state', () => {
       name: 'CloudyAdjustment',
     });
     expect(state.dslShadow?.text).toContain('node CloudyAdjustment = group {');
-    expect(state.dslShadow?.text).toContain('CloudyAdjustment()');
+    expect(state.dslShadow?.text).toContain('cloudy_adjustment1 = CloudyAdjustment()');
+    expect(state.dslShadow?.text).not.toContain('node_group1 = CloudyAdjustment()');
     expect(state.dslShadow?.text).not.toContain('node NodeGroup = group');
   });
 });
