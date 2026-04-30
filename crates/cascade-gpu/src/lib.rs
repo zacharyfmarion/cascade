@@ -207,6 +207,48 @@ mod tests {
         }
     }
 
+    fn eval_rotate(angle: f64, filter: i64) -> Option<Image> {
+        let ctx = match GpuContext::new() {
+            Ok(ctx) => Arc::new(ctx),
+            Err(e) => {
+                println!("GPU not available, skipping: {e}");
+                return None;
+            }
+        };
+
+        let manifest = builtin_gpu_rotate_manifest();
+        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
+            .expect("Should create Rotate node");
+
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(make_column_test_image()));
+
+        let mut params = HashMap::new();
+        params.insert("angle".to_string(), ParamValue::Float(angle));
+        params.insert("filter".to_string(), ParamValue::Int(filter));
+
+        let cm = cascade_core::color::BuiltinColorManagement::new();
+        let format = Format::from_dimensions(4, 4);
+        let eval_ctx = EvalContext {
+            inputs,
+            extra_inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &format,
+            ai_cached_outputs: None,
+            preview_scale: 1.0,
+        };
+
+        let result =
+            pollster::block_on(node.evaluate(&eval_ctx)).expect("Rotate evaluation failed");
+        match result.get("image").expect("Rotate output") {
+            Value::Image(image) => Some(image.clone()),
+            other => panic!("Expected image output, got {:?}", other.value_type()),
+        }
+    }
+
     #[test]
     fn test_pixelate_glsl_builds() {
         let manifest = builtin_pixelate_manifest();
@@ -655,6 +697,29 @@ mod tests {
             (edge[3] - 0.5).abs() < 0.01,
             "expected half alpha at edge, got alpha={}",
             edge[3]
+        );
+    }
+
+    #[test]
+    fn test_rotate_nearest_exposes_transparent_corner() {
+        let Some(out_img) = eval_rotate(45.0, 0) else {
+            return;
+        };
+
+        assert_eq!(out_img.get_pixel_f32(0, 0), [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_rotate_bilinear_fades_into_transparent_corner() {
+        let Some(out_img) = eval_rotate(45.0, 1) else {
+            return;
+        };
+        let corner = out_img.get_pixel_f32(0, 0);
+
+        assert!(
+            corner[3] > 0.0 && corner[3] < 0.5,
+            "expected partial alpha at rotated edge, got alpha={}",
+            corner[3]
         );
     }
 
