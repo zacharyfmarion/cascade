@@ -1,9 +1,9 @@
 name: Deploy PR Preview
 
-# Temporarily disabled — re-enable by removing the `if: false` on each job
-# and restoring the `on:` triggers below.
 on:
-  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
 
 concurrency:
   group: deploy-pr-preview-${{ github.event.pull_request.number }}
