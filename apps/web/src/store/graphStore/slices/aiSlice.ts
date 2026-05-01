@@ -48,6 +48,11 @@ const inputDefaultsForSpec = (
   return defaults;
 };
 
+const errorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return String(error);
+};
+
 export const createAiSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -87,7 +92,14 @@ export const createAiSlice: StateCreator<
 
   runAiNode: async (nodeId) => {
     const eng = getEngine();
-    if (!eng.runAiNode) return;
+    if (!eng.runAiNode) {
+      const message = 'AI node execution is not supported in this build.';
+      set(state => ({
+        aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${message}` },
+      }));
+      get().pushToast('error', 'AI node failed', message);
+      return;
+    }
     set(state => ({
       aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'running' },
     }));
@@ -100,9 +112,11 @@ export const createAiSlice: StateCreator<
       get().renderAllViewersAsync();
     } catch (e) {
       const execState = await Promise.resolve(eng.getNodeExecutionState?.(nodeId));
+      const message = execState?.error || errorMessage(e);
       set(state => ({
-        aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${execState?.error ?? e}` },
+        aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${message}` },
       }));
+      get().pushToast('error', 'AI node failed', message);
     }
   },
 

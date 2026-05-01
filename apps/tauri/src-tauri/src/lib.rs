@@ -1719,6 +1719,54 @@ fn is_ai_configured(state: State<'_, EngineState>) -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn run_ai_node(state: State<'_, EngineState>, node_id: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.run_ai_node(&node_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_node_execution_state(
+    state: State<'_, EngineState>,
+    node_id: String,
+) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    serde_json::to_string(&s.engine.get_node_execution_state(&node_id)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_ai_node_image_data(
+    state: State<'_, EngineState>,
+    node_id: String,
+) -> Result<Response, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let data = s
+        .engine
+        .get_ai_node_image_data(&node_id)
+        .map_err(|e| e.to_string())?;
+    Ok(Response::new(data))
+}
+
+#[tauri::command]
+fn set_ai_node_image_data(
+    state: State<'_, EngineState>,
+    request: tauri::ipc::Request,
+) -> Result<(), String> {
+    let node_id = request
+        .headers()
+        .get("x-node-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "Missing x-node-id header".to_string())?
+        .to_string();
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("Expected raw body with AI result image data".to_string());
+    };
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .set_ai_node_image_data(&node_id, data)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn list_color_spaces(state: State<'_, EngineState>) -> Result<String, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let spaces = s.engine.available_color_spaces();
@@ -1867,6 +1915,10 @@ pub fn run() {
             remove_custom_node,
             set_ai_api_key,
             is_ai_configured,
+            run_ai_node,
+            get_node_execution_state,
+            get_ai_node_image_data,
+            set_ai_node_image_data,
             get_last_render_timings,
             list_color_spaces,
             list_displays,

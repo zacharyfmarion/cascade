@@ -1509,6 +1509,8 @@ describe('graphStore AI node operations', () => {
     mockEngine.getNodeExecutionState = () => ({ status: 'error', isStale: false, error: 'API failure' });
     await useGraphStore.getState().runAiNode(id);
     expect(useGraphStore.getState().aiNodeStatuses[id]).toMatch(/^error:/);
+    expect(useGraphStore.getState().toasts[0]?.title).toBe('AI node failed');
+    expect(useGraphStore.getState().toasts[0]?.message).toBe('API failure');
   });
 
   it('runAiNode clears stale flag on success', async () => {
@@ -1544,13 +1546,14 @@ describe('graphStore AI node operations', () => {
     expect(Object.keys(state.aiNodeStale).length).toBe(0);
   });
 
-  it('runAiNode is a no-op when engine lacks runAiNode', async () => {
+  it('runAiNode reports an error when engine lacks runAiNode', async () => {
     const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
     const originalRunAiNode = mockEngine.runAiNode;
     const mutableEngine = mockEngine as { runAiNode?: typeof mockEngine.runAiNode };
     delete mutableEngine.runAiNode;
     await useGraphStore.getState().runAiNode(id);
-    expect(useGraphStore.getState().aiNodeStatuses[id]).toBeUndefined();
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('error:AI node execution is not supported in this build.');
+    expect(useGraphStore.getState().toasts[0]?.title).toBe('AI node failed');
     mockEngine.runAiNode = originalRunAiNode;
   });
 });
