@@ -114,19 +114,76 @@ const createScalingCanvas = (width: number, height: number): OffscreenCanvas | H
   return canvas;
 };
 
+export const MIN_PREVIEW_DOWNSCALE_EDGE = 600;
+
+export type PreviewDownscaleSize = {
+  width: number;
+  height: number;
+  scale: number;
+};
+
+export const getPreviewDownscaleSize = (
+  width: number,
+  height: number,
+  scale: number,
+): PreviewDownscaleSize | null => {
+  if (
+    !Number.isFinite(scale)
+    || scale <= 0
+    || scale >= 1
+    || !Number.isFinite(width)
+    || !Number.isFinite(height)
+    || width <= 0
+    || height <= 0
+  ) {
+    return null;
+  }
+
+  const minScale = Math.max(
+    MIN_PREVIEW_DOWNSCALE_EDGE / width,
+    MIN_PREVIEW_DOWNSCALE_EDGE / height,
+  );
+  const effectiveScale = Math.min(1, Math.max(scale, minScale));
+  if (effectiveScale >= 1) return null;
+
+  const targetWidth = Math.min(width, Math.max(1, Math.round(width * effectiveScale)));
+  const targetHeight = Math.min(height, Math.max(1, Math.round(height * effectiveScale)));
+  if (targetWidth === width && targetHeight === height) return null;
+
+  return { width: targetWidth, height: targetHeight, scale: effectiveScale };
+};
+
+export const getPreviewScaleFromDimensions = (
+  width: number,
+  height: number,
+  originalWidth: number,
+  originalHeight: number,
+): number => {
+  if (
+    width <= 0
+    || height <= 0
+    || originalWidth <= 0
+    || originalHeight <= 0
+    || width > originalWidth
+    || height > originalHeight
+    || (width === originalWidth && height === originalHeight)
+  ) {
+    return 1;
+  }
+  return Math.min(width / originalWidth, height / originalHeight);
+};
+
 export const downscaleRenderResult = async (result: ViewerResult, scale: number): Promise<ViewerResult> => {
   // Only pixel-carrying results can be downscaled
   if (!isPixelResult(result) && !isCompareResult(result)) return result;
 
-  if (!Number.isFinite(scale) || scale >= 1) {
+  const targetSize = getPreviewDownscaleSize(result.width, result.height, scale);
+  if (!targetSize) {
     return { ...result, previewScale: 1 };
   }
 
-  const targetWidth = Math.max(1, Math.round(result.width * scale));
-  const targetHeight = Math.max(1, Math.round(result.height * scale));
-
   const sourceCanvas = createScalingCanvas(result.width, result.height);
-  const targetCanvas = createScalingCanvas(targetWidth, targetHeight);
+  const targetCanvas = createScalingCanvas(targetSize.width, targetSize.height);
   if (!sourceCanvas || !targetCanvas) {
     return { ...result, previewScale: 1 };
   }
@@ -142,22 +199,22 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
     imageData.data.set(pixels);
     sourceCtx.putImageData(imageData, 0, 0);
 
-    targetCtx.clearRect(0, 0, targetWidth, targetHeight);
+    targetCtx.clearRect(0, 0, targetSize.width, targetSize.height);
     targetCtx.imageSmoothingEnabled = true;
     const sourceImage: CanvasImageSource = sourceCanvas;
-    targetCtx.drawImage(sourceImage, 0, 0, targetWidth, targetHeight);
+    targetCtx.drawImage(sourceImage, 0, 0, targetSize.width, targetSize.height);
 
-    return targetCtx.getImageData(0, 0, targetWidth, targetHeight).data;
+    return targetCtx.getImageData(0, 0, targetSize.width, targetSize.height).data;
   };
 
   if (isCompareResult(result)) {
     return {
       ...result,
-      width: targetWidth,
-      height: targetHeight,
+      width: targetSize.width,
+      height: targetSize.height,
       beforePixels: scalePixels(result.beforePixels),
       afterPixels: scalePixels(result.afterPixels),
-      previewScale: scale,
+      previewScale: targetSize.scale,
       originalWidth: result.originalWidth ?? result.width,
       originalHeight: result.originalHeight ?? result.height,
     };
@@ -165,10 +222,10 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
 
   return {
     ...result,
-    width: targetWidth,
-    height: targetHeight,
+    width: targetSize.width,
+    height: targetSize.height,
     pixels: scalePixels(result.pixels),
-    previewScale: scale,
+    previewScale: targetSize.scale,
     originalWidth: result.originalWidth ?? result.width,
     originalHeight: result.originalHeight ?? result.height,
   };
