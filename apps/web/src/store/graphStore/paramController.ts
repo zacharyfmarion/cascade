@@ -28,6 +28,7 @@ import type { GraphState } from './store';
 import {
   kernel,
   cloneEditingStack,
+  getPreviewScaleFromDimensions,
   getEngine,
   markGraphMutation,
 } from './kernel';
@@ -194,11 +195,19 @@ function dispatchLiveRender(
           if (liveScale < 1 && (isPixelResult(r) || isCompareResult(r)) && r.originalWidth === undefined) {
             const prev = prevResults.get(vid);
             if (prev && (isPixelResult(prev) || isCompareResult(prev))) {
+              const originalWidth = prev.originalWidth ?? prev.width;
+              const originalHeight = prev.originalHeight ?? prev.height;
+              const previewScale = getPreviewScaleFromDimensions(
+                r.width,
+                r.height,
+                originalWidth,
+                originalHeight,
+              );
               newResults.set(vid, {
                 ...r,
-                previewScale: liveScale,
-                originalWidth: prev.originalWidth ?? prev.width,
-                originalHeight: prev.originalHeight ?? prev.height,
+                previewScale,
+                originalWidth,
+                originalHeight,
               });
               continue;
             }

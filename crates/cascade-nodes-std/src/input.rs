@@ -9,25 +9,35 @@ use std::any::Any;
 use std::collections::HashMap;
 
 /// Minimum dimension (pixels) to avoid degenerate downscales.
-const MIN_PREVIEW_DIM: u32 = 32;
-/// Minimum total pixel count for preview (64×64).
-const MIN_PREVIEW_PIXELS: u32 = 64 * 64;
+const MIN_PREVIEW_EDGE: u32 = 600;
+
+fn preview_downscale_size(width: u32, height: u32, scale: f32) -> Option<(u32, u32)> {
+    if !scale.is_finite() || scale <= 0.0 || scale >= 1.0 || width == 0 || height == 0 {
+        return None;
+    }
+
+    let min_scale =
+        (MIN_PREVIEW_EDGE as f32 / width as f32).max(MIN_PREVIEW_EDGE as f32 / height as f32);
+    let effective_scale = scale.max(min_scale).min(1.0);
+    if effective_scale >= 1.0 {
+        return None;
+    }
+
+    let new_w = ((width as f32 * effective_scale).round() as u32).clamp(1, width);
+    let new_h = ((height as f32 * effective_scale).round() as u32).clamp(1, height);
+    if new_w == width && new_h == height {
+        None
+    } else {
+        Some((new_w, new_h))
+    }
+}
 
 /// Downscale an image for preview rendering.
 /// Returns the original if scale >= 1.0 or the image is already small.
 fn preview_downscale(image: Image, scale: f32) -> Result<Image, CascadeError> {
-    if scale >= 1.0 {
+    let Some((new_w, new_h)) = preview_downscale_size(image.width, image.height, scale) else {
         return Ok(image);
-    }
-    let total = image.width as u64 * image.height as u64;
-    if total <= MIN_PREVIEW_PIXELS as u64 {
-        return Ok(image);
-    }
-    let new_w = ((image.width as f32 * scale).round() as u32).max(MIN_PREVIEW_DIM);
-    let new_h = ((image.height as f32 * scale).round() as u32).max(MIN_PREVIEW_DIM);
-    if new_w >= image.width && new_h >= image.height {
-        return Ok(image);
-    }
+    };
     resize_nearest(&image, new_w, new_h)
 }
 use std::sync::{Arc, Mutex, OnceLock};
@@ -1302,6 +1312,26 @@ mod tests {
         let data = vec![value; width as usize * height as usize * 4];
         let image = Image::from_f32_data(width, height, data).expect("test image should build");
         HashMap::from([("image".to_string(), image)])
+    }
+
+    #[test]
+    fn preview_downscale_keeps_small_images_full_size() {
+        assert_eq!(preview_downscale_size(200, 150, 0.25), None);
+    }
+
+    #[test]
+    fn preview_downscale_clamps_effective_scale_to_min_edge() {
+        assert_eq!(preview_downscale_size(1200, 900, 0.25), Some((800, 600)));
+    }
+
+    #[test]
+    fn preview_downscale_preserves_requested_scale_for_large_images() {
+        assert_eq!(preview_downscale_size(4096, 3072, 0.25), Some((1024, 768)));
+    }
+
+    #[test]
+    fn preview_downscale_preserves_aspect_for_narrow_images() {
+        assert_eq!(preview_downscale_size(400, 100, 0.25), None);
     }
 
     #[test]

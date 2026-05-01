@@ -4886,8 +4886,8 @@ return pixelated;
         );
         let (updated_viewer_id, live_result) = &live_results[0];
         assert_eq!(updated_viewer_id, &viewer_id);
-        assert_eq!(live_result.width, 50);
-        assert_eq!(live_result.height, 40);
+        assert_eq!(live_result.width, 100);
+        assert_eq!(live_result.height, 80);
 
         let committed_result = engine.render_viewer(&viewer_id, 0).expect("full render");
         assert_eq!(committed_result.width, 100);
