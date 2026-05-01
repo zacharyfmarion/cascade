@@ -3,6 +3,7 @@ import { useSettingsStore } from '../store/settingsStore';
 import { useLayoutStore } from '../store/layoutStore';
 import type { WorkspacePreset } from '../store/layoutStore';
 import { isTextInputFocused } from '../shortcuts/focusDetection';
+import { isDesktopRuntime } from '../platform/runtime';
 
 // ── Menu item types ─────────────────────────────────────────────
 
@@ -40,6 +41,13 @@ function modKey(): string {
 
 export function getMenuBarDef(): MenuDef[] {
   const mod = modKey();
+  const saveItems: MenuItemDef[] = [
+    { type: 'action', id: 'file.save', label: 'Save', shortcut: `${mod}+S` },
+    { type: 'action', id: 'file.saveAs', label: 'Save As...', shortcut: `${mod}+Shift+S` },
+  ];
+  if (isDesktopRuntime()) {
+    saveItems.push({ type: 'action', id: 'file.saveBundled', label: 'Save Bundled Copy...' });
+  }
 
   return [
     {
@@ -48,9 +56,7 @@ export function getMenuBarDef(): MenuDef[] {
         { type: 'action', id: 'file.new', label: 'New Project', shortcut: `${mod}+N` },
         { type: 'action', id: 'file.open', label: 'Open Project', shortcut: `${mod}+O` },
         { type: 'separator' },
-        { type: 'action', id: 'file.save', label: 'Save', shortcut: `${mod}+S` },
-        { type: 'action', id: 'file.saveAs', label: 'Save As...', shortcut: `${mod}+Shift+S` },
-        { type: 'action', id: 'file.saveBundled', label: 'Save Bundled Copy...' },
+        ...saveItems,
         { type: 'separator' },
         { type: 'action', id: 'file.settings', label: 'Settings', shortcut: `${mod}+,` },
       ],

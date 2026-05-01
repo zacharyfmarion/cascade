@@ -964,7 +964,7 @@ describe('graphStore project hydration', () => {
     expect(saveProject).not.toHaveBeenCalled();
   });
 
-  it('web file-object image loads prompt on first save and preserve asset bytes after worker transfer', async () => {
+  it('web file-object image loads do not show the asset storage prompt on save', async () => {
     const originalLoadImageData = mockEngine.loadImageData;
     mockEngine.loadImageData = (nodeId, data) => {
       const transferred = structuredClone(data, { transfer: [data.buffer] });
@@ -978,14 +978,26 @@ describe('graphStore project hydration', () => {
 
     expect(useGraphStore.getState().currentProjectAssetStorage).toBeNull();
     expect(useGraphStore.getState().projectAssets[load]?.data).toBe('AQIDBA==');
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cascade-bundled-project');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
 
-    const saved = await useGraphStore.getState().saveProject();
+    try {
+      const saved = await useGraphStore.getState().saveProject();
 
-    expect(saved).toBe(false);
-    expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
+      expect(saved).toBe(true);
+      expect(useGraphStore.getState().assetStoragePrompt).toBeNull();
+      expect(useGraphStore.getState().currentProjectAssetStorage).toBe('bundled');
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
   });
 
-  it('web Save Bundled Copy writes non-empty uploaded image assets', async () => {
+  it('web Save writes non-empty uploaded image assets to a bundled project', async () => {
     const originalLoadImageData = mockEngine.loadImageData;
     mockEngine.loadImageData = (nodeId, data) => {
       const transferred = structuredClone(data, { transfer: [data.buffer] });
@@ -1007,7 +1019,7 @@ describe('graphStore project hydration', () => {
     const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
 
     try {
-      const saved = await useGraphStore.getState().saveBundledProject();
+      const saved = await useGraphStore.getState().saveProject();
 
       expect(saved).toBe(true);
       expect(blobs).toHaveLength(1);
@@ -1015,8 +1027,10 @@ describe('graphStore project hydration', () => {
       const zip = await JSZip.loadAsync(await blobs[0].arrayBuffer());
       const manifest = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
         assets: Record<string, { path: string; hash: string; uri: string }>;
+        asset_storage: string;
         graph: { nodes: Array<{ id: string; params: Record<string, { String?: string }> }> };
       };
+      expect(manifest.asset_storage).toBe('bundled');
       const asset = manifest.assets[load];
       expect(asset.path).toMatch(/^assets\/[a-f0-9]{64}\.png$/);
       expect(asset.uri).toBe(`asset://sha256/${asset.hash}`);

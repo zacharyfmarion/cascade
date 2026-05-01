@@ -249,16 +249,22 @@ export const createProjectSlice: StateCreator<
   };
 
   const shouldPromptForAssetStorage = async (): Promise<boolean> => (
-    get().currentProjectAssetStorage === null && await currentProjectHasAssets()
+    isTauri() && get().currentProjectAssetStorage === null && await currentProjectHasAssets()
   );
 
   const saveWebProject = async (): Promise<boolean> => {
     const projectRecord = await currentProjectDocument();
-    projectRecord.asset_storage = get().currentProjectAssetStorage ?? 'external';
+    if (hasAssetBackedNodes(projectRecord, projectRecord.assets)) {
+      const blob = await createBundledProjectBlob(projectRecord);
+      downloadBlob(blob, `${get().currentProjectName || 'project'}.casc`);
+      set({ dirty: false, currentProjectPath: null, currentProjectAssetStorage: 'bundled' });
+      return true;
+    }
+    delete projectRecord.asset_storage;
     const json = JSON.stringify(projectRecord, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     downloadBlob(blob, `${get().currentProjectName || 'project'}.casc`);
-    set({ dirty: false, currentProjectPath: null, currentProjectAssetStorage: 'external' });
+    set({ dirty: false, currentProjectPath: null, currentProjectAssetStorage: null });
     return true;
   };
 
@@ -491,9 +497,7 @@ export const createProjectSlice: StateCreator<
           if (!path) return false;
           return await saveDesktopProjectToPath(path, get().currentProjectAssetStorage === 'bundled');
         }
-        return get().currentProjectAssetStorage === 'bundled'
-          ? await saveWebBundledProject()
-          : await saveWebProject();
+        return await saveWebProject();
       } catch (e) {
         const error = parseEngineError(e);
         set({ lastError: error });
@@ -513,9 +517,7 @@ export const createProjectSlice: StateCreator<
           if (!path) return false;
           return await saveDesktopProjectToPath(path, get().currentProjectAssetStorage === 'bundled');
         }
-        return get().currentProjectAssetStorage === 'bundled'
-          ? await saveWebBundledProject()
-          : await saveWebProject();
+        return await saveWebProject();
       } catch (e) {
         const error = parseEngineError(e);
         set({ lastError: error });

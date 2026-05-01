@@ -782,12 +782,14 @@ function ProjectTab() {
   const projectHeight = useSettingsStore(s => s.projectHeight);
   const setProjectFormat = useGraphStore(s => s.setProjectFormat);
   const assetStorage = useGraphStore(s => s.currentProjectAssetStorage);
+  const hasProjectAssets = useGraphStore(s => Object.keys(s.projectAssets).length > 0);
   const setProjectAssetStorage = useGraphStore(s => s.setProjectAssetStorage);
   const [localWidth, setLocalWidth] = useState(projectWidth);
   const [localHeight, setLocalHeight] = useState(projectHeight);
 
   const isCustom = !RESOLUTION_PRESETS.some(p => p.width === projectWidth && p.height === projectHeight);
   const activePreset = RESOLUTION_PRESETS.find(p => p.width === projectWidth && p.height === projectHeight);
+  const isDesktop = isDesktopRuntime();
 
   const applyResolution = useCallback((w: number, h: number) => {
     const clampedW = Math.max(1, Math.min(8192, Math.round(w)));
@@ -871,22 +873,33 @@ function ProjectTab() {
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
           Assets
         </div>
-        <label style={{ ...rowStyle, gap: '12px' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Storage</span>
-          <select
-            value={assetStorage ?? ''}
-            onChange={event => {
-              if (event.target.value === 'external' || event.target.value === 'bundled') {
-                setProjectAssetStorage(event.target.value);
-              }
-            }}
-            style={selectStyle}
-          >
-            <option value="external">Reference external files</option>
-            <option value="" disabled>Reference external files (ask on save)</option>
-            <option value="bundled">Bundle with project</option>
-          </select>
-        </label>
+        {isDesktop ? (
+          <label style={{ ...rowStyle, gap: '12px' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>Storage</span>
+            <select
+              value={assetStorage ?? ''}
+              onChange={event => {
+                if (event.target.value === 'external' || event.target.value === 'bundled') {
+                  setProjectAssetStorage(event.target.value);
+                }
+              }}
+              style={selectStyle}
+            >
+              <option value="external">Reference external files</option>
+              <option value="" disabled>Reference external files (ask on save)</option>
+              <option value="bundled">Bundle with project</option>
+            </select>
+          </label>
+        ) : (
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            <div style={{ color: 'var(--text-primary)', marginBottom: '4px' }}>
+              {hasProjectAssets ? 'Assets are included in saved project files' : 'No project assets yet'}
+            </div>
+            <div>
+              Browsers cannot save durable references to local files, so Cascade includes imported assets in the project file.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,21 +1,32 @@
 # Web Bundled Asset Save
 
 ## Goal
-Make web project saving match the desktop bundled asset behavior: first save should prompt for asset storage, and saved web projects should reopen with real image bytes instead of broken zero-byte assets.
+Make web project saving use the only browser-realistic asset behavior: save portable project files with embedded assets, without exposing external reference choices that cannot work reliably on web.
 
 ## Approach
-- Keep file-loaded web projects in the unset asset-storage state until first save so the asset storage modal can appear.
+- Never show the external-vs-bundled asset storage modal on web.
+- Hide `Save Bundled Copy...` on web; keep it on desktop.
+- Make web Save/Save As automatically download a bundled `.casc` when assets exist and plain JSON when they do not.
+- Show read-only web asset storage status in Project settings instead of the desktop dropdown.
 - Preserve a non-transferred copy of uploaded image bytes before sending image data to the worker.
-- Use the preserved project asset bytes when saving bundled or plain JSON web projects.
-- Add regression tests for web first-save prompting and non-empty bundled image assets.
+- Use the preserved project asset bytes when saving bundled web projects.
+- Add regression tests for web menu visibility, no-prompt save behavior, Project settings, and non-empty bundled image assets.
 
 ## Affected Areas
+- `apps/web/src/components/SettingsModal.tsx`
+- `apps/web/src/menus/menuDefinition.ts`
 - `apps/web/src/store/graphStore/slices/assetsSlice.ts`
+- `apps/web/src/store/graphStore/slices/projectSlice.ts`
 - `apps/web/src/__tests__/graphStore.test.ts`
+- `apps/web/src/menus/__tests__/menuDefinition.test.ts`
+- `apps/web/src/components/__tests__/SettingsModal.test.ts`
 - `implementation-plans/web-bundled-asset-save.md`
 
 ## Checklist
 - [x] Preserve uploaded image bytes across worker transfer.
-- [x] Keep web asset storage unset before first save.
-- [x] Add regression coverage for web prompt and bundled bytes.
+- [x] Keep web asset storage modal unreachable.
+- [x] Auto-bundle asset-backed web saves.
+- [x] Hide web `Save Bundled Copy...` menu item.
+- [x] Make Project settings read-only for web asset storage.
+- [x] Add regression coverage for web menu, settings, no-prompt save, and bundled bytes.
 - [x] Run focused frontend validation.
