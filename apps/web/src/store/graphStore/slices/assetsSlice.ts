@@ -3,6 +3,7 @@ import type { GraphState } from '../store';
 import type { ParamValue } from '../../types';
 import { getEngine, markGraphMutation } from '../kernel';
 import { assetUriFromHash } from '../assetReferences';
+import { isDesktopRuntime } from '../../../platform/runtime';
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
   let binary = '';
@@ -98,7 +99,7 @@ export const createAssetsSlice: StateCreator<
       set({
         nodes: newNodes,
         projectAssets,
-        currentProjectAssetStorage: get().currentProjectAssetStorage ?? 'bundled',
+        currentProjectAssetStorage: get().currentProjectAssetStorage ?? (isDesktopRuntime() ? null : 'bundled'),
         dirty: true,
       });
       get().refreshDslShadowFromGraph();

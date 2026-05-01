@@ -882,9 +882,9 @@ function ProjectTab() {
             }}
             style={selectStyle}
           >
-            <option value="" disabled>Choose on first save</option>
-            <option value="bundled">Bundle with project</option>
             <option value="external">Reference external files</option>
+            <option value="" disabled>Reference external files (ask on save)</option>
+            <option value="bundled">Bundle with project</option>
           </select>
         </label>
       </div>

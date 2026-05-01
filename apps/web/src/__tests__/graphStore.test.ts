@@ -939,6 +939,30 @@ describe('graphStore project hydration', () => {
     });
   });
 
+  it('desktop file-object image loads do not default the project to bundled before first save', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({
+      currentProjectPath: '/tmp/dragged_image_project.casc',
+      dirty: true,
+      currentProjectAssetStorage: null,
+    });
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+
+    useGraphStore.getState().loadImageFile(load, new File([new Uint8Array([1, 2, 3])], 'plate.png'));
+    await flushPromises(5);
+
+    expect(useGraphStore.getState().currentProjectAssetStorage).toBeNull();
+    expect(useGraphStore.getState().projectAssets[load]?.original_filename).toBe('plate.png');
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
+    expect(saveProject).not.toHaveBeenCalled();
+  });
+
   it('project asset storage setting marks the project dirty and warns when internal refs remain external', async () => {
     const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
     const uri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
