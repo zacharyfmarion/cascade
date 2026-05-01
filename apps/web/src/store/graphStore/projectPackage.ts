@@ -38,6 +38,7 @@ const extensionFromAsset = (asset: Record<string, unknown>): string => {
     if (match) return match[1].toLowerCase();
   }
   if (asset.type === 'image' || asset.asset_type === 'image') return 'image';
+  if (asset.type === 'ai_result' || asset.asset_type === 'ai_result') return 'png';
   return 'bin';
 };
 

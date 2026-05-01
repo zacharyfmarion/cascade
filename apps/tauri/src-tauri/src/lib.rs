@@ -128,6 +128,28 @@ fn is_asset_uri(path: &str) -> bool {
     path.starts_with("asset://sha256/")
 }
 
+fn missing_ai_result_error(message: &str) -> bool {
+    message.contains("No cached AI result") || message.contains("No image in cached AI result")
+}
+
+fn cached_ai_result_blob(engine: &Engine, node_id: &str) -> Result<Option<AssetBlob>, String> {
+    match engine.get_ai_node_image_data(node_id) {
+        Ok(bytes) if bytes.is_empty() => Ok(None),
+        Ok(bytes) => {
+            let fallback = PathBuf::from(format!("{node_id}.png"));
+            Ok(Some(project_package::make_asset_blob(&fallback, bytes)))
+        }
+        Err(err) => {
+            let message = err.to_string();
+            if missing_ai_result_error(&message) {
+                Ok(None)
+            } else {
+                Err(message)
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn list_node_types(state: State<'_, EngineState>) -> Result<String, String> {
     let engine = state.lock().map_err(|e| e.to_string())?;
@@ -611,6 +633,14 @@ fn collect_external_asset_refs(
                     }
                 }
             }
+            type_id if type_id.starts_with("ai_") => {
+                if let Some(blob) = cached_ai_result_blob(engine, &node.id)? {
+                    document.assets.insert(
+                        node.id.clone(),
+                        embedded_asset_ref("ai_result", &blob, String::new()),
+                    );
+                }
+            }
             _ => {}
         }
     }
@@ -994,6 +1024,15 @@ fn collect_packed_assets(
                     }
                 }
             }
+            type_id if type_id.starts_with("ai_") => {
+                if let Some(blob) = cached_ai_result_blob(engine, &node_id)? {
+                    document.assets.insert(
+                        node_id.clone(),
+                        packed_asset_ref("ai_result", &blob, String::new()),
+                    );
+                    package_assets.push(blob);
+                }
+            }
             _ => {}
         }
     }
@@ -1190,6 +1229,12 @@ fn hydrate_asset(
             if path.exists() {
                 load_video_asset(engine, asset_key, &path)?;
             }
+        }
+        "ai_result" => {
+            let bytes = read_project_asset_bytes(project_dir, asset_ref, packed_assets)?;
+            engine
+                .set_ai_node_image_data(asset_key, &bytes)
+                .map_err(|e| e.to_string())?;
         }
         _ => {}
     }
@@ -1948,4 +1993,129 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tiny_png() -> Vec<u8> {
+        general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC")
+            .expect("tiny PNG decodes")
+    }
+
+    fn engine_with_cached_ai_result() -> (Engine, String) {
+        let mut engine = Engine::new();
+        let (node_id, _) = engine
+            .add_node("ai_generate_image", 0.0, 0.0)
+            .expect("add AI image node");
+        engine
+            .set_ai_node_image_data(&node_id, &tiny_png())
+            .expect("cache AI image");
+        (engine, node_id)
+    }
+
+    #[test]
+    fn collect_packed_assets_includes_cached_ai_results() {
+        let (engine, node_id) = engine_with_cached_ai_result();
+        let mut document = engine.export_document();
+        let mut package_assets = Vec::new();
+
+        collect_packed_assets(
+            &engine,
+            &mut document,
+            &mut package_assets,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .expect("collect packed assets");
+
+        let asset_ref = document
+            .assets
+            .get(&node_id)
+            .expect("AI result asset reference");
+        assert_eq!(asset_ref.asset_type, "ai_result");
+        assert_eq!(asset_ref.source, "packed");
+        assert!(asset_ref.path.starts_with("assets/"));
+        assert!(asset_ref.path.ends_with(".png"));
+        assert!(asset_ref.uri.starts_with("asset://sha256/"));
+        assert_eq!(package_assets.len(), 1);
+        assert_eq!(package_assets[0].package_path, asset_ref.path);
+        assert_eq!(
+            package_assets[0].bytes,
+            engine
+                .get_ai_node_image_data(&node_id)
+                .expect("cached AI image bytes")
+        );
+    }
+
+    #[test]
+    fn collect_external_asset_refs_embeds_cached_ai_results() {
+        let (engine, node_id) = engine_with_cached_ai_result();
+        let mut document = engine.export_document();
+
+        collect_external_asset_refs(
+            &engine,
+            Path::new("."),
+            &mut document,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
+        .expect("collect external assets");
+
+        let asset_ref = document
+            .assets
+            .get(&node_id)
+            .expect("AI result asset reference");
+        assert_eq!(asset_ref.asset_type, "ai_result");
+        assert_eq!(asset_ref.source, "embedded");
+        assert!(asset_ref.path.is_empty());
+        assert!(!asset_ref.data.is_empty());
+        assert!(asset_ref.uri.starts_with("asset://sha256/"));
+    }
+
+    #[test]
+    fn hydrate_asset_restores_packed_ai_result_cache() {
+        let mut source_engine = Engine::new();
+        let (node_id, _) = source_engine
+            .add_node("ai_generate_image", 0.0, 0.0)
+            .expect("add source AI node");
+        source_engine
+            .set_ai_node_image_data(&node_id, &tiny_png())
+            .expect("cache source AI image");
+        let bytes = source_engine
+            .get_ai_node_image_data(&node_id)
+            .expect("encoded AI image");
+        let blob = project_package::make_asset_blob(Path::new("ai-result.png"), bytes.clone());
+        let asset_ref = packed_asset_ref("ai_result", &blob, String::new());
+        let packed_assets = HashMap::from([(blob.package_path.clone(), blob.bytes.clone())]);
+
+        let mut restored_engine = Engine::new();
+        let (restored_node_id, _) = restored_engine
+            .add_node("ai_generate_image", 0.0, 0.0)
+            .expect("add restored AI node");
+        hydrate_asset(
+            &mut restored_engine,
+            Path::new("."),
+            Path::new("/tmp/project.casc"),
+            &restored_node_id,
+            &asset_ref,
+            Some(&packed_assets),
+        )
+        .expect("hydrate AI result");
+
+        assert_eq!(
+            restored_engine
+                .get_ai_node_image_data(&restored_node_id)
+                .expect("restored AI image bytes"),
+            bytes
+        );
+        assert_eq!(
+            restored_engine
+                .get_node_execution_state(&restored_node_id)
+                .status,
+            "complete"
+        );
+    }
 }

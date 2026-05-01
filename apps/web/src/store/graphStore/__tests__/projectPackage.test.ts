@@ -175,6 +175,46 @@ describe('projectPackage', () => {
     expect(Object.keys(zip.files).filter(name => name.startsWith('assets/') && !name.endsWith('/'))).toHaveLength(1);
   });
 
+  it('packs AI result assets and hydrates them for import', async () => {
+    const sourceDoc = {
+      cascade: { format_version: '1.4.0' },
+      graph: {
+        nodes: [{
+          id: 'ai1',
+          type_id: 'ai_generate_image',
+          params: {},
+          input_defaults: {},
+          position: [0, 0],
+          muted: false,
+        }],
+        connections: [],
+      },
+      assets: {
+        ai1: {
+          type: 'ai_result',
+          source: 'embedded',
+          data: btoa('generated-image-bytes'),
+          original_filename: '',
+          hash: '',
+        },
+      },
+    };
+
+    const blob = await createBundledProjectBlob(sourceDoc);
+    const zip = await JSZip.loadAsync(await blobBytes(blob));
+    const packedDoc = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
+      assets: Record<string, { type: string; source: string; path: string; data?: string; uri: string }>;
+    };
+    expect(packedDoc.assets.ai1.type).toBe('ai_result');
+    expect(packedDoc.assets.ai1.source).toBe('packed');
+    expect(packedDoc.assets.ai1.data).toBeUndefined();
+    expect(packedDoc.assets.ai1.path).toMatch(/^assets\/[a-f0-9]{64}\.png$/);
+    expect(packedDoc.assets.ai1.uri).toMatch(/^asset:\/\/sha256\/[a-f0-9]{64}$/);
+
+    const loaded = await readCascadeProjectFile(new File([blob], 'ai-bundled.casc'));
+    expect((loaded.assets as Record<string, { data: string }>).ai1.data).toBe(btoa('generated-image-bytes'));
+  });
+
   it('hydrates packed asset bytes back to base64 for existing web import code', async () => {
     const sourceDoc = {
       cascade: { format_version: '1.3.0' },
