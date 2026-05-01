@@ -328,6 +328,7 @@ export const createGraphSlice: StateCreator<
       kernel.renderGenerations.delete(id);
 
       if (removedNode?.typeId === 'load_image_sequence') {
+        await Promise.resolve(getEngine().clearSequenceFiles?.(id));
         sequenceFrameManager.clear(id);
         get().recomputeSequenceState();
       }

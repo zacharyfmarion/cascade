@@ -127,6 +127,7 @@ export interface GraphState {
   setCurrentFrame: (frame: number) => void;
   setSequenceDirectory: (nodeId: string, directory: string) => Promise<void>;
   setSequenceFiles: (nodeId: string, files: File[]) => Promise<void>;
+  prefetchSequenceFrames: (startFrame: number, count: number) => void;
   loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
   renderSequence: (nodeId: string) => Promise<void>;
   renderBatch: (nodeId: string) => Promise<void>;

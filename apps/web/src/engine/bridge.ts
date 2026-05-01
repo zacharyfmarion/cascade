@@ -122,6 +122,10 @@ export interface EngineBridge {
   setSequenceDirectory?(nodeId: string, directory: string): Promise<SequenceInfo>;
   getSequenceInfo?(nodeId: string, pattern: string): Promise<SequenceInfo>;
   loadVideoFile?(nodeId: string, path: string): Promise<VideoInfo>;
+  registerSequenceFiles?(nodeId: string, files: File[]): Promise<{ info: SequenceInfo; pattern: string }>;
+  prepareSequenceFrame?(nodeId: string, frame: number): Promise<NodeInterfaceChange | null>;
+  prefetchSequenceFrames?(nodeId: string, startFrame: number, count: number): Promise<void> | void;
+  clearSequenceFiles?(nodeId: string): Promise<void> | void;
   loadSequenceFrameData?(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange> | NodeInterfaceChange;
   setSequenceInfo?(nodeId: string, info: SequenceInfo): Promise<void> | void;
   batchClear?(nodeId: string): Promise<void> | void;

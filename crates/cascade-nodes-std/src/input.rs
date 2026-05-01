@@ -395,6 +395,8 @@ fn decode_standard_image(bytes: &[u8]) -> Result<Image, CascadeError> {
 }
 
 const FRAME_CACHE_SIZE: usize = 32;
+const UPLOADED_FRAME_CACHE_SIZE: usize = 8;
+const UPLOADED_FRAME_CACHE_BYTES: usize = 192 * 1024 * 1024;
 
 pub struct LoadImageSequence {
     directory: Mutex<Option<String>>,
@@ -435,9 +437,55 @@ impl SeqFrameCache {
         self.entries.push((frame, outputs));
     }
 
+    fn insert_uploaded(&mut self, frame: u64, outputs: HashMap<String, Image>) {
+        self.insert_uploaded_with_limits(
+            frame,
+            outputs,
+            UPLOADED_FRAME_CACHE_SIZE,
+            UPLOADED_FRAME_CACHE_BYTES,
+        );
+    }
+
+    fn insert_uploaded_with_limits(
+        &mut self,
+        frame: u64,
+        outputs: HashMap<String, Image>,
+        max_frames: usize,
+        max_bytes: usize,
+    ) {
+        self.entries.retain(|(f, _)| *f != frame);
+        self.entries.push((frame, outputs));
+
+        while self.entries.len() > 1
+            && (self.entries.len() > max_frames || self.total_bytes() > max_bytes)
+        {
+            if let Some(idx) = self.entries.iter().position(|(f, _)| *f != frame) {
+                self.entries.remove(idx);
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn total_bytes(&self) -> usize {
+        self.entries
+            .iter()
+            .map(|(_, outputs)| outputs.values().map(image_byte_size).sum::<usize>())
+            .sum()
+    }
+
     fn clear(&mut self) {
         self.entries.clear();
     }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+fn image_byte_size(image: &Image) -> usize {
+    image.data.len() * std::mem::size_of::<f32>()
 }
 
 /// Simple single-image-per-frame cache used by LoadVideo and LoadImageBatch.
@@ -501,6 +549,16 @@ impl LoadImageSequence {
     }
 
     pub fn set_frame_data(&self, frame: u64, bytes: &[u8]) -> Result<Vec<String>, CascadeError> {
+        {
+            let cache = self
+                .frame_cache
+                .lock()
+                .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
+            if cache.get(frame).is_some() {
+                return Ok(vec![]);
+            }
+        }
+
         // Collect old output port names before update
         let old_ports: Vec<String> = {
             let guard = self
@@ -531,7 +589,10 @@ impl LoadImageSequence {
             .frame_cache
             .lock()
             .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
-        cache.insert(frame, outputs);
+        // Browser-backed sequences upload frame bytes from a worker-owned File
+        // cache. Keep decoded f32 RGBA frames bounded by bytes instead of
+        // mirroring the full compressed sequence in WASM memory.
+        cache.insert_uploaded(frame, outputs);
 
         // Collect new output port names after update
         let new_ports: Vec<String> = {
@@ -1225,6 +1286,23 @@ impl Node for LoadImageBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+    use std::io::Cursor;
+
+    fn png_bytes(rgba: [u8; 4]) -> Vec<u8> {
+        let image = ::image::RgbaImage::from_pixel(1, 1, ::image::Rgba(rgba));
+        let mut bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .expect("test PNG should encode");
+        bytes
+    }
+
+    fn image_outputs(width: u32, height: u32, value: f32) -> HashMap<String, Image> {
+        let data = vec![value; width as usize * height as usize * 4];
+        let image = Image::from_f32_data(width, height, data).expect("test image should build");
+        HashMap::from([("image".to_string(), image)])
+    }
 
     #[test]
     fn load_image_sequence_asset_params_are_strings() {
@@ -1250,5 +1328,78 @@ mod tests {
             &pattern.default,
             ParamDefault::String(value) if value == "frame_{frame}.png"
         ));
+    }
+
+    #[test]
+    fn uploaded_sequence_frame_data_keeps_multiple_decoded_frames() {
+        let node = LoadImageSequence::new();
+        let first = png_bytes([255, 0, 0, 255]);
+        let second = png_bytes([0, 255, 0, 255]);
+
+        node.set_frame_data(1, &first)
+            .expect("first uploaded frame should decode");
+        node.set_frame_data(2, &second)
+            .expect("second uploaded frame should decode");
+
+        let cache = node
+            .frame_cache
+            .lock()
+            .expect("test cache lock should succeed");
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(1).is_some());
+        assert!(cache.get(2).is_some());
+    }
+
+    #[test]
+    fn uploaded_sequence_cache_evicts_old_frames_by_frame_limit() {
+        let mut cache = SeqFrameCache::new(FRAME_CACHE_SIZE);
+        cache.insert_uploaded_with_limits(1, image_outputs(1, 1, 0.1), 2, usize::MAX);
+        cache.insert_uploaded_with_limits(2, image_outputs(1, 1, 0.2), 2, usize::MAX);
+        cache.insert_uploaded_with_limits(3, image_outputs(1, 1, 0.3), 2, usize::MAX);
+
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(1).is_none());
+        assert!(cache.get(2).is_some());
+        assert!(cache.get(3).is_some());
+    }
+
+    #[test]
+    fn uploaded_sequence_cache_evicts_old_frames_by_byte_budget() {
+        let mut cache = SeqFrameCache::new(FRAME_CACHE_SIZE);
+        let one_frame_bytes = image_outputs(2, 1, 0.1)
+            .values()
+            .map(image_byte_size)
+            .sum::<usize>();
+
+        cache.insert_uploaded_with_limits(1, image_outputs(2, 1, 0.1), 8, one_frame_bytes * 2);
+        cache.insert_uploaded_with_limits(2, image_outputs(2, 1, 0.2), 8, one_frame_bytes * 2);
+        cache.insert_uploaded_with_limits(3, image_outputs(2, 1, 0.3), 8, one_frame_bytes * 2);
+
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(1).is_none());
+        assert!(cache.get(2).is_some());
+        assert!(cache.get(3).is_some());
+    }
+
+    #[test]
+    fn uploaded_sequence_cache_keeps_current_frame_over_budget() {
+        let mut cache = SeqFrameCache::new(FRAME_CACHE_SIZE);
+        cache.insert_uploaded_with_limits(1, image_outputs(4, 4, 0.1), 8, 1);
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(1).is_some());
+    }
+
+    #[test]
+    fn directory_sequence_cache_uses_count_limit() {
+        let mut cache = SeqFrameCache::new(2);
+        cache.insert(1, image_outputs(1, 1, 0.1));
+        cache.insert(2, image_outputs(1, 1, 0.2));
+        cache.insert(3, image_outputs(1, 1, 0.3));
+
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(1).is_none());
+        assert!(cache.get(2).is_some());
+        assert!(cache.get(3).is_some());
     }
 }

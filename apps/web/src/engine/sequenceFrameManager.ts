@@ -4,11 +4,14 @@ interface SequenceEntry {
   files: File[];
   frameNumbers: number[];
   byteCache: Map<number, Uint8Array>;
+  byteCacheBytes: number;
+  inflightReads: Map<number, Promise<Uint8Array | null>>;
 }
 
 const MAX_BYTE_CACHE_SIZE = 32;
+const MAX_BYTE_CACHE_BYTES = 128 * 1024 * 1024;
 
-function inferFrameNumber(filename: string): number | null {
+export function inferFrameNumber(filename: string): number | null {
   const numericRuns = [...filename.matchAll(/\d+/g)];
   if (numericRuns.length === 0) return null;
 
@@ -21,7 +24,7 @@ function inferFrameNumber(filename: string): number | null {
   return parseInt(best[0], 10);
 }
 
-function inferPattern(filename: string): string {
+export function inferPattern(filename: string): string {
   const numericRuns = [...filename.matchAll(/\d+/g)];
   if (numericRuns.length === 0) return filename;
 
@@ -41,7 +44,7 @@ function inferPattern(filename: string): string {
   );
 }
 
-class SequenceFrameManager {
+export class SequenceFrameManager {
   private sequences = new Map<string, SequenceEntry>();
 
   setFiles(nodeId: string, files: File[]): { info: SequenceInfo; pattern: string } {
@@ -61,6 +64,8 @@ class SequenceFrameManager {
       files: validFiles,
       frameNumbers,
       byteCache: new Map(),
+      byteCacheBytes: 0,
+      inflightReads: new Map(),
     });
 
     const pattern = validFiles.length > 0 ? inferPattern(validFiles[0].name) : '{frame:4}.png';
@@ -81,6 +86,33 @@ class SequenceFrameManager {
     if (!entry) return null;
 
     const cached = entry.byteCache.get(frame);
+    if (cached) {
+      entry.byteCache.delete(frame);
+      entry.byteCache.set(frame, cached);
+      return cached;
+    }
+
+    const inflight = entry.inflightReads.get(frame);
+    if (inflight) return inflight;
+
+    const readPromise = this.readFrameData(entry, frame)
+      .finally(() => {
+        entry.inflightReads.delete(frame);
+      });
+    entry.inflightReads.set(frame, readPromise);
+    return readPromise;
+  }
+
+  async prefetchFrames(nodeId: string, startFrame: number, count: number): Promise<void> {
+    const reads: Array<Promise<Uint8Array | null>> = [];
+    for (let offset = 0; offset < count; offset += 1) {
+      reads.push(this.getFrameData(nodeId, startFrame + offset));
+    }
+    await Promise.allSettled(reads);
+  }
+
+  private async readFrameData(entry: SequenceEntry, frame: number): Promise<Uint8Array | null> {
+    const cached = entry.byteCache.get(frame);
     if (cached) return cached;
 
     const idx = entry.frameNumbers.indexOf(frame);
@@ -90,15 +122,32 @@ class SequenceFrameManager {
     const buffer = await file.arrayBuffer();
     const data = new Uint8Array(buffer);
 
-    if (entry.byteCache.size >= MAX_BYTE_CACHE_SIZE) {
-      const oldest = entry.byteCache.keys().next().value;
-      if (oldest !== undefined) {
-        entry.byteCache.delete(oldest);
-      }
-    }
-    entry.byteCache.set(frame, data);
+    this.insertCachedBytes(entry, frame, data);
 
     return data;
+  }
+
+  private insertCachedBytes(entry: SequenceEntry, frame: number, data: Uint8Array): void {
+    const existing = entry.byteCache.get(frame);
+    if (existing) {
+      entry.byteCacheBytes -= existing.byteLength;
+      entry.byteCache.delete(frame);
+    }
+
+    entry.byteCache.set(frame, data);
+    entry.byteCacheBytes += data.byteLength;
+
+    while (entry.byteCache.size > 1
+      && (entry.byteCache.size > MAX_BYTE_CACHE_SIZE
+        || entry.byteCacheBytes > MAX_BYTE_CACHE_BYTES)) {
+      const oldest = entry.byteCache.keys().next().value;
+      if (oldest === undefined || oldest === frame) break;
+      const evicted = entry.byteCache.get(oldest);
+      if (evicted) {
+        entry.byteCacheBytes -= evicted.byteLength;
+      }
+      entry.byteCache.delete(oldest);
+    }
   }
 
   hasSequence(nodeId: string): boolean {

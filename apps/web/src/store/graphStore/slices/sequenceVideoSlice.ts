@@ -113,7 +113,9 @@ export const createSequenceVideoSlice: StateCreator<
 
     setSequenceFiles: async (nodeId, files) => {
       const eng = getEngine();
-      const { info, pattern } = sequenceFrameManager.setFiles(nodeId, files);
+      const { info, pattern } = eng.registerSequenceFiles
+        ? await eng.registerSequenceFiles(nodeId, files)
+        : sequenceFrameManager.setFiles(nodeId, files);
 
       if (eng.setSequenceInfo) {
         await eng.setSequenceInfo(nodeId, info);
@@ -122,10 +124,17 @@ export const createSequenceVideoSlice: StateCreator<
       await get().setParam(nodeId, 'pattern', { String: pattern } as ParamValue);
 
       if (info.frame_count > 0) {
-        const frameData = await sequenceFrameManager.getFrameData(nodeId, info.first_frame);
-        if (frameData && eng.loadSequenceFrameData) {
-          const change = await eng.loadSequenceFrameData(nodeId, info.first_frame, frameData);
-          get().applyNodeInterfaceChange(nodeId, change);
+        if (eng.prepareSequenceFrame) {
+          const change = await eng.prepareSequenceFrame(nodeId, info.first_frame);
+          if (change) {
+            get().applyNodeInterfaceChange(nodeId, change);
+          }
+        } else if (eng.loadSequenceFrameData) {
+          const frameData = await sequenceFrameManager.getFrameData(nodeId, info.first_frame);
+          if (frameData) {
+            const change = await eng.loadSequenceFrameData(nodeId, info.first_frame, frameData);
+            get().applyNodeInterfaceChange(nodeId, change);
+          }
         }
       }
 
@@ -220,6 +229,9 @@ export const createSequenceVideoSlice: StateCreator<
 
           const { currentFrame: cur } = get();
           const next = cur + 1;
+          const prefetchStart = next > endFrame
+            ? (loopPlayback ? seqStart : null)
+            : next;
 
           if (next > endFrame) {
             if (loopPlayback) {
@@ -235,6 +247,9 @@ export const createSequenceVideoSlice: StateCreator<
           const renderTime = performance.now() - frameStart;
           const remaining = interval - renderTime;
           if (remaining > 0) {
+            if (prefetchStart !== null) {
+              get().prefetchSequenceFrames(prefetchStart, 2);
+            }
             await new Promise<void>(resolve => {
               kernel.playbackTimeoutId = setTimeout(resolve, remaining);
             });

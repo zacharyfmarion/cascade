@@ -121,6 +121,7 @@ const EXPECTED_KEYS: string[] = [
   'newProject',
   'pause',
   'play',
+  'prefetchSequenceFrames',
   'pushSequenceFrames',
   'pushToast',
   'pushUndo',

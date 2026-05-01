@@ -3,9 +3,10 @@
 type WasmModule = typeof import('../wasm-pkg/cascade_wasm');
 type EngineInstance = InstanceType<WasmModule['Engine']>;
 import * as Comlink from 'comlink';
-import type { AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange } from './bridge';
+import type { AddNodeResult, ColorManagementInfo, EditValidationError, NodeInterfaceChange, SequenceInfo } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, InternalGraphNode } from '../store/types';
 import { extractParamValue } from '../store/types';
+import { SequenceFrameManager } from './sequenceFrameManager';
 import {
   collectViewerResultTransferables,
   decodeViewerResult,
@@ -75,6 +76,8 @@ let engine: any = null;
 let wasmModule: WasmModule | null = null;
 let initPromise: Promise<void> | null = null;
 let lastTimings: Record<string, number> = {};
+const workerSequenceFrames = new SequenceFrameManager();
+const sequencePrefetchGenerations = new Map<string, number>();
 
 type WasmEngineGroupNode = {
   id: string;
@@ -647,6 +650,48 @@ const engineAPI = {
 
   loadVideoFile(_nodeId: string, _path: string): Promise<never> {
     return Promise.reject(new Error('Video loading is not supported in WASM engine'));
+  },
+
+  registerSequenceFiles(nodeId: string, files: File[]): Promise<{ info: SequenceInfo; pattern: string }> {
+    sequencePrefetchGenerations.set(nodeId, (sequencePrefetchGenerations.get(nodeId) ?? 0) + 1);
+    return Promise.resolve(workerSequenceFrames.setFiles(nodeId, files));
+  },
+
+  async prepareSequenceFrame(nodeId: string, frame: number): Promise<NodeInterfaceChange | null> {
+    sequencePrefetchGenerations.set(nodeId, (sequencePrefetchGenerations.get(nodeId) ?? 0) + 1);
+    const data = await workerSequenceFrames.getFrameData(nodeId, frame);
+    if (!data) return null;
+    return scheduler.enqueue(() => {
+      return getEngineWithBindings().load_sequence_frame_data(nodeId, BigInt(frame), data);
+    });
+  },
+
+  prefetchSequenceFrames(nodeId: string, startFrame: number, count: number): Promise<void> {
+    const generation = (sequencePrefetchGenerations.get(nodeId) ?? 0) + 1;
+    sequencePrefetchGenerations.set(nodeId, generation);
+
+    void (async () => {
+      for (let offset = 0; offset < count; offset += 1) {
+        if (sequencePrefetchGenerations.get(nodeId) !== generation) return;
+        const frame = startFrame + offset;
+        const data = await workerSequenceFrames.getFrameData(nodeId, frame);
+        if (!data || sequencePrefetchGenerations.get(nodeId) !== generation) return;
+        await scheduler.enqueue(() => {
+          if (sequencePrefetchGenerations.get(nodeId) !== generation) return null;
+          return getEngineWithBindings().load_sequence_frame_data(nodeId, BigInt(frame), data);
+        });
+      }
+    })().catch((error) => {
+      console.warn('[WASM] Sequence prefetch failed:', error);
+    });
+
+    return Promise.resolve();
+  },
+
+  clearSequenceFiles(nodeId: string): Promise<void> {
+    sequencePrefetchGenerations.set(nodeId, (sequencePrefetchGenerations.get(nodeId) ?? 0) + 1);
+    workerSequenceFrames.clear(nodeId);
+    return Promise.resolve();
   },
 
   loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange> {

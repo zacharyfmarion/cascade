@@ -70,7 +70,10 @@ export const createUndoSlice: StateCreator<
 
     for (const [nodeId, node] of snapshot.nodes) {
       if (node.typeId !== 'load_image_sequence') continue;
-      if (sequenceFrameManager.hasSequence(nodeId)) {
+      if (eng.prepareSequenceFrame) {
+        const frame = get().currentFrame;
+        await eng.prepareSequenceFrame(nodeId, frame);
+      } else if (sequenceFrameManager.hasSequence(nodeId)) {
         const frame = get().currentFrame;
         const data = await sequenceFrameManager.getFrameData(nodeId, frame);
         if (data && eng.loadSequenceFrameData) {

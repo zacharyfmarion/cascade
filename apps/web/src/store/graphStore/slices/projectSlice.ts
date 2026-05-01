@@ -7,6 +7,7 @@ import { createDocumentEnvelope, extractFrames, extractGraphData, getEngine, isT
 import type { SerializableGraphData } from '../kernel';
 import { hydrateRootGraphFromEngine } from '../hydration';
 import { syncAllCommitted } from '../nodeDraftStore';
+import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { dslShadowMatchesGraph, graphSemanticHash, hydrateDslShadowMetadata, serializeDslShadowMetadata } from '../../../ai/dsl/shadow';
 import { createBundledProjectBlob, readCascadeProjectFile } from '../projectPackage';
 import { collectProjectAssets, hasAssetBackedNodes, type ProjectAssetRecord, type ProjectAssetStorage } from '../assetReferences';
@@ -73,6 +74,7 @@ export const createProjectSlice: StateCreator<
     kernel.undoStack.length = 0;
     kernel.redoStack.length = 0;
     stopPlayback();
+    sequenceFrameManager.clearAll();
 
     set({
       frames,
@@ -94,6 +96,18 @@ export const createProjectSlice: StateCreator<
       aiNodeStatuses: {},
       aiNodeStale: {},
     });
+  };
+
+  const clearWorkerSequenceFiles = async () => {
+    const eng = getEngine();
+    if (!eng.clearSequenceFiles) return;
+    const clears: Promise<void>[] = [];
+    for (const [nodeId, node] of get().nodes) {
+      if (node.typeId === 'load_image_sequence') {
+        clears.push(Promise.resolve(eng.clearSequenceFiles(nodeId)));
+      }
+    }
+    await Promise.all(clears);
   };
 
   const projectNameFromPath = (path: string): string => {
@@ -369,6 +383,7 @@ export const createProjectSlice: StateCreator<
     }
 
     const graphData = extractGraphData(data);
+    await clearWorkerSequenceFiles();
     if (eng.importDocument) {
       await eng.importDocument(data);
     } else {
@@ -385,6 +400,7 @@ export const createProjectSlice: StateCreator<
     if (!eng.loadProject) {
       throw makeEngineError('Project loading is only available in the desktop app');
     }
+    await clearWorkerSequenceFiles();
     const loaded = await eng.loadProject(path);
     resetProjectRuntimeState(frameMapFromProjectData((loaded as Record<string, unknown>) ?? {}));
     await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
@@ -449,6 +465,7 @@ export const createProjectSlice: StateCreator<
     newProject: async () => {
       const eng = getEngine();
       const emptyGraph = { nodes: [], connections: [] };
+      await clearWorkerSequenceFiles();
       if (eng.importDocument) {
         await eng.importDocument(emptyGraph);
       } else {
