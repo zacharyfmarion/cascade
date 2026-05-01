@@ -95,6 +95,7 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
   - `./scripts/release.sh prepare <version>`
   - `./scripts/release.sh publish <version>`
 - The script defaults to `RELEASE_GITHUB_REPO=zacharyfmarion/cascade` and `RELEASE_REMOTE=cascade` so release work does not depend on `origin`.
+- `publish` must run on a local Mac. It builds, signs, notarizes, staples, verifies, uploads, and Homebrew-publishes the DMG locally using `.env.release.local` when present. GitHub Actions validates release tags only and must not be used for DMG building.
 - Release notes should use `### Added`, `### Changed`, and `### Fixed` sections unless the user explicitly wants a different format.
 
 ### Adding a new node

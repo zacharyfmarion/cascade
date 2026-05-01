@@ -45,11 +45,15 @@ Prepare the release PR:
 ./scripts/release.sh prepare 0.10.0
 ```
 
-After that PR is merged to `main`, publish the release:
+After that PR is merged to `main`, publish the release from a local Mac:
 
 ```bash
 ./scripts/release.sh publish 0.10.0
 ```
+
+`publish` now builds, signs, notarizes, staples, and verifies the macOS DMG
+locally before pushing the tag. After the tag is pushed, it creates or updates
+the GitHub Release and updates the Homebrew cask from the same local artifacts.
 
 For automation, `prepare` also supports non-interactive changelog input:
 
@@ -89,15 +93,50 @@ The `publish` command will:
 5. Verify the tagged commit contains matching release versions in the tracked
    version files.
 6. Verify `CHANGELOG.md` contains a non-empty `X.Y.Z` entry.
-7. Create and push only the annotated tag `vX.Y.Z`.
+7. Build signed and notarized local macOS artifacts from the verified merge
+   commit in a temporary worktree.
+8. Create and push the annotated tag `vX.Y.Z`.
+9. Create or update the GitHub Release using the matching `CHANGELOG.md` entry
+   as the release body.
+10. Update the Homebrew cask in `zacharyfmarion/homebrew-cascade`.
 
-Pushing that tag triggers GitHub Actions to:
+GitHub Actions now validates release tags only. It intentionally does not build
+DMGs or use Apple-hosted runners.
 
-1. Validate the tagged commit.
-2. Build and notarize macOS DMGs for Apple Silicon and Intel.
-3. Create the GitHub Release using the matching `CHANGELOG.md` entry as the
-   release body.
-4. Update the Homebrew cask in `zacharyfmarion/homebrew-cascade`.
+Useful `publish` options:
+
+```bash
+./scripts/release.sh publish 0.10.0 --env-file .env.release.local
+./scripts/release.sh publish 0.10.0 --skip-deps
+./scripts/release.sh publish 0.10.0 --skip-homebrew
+./scripts/release.sh publish 0.10.0 --skip-local-build
+```
+
+Use `--skip-local-build` only for recovery. It pushes the verified tag without
+creating release artifacts, then prints the local command needed to finish.
+
+### Local macOS Artifact Builder
+
+`scripts/local-macos-release.sh` is the lower-level local equivalent of the old
+macOS GitHub Actions build job.
+
+```bash
+./scripts/local-macos-release.sh build 0.10.0 --source-ref v0.10.0
+./scripts/local-macos-release.sh publish-artifacts 0.10.0 --source-ref v0.10.0
+./scripts/local-macos-release.sh all 0.10.0 --source-ref v0.10.0
+```
+
+The script:
+
+1. Creates a temporary Git worktree at the requested release ref.
+2. Installs required Rust targets/tooling unless `--skip-deps` is passed.
+3. Runs `yarn install --immutable`.
+4. Builds the WASM bundles.
+5. Builds the signed Tauri app bundle.
+6. Creates, signs, notarizes, staples, mounts, and verifies the DMG.
+7. Writes versioned and stable artifacts to
+   `target/release-artifacts/vX.Y.Z/`.
+8. Uploads artifacts to GitHub Releases and updates Homebrew when requested.
 
 ### Example Release Notes Format
 
@@ -119,18 +158,27 @@ When prompted for release notes, use Markdown in this shape:
 
 ### Production Release Secrets
 
-The tag-driven GitHub Actions release workflow expects these repository secrets:
+Local release secrets should live in `.env.release.local`, copied from
+`.env.release.example`. That file is ignored and should be populated from your
+password manager before a local publish.
 
-- `APPLE_CERTIFICATE`
-- `APPLE_CERTIFICATE_PASSWORD`
+Required values:
+
 - `APPLE_SIGNING_IDENTITY`
 - `APPLE_ID`
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
 - `HOMEBREW_TAP_TOKEN`
 
+Optional values, only needed when the Developer ID certificate is not already
+installed in the local login keychain:
+
+- `APPLE_CERTIFICATE`
+- `APPLE_CERTIFICATE_PASSWORD`
+
 These releases are intended for **public GA distribution**, not ad-hoc local
-desktop bundles.
+desktop bundles. Do not commit `.env.release.local` or paste these secrets into
+release notes, PRs, or CI logs.
 
 ### Troubleshooting
 
