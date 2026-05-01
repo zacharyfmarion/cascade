@@ -3,7 +3,6 @@ import type { GraphState } from '../store';
 import type { ParamValue } from '../../types';
 import { getEngine, markGraphMutation } from '../kernel';
 import { assetUriFromHash } from '../assetReferences';
-import { isDesktopRuntime } from '../../../platform/runtime';
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
   let binary = '';
@@ -71,10 +70,11 @@ export const createAssetsSlice: StateCreator<
 
   loadImageFile: (nodeId, file) => {
     file.arrayBuffer().then(async buffer => {
-      const data = new Uint8Array(buffer);
-      const hash = await hashBytes(data);
+      const assetBytes = new Uint8Array(buffer);
+      const engineBytes = new Uint8Array(assetBytes);
+      const hash = await hashBytes(assetBytes);
       const uri = assetUriFromHash(hash);
-      const change = await getEngine().loadImageData(nodeId, data);
+      const change = await getEngine().loadImageData(nodeId, engineBytes);
       get().applyNodeInterfaceChange(nodeId, change);
       const newNodes = new Map(get().nodes);
       const node = newNodes.get(nodeId);
@@ -91,7 +91,7 @@ export const createAssetsSlice: StateCreator<
           source: 'embedded',
           uri,
           hash,
-          data: bytesToBase64(data),
+          data: bytesToBase64(assetBytes),
           original_filename: file.name,
         },
       };
@@ -99,7 +99,7 @@ export const createAssetsSlice: StateCreator<
       set({
         nodes: newNodes,
         projectAssets,
-        currentProjectAssetStorage: get().currentProjectAssetStorage ?? (isDesktopRuntime() ? null : 'bundled'),
+        currentProjectAssetStorage: get().currentProjectAssetStorage,
         dirty: true,
       });
       get().refreshDslShadowFromGraph();

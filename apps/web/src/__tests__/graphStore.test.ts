@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import JSZip from 'jszip';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
@@ -961,6 +962,71 @@ describe('graphStore project hydration', () => {
     expect(saved).toBe(false);
     expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
     expect(saveProject).not.toHaveBeenCalled();
+  });
+
+  it('web file-object image loads prompt on first save and preserve asset bytes after worker transfer', async () => {
+    const originalLoadImageData = mockEngine.loadImageData;
+    mockEngine.loadImageData = (nodeId, data) => {
+      const transferred = structuredClone(data, { transfer: [data.buffer] });
+      expect(data.byteLength).toBe(0);
+      return originalLoadImageData(nodeId, transferred);
+    };
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+
+    useGraphStore.getState().loadImageFile(load, new File([new Uint8Array([1, 2, 3, 4])], 'plate.png'));
+    await flushPromises(5);
+
+    expect(useGraphStore.getState().currentProjectAssetStorage).toBeNull();
+    expect(useGraphStore.getState().projectAssets[load]?.data).toBe('AQIDBA==');
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
+  });
+
+  it('web Save Bundled Copy writes non-empty uploaded image assets', async () => {
+    const originalLoadImageData = mockEngine.loadImageData;
+    mockEngine.loadImageData = (nodeId, data) => {
+      const transferred = structuredClone(data, { transfer: [data.buffer] });
+      return originalLoadImageData(nodeId, transferred);
+    };
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    useGraphStore.setState({ currentProjectName: 'web_bundle' });
+    useGraphStore.getState().loadImageFile(load, new File([new Uint8Array([5, 6, 7, 8])], 'plate.png'));
+    await flushPromises(5);
+
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      blobs.push(blob as Blob);
+      return 'blob:cascade-bundled-project';
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveBundledProject();
+
+      expect(saved).toBe(true);
+      expect(blobs).toHaveLength(1);
+      expect(link.download).toBe('web_bundle.casc');
+      const zip = await JSZip.loadAsync(await blobs[0].arrayBuffer());
+      const manifest = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
+        assets: Record<string, { path: string; hash: string; uri: string }>;
+        graph: { nodes: Array<{ id: string; params: Record<string, { String?: string }> }> };
+      };
+      const asset = manifest.assets[load];
+      expect(asset.path).toMatch(/^assets\/[a-f0-9]{64}\.png$/);
+      expect(asset.uri).toBe(`asset://sha256/${asset.hash}`);
+      expect(await zip.file(asset.path)!.async('uint8array')).toEqual(new Uint8Array([5, 6, 7, 8]));
+      expect(manifest.graph.nodes.find(node => node.id === load)?.params.path.String).toBe(asset.uri);
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
   });
 
   it('project asset storage setting marks the project dirty and warns when internal refs remain external', async () => {
