@@ -7,6 +7,7 @@ import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { pendingImageFiles } from './pendingImageFiles';
 import { isDesktopRuntime } from '../../platform/runtime';
+import { findAssetByUri, isAssetUri, type ProjectAssetRecord } from '../../store/graphStore/assetReferences';
 
 type NodeData = {
   label: string;
@@ -17,7 +18,19 @@ type NodeData = {
 const getStringParam = (value: ParamValue | undefined): string | null =>
   value && 'String' in value && value.String ? value.String : null;
 
-const getImagePathDisplayName = (path: string): string => {
+const assetDisplayName = (asset: ProjectAssetRecord | undefined): string | null => {
+  const name = asset?.original_filename?.trim();
+  return name || null;
+};
+
+const getImagePathDisplayName = (
+  path: string,
+  projectAssets: Record<string, ProjectAssetRecord>,
+): string => {
+  if (isAssetUri(path)) {
+    const asset = findAssetByUri(projectAssets, path)?.[1];
+    return assetDisplayName(asset) ?? 'Bundled image';
+  }
   const normalized = path.replace(/^file:\/\//, '').replace(/\\/g, '/');
   const name = normalized.split('/').filter(Boolean).pop();
   return name || path;
@@ -33,6 +46,7 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
   const loadImageFile = useGraphStore(s => s.loadImageFile);
   const loadImagePath = useGraphStore(s => s.loadImagePath);
   const getImageData = useGraphStore(s => s.getImageData);
+  const projectAssets = useGraphStore(s => s.projectAssets);
   const data = props.data as NodeData;
   const imagePath = getStringParam(data.params.path);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -57,7 +71,7 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
   useEffect(() => {
     if (!imagePath) return;
     let cancelled = false;
-    const name = getImagePathDisplayName(imagePath);
+    const name = getImagePathDisplayName(imagePath, projectAssets);
     setFileName(name);
     getImageData(props.id).then(bytes => {
       if (cancelled) return;
@@ -68,7 +82,7 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
       setThumbnail(createThumbnailUrl(bytes, name));
     });
     return () => { cancelled = true; };
-  }, [props.id, getImageData, imagePath]);
+  }, [props.id, getImageData, imagePath, projectAssets]);
 
   // Recover thumbnail from engine for embedded images (e.g. after undo/redo)
   useEffect(() => {
@@ -115,11 +129,11 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
             filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'exr'] }],
           });
           if (!selected || Array.isArray(selected)) return;
-          setFileName(getImagePathDisplayName(selected));
+          setFileName(getImagePathDisplayName(selected, projectAssets));
           await loadImagePath(props.id, selected);
           const bytes = await getImageData(props.id);
           if (bytes) {
-            setThumbnail(createThumbnailUrl(bytes, getImagePathDisplayName(selected)));
+            setThumbnail(createThumbnailUrl(bytes, getImagePathDisplayName(selected, projectAssets)));
           }
         } catch (err) {
           console.error('Failed to open image:', err);
@@ -128,7 +142,7 @@ export const ImageInputNode: React.FC<NodeProps> = (props) => {
       return;
     }
     fileInputRef.current?.click();
-  }, [getImageData, loadImagePath, props.id]);
+  }, [getImageData, loadImagePath, projectAssets, props.id]);
 
   const onFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
