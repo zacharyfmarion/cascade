@@ -141,11 +141,20 @@ export const createProjectSlice: StateCreator<
     const projectRecord = projectDoc as Record<string, unknown>;
     const state = get();
     projectRecord.asset_storage = state.currentProjectAssetStorage ?? undefined;
-    if (Object.keys(state.projectAssets).length > 0) {
-      projectRecord.assets = {
-        ...(typeof projectRecord.assets === 'object' && projectRecord.assets !== null ? projectRecord.assets : {}),
-        ...state.projectAssets,
+    const exportedAssets = collectProjectAssets(projectRecord.assets);
+    const retainedAssets = state.projectAssets;
+    if (Object.keys(exportedAssets).length > 0 || Object.keys(retainedAssets).length > 0) {
+      const mergedAssets: Record<string, ProjectAssetRecord> = {
+        ...retainedAssets,
+        ...exportedAssets,
       };
+      for (const [key, asset] of Object.entries(mergedAssets)) {
+        const retained = retainedAssets[key];
+        if (retained?.original_filename && !asset.original_filename) {
+          mergedAssets[key] = { ...asset, original_filename: retained.original_filename };
+        }
+      }
+      projectRecord.assets = mergedAssets;
     }
     const framesArray = Array.from(state.frames.values());
     if (framesArray.length > 0) {

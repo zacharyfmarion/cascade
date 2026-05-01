@@ -10,6 +10,7 @@ Make web project saving use the only browser-realistic asset behavior: save port
 - Show read-only web asset storage status in Project settings instead of the desktop dropdown.
 - Preserve a non-transferred copy of uploaded image bytes before sending image data to the worker.
 - Use the preserved project asset bytes when saving bundled web projects.
+- Prefer freshly exported runtime asset bytes over retained project metadata so regenerated AI outputs replace older saved results.
 - Add regression tests for web menu visibility, no-prompt save behavior, Project settings, and non-empty bundled image assets.
 
 ## Affected Areas
@@ -28,5 +29,6 @@ Make web project saving use the only browser-realistic asset behavior: save port
 - [x] Auto-bundle asset-backed web saves.
 - [x] Hide web `Save Bundled Copy...` menu item.
 - [x] Make Project settings read-only for web asset storage.
+- [x] Prefer latest runtime AI result bytes when saving.
 - [x] Add regression coverage for web menu, settings, no-prompt save, and bundled bytes.
 - [x] Run focused frontend validation.

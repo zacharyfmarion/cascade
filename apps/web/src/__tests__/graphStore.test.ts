@@ -1043,6 +1043,72 @@ describe('graphStore project hydration', () => {
     }
   });
 
+  it('web Save packs the latest exported AI result over retained project asset data', async () => {
+    const ai = await useGraphStore.getState().addNode('ai_generate_image', { x: 0, y: 0 });
+    useGraphStore.setState({
+      currentProjectName: 'ai_regenerated',
+      projectAssets: {
+        [ai]: {
+          type: 'ai_result',
+          source: 'embedded',
+          data: btoa('first-result'),
+          original_filename: '',
+          hash: '',
+        },
+      },
+    });
+    mockEngine.exportDocument = async () => ({
+      cascade: { format_version: '1.4.0' },
+      graph: {
+        nodes: [{
+          id: ai,
+          type_id: 'ai_generate_image',
+          params: {},
+          input_defaults: {},
+          position: [0, 0],
+          muted: false,
+        }],
+        connections: [],
+        group_definitions: [],
+      },
+      assets: {
+        [ai]: {
+          type: 'ai_result',
+          source: 'embedded',
+          data: btoa('second-result'),
+          original_filename: '',
+          hash: '',
+        },
+      },
+    });
+
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      blobs.push(blob as Blob);
+      return 'blob:cascade-ai-regenerated';
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveProject();
+
+      expect(saved).toBe(true);
+      const zip = await JSZip.loadAsync(await blobs[0].arrayBuffer());
+      const manifest = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
+        assets: Record<string, { path: string }>;
+      };
+      const asset = manifest.assets[ai];
+      expect(await zip.file(asset.path)!.async('uint8array')).toEqual(new TextEncoder().encode('second-result'));
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
   it('project asset storage setting marks the project dirty and warns when internal refs remain external', async () => {
     const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
     const uri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
