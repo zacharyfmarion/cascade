@@ -360,6 +360,19 @@ const inputPortToParamSpec = (port: PortSpec): ParamSpec | null => {
   };
 };
 
+const isSyntheticParamInput = (portSpec: PortSpec, paramSpec: ParamSpec | undefined): boolean => {
+  if (!paramSpec) return false;
+  return isConnectableParam(paramSpec)
+    && portSpec.name === paramSpec.key
+    && portSpec.label === paramSpec.label
+    && portSpec.ty === paramSpec.ty
+    && JSON.stringify(portSpec.default) === JSON.stringify(paramSpec.default)
+    && portSpec.min === paramSpec.min
+    && portSpec.max === paramSpec.max
+    && portSpec.step === paramSpec.step
+    && JSON.stringify(portSpec.ui_hint) === JSON.stringify(paramSpec.ui_hint);
+};
+
 const formatInputDefaultEntry = (
   typeId: string,
   portSpec: PortSpec,
@@ -792,8 +805,10 @@ export function serializeGraph(input: SerializerInput): string {
           .filter(connection => connection.toNode === node.id)
           .map(connection => connection.toPort),
       );
-      const paramKeys = new Set(spec.params.map(param => param.key));
+      const paramByKey = new Map(spec.params.map(param => [param.key, param]));
+      const paramKeys = new Set(paramByKey.keys());
       for (const inputSpec of spec.inputs) {
+        if (isSyntheticParamInput(inputSpec, paramByKey.get(inputSpec.name))) continue;
         if (connectedInputs.has(inputSpec.name)) continue;
         const value = node.inputDefaults[inputSpec.name];
         if (!value || JSON.stringify(value) === JSON.stringify(inputSpec.default)) continue;

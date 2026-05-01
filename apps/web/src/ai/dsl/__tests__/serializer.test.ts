@@ -600,6 +600,78 @@ describe('serializeGraph', () => {
     expect(output).toBe(graph(['collision1 = CollisionNode(input.amount: 3.0, amount: 2.0)']));
   });
 
+  it('does not duplicate input defaults for all_inputs param mirrors', () => {
+    const differenceMatteSpec: NodeSpec = {
+      id: 'gpu_kernel::difference_matte',
+      display_name: 'Difference Matte',
+      category: 'Matte',
+      description: 'Generate matte from difference between footage and clean plate',
+      inputs: [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'clean_plate', label: 'Clean Plate', ty: 'Image' },
+        {
+          name: 'tolerance',
+          label: 'Tolerance',
+          ty: 'Float',
+          default: { Float: 0.1 },
+          min: 0,
+          max: 1,
+          step: 0.01,
+          ui_hint: { type: 'Slider' },
+        },
+        {
+          name: 'softness',
+          label: 'Softness',
+          ty: 'Float',
+          default: { Float: 0.1 },
+          min: 0,
+          max: 1,
+          step: 0.01,
+          ui_hint: { type: 'Slider' },
+        },
+      ],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      params: [
+        {
+          key: 'tolerance',
+          label: 'Tolerance',
+          ty: 'Float',
+          default: { Float: 0.1 },
+          min: 0,
+          max: 1,
+          step: 0.01,
+          ui_hint: { type: 'Slider' },
+          promotable: true,
+        },
+        {
+          key: 'softness',
+          label: 'Softness',
+          ty: 'Float',
+          default: { Float: 0.1 },
+          min: 0,
+          max: 1,
+          step: 0.01,
+          ui_hint: { type: 'Slider' },
+          promotable: true,
+        },
+      ],
+    };
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'difference-node',
+      makeNodeInstance({
+        id: 'difference-node',
+        typeId: 'gpu_kernel::difference_matte',
+        params: { tolerance: { Float: 0.65 }, softness: { Float: 0.7 } },
+        inputDefaults: { tolerance: { Float: 0.65 }, softness: { Float: 0.7 } },
+      })
+    );
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], [...mockSpecs, differenceMatteSpec]));
+    expect(output).toBe(graph(['difference1 = DifferenceMatte(tolerance: 0.65, softness: 0.7)']));
+    expect(output).not.toContain('input.tolerance');
+    expect(output).not.toContain('input.softness');
+  });
+
   it('does not add blank line when no connections', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set(
