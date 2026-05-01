@@ -58,6 +58,41 @@ const NODE_SPECS: NodeSpec[] = [
     ],
   },
   {
+    id: 'math',
+    display_name: 'Math',
+    category: 'Utility',
+    description: 'Apply math operations on float values',
+    inputs: [
+      { name: 'a', label: 'A', ty: 'Float', default: { Float: 0 }, step: 0.01, ui_hint: { type: 'NumberInput' } },
+      { name: 'b', label: 'B', ty: 'Float', default: { Float: 0 }, step: 0.01, ui_hint: { type: 'NumberInput' } },
+    ],
+    outputs: [{ name: 'value', label: 'Value', ty: 'Float' }],
+    params: [
+      {
+        key: 'operation',
+        label: 'Operation',
+        ty: 'Int',
+        default: { Int: 0 },
+        min: 0,
+        max: 13,
+        step: 1,
+        ui_hint: {
+          type: 'Dropdown',
+          data: ['Add', 'Subtract', 'Multiply', 'Divide', 'Power', 'Min', 'Max', 'Abs', 'Greater Than', 'Less Than', 'Clamp', 'Step', 'Smooth Step', 'Lerp'],
+        },
+        promotable: false,
+      },
+      {
+        key: 'clamp_result',
+        label: 'Clamp Result',
+        ty: 'Bool',
+        default: { Bool: false },
+        ui_hint: { type: 'Checkbox' },
+        promotable: false,
+      },
+    ],
+  },
+  {
     id: 'gaussian_blur',
     display_name: 'Gaussian Blur',
     category: 'Filter',

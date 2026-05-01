@@ -1,4 +1,4 @@
-import type { NodeSpec, ParamSpec, ValueType } from '../../store/types';
+import type { NodeSpec, ParamDefault, ParamSpec, PortSpec, UiHint, ValueType } from '../../store/types';
 import type {
   DslAst,
   DslCustomNodeDefinition,
@@ -124,6 +124,41 @@ const getParamSpec = (node: DslNode, spec: NodeSpec, key: string): ParamSpec | u
   return spec.params.find(param => param.key === key);
 };
 
+const INPUT_DEFAULT_TYPES = new Set<ValueType>(['Float', 'Int', 'Bool', 'Color', 'String']);
+
+const fallbackDefaultForInputType = (ty: ValueType): ParamDefault => {
+  switch (ty) {
+    case 'Float': return { Float: 0 };
+    case 'Int': return { Int: 0 };
+    case 'Bool': return { Bool: false };
+    case 'Color': return { Color: [0, 0, 0, 1] };
+    default: return { String: '' };
+  }
+};
+
+const uiHintForInputType = (ty: ValueType): UiHint => {
+  switch (ty) {
+    case 'Bool': return { type: 'Checkbox' };
+    case 'Color': return { type: 'ColorPicker' };
+    case 'String': return { type: 'TextArea' };
+    default: return { type: 'NumberInput' };
+  }
+};
+
+const inputPortToParamSpec = (port: PortSpec): ParamSpec | null => {
+  if (!INPUT_DEFAULT_TYPES.has(port.ty)) return null;
+  return {
+    key: port.name,
+    label: port.label,
+    ty: port.ty,
+    default: port.default ?? fallbackDefaultForInputType(port.ty),
+    min: port.min,
+    max: port.max,
+    step: port.step,
+    ui_hint: port.ui_hint ?? uiHintForInputType(port.ty),
+    promotable: true,
+  };
+};
 
 const addError = (errors: ValidationError[], error: ValidationError) => {
   errors.push(error);
@@ -201,6 +236,45 @@ const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationErr
   }
 };
 
+const validateNodeInputDefaults = (node: DslNode, spec: NodeSpec, errors: ValidationError[]) => {
+  const validKeys = spec.inputs
+    .filter(input => inputPortToParamSpec(input) !== null)
+    .map(input => input.name);
+
+  for (const [portName, inputValue] of node.inputDefaults.entries()) {
+    const portSpec = spec.inputs.find(input => input.name === portName);
+    const paramSpec = portSpec ? inputPortToParamSpec(portSpec) : null;
+    if (!paramSpec) {
+      addError(errors, {
+        line: node.line,
+        message: `Line ${node.line}: Unknown input default "${portName}" on ${node.nodeType}. Valid input defaults: ${validKeys.join(', ')}`,
+      });
+      continue;
+    }
+
+    if (!isParamTypeMatch(paramSpec, inputValue)) {
+      addError(errors, {
+        line: node.line,
+        message: `Line ${node.line}: Input default "${portName}" expects ${expectedLabelForParam(paramSpec)}, got "${dslValueLabel(inputValue)}"`,
+      });
+      continue;
+    }
+
+    if ((paramSpec.min !== undefined || paramSpec.max !== undefined)
+      && (inputValue.type === 'float' || inputValue.type === 'int')) {
+      const value = inputValue.value;
+      const min = paramSpec.min ?? value;
+      const max = paramSpec.max ?? value;
+      if (value < min || value > max) {
+        addError(errors, {
+          line: node.line,
+          message: `Line ${node.line}: Input default "${portName}" must be between ${min} and ${max}, got ${value}`,
+        });
+      }
+    }
+  }
+};
+
 /**
  * Structural validation of connections. Checks only DSL-level concerns:
  * - Unknown handles (with fuzzy suggestions)
@@ -271,6 +345,7 @@ const validateNodeTypes = (ast: DslAst, specById: Map<string, NodeSpec>, errors:
     }
 
     validateNodeParams(node, spec, errors);
+    validateNodeInputDefaults(node, spec, errors);
   }
 };
 

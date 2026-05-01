@@ -144,6 +144,49 @@ describe('applyDsl', () => {
     expect(useGraphStore.getState().nodes.get(nodeId)?.params.path).toEqual({ String: 'file:///tmp/old.png' });
   });
 
+  it('applies DSL scalar input defaults to node inputDefaults', async () => {
+    const result = await applyDsl(
+      'graph {\n  math1 = Math(a: 3.0, b: 7.0, operation: "multiply")\n}',
+      new HandleMap(),
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    const mathNode = Array.from(useGraphStore.getState().nodes.values()).find(node => node.typeId === 'math');
+    expect(mathNode?.inputDefaults).toMatchObject({
+      a: { Float: 3 },
+      b: { Float: 7 },
+    });
+    expect(mathNode?.params.operation).toEqual({ Int: 2 });
+    expect(mathNode?.params.a).toBeUndefined();
+    expect(mathNode?.params.b).toBeUndefined();
+  });
+
+  it('resets removed DSL input defaults to the port default', async () => {
+    const store = useGraphStore.getState();
+    const nodeId = await store.addNode('math', { x: 0, y: 0 });
+    await store.setInputDefault(nodeId, 'a', { Float: 3 });
+    await store.setInputDefault(nodeId, 'b', { Float: 7 });
+    const handleMap = new HandleMap();
+    handleMap.set('math1', nodeId);
+
+    const result = await applyDsl(
+      'graph {\n  math1 = Math(a: 5.0)\n}',
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    expect(useGraphStore.getState().nodes.get(nodeId)?.inputDefaults).toMatchObject({
+      a: { Float: 5 },
+      b: { Float: 0 },
+    });
+  });
+
   it('registers a gpu custom definition before applying root graph nodes', async () => {
     const registerGpuKernel = vi.spyOn(mockEngine as EngineBridge, 'registerGpuKernel');
     const handleMap = new HandleMap();

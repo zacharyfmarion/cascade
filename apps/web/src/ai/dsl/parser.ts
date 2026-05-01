@@ -96,6 +96,47 @@ const getParamSpec = (nodeTypeId: string, paramSpecByKey: Map<string, ParamSpec>
   return paramSpecByKey.get(key);
 };
 
+const INPUT_DEFAULT_TYPES = new Set<ValueType>(['Float', 'Int', 'Bool', 'Color', 'String']);
+
+const fallbackDefaultForInputType = (ty: ValueType): ParamDefault => {
+  switch (ty) {
+    case 'Float': return { Float: 0 };
+    case 'Int': return { Int: 0 };
+    case 'Bool': return { Bool: false };
+    case 'Color': return { Color: [0, 0, 0, 1] };
+    default: return { String: '' };
+  }
+};
+
+const uiHintForInputType = (ty: ValueType) => {
+  switch (ty) {
+    case 'Bool': return { type: 'Checkbox' } as const;
+    case 'Color': return { type: 'ColorPicker' } as const;
+    case 'String': return { type: 'TextArea' } as const;
+    default: return { type: 'NumberInput' } as const;
+  }
+};
+
+const inputPortToParamSpec = (port: PortSpec): ParamSpec | null => {
+  if (!INPUT_DEFAULT_TYPES.has(port.ty)) return null;
+  return {
+    key: port.name,
+    label: port.label,
+    ty: port.ty,
+    default: port.default ?? fallbackDefaultForInputType(port.ty),
+    min: port.min,
+    max: port.max,
+    step: port.step,
+    ui_hint: port.ui_hint ?? uiHintForInputType(port.ty),
+    promotable: true,
+  };
+};
+
+const getInputDefaultSpec = (spec: NodeSpec | undefined, key: string): ParamSpec | null => {
+  const port = spec?.inputs.find(input => input.name === key);
+  return port ? inputPortToParamSpec(port) : null;
+};
+
 const advanceScanner = (text: string, index: number, state: ScanState): { nextIndex: number; state: ScanState } => {
   if (state.stringMode === 'triple') {
     if (text.startsWith('"""', index)) {
@@ -670,6 +711,7 @@ const parseGraphStatements = (
       }
 
       const params = new Map<string, DslParamValue>();
+      const inputDefaults = new Map<string, DslParamValue>();
       const paramSpecByKey = new Map((spec?.params ?? []).map((param) => [param.key, param]));
       const entries = splitTopLevelParams(paramsSection.trim());
       for (const entry of entries) {
@@ -679,8 +721,9 @@ const parseGraphStatements = (
           errors.push({ line: lineNumber, message: `Invalid param syntax '${entry}'` });
           continue;
         }
-        const paramKey = pair.key.startsWith('input.') ? pair.key.slice('input.'.length) : pair.key;
-        const paramSpec = getParamSpec(nodeTypeId, paramSpecByKey, paramKey);
+        const explicitInputDefault = pair.key.startsWith('input.');
+        const paramKey = explicitInputDefault ? pair.key.slice('input.'.length) : pair.key;
+        const paramSpec = explicitInputDefault ? undefined : getParamSpec(nodeTypeId, paramSpecByKey, paramKey);
         if (!paramSpec && nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
           const parsedScript = parseParamValue({
             key: 'script',
@@ -697,20 +740,26 @@ const parseGraphStatements = (
           params.set(paramKey, parsedScript);
           continue;
         }
-        if (!paramSpec) {
+        const inputSpec = paramSpec ? null : getInputDefaultSpec(spec, paramKey);
+        const targetSpec = paramSpec ?? inputSpec;
+        if (!targetSpec) {
           errors.push({ line: lineNumber, message: `Unknown param '${pair.key}' on ${nodeType}` });
           continue;
         }
-        const parsed = parseParamValue(paramSpec, pair.value);
+        const parsed = parseParamValue(targetSpec, pair.value);
         if (!parsed) {
-          const hint = expectedFormatHint(paramSpec);
+          const hint = expectedFormatHint(targetSpec);
           errors.push({ line: lineNumber, message: `Invalid value for '${pair.key}'. ${hint}` });
           continue;
         }
-        params.set(paramKey, parsed);
+        if (paramSpec) {
+          params.set(paramKey, parsed);
+        } else {
+          inputDefaults.set(paramKey, parsed);
+        }
       }
 
-      nodes.set(handle, { handle, nodeType, nodeTypeId, params, muted, line: lineNumber });
+      nodes.set(handle, { handle, nodeType, nodeTypeId, params, inputDefaults, muted, line: lineNumber });
       const trimmedLine = withoutComment.trim();
       nodeSpans?.set(handle, {
         startLine: lineNumber,
@@ -1809,10 +1858,12 @@ const resolveGraphStatements = (
     }
 
     const params = new Map<string, DslParamValue>();
+    const inputDefaults = new Map<string, DslParamValue>();
     const paramSpecByKey = new Map((spec?.params ?? []).map((param) => [param.key, param]));
     for (const entry of statement.params) {
-      const paramKey = entry.key.startsWith('input.') ? entry.key.slice('input.'.length) : entry.key;
-      const paramSpec = getParamSpec(nodeTypeId, paramSpecByKey, paramKey);
+      const explicitInputDefault = entry.key.startsWith('input.');
+      const paramKey = explicitInputDefault ? entry.key.slice('input.'.length) : entry.key;
+      const paramSpec = explicitInputDefault ? undefined : getParamSpec(nodeTypeId, paramSpecByKey, paramKey);
       const rawValue = rawValueText(input, entry.value);
       if (!paramSpec && nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
         const parsedScript = parseParamValue({
@@ -1830,16 +1881,22 @@ const resolveGraphStatements = (
         params.set(paramKey, parsedScript);
         continue;
       }
-      if (!paramSpec) {
+      const inputSpec = paramSpec ? null : getInputDefaultSpec(spec, paramKey);
+      const targetSpec = paramSpec ?? inputSpec;
+      if (!targetSpec) {
         errors.push({ line: statement.line, message: `Unknown param '${entry.key}' on ${statement.nodeType}` });
         continue;
       }
-      const parsed = parseParamValue(paramSpec, rawValue);
+      const parsed = parseParamValue(targetSpec, rawValue);
       if (!parsed) {
-        errors.push({ line: statement.line, message: `Invalid value for '${entry.key}'. ${expectedFormatHint(paramSpec)}` });
+        errors.push({ line: statement.line, message: `Invalid value for '${entry.key}'. ${expectedFormatHint(targetSpec)}` });
         continue;
       }
-      params.set(paramKey, parsed);
+      if (paramSpec) {
+        params.set(paramKey, parsed);
+      } else {
+        inputDefaults.set(paramKey, parsed);
+      }
     }
 
     nodes.set(statement.handle, {
@@ -1847,6 +1904,7 @@ const resolveGraphStatements = (
       nodeType: statement.nodeType,
       nodeTypeId,
       params,
+      inputDefaults,
       muted: statement.muted,
       line: statement.line,
     });

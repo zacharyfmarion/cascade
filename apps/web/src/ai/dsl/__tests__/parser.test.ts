@@ -29,6 +29,45 @@ describe('parseDsl', () => {
     expect(node?.nodeType).toBe('Viewer');
     expect(node?.nodeTypeId).toBe('viewer');
     expect(node?.params.size).toBe(0);
+    expect(node?.inputDefaults.size).toBe(0);
+  });
+
+  it('parses scalar input defaults separately from params', () => {
+    const result = parseGraph('math1 = Math(a: 3.0, b: 7.0, operation: "multiply")', mockSpecs);
+    expect(result.errors).toHaveLength(0);
+    const node = result.ast?.nodes.get('math1');
+    expect(node?.params.get('operation')).toEqual({ type: 'dropdown', value: 'multiply', index: 2 });
+    expect(node?.inputDefaults.get('a')).toEqual({ type: 'float', value: 3 });
+    expect(node?.inputDefaults.get('b')).toEqual({ type: 'float', value: 7 });
+  });
+
+  it('uses input prefix to target colliding input defaults', () => {
+    const collisionSpec: NodeSpec = {
+      id: 'collision_node',
+      display_name: 'Collision Node',
+      category: 'Utility',
+      description: 'Has a param and input with the same name',
+      inputs: [{ name: 'amount', label: 'Amount Input', ty: 'Float', default: { Float: 0 } }],
+      outputs: [],
+      params: [{
+        key: 'amount',
+        label: 'Amount Param',
+        ty: 'Float',
+        default: { Float: 1 },
+        ui_hint: { type: 'NumberInput' },
+        promotable: false,
+      }],
+    };
+    const result = parseGraph('collision1 = CollisionNode(amount: 2.0, input.amount: 3.0)', [...mockSpecs, collisionSpec]);
+    expect(result.errors).toHaveLength(0);
+    const node = result.ast?.nodes.get('collision1');
+    expect(node?.params.get('amount')).toEqual({ type: 'float', value: 2 });
+    expect(node?.inputDefaults.get('amount')).toEqual({ type: 'float', value: 3 });
+  });
+
+  it('rejects non-scalar input defaults in node calls', () => {
+    const result = parseGraph('load1 = LoadImage(image: 1.0)', mockSpecs);
+    expect(result.errors.some(error => error.message.includes("Unknown param 'image' on LoadImage"))).toBe(true);
   });
 
   it('rejects non-empty DSL without a graph block', () => {

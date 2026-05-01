@@ -18,11 +18,14 @@ function makeNode(
   nodeType: string,
   nodeTypeId: string,
   params?: Record<string, DslParamValue>,
-  muted?: boolean
+  muted?: boolean,
+  inputDefaults?: Record<string, DslParamValue>,
 ): DslNode {
   const paramMap = new Map<string, DslParamValue>();
   if (params) for (const [k, v] of Object.entries(params)) paramMap.set(k, v);
-  return { handle, nodeType, nodeTypeId, params: paramMap, muted: muted ?? false, line: 1 };
+  const inputDefaultMap = new Map<string, DslParamValue>();
+  if (inputDefaults) for (const [k, v] of Object.entries(inputDefaults)) inputDefaultMap.set(k, v);
+  return { handle, nodeType, nodeTypeId, params: paramMap, inputDefaults: inputDefaultMap, muted: muted ?? false, line: 1 };
 }
 
 function makeAst(nodes: DslNode[], connections: DslConnection[]): DslAst {
@@ -101,6 +104,34 @@ describe('validator', () => {
     const result = validateAst(makeAst([node], []), mockSpecs);
 
     expect(result.errors).toHaveLength(0);
+  });
+
+  it('accepts valid scalar input defaults', () => {
+    const node = makeNode('math', 'Math', 'math', undefined, false, {
+      a: { type: 'float', value: 3 },
+      b: { type: 'float', value: 7 },
+    });
+    const result = validateAst(makeAst([node], []), mockSpecs);
+
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('reports invalid scalar input default types', () => {
+    const node = makeNode('math', 'Math', 'math', undefined, false, {
+      a: { type: 'string', value: 'bad' },
+    });
+    const result = validateAst(makeAst([node], []), mockSpecs);
+
+    expect(result.errors[0]?.message).toContain('Input default "a" expects number');
+  });
+
+  it('rejects non-scalar input defaults', () => {
+    const node = makeNode('load', 'LoadImage', 'load_image', undefined, false, {
+      image: { type: 'float', value: 1 },
+    });
+    const result = validateAst(makeAst([node], []), mockSpecs);
+
+    expect(result.errors[0]?.message).toContain('Unknown input default "image"');
   });
 
   it('reports connections to unknown handles with suggestions', () => {

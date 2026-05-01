@@ -238,8 +238,13 @@ const formatParamDeclaration = (param: DslParamDeclaration): string =>
 
 const formatInternalNode = (node: DslNode): string => {
   const params: string[] = [];
+  const paramKeys = new Set(node.params.keys());
   for (const [key, value] of node.params) {
     params.push(`${key}: ${formatDslValue(value)}`);
+  }
+  for (const [key, value] of node.inputDefaults) {
+    const dslKey = paramKeys.has(key) ? `input.${key}` : key;
+    params.push(`${dslKey}: ${formatDslValue(value)}`);
   }
   const expression = `${node.nodeType}(${params.join(', ')})`;
   return node.muted ? `${node.handle} = muted(${expression})` : `${node.handle} = ${expression}`;
@@ -321,6 +326,52 @@ const portToDslDeclaration = (port: PortSpec): DslPortDeclaration => ({
   step: port.step,
   line: 1,
 });
+
+const INPUT_DEFAULT_TYPES = new Set(['Float', 'Int', 'Bool', 'Color', 'String']);
+
+const fallbackDefaultForInputType = (ty: string): ParamValue => {
+  if (ty === 'Bool') return { Bool: false };
+  if (ty === 'Int') return { Int: 0 };
+  if (ty === 'Float') return { Float: 0 };
+  if (ty === 'Color') return { Color: [0, 0, 0, 1] };
+  return { String: '' };
+};
+
+const inputPortToParamSpec = (port: PortSpec): ParamSpec | null => {
+  if (!INPUT_DEFAULT_TYPES.has(port.ty)) return null;
+  return {
+    key: port.name,
+    label: port.label,
+    ty: port.ty,
+    default: port.default ?? fallbackDefaultForInputType(port.ty),
+    min: port.min,
+    max: port.max,
+    step: port.step,
+    ui_hint: port.ui_hint ?? (
+      port.ty === 'Bool'
+        ? { type: 'Checkbox' }
+        : port.ty === 'Color'
+          ? { type: 'ColorPicker' }
+          : port.ty === 'String'
+            ? { type: 'TextArea' }
+            : { type: 'NumberInput' }
+    ),
+    promotable: true,
+  };
+};
+
+const formatInputDefaultEntry = (
+  typeId: string,
+  portSpec: PortSpec,
+  value: ParamValue,
+  paramKeys: Set<string>,
+): string | null => {
+  const inputParamSpec = inputPortToParamSpec(portSpec);
+  if (!inputParamSpec) return null;
+  const dslValue = unwrapParamValue(inputParamSpec, value);
+  const key = paramKeys.has(portSpec.name) ? `input.${portSpec.name}` : portSpec.name;
+  return `${key}: ${formatDslValue(dslValue, { typeId, paramKey: portSpec.name })}`;
+};
 
 const promotionToParamDeclaration = (promotion: SerializablePromotion): DslParamDeclaration => ({
   valueType: promotion.spec.ty.toLowerCase(),
@@ -425,6 +476,7 @@ const internalNodeToDslNode = (
   nodeSpecById: Map<string, NodeSpec>,
   customDefinitionNameByRuntimeId: Map<string, string>,
   promotions: SerializablePromotion[],
+  connectedInputKeys: Set<string> = new Set(),
 ): DslNode => {
   const spec = nodeSpecById.get(node.type_id);
   const promotedParamByKey = new Map(
@@ -433,6 +485,7 @@ const internalNodeToDslNode = (
       .map(promotion => [promotion.internal_param_key, promotion.group_param_key]),
   );
   const params = new Map<string, DslParamValue>();
+  const inputDefaults = new Map<string, DslParamValue>();
 
   if (spec) {
     for (const paramSpec of spec.params) {
@@ -447,6 +500,14 @@ const internalNodeToDslNode = (
       if (!value || JSON.stringify(value) === JSON.stringify(paramSpec.default)) continue;
       params.set(paramSpec.key, unwrapParamValue(paramSpec, value));
     }
+    for (const inputSpec of spec.inputs) {
+      if (connectedInputKeys.has(inputSpec.name)) continue;
+      const inputParamSpec = inputPortToParamSpec(inputSpec);
+      if (!inputParamSpec) continue;
+      const value = node.input_defaults?.[inputSpec.name] ?? node.params?.[inputSpec.name];
+      if (!value || JSON.stringify(value) === JSON.stringify(inputSpec.default)) continue;
+      inputDefaults.set(inputSpec.name, unwrapParamValue(inputParamSpec, value));
+    }
   } else {
     for (const [key, value] of Object.entries(node.params ?? {})) {
       if (key === '__script_manifest') continue;
@@ -460,6 +521,7 @@ const internalNodeToDslNode = (
     nodeType: typeNameForNodeTypeId(node.type_id, nodeSpecById, customDefinitionNameByRuntimeId),
     nodeTypeId: node.type_id,
     params,
+    inputDefaults,
     muted: Boolean(node.muted),
     line: 1,
   };
@@ -479,7 +541,12 @@ const runtimeGroupDefinitionToDsl = (
   for (const node of definition.internal_graph.nodes) {
     if (node.type_id === 'group_input' || node.type_id === 'group_output') continue;
     const handle = handleMap.getOrCreate(node.id, node.type_id);
-    nodes.set(handle, internalNodeToDslNode(node, handle, nodeSpecById, customDefinitionNameByRuntimeId, promotions));
+    const connectedInputs = new Set(
+      definition.internal_graph.connections
+        .filter(connection => connection.to_node === node.id)
+        .map(connection => connection.to_port),
+    );
+    nodes.set(handle, internalNodeToDslNode(node, handle, nodeSpecById, customDefinitionNameByRuntimeId, promotions, connectedInputs));
   }
 
   const connections: DslConnection[] = definition.internal_graph.connections.map(connection => ({
@@ -697,7 +764,7 @@ export function serializeGraph(input: SerializerInput): string {
         // Emit current scalar param values that differ from the manifest defaults
         const scalarParams: string[] = [];
         for (const port of manifest.inputs.filter(p => isScalarScriptType(p.ty))) {
-          const raw = node.params[port.name];
+          const raw = node.inputDefaults[port.name] ?? node.params[port.name];
           const dslValue = scalarPortToDslValue(port.ty, raw);
           if (!dslValue) continue;
           const defValue = scalarPortDefaultDslValue(port.ty, port.default);
@@ -720,6 +787,19 @@ export function serializeGraph(input: SerializerInput): string {
 
     const params: string[] = formatVirtualAssetParamEntries(node, spec);
     if (spec) {
+      const connectedInputs = new Set(
+        connections
+          .filter(connection => connection.toNode === node.id)
+          .map(connection => connection.toPort),
+      );
+      const paramKeys = new Set(spec.params.map(param => param.key));
+      for (const inputSpec of spec.inputs) {
+        if (connectedInputs.has(inputSpec.name)) continue;
+        const value = node.inputDefaults[inputSpec.name];
+        if (!value || JSON.stringify(value) === JSON.stringify(inputSpec.default)) continue;
+        const entry = formatInputDefaultEntry(node.typeId, inputSpec, value, paramKeys);
+        if (entry) params.push(entry);
+      }
       for (const paramSpec of spec.params) {
         const value = isConnectableParam(paramSpec)
           ? node.inputDefaults[paramSpec.key] ?? node.params[paramSpec.key]

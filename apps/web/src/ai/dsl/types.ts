@@ -54,6 +54,7 @@ export interface DslNode {
   nodeType: string;
   nodeTypeId: string;
   params: Map<string, DslParamValue>;
+  inputDefaults: Map<string, DslParamValue>;
   muted: boolean;
   line: number;
 }
@@ -103,9 +104,10 @@ export interface DslSourceMap {
 }
 
 export type GraphMutation =
-  | { type: 'addNode'; handle: string; typeId: string; params: Map<string, DslParamValue>; muted: boolean }
+  | { type: 'addNode'; handle: string; typeId: string; params: Map<string, DslParamValue>; inputDefaults: Map<string, DslParamValue>; muted: boolean }
   | { type: 'removeNode'; handle: string }
   | { type: 'setParam'; handle: string; paramKey: string; value: DslParamValue }
+  | { type: 'setInputDefault'; handle: string; portName: string; value: DslParamValue }
   | { type: 'connect'; fromHandle: string; fromPort: string; toHandle: string; toPort: string }
   | { type: 'disconnect'; toHandle: string; toPort: string }
   | { type: 'setMuted'; handle: string; muted: boolean };
