@@ -696,6 +696,45 @@ describe('Sequence state contracts', () => {
     expect(loadedFrames.some(frame => frame > 1)).toBe(true);
     expect(mockEngine._renderCalls).toContain(viewer);
   });
+
+  it('setSequenceFiles uses worker-owned sequence registration when available', async () => {
+    const s = useGraphStore.getState();
+    const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+    const registerSequenceFiles = vi.fn(async () => ({
+      info: { frame_count: 3, first_frame: 1, last_frame: 10 },
+      pattern: 'frame_{frame:4}.png',
+    }));
+    const prepareSequenceFrame = vi.fn(async () => ({
+      newSpec: useGraphStore.getState().nodeSpecsById.get('load_image_sequence')!,
+      removedOutputPorts: [],
+      prunedConnections: [],
+    }));
+    Object.assign(mockEngine, { registerSequenceFiles, prepareSequenceFrame });
+
+    const files = [
+      new File([new Uint8Array([1])], 'frame_0001.png'),
+      new File([new Uint8Array([2])], 'frame_0005.png'),
+      new File([new Uint8Array([3])], 'frame_0010.png'),
+    ];
+
+    await s.setSequenceFiles(seqNode, files);
+
+    expect(registerSequenceFiles).toHaveBeenCalledWith(seqNode, files);
+    expect(prepareSequenceFrame).toHaveBeenCalledWith(seqNode, 1);
+    expect(useGraphStore.getState().sequenceStart).toBe(1);
+    expect(useGraphStore.getState().sequenceLength).toBe(10);
+  });
+
+  it('removeNode clears worker-owned sequence files', async () => {
+    const s = useGraphStore.getState();
+    const clearSequenceFiles = vi.fn(async () => {});
+    Object.assign(mockEngine, { clearSequenceFiles });
+    const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+
+    await s.removeNode(seqNode);
+
+    expect(clearSequenceFiles).toHaveBeenCalledWith(seqNode);
+  });
 });
 
 // ===========================================================================

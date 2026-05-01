@@ -40,6 +40,7 @@ export interface RenderSliceActions {
   triggerAffectedViewers: (changedNodeIds: string[]) => void | Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
   pushSequenceFrames: (frame: number) => Promise<void>;
+  prefetchSequenceFrames: (startFrame: number, count: number) => void;
   flushRender: () => Promise<Map<string, EngineError>>;
   editTransaction: (
     options: TransactionOptions,
@@ -147,15 +148,35 @@ export const createRenderSlice: StateCreator<
 
   const pushSequenceFrames = async (frame: number) => {
     const eng = getEngine();
-    if (!eng.loadSequenceFrameData) return;
+    if (!eng.prepareSequenceFrame && !eng.loadSequenceFrameData) return;
     const { nodes } = get();
     for (const [nodeId, node] of nodes) {
       if (node.typeId !== 'load_image_sequence') continue;
-      if (!sequenceFrameManager.hasSequence(nodeId)) continue;
-      const data = await sequenceFrameManager.getFrameData(nodeId, frame);
-      if (data) {
+      if (eng.prepareSequenceFrame) {
+        const change = await eng.prepareSequenceFrame(nodeId, frame);
+        if (change) {
+          get().applyNodeInterfaceChange(nodeId, change);
+        }
+        continue;
+      }
+      if (sequenceFrameManager.hasSequence(nodeId) && eng.loadSequenceFrameData) {
+        const data = await sequenceFrameManager.getFrameData(nodeId, frame);
+        if (!data) continue;
         const change = await eng.loadSequenceFrameData(nodeId, frame, data);
         get().applyNodeInterfaceChange(nodeId, change);
+      }
+    }
+  };
+
+  const prefetchSequenceFrames = (startFrame: number, count: number) => {
+    const eng = getEngine();
+    const { nodes } = get();
+    for (const [nodeId, node] of nodes) {
+      if (node.typeId !== 'load_image_sequence') continue;
+      if (eng.prefetchSequenceFrames) {
+        void eng.prefetchSequenceFrames(nodeId, startFrame, count);
+      } else if (sequenceFrameManager.hasSequence(nodeId)) {
+        void sequenceFrameManager.prefetchFrames(nodeId, startFrame, count);
       }
     }
   };
@@ -232,6 +253,7 @@ export const createRenderSlice: StateCreator<
     triggerAllViewers,
     triggerAffectedViewers,
     pushSequenceFrames,
+    prefetchSequenceFrames,
     renderAllViewersAsync,
 
     flushRender: async () => {

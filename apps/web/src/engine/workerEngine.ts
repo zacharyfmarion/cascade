@@ -24,6 +24,7 @@ import type {
   ColorManagementInfo,
   EditValidationError,
 } from './bridge';
+import { copyBytesForTransfer } from './transferableBytes';
 import type {
   NodeSpec,
   ParamValue,
@@ -83,6 +84,10 @@ interface WorkerAPI {
   setSequenceDirectory(nodeId: string, directory: string): Promise<SequenceInfo>;
   getSequenceInfo(nodeId: string, pattern: string): Promise<SequenceInfo>;
   loadVideoFile(nodeId: string, path: string): Promise<VideoInfo>;
+  registerSequenceFiles(nodeId: string, files: File[]): Promise<{ info: SequenceInfo; pattern: string }>;
+  prepareSequenceFrame(nodeId: string, frame: number): Promise<NodeInterfaceChange | null>;
+  prefetchSequenceFrames(nodeId: string, startFrame: number, count: number): Promise<void>;
+  clearSequenceFiles(nodeId: string): Promise<void>;
   setSequenceInfo(nodeId: string, info: SequenceInfo): Promise<void>;
 
   batchClear(nodeId: string): Promise<void>;
@@ -279,10 +284,13 @@ export class WorkerEngine implements EngineBridge {
     frame: number,
     data: Uint8Array,
   ): Promise<NodeInterfaceChange> {
+    // Sequence frames come from a reusable main-thread cache. Transfer an owned
+    // copy so postMessage detaches only this bridge payload, not the cache.
+    const transferData = copyBytesForTransfer(data);
     return this.getAPI().loadSequenceFrameData(
       nodeId,
       frame,
-      Comlink.transfer(data, [data.buffer]),
+      Comlink.transfer(transferData, [transferData.buffer]),
     );
   }
 
@@ -356,6 +364,22 @@ export class WorkerEngine implements EngineBridge {
 
   loadVideoFile(nodeId: string, path: string): Promise<VideoInfo> {
     return this.getAPI().loadVideoFile(nodeId, path);
+  }
+
+  registerSequenceFiles(nodeId: string, files: File[]): Promise<{ info: SequenceInfo; pattern: string }> {
+    return this.getAPI().registerSequenceFiles(nodeId, files);
+  }
+
+  prepareSequenceFrame(nodeId: string, frame: number): Promise<NodeInterfaceChange | null> {
+    return this.getAPI().prepareSequenceFrame(nodeId, frame);
+  }
+
+  prefetchSequenceFrames(nodeId: string, startFrame: number, count: number): Promise<void> {
+    return this.getAPI().prefetchSequenceFrames(nodeId, startFrame, count);
+  }
+
+  clearSequenceFiles(nodeId: string): Promise<void> {
+    return this.getAPI().clearSequenceFiles(nodeId);
   }
 
   setSequenceInfo(nodeId: string, info: SequenceInfo): Promise<void> {
