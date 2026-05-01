@@ -4,7 +4,7 @@ mod builtin_groups;
 pub mod document;
 pub mod migrations;
 
-pub use builtin_groups::{color_range_group, photo_adjust_group, pixelate_group};
+pub use builtin_groups::{color_range_group, photo_adjust_group};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ai_provider::NativeAiProvider;
@@ -4712,120 +4712,6 @@ return pixelated;
     }
 
     #[test]
-    fn test_pixelate_group_e2e() {
-        let mut engine = Engine::new();
-        if engine.gpu_context().is_none() {
-            println!("GPU not available, skipping");
-            return;
-        }
-
-        let spec = engine.registry.get_spec("group::pixelate");
-        assert!(spec.is_some(), "Pixelate group should be registered");
-        let spec = spec.unwrap();
-        assert_eq!(spec.display_name, "Pixelate");
-        assert_eq!(spec.inputs.len(), 2);
-        assert!(spec.inputs.iter().any(|p| p.name == "image"));
-        assert!(spec.inputs.iter().any(|p| p.name == "palette"));
-        assert_eq!(spec.outputs.len(), 1);
-        assert_eq!(spec.outputs[0].name, "image");
-        assert_eq!(spec.params.len(), 4);
-        assert!(spec.params.iter().any(|p| p.key == "pixel_size"));
-        assert!(spec.params.iter().any(|p| p.key == "algorithm"));
-        assert!(spec.params.iter().any(|p| p.key == "matrix_size"));
-        assert!(spec.params.iter().any(|p| p.key == "dither_amount"));
-
-        let (load_id, _) = engine.add_node("load_image", -200.0, 0.0).unwrap();
-        let (pix_id, _) = engine.add_node("group::pixelate", 0.0, 0.0).unwrap();
-        let (viewer_id, _) = engine.add_node("viewer", 200.0, 0.0).unwrap();
-
-        let png_image = image::RgbaImage::from_fn(8, 8, |x, y| {
-            let r = ((x as f32 / 7.0) * 255.0) as u8;
-            let g = ((y as f32 / 7.0) * 255.0) as u8;
-            image::Rgba([r, g, 64, 255])
-        });
-        let mut png_bytes = Vec::new();
-        png_image
-            .write_to(
-                &mut std::io::Cursor::new(&mut png_bytes),
-                image::ImageFormat::Png,
-            )
-            .expect("encode PNG");
-        engine.load_image_data(&load_id, &png_bytes).expect("load");
-
-        engine
-            .connect(&load_id, "image", &pix_id, "image")
-            .expect("connect");
-        engine
-            .connect(&pix_id, "image", &viewer_id, "value")
-            .expect("connect");
-        engine
-            .set_param(&pix_id, "pixel_size", ParamValue::Int(4))
-            .expect("set param");
-
-        let result_no_palette = engine.render_viewer(&viewer_id, 0).expect("render");
-        assert_eq!(result_no_palette.width, 8);
-        assert_eq!(result_no_palette.height, 8);
-
-        let px = |x: usize, y: usize| -> (u8, u8, u8, u8) {
-            let idx = (y * 8 + x) * 4;
-            (
-                result_no_palette.pixels[idx],
-                result_no_palette.pixels[idx + 1],
-                result_no_palette.pixels[idx + 2],
-                result_no_palette.pixels[idx + 3],
-            )
-        };
-        assert_eq!(px(0, 0), px(1, 0), "Same block should match");
-        assert_eq!(px(0, 0), px(3, 3), "Same block should match");
-        assert_ne!(px(0, 0), px(4, 0), "Different blocks should differ");
-        assert_eq!(px(0, 0).3, 255, "Alpha preserved");
-        let (load_pal_id, _) = engine.add_node("load_image", -200.0, 200.0).unwrap();
-        let pal_image = image::RgbaImage::from_fn(4, 1, |x, _| match x {
-            0 => image::Rgba([255, 0, 0, 255]),
-            1 => image::Rgba([0, 255, 0, 255]),
-            2 => image::Rgba([0, 0, 255, 255]),
-            _ => image::Rgba([255, 255, 255, 255]),
-        });
-        let mut pal_bytes = Vec::new();
-        pal_image
-            .write_to(
-                &mut std::io::Cursor::new(&mut pal_bytes),
-                image::ImageFormat::Png,
-            )
-            .expect("encode palette");
-        engine
-            .load_image_data(&load_pal_id, &pal_bytes)
-            .expect("load palette");
-        engine
-            .connect(&load_pal_id, "image", &pix_id, "palette")
-            .expect("connect palette");
-        engine
-            .set_param(&pix_id, "dither_amount", ParamValue::Float(1.0))
-            .expect("set dither amount");
-
-        let result_palette = engine.render_viewer(&viewer_id, 1).expect("render");
-        assert_eq!(result_palette.width, 8);
-        assert_eq!(result_palette.height, 8);
-        let idx = 0;
-        let p = (
-            result_palette.pixels[idx],
-            result_palette.pixels[idx + 1],
-            result_palette.pixels[idx + 2],
-            result_palette.pixels[idx + 3],
-        );
-        assert_eq!(p.3, 255, "Alpha preserved");
-        let is_palette_color = (p.0 > 200 && p.1 < 50 && p.2 < 50)
-            || (p.0 < 50 && p.1 > 200 && p.2 < 50)
-            || (p.0 < 50 && p.1 < 50 && p.2 > 200)
-            || (p.0 > 200 && p.1 > 200 && p.2 > 200);
-        assert!(
-            is_palette_color,
-            "Output pixel should be snapped to a palette color, got {p:?}"
-        );
-        println!("Pixelate GROUP E2E test PASSED");
-    }
-
-    #[test]
     fn test_live_render_preview_scale_only_updates_affected_viewers() {
         let mut engine = Engine::new();
 
@@ -4916,9 +4802,15 @@ return pixelated;
         // registered, so we only assert they exist when GPU init succeeded.
         // Note: Color Range group is temporarily disabled — it depends on CPU image_math
         // scalar operations not yet supported by the GPU image_math kernel.
-        let has_pixelate = specs.iter().any(|s| s.id == "group::pixelate");
+        assert!(
+            specs.iter().all(|s| s.id != "group::pixelate"),
+            "Pixelate should be exposed only as the core GPU kernel node"
+        );
         if engine.gpu_context().is_some() {
-            assert!(has_pixelate, "Pixelate group should appear in node types");
+            assert!(
+                specs.iter().any(|s| s.id == "gpu_kernel::pixelate"),
+                "Pixelate GPU kernel should be registered when GPU init succeeds"
+            );
             assert!(
                 specs.iter().any(|s| s.id == "gpu_kernel::white_balance"),
                 "White Balance GPU kernel should be registered when GPU init succeeds"

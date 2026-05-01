@@ -112,6 +112,7 @@ export interface GraphState {
   loadProjectFromPath?: () => Promise<boolean>;
   requestNewProject: () => Promise<void>;
   requestOpenProject: (file?: File) => Promise<void>;
+  requestOpenExample: (exampleId: string) => Promise<void>;
   requestSaveProject: () => Promise<boolean>;
   requestSaveProjectAs: () => Promise<boolean>;
   requestSaveBundledProject: () => Promise<boolean>;

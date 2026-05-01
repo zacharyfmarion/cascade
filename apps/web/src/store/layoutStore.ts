@@ -5,7 +5,7 @@ import type { DockviewApi, SerializedDockview } from 'dockview';
 const LAYOUT_STORAGE_KEY = 'cascade-layout';
 const LAYOUT_VERSION_KEY = 'cascade-layout-version';
 /** Bump this when default layout changes to invalidate stale cached layouts. */
-const LAYOUT_VERSION = 6;
+const LAYOUT_VERSION = 7;
 
 export type WorkspacePreset = 'compositing' | 'viewing' | 'minimal';
 
@@ -13,6 +13,8 @@ function addPresetPanels(api: DockviewApi, preset: WorkspacePreset) {
   switch (preset) {
     case 'compositing': {
       api.addPanel({ id: 'node-library', component: 'node-library', title: 'Node Library', initialWidth: 300, minimumWidth: 300, maximumWidth: 300 });
+      api.addPanel({ id: 'examples', component: 'examples', title: 'Examples', position: { referencePanel: 'node-library' } });
+      api.getPanel('node-library')?.api.setActive();
       api.addPanel({ id: 'node-canvas', component: 'node-canvas', title: 'Node Editor', position: { referencePanel: 'node-library', direction: 'right' } });
       api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'right' }, initialWidth: 338 });
       api.addPanel({ id: 'dsl-editor', component: 'dsl-editor', title: 'DSL', position: { referencePanel: 'inspector' } });
@@ -26,6 +28,7 @@ function addPresetPanels(api: DockviewApi, preset: WorkspacePreset) {
       api.addPanel({ id: 'node-canvas', component: 'node-canvas', title: 'Node Editor', position: { referencePanel: 'viewer', direction: 'right' } });
       api.addPanel({ id: 'inspector', component: 'inspector', title: 'Inspector', position: { referencePanel: 'node-canvas', direction: 'below' }, initialHeight: 260 });
       api.addPanel({ id: 'node-library', component: 'node-library', title: 'Node Library', position: { referenceGroup: api.groups[api.groups.length - 1].id } });
+      api.addPanel({ id: 'examples', component: 'examples', title: 'Examples', position: { referencePanel: 'node-library' } });
       api.addPanel({ id: 'timeline', component: 'timeline', title: 'Timeline', position: { referencePanel: 'viewer', direction: 'below' }, initialHeight: 40 });
       break;
     }
@@ -41,6 +44,30 @@ export function applyDefaultLayout(api: DockviewApi) {
   addPresetPanels(api, 'compositing');
 }
 
+export function focusExamplesPanel(api: DockviewApi) {
+  const existing = api.getPanel('examples');
+  if (existing) {
+    existing.api.setActive();
+    return;
+  }
+
+  const nodeLibrary = api.getPanel('node-library');
+  const position = nodeLibrary
+    ? { referencePanel: 'node-library' as const }
+    : api.groups.length > 0
+      ? { referenceGroup: api.groups[0].id }
+      : undefined;
+
+  const panel = api.addPanel({
+    id: 'examples',
+    component: 'examples',
+    title: 'Examples',
+    ...(position ? { position } : {}),
+  });
+  panel?.api.setActive();
+  api.getPanel('examples')?.api.setActive();
+}
+
 interface LayoutState {
   dockviewApi: DockviewApi | null;
   setDockviewApi: (api: DockviewApi) => void;
@@ -48,6 +75,7 @@ interface LayoutState {
   loadLayout: () => SerializedDockview | null;
   resetLayout: () => void;
   applyWorkspacePreset: (preset: WorkspacePreset) => void;
+  focusExamplesPanel: () => void;
 }
 
 export const useLayoutStore = create<LayoutState>()(
@@ -100,6 +128,13 @@ export const useLayoutStore = create<LayoutState>()(
         if (!dockviewApi) return;
         dockviewApi.clear();
         addPresetPanels(dockviewApi, preset);
+        get().saveLayout();
+      },
+
+      focusExamplesPanel: () => {
+        const { dockviewApi } = get();
+        if (!dockviewApi) return;
+        focusExamplesPanel(dockviewApi);
         get().saveLayout();
       },
     }),

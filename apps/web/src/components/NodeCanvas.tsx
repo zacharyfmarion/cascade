@@ -22,6 +22,7 @@ import type {
 import '@xyflow/react/dist/style.css';
 
 import { useGraphStore } from '../store/graphStore';
+import { useLayoutStore } from '../store/layoutStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { ImageInputNode } from './nodes/ImageInputNode';
 import { LoadImageSequenceNode } from './nodes/LoadImageSequenceNode';
@@ -141,7 +142,10 @@ export const NodeCanvas: React.FC = () => {
   const nodeSpecs = useGraphStore(s => s.nodeSpecs);
   const nodeSpecsById = useGraphStore(s => s.nodeSpecsById);
   const dslShadow = useGraphStore(s => s.dslShadow);
+  const isRootGraph = useGraphStore(s => s.editingStack.length === 1);
+  const focusExamplesPanel = useLayoutStore(s => s.focusExamplesPanel);
   const { screenToFlowPosition, getNodes, getEdges, fitView } = useReactFlow();
+  const showExamplesCta = isRootGraph && nodesStore.size === 0 && framesStore.size === 0;
 
   const nodeTypes = useMemo((): NodeTypes => {
     const types: NodeTypes = { ...SPECIAL_NODE_TYPES };
@@ -1219,6 +1223,58 @@ export const NodeCanvas: React.FC = () => {
           onFrameSelection={onFrameSelectionFromMenu}
           onClose={closeContextMenu}
         />
+      )}
+
+      {showExamplesCta && (
+        <div
+          data-testid="empty-node-editor-cta"
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            zIndex: 20,
+            transform: 'translate(-50%, -50%)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px',
+            width: 'min(320px, calc(100% - 48px))',
+            padding: '16px',
+            border: '1px solid var(--border-default)',
+            borderRadius: '8px',
+            background: 'var(--bg-secondary)',
+            boxShadow: '0 8px 32px var(--shadow-contextMenu)',
+          }}
+        >
+          <p
+            style={{
+              margin: 0,
+              color: 'var(--text-secondary)',
+              fontSize: '0.9rem',
+              lineHeight: 1.4,
+              textAlign: 'center',
+            }}
+          >
+            Want a starting point? Browse examples.
+          </p>
+          <button
+            type="button"
+            onClick={focusExamplesPanel}
+            style={{
+              minHeight: '34px',
+              border: '1px solid var(--accent-primary)',
+              borderRadius: '4px',
+              background: 'var(--accent-primary)',
+              color: 'var(--text-on-accent)',
+              cursor: 'pointer',
+              font: 'inherit',
+              fontSize: '0.82rem',
+              padding: '0 14px',
+            }}
+          >
+            Browse Examples
+          </button>
+        </div>
       )}
 
       {isDraggingFile && (

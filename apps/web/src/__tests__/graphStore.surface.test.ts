@@ -135,6 +135,7 @@ const EXPECTED_KEYS: string[] = [
   'removeNode',
   'requestCloseProject',
   'requestNewProject',
+  'requestOpenExample',
   'requestOpenProject',
   'requestSaveProject',
   'requestSaveProjectAs',

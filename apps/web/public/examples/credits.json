@@ -1,0 +1,40 @@
+{
+  "license": {
+    "name": "Pexels License",
+    "url": "https://www.pexels.com/license/"
+  },
+  "assets": [
+    {
+      "filename": "mountain-lake.jpg",
+      "title": "Breathtaking view of tranquil mountain lake reflecting rugged peaks under a clear blue sky.",
+      "photographer": "Jhan Castillon",
+      "sourceUrl": "https://www.pexels.com/photo/landscape-with-mountains-and-a-lake-17955893/",
+      "downloadUrl": "https://images.pexels.com/photos/17955893/pexels-photo-17955893.jpeg",
+      "usedBy": ["photo-grade"]
+    },
+    {
+      "filename": "colorful-houses.jpg",
+      "title": "Colorful houses on a cobblestone street",
+      "photographer": "Mustafa Kalkan",
+      "sourceUrl": "https://www.pexels.com/photo/colorful-houses-on-a-cobblestone-street-29542235/",
+      "downloadUrl": "https://images.pexels.com/photos/29542235/pexels-photo-29542235.jpeg",
+      "usedBy": ["pixel-art-palette-grade", "duotone-grain"]
+    },
+    {
+      "filename": "neon-street.jpg",
+      "title": "City street at night under neon lights in New York with an urban skyline and bridge.",
+      "photographer": "Well Naves",
+      "sourceUrl": "https://www.pexels.com/photo/neon-city-street-at-night-4132321/",
+      "downloadUrl": "https://images.pexels.com/photos/4132321/pexels-photo-4132321.jpeg",
+      "usedBy": ["cinematic-color-ramp", "crt-scanline-look", "glitch-datamosh-look"]
+    },
+    {
+      "filename": "colorful-building.jpg",
+      "title": "Bright and colorful building facade with geometric patterns and vivid primary colors.",
+      "photographer": "Jan van der Wolf",
+      "sourceUrl": "https://www.pexels.com/photo/colorful-urban-building-19263015/",
+      "downloadUrl": "https://images.pexels.com/photos/19263015/pexels-photo-19263015.jpeg",
+      "usedBy": ["halftone-shader", "abstract-cell-voronoi-poster"]
+    }
+  ]
+}

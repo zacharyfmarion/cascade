@@ -5,14 +5,17 @@ import { useLayoutStore } from '../store/layoutStore';
 const STORAGE_KEY = 'cascade-layout';
 const VERSION_KEY = 'cascade-layout-version';
 /** Must match LAYOUT_VERSION in layoutStore.ts */
-const CURRENT_VERSION = '6';
+const CURRENT_VERSION = '7';
 
 const createDockviewApiMock = () => {
   const addPanel = vi.fn();
   const clear = vi.fn();
   const toJSON = vi.fn(() => ({ version: 1, panels: [] }));
   const groups = [{ id: 'group-1' }];
-  const getPanel = vi.fn(() => ({ api: { setActive: vi.fn() } }));
+  const panels = new Map<string, { api: { setActive: ReturnType<typeof vi.fn> } }>();
+  panels.set('node-library', { api: { setActive: vi.fn() } });
+  panels.set('inspector', { api: { setActive: vi.fn() } });
+  const getPanel = vi.fn((id: string) => panels.get(id) ?? null);
   return {
     addPanel,
     clear,
@@ -119,5 +122,49 @@ describe('layoutStore', () => {
     useLayoutStore.getState().applyWorkspacePreset('compositing');
     const calls = (api.addPanel as ReturnType<typeof vi.fn>).mock.calls.map((c: unknown[]) => (c[0] as { id: string }).id);
     expect(calls).toContain('dsl-editor');
+  });
+
+  it('compositing preset includes examples beside node library', () => {
+    const api = createDockviewApiMock();
+    useLayoutStore.getState().setDockviewApi(api);
+    useLayoutStore.getState().applyWorkspacePreset('compositing');
+
+    expect(api.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'examples',
+      component: 'examples',
+      title: 'Examples',
+      position: { referencePanel: 'node-library' },
+    }));
+  });
+
+  it('focusExamplesPanel activates an existing examples panel', () => {
+    const api = createDockviewApiMock();
+    const examplesPanel = { api: { setActive: vi.fn() } };
+    (api.getPanel as ReturnType<typeof vi.fn>).mockImplementation((id: string) => (
+      id === 'examples' ? examplesPanel : null
+    ));
+    useLayoutStore.getState().setDockviewApi(api);
+
+    useLayoutStore.getState().focusExamplesPanel();
+
+    expect(examplesPanel.api.setActive).toHaveBeenCalled();
+    expect(api.addPanel).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'examples' }));
+  });
+
+  it('focusExamplesPanel creates examples beside node library when missing', () => {
+    const api = createDockviewApiMock();
+    const nodeLibraryPanel = { api: { setActive: vi.fn() } };
+    (api.getPanel as ReturnType<typeof vi.fn>).mockImplementation((id: string) => (
+      id === 'node-library' ? nodeLibraryPanel : null
+    ));
+    useLayoutStore.getState().setDockviewApi(api);
+
+    useLayoutStore.getState().focusExamplesPanel();
+
+    expect(api.addPanel).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'examples',
+      component: 'examples',
+      position: { referencePanel: 'node-library' },
+    }));
   });
 });
