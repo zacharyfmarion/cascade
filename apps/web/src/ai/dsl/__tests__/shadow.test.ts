@@ -517,6 +517,7 @@ describe('DSL shadow graph matching', () => {
     );
 
     expect(hydrated?.status).toBe('valid');
+    expect(hydrated?.graphHash).toBe(graphSemanticHash(gpuNodes(), gpuConnections));
     expect(hydrated?.text).toContain('# Testing a comment');
     expect(hydrated?.text).toContain('return color * 2;');
   });
@@ -556,5 +557,6 @@ describe('DSL shadow graph matching', () => {
     );
 
     expect(hydrated?.status).toBe('stale');
+    expect(hydrated?.graphHash).toBe('legacy-hash-from-older-normalization');
   });
 });
