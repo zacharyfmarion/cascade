@@ -467,7 +467,7 @@ const typeNameForNodeTypeId = (
   if (customName) return customName;
   const spec = nodeSpecById.get(typeId);
   const rawId = spec ? spec.id : typeId;
-  return snakeToPascal(rawId.replace(/^gpu_kernel::/, ''));
+  return snakeToPascal(rawId.replace(/^(gpu_kernel|group)::/, ''));
 };
 
 const internalNodeToDslNode = (

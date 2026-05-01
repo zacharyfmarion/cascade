@@ -193,7 +193,10 @@ const expectedLabelForParam = (paramSpec: ParamSpec): string => {
 };
 
 const validateNodeParams = (node: DslNode, spec: NodeSpec, errors: ValidationError[]) => {
-  const validKeys = spec.params.map(param => param.key);
+  const validKeys = [
+    ...spec.params.map(param => param.key),
+    ...spec.inputs.flatMap(input => inputPortToParamSpec(input)?.key ?? []),
+  ];
   for (const [paramKey, paramValue] of node.params.entries()) {
     if (node.nodeTypeId.startsWith('gpu_script') && paramKey === 'script') {
       if (paramValue.type !== 'string') {

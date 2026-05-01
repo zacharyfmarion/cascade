@@ -71,7 +71,6 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("separate_hsva", || Arc::new(SeparateHsva::new()));
     registry.register("combine_hsva", || Arc::new(CombineHsva::new()));
     registry.register("color_ramp", || Arc::new(ColorRampNode::new()));
-
     registry.register("math", || Arc::new(MathNode::new()));
     registry.register("dot", || Arc::new(Dot::new()));
     registry.register("project_info", || Arc::new(ProjectInfo::new()));
@@ -85,8 +84,6 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("median", || Arc::new(Median::new()));
     registry.register("directional_blur", || Arc::new(DirectionalBlur::new()));
     registry.register("radial_blur", || Arc::new(RadialBlur::new()));
-
-    // Composite
 
     // Transform
     registry.register("resize", || Arc::new(Resize::new()));

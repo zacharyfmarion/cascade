@@ -14,6 +14,7 @@ const HANDLE_ALIASES: Record<string, string> = {
   'gpu_kernel::channel_shuffle': 'shuffle',
   'gpu_kernel::extract_channel': 'extract',
   'gpu_kernel::pixelate': 'pixelate',
+  'group::photo_adjust': 'photo_adjust',
 };
 
 const HANDLE_REGEX = /^[a-z][a-z0-9_]*$/;

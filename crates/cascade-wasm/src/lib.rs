@@ -27,6 +27,7 @@ use cascade_nodes_std::{
     Viewer,
 };
 use cascade_runtime::migrations;
+use cascade_runtime::{color_range_group, photo_adjust_group, pixelate_group};
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -215,7 +216,7 @@ impl Engine {
         console_error_panic_hook::set_once();
         let mut registry = NodeRegistry::new();
         register_standard_nodes(&mut registry);
-        Engine {
+        let mut engine = Engine {
             graph: Graph::new(),
             registry: Arc::new(registry),
             nodes: HashMap::new(),
@@ -232,7 +233,9 @@ impl Engine {
             active_display: "sRGB".to_string(),
             active_view: "Standard".to_string(),
             project_format: Format::hd(),
-        }
+        };
+        engine.register_builtin_groups();
+        engine
     }
 
     pub async fn init_gpu(&mut self) -> Result<(), JsValue> {
@@ -240,6 +243,7 @@ impl Engine {
         let shared = Arc::new(ctx);
         cascade_gpu::register_gpu_nodes(Arc::make_mut(&mut self.registry), shared.clone());
         self.gpu_context = Some(shared);
+        self.register_builtin_groups();
         Ok(())
     }
 
@@ -358,6 +362,26 @@ impl Engine {
         Arc::make_mut(&mut self.registry).register_spec(&spec.id, spec.clone());
         self.group_definitions.insert(spec.id.clone(), arc_def);
         Ok(spec)
+    }
+
+    fn register_builtin_groups(&mut self) {
+        if let Err(err) = self.register_group(color_range_group()) {
+            web_sys::console::warn_1(
+                &format!("Failed to register Color Range group: {err}").into(),
+            );
+        }
+        if self.gpu_context.is_some() {
+            if let Err(err) = self.register_group(photo_adjust_group()) {
+                web_sys::console::warn_1(
+                    &format!("Failed to register Photo Adjust group: {err}").into(),
+                );
+            }
+            if let Err(err) = self.register_group(pixelate_group()) {
+                web_sys::console::warn_1(
+                    &format!("Failed to register Pixelate group: {err}").into(),
+                );
+            }
+        }
     }
 
     fn internal_graph_has_cycle(graph: &SerializableInternalGraph) -> bool {
