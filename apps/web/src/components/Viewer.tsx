@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
-import { isPixelResult } from '../store/types';
+import { isCompareResult, isPixelResult } from '../store/types';
 import type { ViewerResult } from '../store/types';
 import { ViewerToolbar } from './ViewerToolbar';
 
@@ -22,6 +22,7 @@ export interface PixelInfo {
   g: number;
   b: number;
   a: number;
+  source?: 'before' | 'after';
 }
 
 /* ── Viewer pixel transforms (display-only) ──────────────────── */
@@ -227,6 +228,8 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const [activeChannel, setActiveChannel] = useState<ChannelMode>(null);
   const [gain, setGain] = useState(1);
   const [gamma, setGamma] = useState(1);
+  const [compareSplit, setCompareSplit] = useState(0.5);
+  const [isDraggingCompareSplit, setIsDraggingCompareSplit] = useState(false);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
   const panelWidth = useSyncExternalStore(
     (onStoreChange) => {
@@ -239,6 +242,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   );
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const beforeCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageDataRef = useRef<ImageData | null>(null);
   const previewScaleRef = useRef(1);
@@ -277,13 +281,13 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     /* eslint-disable react-hooks/set-state-in-effect -- Syncs selected viewer state with external store updates. */
     if (selectedNodeId) {
       const node = nodes.get(selectedNodeId);
-      if (node && node.typeId === 'viewer') {
+      if (node && (node.typeId === 'viewer' || node.typeId === 'compare_viewer')) {
         setActiveViewerId(selectedNodeId);
         return;
       }
     }
     if (!activeViewerId) {
-      const viewerNode = Array.from(nodes.values()).find(n => n.typeId === 'viewer');
+      const viewerNode = Array.from(nodes.values()).find(n => n.typeId === 'viewer' || n.typeId === 'compare_viewer');
       if (viewerNode) {
         setActiveViewerId(viewerNode.id);
       }
@@ -299,10 +303,10 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   }, [renderResults, activeViewerId]);
 
   const hasResult = !!activeResult;
-  const hasPixels = activeResult ? isPixelResult(activeResult) : false;
+  const hasPixels = activeResult ? isPixelResult(activeResult) || isCompareResult(activeResult) : false;
 
   const dimensions = useMemo(() => {
-    if (!activeResult || !isPixelResult(activeResult)) return null;
+    if (!activeResult || (!isPixelResult(activeResult) && !isCompareResult(activeResult))) return null;
     return {
       w: activeResult.originalWidth ?? activeResult.width,
       h: activeResult.originalHeight ?? activeResult.height,
@@ -311,9 +315,11 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!activeResult || !isPixelResult(activeResult) || !canvas) {
+    if (!activeResult || (!isPixelResult(activeResult) && !isCompareResult(activeResult)) || !canvas) {
       return;
     }
+    const beforeCanvas = isCompareResult(activeResult) ? beforeCanvasRef.current : null;
+    if (isCompareResult(activeResult) && !beforeCanvas) return;
 
     const previewScale = activeResult.previewScale ?? 1;
     previewScaleRef.current = previewScale;
@@ -334,45 +340,59 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const dimsChanged = !prevDimensions || prevDimensions.w !== logicalWidth || prevDimensions.h !== logicalHeight;
     dimensionsRef.current = { w: logicalWidth, h: logicalHeight };
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const drawPixels = (targetCanvas: HTMLCanvasElement, pixels: Uint8ClampedArray) => {
+      const ctx = targetCanvas.getContext('2d');
+      if (!ctx) return;
+      if (targetCanvas.width !== logicalWidth || targetCanvas.height !== logicalHeight) {
+        targetCanvas.width = logicalWidth;
+        targetCanvas.height = logicalHeight;
+        if (targetCanvas === canvas) imageDataRef.current = null;
+      }
 
-    // Apply display-only transforms (channel isolation, gain, gamma)
-    const transformed = applyViewerTransforms(activeResult.pixels, {
-      channel: activeChannel,
-      gain,
-      gamma,
-    });
+      const transformed = applyViewerTransforms(pixels, {
+        channel: activeChannel,
+        gain,
+        gamma,
+      });
 
-    if (previewScale < 1) {
-      // Downscaled preview: draw pixel data onto a temporary canvas at the
-      // actual (small) resolution, then stretch it up to the logical canvas.
-      const offscreen = document.createElement('canvas');
-      offscreen.width = activeResult.width;
-      offscreen.height = activeResult.height;
-      const offCtx = offscreen.getContext('2d');
-      if (offCtx) {
-        const imgData = new ImageData(activeResult.width, activeResult.height);
+      if (previewScale < 1) {
+        const offscreen = document.createElement('canvas');
+        offscreen.width = activeResult.width;
+        offscreen.height = activeResult.height;
+        const offCtx = offscreen.getContext('2d');
+        if (offCtx) {
+          const imgData = new ImageData(activeResult.width, activeResult.height);
+          imgData.data.set(transformed);
+          offCtx.putImageData(imgData, 0, 0);
+          ctx.imageSmoothingEnabled = false;
+          ctx.clearRect(0, 0, logicalWidth, logicalHeight);
+          ctx.drawImage(offscreen, 0, 0, logicalWidth, logicalHeight);
+        }
+      } else if (targetCanvas === canvas) {
+        let imgData = imageDataRef.current;
+        if (!imgData || imgData.width !== logicalWidth || imgData.height !== logicalHeight) {
+          imgData = new ImageData(logicalWidth, logicalHeight);
+          imageDataRef.current = imgData;
+        }
         imgData.data.set(transformed);
-        offCtx.putImageData(imgData, 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        ctx.clearRect(0, 0, logicalWidth, logicalHeight);
-        ctx.drawImage(offscreen, 0, 0, logicalWidth, logicalHeight);
+        ctx.putImageData(imgData, 0, 0);
+      } else {
+        const imgData = new ImageData(logicalWidth, logicalHeight);
+        imgData.data.set(transformed);
+        ctx.putImageData(imgData, 0, 0);
       }
-    } else {
-      // Full resolution: write pixels directly
-      let imgData = imageDataRef.current;
-      if (!imgData || imgData.width !== logicalWidth || imgData.height !== logicalHeight) {
-        imgData = new ImageData(logicalWidth, logicalHeight);
-        imageDataRef.current = imgData;
-      }
-      imgData.data.set(transformed);
-      ctx.putImageData(imgData, 0, 0);
-    }
 
-    canvas.style.width = `${logicalWidth}px`;
-    canvas.style.height = `${logicalHeight}px`;
-    canvas.style.imageRendering = previewScale < 1 ? 'pixelated' : 'auto';
+      targetCanvas.style.width = `${logicalWidth}px`;
+      targetCanvas.style.height = `${logicalHeight}px`;
+      targetCanvas.style.imageRendering = previewScale < 1 ? 'pixelated' : 'auto';
+    };
+
+    if (isCompareResult(activeResult)) {
+      drawPixels(canvas, activeResult.afterPixels);
+      if (beforeCanvas) drawPixels(beforeCanvas, activeResult.beforePixels);
+    } else {
+      drawPixels(canvas, activeResult.pixels);
+    }
 
     if (dimsChanged) {
       setTimeout(() => transformRef.current?.centerView(computeFitScale(), 0), 0);
@@ -434,7 +454,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   // Pixel inspector: track mouse over canvas
   const handleCanvasMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!activeResult || !isPixelResult(activeResult)) return;
+      if (!activeResult || (!isPixelResult(activeResult) && !isCompareResult(activeResult))) return;
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -458,16 +478,21 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       const bufX = Math.min(Math.floor(px * previewScale), activeResult.width - 1);
       const bufY = Math.min(Math.floor(py * previewScale), activeResult.height - 1);
       const idx = (bufY * activeResult.width + bufX) * 4;
+      const source = isCompareResult(activeResult) && px / canvas.width <= compareSplit ? 'before' : 'after';
+      const pixels = isCompareResult(activeResult)
+        ? source === 'before' ? activeResult.beforePixels : activeResult.afterPixels
+        : activeResult.pixels;
       setPixelInfo({
         x: px,
         y: py,
-        r: activeResult.pixels[idx],
-        g: activeResult.pixels[idx + 1],
-        b: activeResult.pixels[idx + 2],
-        a: activeResult.pixels[idx + 3],
+        r: pixels[idx],
+        g: pixels[idx + 1],
+        b: pixels[idx + 2],
+        a: pixels[idx + 3],
+        source: isCompareResult(activeResult) ? source : undefined,
       });
     },
-    [activeResult],
+    [activeResult, compareSplit],
   );
 
   const handleCanvasMouseLeave = useCallback(() => {
@@ -478,6 +503,38 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     setGain(1);
     setGamma(1);
   }, []);
+
+  const updateCompareSplitFromPointer = useCallback((clientX: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const next = (clientX - rect.left) / rect.width;
+    setCompareSplit(Math.max(0, Math.min(1, next)));
+  }, []);
+
+  const handleComparePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingCompareSplit(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    updateCompareSplitFromPointer(e.clientX);
+  }, [updateCompareSplitFromPointer]);
+
+  const handleComparePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingCompareSplit) return;
+    e.preventDefault();
+    updateCompareSplitFromPointer(e.clientX);
+  }, [isDraggingCompareSplit, updateCompareSplitFromPointer]);
+
+  const handleComparePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggingCompareSplit) return;
+    e.preventDefault();
+    setIsDraggingCompareSplit(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  }, [isDraggingCompareSplit]);
 
   return (
     <section
@@ -535,6 +592,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                     justifyContent: 'center',
                     width: 'fit-content',
                     height: 'fit-content',
+                    position: 'relative',
                 }}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseLeave={handleCanvasMouseLeave}
@@ -548,6 +606,36 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                     imageRendering: 'auto',
                   }}
                 />
+                {activeResult && isCompareResult(activeResult) && (
+                  <div
+                    className="viewer-compare-overlay"
+                    data-testid="viewer-compare-overlay"
+                    style={{ '--compare-split': compareSplit } as React.CSSProperties}
+                    onPointerDown={handleComparePointerDown}
+                    onPointerMove={handleComparePointerMove}
+                    onPointerUp={handleComparePointerUp}
+                    onPointerCancel={handleComparePointerUp}
+                  >
+                    <div className="viewer-compare-before">
+                      <canvas
+                        ref={beforeCanvasRef}
+                        data-testid="viewer-before-canvas"
+                        style={{
+                          display: 'block',
+                          imageRendering: 'auto',
+                        }}
+                      />
+                    </div>
+                    <div
+                      className="viewer-compare-divider"
+                      role="slider"
+                      aria-label="Compare split"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={Math.round(compareSplit * 100)}
+                    />
+                  </div>
+                )}
               </div>
               {/* Scalar value viewer */}
               {hasResult && !hasPixels && activeResult && (
@@ -661,6 +749,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
           data-pixel-info={JSON.stringify(pixelInfo)}
         >
           <span className="viewer-pixel-inspector__coords">[{pixelInfo.x}, {pixelInfo.y}]</span>
+          {pixelInfo.source && (
+            <span className="viewer-pixel-inspector__coords">{pixelInfo.source}</span>
+          )}
           <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--r">R: {pixelInfo.r} ({srgbToLinear(pixelInfo.r).toFixed(3)})</span>
           <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--g">G: {pixelInfo.g} ({srgbToLinear(pixelInfo.g).toFixed(3)})</span>
           <span className="viewer-pixel-inspector__channel viewer-pixel-inspector__channel--b">B: {pixelInfo.b} ({srgbToLinear(pixelInfo.b).toFixed(3)})</span>

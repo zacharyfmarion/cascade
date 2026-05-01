@@ -22,7 +22,7 @@
  */
 
 import type { ParamValue } from '../types';
-import { isPixelResult } from '../types';
+import { isCompareResult, isPixelResult } from '../types';
 import { useSettingsStore } from '../settingsStore';
 import type { GraphState } from './store';
 import {
@@ -191,9 +191,9 @@ function dispatchLiveRender(
           // Annotate downscaled live-preview pixel results with original logical
           // dimensions so the Viewer's dimsChanged check stays false and zoom/pan
           // is preserved while dragging sliders.
-          if (liveScale < 1 && isPixelResult(r) && r.originalWidth === undefined) {
+          if (liveScale < 1 && (isPixelResult(r) || isCompareResult(r)) && r.originalWidth === undefined) {
             const prev = prevResults.get(vid);
-            if (prev && isPixelResult(prev)) {
+            if (prev && (isPixelResult(prev) || isCompareResult(prev))) {
               newResults.set(vid, {
                 ...r,
                 previewScale: liveScale,

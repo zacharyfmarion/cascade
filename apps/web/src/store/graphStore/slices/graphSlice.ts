@@ -318,7 +318,7 @@ export const createGraphSlice: StateCreator<
         sequenceInfoMap: newInfoMap,
       });
 
-      if (removedNode?.typeId === 'viewer') {
+      if (removedNode?.typeId === 'viewer' || removedNode?.typeId === 'compare_viewer') {
         const newResults = new Map(get().renderResults);
         newResults.delete(id);
         set({ renderResults: newResults });

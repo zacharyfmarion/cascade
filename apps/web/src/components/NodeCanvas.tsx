@@ -49,6 +49,7 @@ const SPECIAL_NODE_TYPES: NodeTypes = {
   load_video: withNodeErrorBoundary(LoadVideoNode, 'load_video'),
   load_image_batch: withNodeErrorBoundary(LoadImageBatchNode, 'load_image_batch'),
   viewer: withNodeErrorBoundary(ViewerNode, 'viewer'),
+  compare_viewer: withNodeErrorBoundary(ViewerNode, 'compare_viewer'),
   export_image: withNodeErrorBoundary(ExportImageNode, 'export_image'),
   export_image_sequence: withNodeErrorBoundary(ExportImageSequenceNode, 'export_image_sequence'),
   export_video: withNodeErrorBoundary(ExportVideoNode, 'export_video'),
@@ -1020,12 +1021,13 @@ export const NodeCanvas: React.FC = () => {
       const storeNode = nodesStore.get(node.id);
       if (!storeNode) return;
       const spec = nodeSpecs.find(s => s.id === storeNode.typeId);
-      if (!spec || spec.outputs.length === 0) return;
+      const visibleOutputs = spec?.outputs.filter(output => output.ui_hint?.type !== 'Hidden') ?? [];
+      if (!spec || visibleOutputs.length === 0) return;
 
       // Determine output index: if same node clicked again, cycle; otherwise start at 0
       let outputIndex = 0;
       if (viewerLinkRef.current && viewerLinkRef.current.nodeId === node.id) {
-        outputIndex = (viewerLinkRef.current.outputIndex + 1) % spec.outputs.length;
+        outputIndex = (viewerLinkRef.current.outputIndex + 1) % visibleOutputs.length;
       }
 
       viewerLinkRef.current = { nodeId: node.id, outputIndex };

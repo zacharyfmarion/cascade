@@ -177,6 +177,8 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
   headerExtra, headerIcon, headerTag, onHeaderDoubleClick, topContent,
 }) => {
   const { spec } = data;
+  const visibleInputs = spec.inputs.filter(input => input.ui_hint?.type !== 'Hidden');
+  const visibleOutputs = spec.outputs.filter(output => output.ui_hint?.type !== 'Hidden');
   const muted = useGraphStore(s => s.nodes.get(id)?.muted ?? false);
   const timing = useGraphStore(s => s.nodeTimings.get(id));
   const nodeError = useGraphStore(s => s.nodeErrors.get(id));
@@ -258,7 +260,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
 
       <div className="base-node__body">
         {topContent}
-        {spec.inputs.map((input: PortSpec) => {
+        {visibleInputs.map((input: PortSpec) => {
           const isConnected = connectedInputSet.has(input.name);
           const isInlineable = input.ty === 'Float' || input.ty === 'Int' || input.ty === 'Bool' || input.ty === 'Color' || input.ty === 'String';
           const hasDefault = isInlineable && !isConnected && (input.default != null || data.inputDefaults?.[input.name] != null || data.params?.[input.name] != null);
@@ -293,7 +295,7 @@ export const BaseNode: React.FC<BaseNodeProps> = ({
 
         {children}
 
-        {spec.outputs.map((output: PortSpec) => (
+        {visibleOutputs.map((output: PortSpec) => (
           <div key={output.name} className="node-port node-port--output">
             <span className="node-port__label">
               {output.label}

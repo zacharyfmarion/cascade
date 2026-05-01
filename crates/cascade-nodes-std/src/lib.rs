@@ -38,7 +38,9 @@ pub use input::{
     srgb_to_linear_lut, LoadImage, LoadImageBatch, LoadImageSequence, LoadVideo, SequenceInfo,
 };
 pub use matte::{CombineRgba, EdgeBlur, MatteExpand, MatteShrink, SeparateRgba};
-pub use output::{ExportImageBatch, ExportImageSequence, ExportVideo, SaveExr, Viewer};
+pub use output::{
+    CompareViewer, ExportImageBatch, ExportImageSequence, ExportVideo, SaveExr, Viewer,
+};
 pub use palette::ColorPaletteNode;
 pub use script::GpuScriptDraftNode;
 pub use time_ops::{FrameBlend, FrameHold, TimeOffset};
@@ -52,6 +54,7 @@ pub fn register_standard_nodes(registry: &mut NodeRegistry) {
     registry.register("load_image_batch", || Arc::new(LoadImageBatch::new()));
     registry.register("load_video", || Arc::new(LoadVideo::new()));
     registry.register("viewer", || Arc::new(Viewer::new()));
+    registry.register("compare_viewer", || Arc::new(CompareViewer::new()));
 
     registry.register("ai_inpaint", || Arc::new(AiInpaint::new()));
     registry.register("ai_depth_estimate", || Arc::new(AiDepthEstimate::new()));
@@ -187,6 +190,62 @@ mod tests {
                 && approx_eq(actual[3], expected[3]),
             "{msg}: expected {expected:?}, got {actual:?}"
         );
+    }
+
+    fn eval_context_for_inputs<'a>(
+        inputs: HashMap<String, Value>,
+        params: &'a HashMap<String, ParamValue>,
+        cm: &'a BuiltinColorManagement,
+        format: &'a Format,
+    ) -> EvalContext<'a> {
+        EvalContext {
+            inputs,
+            extra_inputs: HashMap::new(),
+            params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: cm,
+            ai_provider: None,
+            project_format: format,
+            ai_cached_outputs: None,
+            preview_scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn compare_viewer_spec_declares_two_visible_inputs_and_hidden_buffers() {
+        let spec = CompareViewer::new().spec();
+        assert_eq!(spec.id, "compare_viewer");
+        assert_eq!(spec.inputs.len(), 2);
+        assert_eq!(spec.inputs[0].name, "before");
+        assert_eq!(spec.inputs[1].name, "after");
+        assert_eq!(spec.outputs[0].name, "display");
+        assert!(spec
+            .outputs
+            .iter()
+            .any(|port| port.name == "before_display"
+                && matches!(port.ui_hint, Some(UiHint::Hidden))));
+        assert!(spec.outputs.iter().any(
+            |port| port.name == "after_display" && matches!(port.ui_hint, Some(UiHint::Hidden))
+        ));
+    }
+
+    #[test]
+    fn compare_viewer_forwards_after_image_to_display() {
+        let before = Image::from_f32_data(1, 1, vec![0.0, 0.0, 0.0, 1.0]).unwrap();
+        let after = Image::from_f32_data(1, 1, vec![1.0, 0.0, 0.0, 1.0]).unwrap();
+        let mut inputs = HashMap::new();
+        inputs.insert("before".to_string(), Value::Image(before));
+        inputs.insert("after".to_string(), Value::Image(after.clone()));
+        let params = HashMap::new();
+        let cm = BuiltinColorManagement::new();
+        let format = Format::from_dimensions(1, 1);
+        let ctx = eval_context_for_inputs(inputs, &params, &cm, &format);
+
+        let result = block_on(CompareViewer::new().evaluate(&ctx)).unwrap();
+        match result.get("display") {
+            Some(Value::Image(image)) => assert_eq!(image.data.as_ref(), after.data.as_ref()),
+            other => panic!("Expected display image, got {other:?}"),
+        }
     }
 
     fn curves_default_params() -> HashMap<String, ParamValue> {

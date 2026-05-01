@@ -1073,6 +1073,45 @@ body {
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 
+.viewer-compare-overlay {
+  position: absolute;
+  inset: 0;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.viewer-compare-before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--compare-split) * 100%);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.viewer-compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--compare-split) * 100%);
+  width: 0;
+  border-left: 1px solid var(--text-primary);
+  pointer-events: none;
+  filter: drop-shadow(0 0 2px var(--bg-primary));
+}
+
+.viewer-compare-divider::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -6px;
+  width: 11px;
+  height: 36px;
+  transform: translateY(-50%);
+  border: 1px solid var(--text-primary);
+  border-radius: 6px;
+  background: var(--overlay-label);
+}
+
 /* ── Viewer Channel Buttons ───────────────────────────────────── */
 .viewer-toolbar__channel-btn {
   width: 22px;
@@ -1089,7 +1128,7 @@ body {
   font-size: 0.65rem;
   font-weight: 700;
   font-family: 'SF Mono', 'Fira Code', monospace;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
   border-bottom: 2px solid transparent;
   transition: color 0.1s, border-color 0.1s, background 0.1s;
 }

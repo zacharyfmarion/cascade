@@ -69,7 +69,7 @@ interface WorkerAPI {
   loadPaletteData(nodeId: string, data: Uint8Array): Promise<[number, number, number, number][]>;
   loadSequenceFrameData(nodeId: string, frame: number, data: Uint8Array): Promise<NodeInterfaceChange>;
 
-  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null>;
+  renderViewer(viewerNodeId: string, frame: number, previewScale?: number): Promise<ViewerResult | null>;
   renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null>;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
   getImageData(nodeId: string): Promise<Uint8Array | null>;
@@ -290,8 +290,8 @@ export class WorkerEngine implements EngineBridge {
   // Rendering — pixel data Transferred FROM the Worker (handled Worker-side)
   // -----------------------------------------------------------------------
 
-  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
-    return this.getAPI().renderViewer(viewerNodeId, frame);
+  renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
+    return this.getAPI().renderViewer(viewerNodeId, frame, previewScale);
   }
 
   renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale?: number): Promise<ViewerResult | null> {

@@ -358,6 +358,7 @@ impl Graph {
     /// Node type IDs that act as output/viewer nodes for selective invalidation.
     pub const VIEWER_TYPE_IDS: &'static [&'static str] = &[
         "viewer",
+        "compare_viewer",
         "export_image",
         "export_image_sequence",
         "export_video",

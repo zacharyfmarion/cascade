@@ -30,6 +30,22 @@ const NODE_SPECS: NodeSpec[] = [
     params: []
   },
   {
+    id: 'compare_viewer',
+    display_name: 'Compare Viewer',
+    category: 'Output',
+    description: 'Compare before and after images',
+    inputs: [
+      { name: 'before', label: 'Before', ty: 'Image' },
+      { name: 'after', label: 'After', ty: 'Image' }
+    ],
+    outputs: [
+      { name: 'display', label: 'Display', ty: 'Image' },
+      { name: 'before_display', label: 'Before Display', ty: 'Image', ui_hint: { type: 'Hidden' } },
+      { name: 'after_display', label: 'After Display', ty: 'Image', ui_hint: { type: 'Hidden' } }
+    ],
+    params: []
+  },
+  {
     id: 'gpu_kernel::brightness_contrast',
     display_name: 'Brightness / Contrast',
     category: 'Color',

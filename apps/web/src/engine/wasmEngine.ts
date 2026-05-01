@@ -194,6 +194,7 @@ export class WasmEngine implements EngineBridge {
     export_group_as_package?: (groupDefId: string) => unknown;
     import_custom_nodes?: (pkg: unknown) => NodeSpec[];
     register_group_definition?: (definition: unknown) => NodeSpec;
+    render_viewer_scaled?: (viewerNodeId: string, frame: bigint, scale: number) => Promise<unknown>;
     render_internal_viewer_scaled?: (groupNodeId: string, internalViewerId: string, frame: bigint, scale: number) => Promise<unknown>;
   } {
     return this.getEngine() as Engine & {
@@ -229,6 +230,7 @@ export class WasmEngine implements EngineBridge {
       export_group_as_package?: (groupDefId: string) => unknown;
       import_custom_nodes?: (pkg: unknown) => NodeSpec[];
       register_group_definition?: (definition: unknown) => NodeSpec;
+      render_viewer_scaled?: (viewerNodeId: string, frame: bigint, scale: number) => Promise<unknown>;
       render_internal_viewer_scaled?: (groupNodeId: string, internalViewerId: string, frame: bigint, scale: number) => Promise<unknown>;
     };
   }
@@ -357,9 +359,12 @@ export class WasmEngine implements EngineBridge {
     });
   }
 
-  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
+  renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     return this.scheduler.enqueue(async (): Promise<ViewerResult | null> => {
-      const raw = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
+      const eng = this.getEngineWithBindings();
+      const raw = previewScale < 1 && typeof eng.render_viewer_scaled === 'function'
+        ? await eng.render_viewer_scaled(viewerNodeId, BigInt(frame), previewScale)
+        : await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
 
       try {
         const timingsRaw = this.getEngine().get_last_render_timings();

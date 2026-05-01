@@ -1,4 +1,4 @@
-import { isPixelResult, type ViewerResult } from '../store/types';
+import { isCompareResult, isPixelResult, type ViewerResult } from '../store/types';
 
 type DecodeViewerResultOptions = {
   copyPixels?: boolean;
@@ -33,6 +33,7 @@ export function decodeViewerResult(
   if (type !== 'image'
     && type !== 'mask'
     && type !== 'field'
+    && type !== 'compare'
     && type !== 'float'
     && type !== 'int'
     && type !== 'bool'
@@ -58,6 +59,21 @@ export function decodeViewerResult(
         pixels,
       };
     }
+    case 'compare': {
+      const beforePixels = decodePixels(raw.beforePixels, options.copyPixels ?? false);
+      const afterPixels = decodePixels(raw.afterPixels, options.copyPixels ?? false);
+      if (!beforePixels || !afterPixels) {
+        return null;
+      }
+      return {
+        type: 'compare',
+        nodeId,
+        width: raw.width as number,
+        height: raw.height as number,
+        beforePixels,
+        afterPixels,
+      };
+    }
     case 'float':
     case 'int':
       return { type, nodeId, value: raw.value as number };
@@ -74,6 +90,12 @@ export function decodeViewerResult(
 
 export function collectViewerResultTransferables(result: ViewerResult): ArrayBuffer[] {
   if (!isPixelResult(result)) {
+    if (isCompareResult(result)) {
+      return [
+        result.beforePixels.buffer as ArrayBuffer,
+        result.afterPixels.buffer as ArrayBuffer,
+      ];
+    }
     return [];
   }
   return [result.pixels.buffer as ArrayBuffer];

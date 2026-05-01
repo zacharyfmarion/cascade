@@ -4,7 +4,7 @@ import { BaseNode } from './BaseNode';
 import { NodeCanvas } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
-import { isPixelResult } from '../../store/types';
+import { isCompareResult, isPixelResult } from '../../store/types';
 import type { NodeSpec, ParamValue } from '../../store/types';
 
 type NodeData = {
@@ -95,25 +95,48 @@ export const ViewerNode: React.FC<NodeProps> = (props) => {
   const data = props.data as NodeData;
   const result = useGraphStore(s => s.renderResults.get(props.id));
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const hasPixels = result ? isPixelResult(result) : false;
+  const beforeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const hasPixels = result ? isPixelResult(result) || isCompareResult(result) : false;
 
   useEffect(() => {
-    if (result && isPixelResult(result) && canvasRef.current) {
-      const canvas = canvasRef.current;
-      canvas.width = result.width;
-      canvas.height = result.height;
+    const draw = (canvas: HTMLCanvasElement, width: number, height: number, pixels: Uint8ClampedArray) => {
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        const imageData = new ImageData(result.width, result.height);
-        imageData.data.set(result.pixels);
+        const imageData = new ImageData(width, height);
+        imageData.data.set(pixels);
         ctx.putImageData(imageData, 0, 0);
       }
+    };
+
+    if (result && isPixelResult(result) && canvasRef.current) {
+      draw(canvasRef.current, result.width, result.height, result.pixels);
+    }
+
+    if (result && isCompareResult(result) && canvasRef.current && beforeCanvasRef.current) {
+      draw(canvasRef.current, result.width, result.height, result.afterPixels);
+      draw(beforeCanvasRef.current, result.width, result.height, result.beforePixels);
     }
   }, [result]);
 
   return (
     <BaseNode {...props} data={data} headerIcon={getNodeIcon('viewer', 'Output')}>
-      {hasPixels ? (
+      {result && isCompareResult(result) ? (
+        <div className="node-preview" style={{ position: 'relative', height: 100, overflow: 'hidden' }}>
+          <canvas
+            ref={canvasRef}
+            style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
+          />
+          <div style={{ position: 'absolute', inset: '0 50% 0 0', overflow: 'hidden', pointerEvents: 'none' }}>
+            <canvas
+              ref={beforeCanvasRef}
+              style={{ width: '200%', height: '100%', display: 'block', objectFit: 'contain' }}
+            />
+          </div>
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '50%', borderLeft: '1px solid var(--text-primary)', pointerEvents: 'none' }} />
+        </div>
+      ) : hasPixels ? (
         <NodeCanvas canvasRef={canvasRef} hasResult={true} emptyText="No Output" height={100} />
       ) : result ? (
         <InlineScalar result={result} />

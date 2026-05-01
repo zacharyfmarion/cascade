@@ -229,10 +229,25 @@ pub struct InternalGraphConnection {
     pub to_port: String,
 }
 
+#[derive(Debug)]
 pub struct RenderResult {
     pub width: u32,
     pub height: u32,
     pub pixels: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct CompareRenderResult {
+    pub width: u32,
+    pub height: u32,
+    pub before_pixels: Vec<u8>,
+    pub after_pixels: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub enum ViewerRenderResult {
+    Image(RenderResult),
+    Compare(CompareRenderResult),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2183,13 +2198,23 @@ impl Engine {
         frame: u64,
         preview_scale: f32,
     ) -> Result<cascade_core::eval::EvalResult, CascadeError> {
+        self.evaluate_viewer_output_scaled(viewer_id, "display", frame, preview_scale)
+    }
+
+    fn evaluate_viewer_output_scaled(
+        &mut self,
+        viewer_id: NodeId,
+        output_port: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<cascade_core::eval::EvalResult, CascadeError> {
         let cm = self.color_management.as_ref();
         pollster::block_on(self.evaluator.evaluate(
             &mut self.graph,
             &self.registry,
             &self.nodes,
             viewer_id,
-            "display",
+            output_port,
             FrameTime { frame },
             cm,
             self.ai_provider.as_deref(),
@@ -2210,6 +2235,118 @@ impl Engine {
             width: image.width,
             height: image.height,
             pixels,
+        }
+    }
+
+    fn images_to_compare_render_result(
+        &self,
+        before: &Image,
+        after: &Image,
+    ) -> Result<CompareRenderResult, CascadeError> {
+        if before.width != after.width || before.height != after.height {
+            return Err(CascadeError::Other(format!(
+                "Compare Viewer requires matching image dimensions, got before {}x{} and after {}x{}",
+                before.width, before.height, after.width, after.height
+            )));
+        }
+        Ok(CompareRenderResult {
+            width: after.width,
+            height: after.height,
+            before_pixels: Viewer::image_to_rgba8_with_display(
+                before,
+                self.color_management.as_ref(),
+                &self.active_display,
+                &self.active_view,
+            ),
+            after_pixels: Viewer::image_to_rgba8_with_display(
+                after,
+                self.color_management.as_ref(),
+                &self.active_display,
+                &self.active_view,
+            ),
+        })
+    }
+
+    fn render_compare_viewer_scaled(
+        &mut self,
+        viewer_id: NodeId,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<CompareRenderResult, CascadeError> {
+        let before_eval =
+            self.evaluate_viewer_output_scaled(viewer_id, "before_display", frame, preview_scale)?;
+        let mut merged_timings = before_eval.node_timings;
+        let before = match before_eval.value {
+            Value::Image(image) => image,
+            _ => {
+                return Err(CascadeError::Other(
+                    "Compare Viewer before output is not an image".to_string(),
+                ))
+            }
+        };
+
+        let after_eval =
+            self.evaluate_viewer_output_scaled(viewer_id, "after_display", frame, preview_scale)?;
+        for (node_id, duration) in after_eval.node_timings {
+            merged_timings.insert(node_id, duration);
+        }
+        self.last_timings = merged_timings
+            .into_iter()
+            .map(|(node_id, duration)| {
+                (
+                    format_node_id(&self.graph, node_id),
+                    duration.as_secs_f64() * 1000.0,
+                )
+            })
+            .collect();
+        let after = match after_eval.value {
+            Value::Image(image) => image,
+            _ => {
+                return Err(CascadeError::Other(
+                    "Compare Viewer after output is not an image".to_string(),
+                ))
+            }
+        };
+
+        self.images_to_compare_render_result(&before, &after)
+    }
+
+    fn render_viewer_result_for_id_scaled(
+        &mut self,
+        viewer_id: NodeId,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<ViewerRenderResult, CascadeError> {
+        let type_id = self
+            .graph
+            .nodes
+            .get(viewer_id)
+            .map(|node| node.type_id.clone())
+            .ok_or(CascadeError::NodeNotFound(viewer_id))?;
+        if type_id == "compare_viewer" {
+            return Ok(ViewerRenderResult::Compare(
+                self.render_compare_viewer_scaled(viewer_id, frame, preview_scale)?,
+            ));
+        }
+
+        let eval_result = self.evaluate_viewer_scaled(viewer_id, frame, preview_scale)?;
+        self.last_timings = eval_result
+            .node_timings
+            .into_iter()
+            .map(|(node_id, duration)| {
+                (
+                    format_node_id(&self.graph, node_id),
+                    duration.as_secs_f64() * 1000.0,
+                )
+            })
+            .collect();
+        match eval_result.value {
+            Value::Image(image) => Ok(ViewerRenderResult::Image(
+                self.image_to_render_result(&image),
+            )),
+            _ => Err(CascadeError::Other(
+                "Viewer output is not an image".to_string(),
+            )),
         }
     }
 
@@ -2238,6 +2375,24 @@ impl Engine {
         }
 
         self.last_timings = merged_timings;
+        results
+    }
+
+    fn render_viewer_results_scaled(
+        &mut self,
+        viewer_ids: Vec<NodeId>,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Vec<(String, ViewerRenderResult)> {
+        let mut results = Vec::new();
+        for viewer_id in viewer_ids {
+            let viewer_id_str = format_node_id(&self.graph, viewer_id);
+            if let Ok(result) =
+                self.render_viewer_result_for_id_scaled(viewer_id, frame, preview_scale)
+            {
+                results.push((viewer_id_str, result));
+            }
+        }
         results
     }
 
@@ -2273,6 +2428,24 @@ impl Engine {
                 "Viewer output is not an image".to_string(),
             )),
         }
+    }
+
+    pub fn render_viewer_result(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<ViewerRenderResult, CascadeError> {
+        self.render_viewer_result_scaled(viewer_node_id, frame, 1.0)
+    }
+
+    pub fn render_viewer_result_scaled(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<ViewerRenderResult, CascadeError> {
+        let id = self.parse_node_id(viewer_node_id)?;
+        self.render_viewer_result_for_id_scaled(id, frame, preview_scale)
     }
 
     pub fn render_internal_viewer(
@@ -2367,6 +2540,146 @@ impl Engine {
         self.last_timings.clear();
         match eval_result.value {
             Value::Image(image) => Ok(self.image_to_render_result(&image)),
+            _ => Err(CascadeError::Other(
+                "Viewer output is not an image".to_string(),
+            )),
+        }
+    }
+
+    pub fn render_internal_viewer_result_scaled(
+        &mut self,
+        group_node_id: &str,
+        internal_viewer_id: &str,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<ViewerRenderResult, CascadeError> {
+        let group_id = self.parse_node_id(group_node_id)?;
+        let group_instance = self
+            .graph
+            .nodes
+            .get(group_id)
+            .cloned()
+            .ok_or(CascadeError::NodeNotFound(group_id))?;
+        let group_node_arc = self
+            .nodes
+            .get(&group_id)
+            .cloned()
+            .ok_or_else(|| CascadeError::Other("Group node instance not found".to_string()))?;
+        let group_node = group_node_arc
+            .as_any()
+            .downcast_ref::<GroupNode>()
+            .ok_or_else(|| CascadeError::Other("Node is not a group".to_string()))?;
+        let group_spec = self
+            .registry
+            .get_spec(&group_instance.type_id)
+            .cloned()
+            .ok_or_else(|| {
+                CascadeError::InvalidConnection(format!(
+                    "Unknown node type: {}",
+                    group_instance.type_id
+                ))
+            })?;
+
+        let frame_time = FrameTime { frame };
+        let mut inputs = HashMap::new();
+        for input in group_spec.all_inputs() {
+            if let Some((up_node, up_port)) = self.graph.get_upstream(group_id, &input.name) {
+                let eval_result = pollster::block_on(self.evaluator.evaluate(
+                    &mut self.graph,
+                    &self.registry,
+                    &self.nodes,
+                    up_node,
+                    &up_port,
+                    frame_time,
+                    self.color_management.as_ref(),
+                    self.ai_provider.as_deref(),
+                    &self.project_format,
+                    &HashMap::new(),
+                    preview_scale,
+                ))?;
+                inputs.insert(input.name.clone(), eval_result.value);
+            } else if let Some(value) = group_instance.input_defaults.get(&input.name) {
+                inputs.insert(input.name.clone(), param_value_to_runtime_value(value));
+            } else if let Some(default) = &input.default {
+                inputs.insert(input.name.clone(), param_default_to_runtime_value(default));
+            }
+        }
+
+        let mut params: HashMap<String, ParamValue> = group_spec
+            .params
+            .iter()
+            .map(|param| (param.key.clone(), param_default_to_value(&param.default)))
+            .collect();
+        params.extend(group_instance.params.clone());
+
+        if group_node.internal_node_type(internal_viewer_id)? == "compare_viewer" {
+            let before_eval = pollster::block_on(group_node.evaluate_internal_output(
+                InternalOutputEvalRequest {
+                    internal_node_id: internal_viewer_id,
+                    output_port: "before_display",
+                    inputs: inputs.clone(),
+                    params: params.clone(),
+                    frame_time,
+                    color_management: self.color_management.as_ref(),
+                    ai_provider: self.ai_provider.as_deref(),
+                    project_format: &self.project_format,
+                    preview_scale,
+                },
+            ))?;
+            let after_eval = pollster::block_on(group_node.evaluate_internal_output(
+                InternalOutputEvalRequest {
+                    internal_node_id: internal_viewer_id,
+                    output_port: "after_display",
+                    inputs,
+                    params,
+                    frame_time,
+                    color_management: self.color_management.as_ref(),
+                    ai_provider: self.ai_provider.as_deref(),
+                    project_format: &self.project_format,
+                    preview_scale,
+                },
+            ))?;
+            self.last_timings.clear();
+            let before = match before_eval.value {
+                Value::Image(image) => image,
+                _ => {
+                    return Err(CascadeError::Other(
+                        "Compare Viewer before output is not an image".to_string(),
+                    ))
+                }
+            };
+            let after = match after_eval.value {
+                Value::Image(image) => image,
+                _ => {
+                    return Err(CascadeError::Other(
+                        "Compare Viewer after output is not an image".to_string(),
+                    ))
+                }
+            };
+            return Ok(ViewerRenderResult::Compare(
+                self.images_to_compare_render_result(&before, &after)?,
+            ));
+        }
+
+        let eval_result = pollster::block_on(group_node.evaluate_internal_output(
+            InternalOutputEvalRequest {
+                internal_node_id: internal_viewer_id,
+                output_port: "display",
+                inputs,
+                params,
+                frame_time,
+                color_management: self.color_management.as_ref(),
+                ai_provider: self.ai_provider.as_deref(),
+                project_format: &self.project_format,
+                preview_scale,
+            },
+        ))?;
+
+        self.last_timings.clear();
+        match eval_result.value {
+            Value::Image(image) => Ok(ViewerRenderResult::Image(
+                self.image_to_render_result(&image),
+            )),
             _ => Err(CascadeError::Other(
                 "Viewer output is not an image".to_string(),
             )),
@@ -2491,6 +2804,20 @@ impl Engine {
         Ok(self.render_viewers_scaled(viewer_ids, frame, preview_scale))
     }
 
+    pub fn set_param_and_render_viewer_results_scaled(
+        &mut self,
+        node_id: &str,
+        key: &str,
+        value: ParamValue,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<Vec<(String, ViewerRenderResult)>, CascadeError> {
+        self.set_param(node_id, key, value)?;
+        let id = self.parse_node_id(node_id)?;
+        let viewer_ids = self.graph.get_affected_viewers(id);
+        Ok(self.render_viewer_results_scaled(viewer_ids, frame, preview_scale))
+    }
+
     pub fn set_input_default_and_render_viewers(
         &mut self,
         node_id: &str,
@@ -2513,6 +2840,20 @@ impl Engine {
         self.graph.set_input_default(id, port_name, value);
         let viewer_ids = self.graph.get_affected_viewers(id);
         Ok(self.render_viewers_scaled(viewer_ids, frame, preview_scale))
+    }
+
+    pub fn set_input_default_and_render_viewer_results_scaled(
+        &mut self,
+        node_id: &str,
+        port_name: &str,
+        value: ParamValue,
+        frame: u64,
+        preview_scale: f32,
+    ) -> Result<Vec<(String, ViewerRenderResult)>, CascadeError> {
+        self.set_input_default(node_id, port_name, value)?;
+        let id = self.parse_node_id(node_id)?;
+        let viewer_ids = self.graph.get_affected_viewers(id);
+        Ok(self.render_viewer_results_scaled(viewer_ids, frame, preview_scale))
     }
 
     pub fn get_last_render_timings(&self) -> &HashMap<String, f64> {
@@ -3627,6 +3968,96 @@ mod tests {
         assert_eq!(result.width, 8);
         assert_eq!(result.height, 6);
         assert_eq!(result.pixels.len(), 8 * 6 * 4);
+    }
+
+    fn encode_test_png(width: u32, height: u32, color: image::Rgba<u8>) -> Vec<u8> {
+        let image = image::RgbaImage::from_pixel(width, height, color);
+        let mut png_bytes = Vec::new();
+        image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode test png");
+        png_bytes
+    }
+
+    #[test]
+    fn test_compare_viewer_renders_compare_payload_and_invalidates_from_either_input() {
+        let mut engine = Engine::new();
+        let (before_id, _) = engine.add_node("load_image", 0.0, 0.0).unwrap();
+        let (after_id, _) = engine.add_node("load_image", 0.0, 100.0).unwrap();
+        let (compare_id, _) = engine.add_node("compare_viewer", 300.0, 0.0).unwrap();
+
+        let before_png = encode_test_png(2, 1, image::Rgba([255, 0, 0, 255]));
+        let after_png = encode_test_png(2, 1, image::Rgba([0, 255, 0, 255]));
+        engine
+            .load_image_data(&before_id, &before_png)
+            .expect("load before image");
+        engine
+            .load_image_data(&after_id, &after_png)
+            .expect("load after image");
+        engine
+            .connect(&before_id, "image", &compare_id, "before")
+            .expect("connect before");
+        engine
+            .connect(&after_id, "image", &compare_id, "after")
+            .expect("connect after");
+
+        let before_node_id = engine.parse_node_id(&before_id).unwrap();
+        let after_node_id = engine.parse_node_id(&after_id).unwrap();
+        let compare_node_id = engine.parse_node_id(&compare_id).unwrap();
+        assert_eq!(
+            engine.graph.get_affected_viewers(before_node_id),
+            vec![compare_node_id]
+        );
+        assert_eq!(
+            engine.graph.get_affected_viewers(after_node_id),
+            vec![compare_node_id]
+        );
+
+        let result = engine
+            .render_viewer_result(&compare_id, 0)
+            .expect("render compare viewer");
+        let ViewerRenderResult::Compare(compare) = result else {
+            panic!("expected compare render result");
+        };
+        assert_eq!(compare.width, 2);
+        assert_eq!(compare.height, 1);
+        assert_eq!(compare.before_pixels.len(), 2 * 4);
+        assert_eq!(compare.after_pixels.len(), 2 * 4);
+    }
+
+    #[test]
+    fn test_compare_viewer_errors_on_mismatched_dimensions() {
+        let mut engine = Engine::new();
+        let (before_id, _) = engine.add_node("load_image", 0.0, 0.0).unwrap();
+        let (after_id, _) = engine.add_node("load_image", 0.0, 100.0).unwrap();
+        let (compare_id, _) = engine.add_node("compare_viewer", 300.0, 0.0).unwrap();
+
+        let before_png = encode_test_png(2, 1, image::Rgba([255, 0, 0, 255]));
+        let after_png = encode_test_png(1, 1, image::Rgba([0, 255, 0, 255]));
+        engine
+            .load_image_data(&before_id, &before_png)
+            .expect("load before image");
+        engine
+            .load_image_data(&after_id, &after_png)
+            .expect("load after image");
+        engine
+            .connect(&before_id, "image", &compare_id, "before")
+            .expect("connect before");
+        engine
+            .connect(&after_id, "image", &compare_id, "after")
+            .expect("connect after");
+
+        let err = engine
+            .render_viewer_result(&compare_id, 0)
+            .expect_err("mismatched compare inputs should error");
+        assert!(
+            err.to_string()
+                .contains("requires matching image dimensions"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
