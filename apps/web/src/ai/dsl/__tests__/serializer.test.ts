@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { serializeGraph, serializeCustomDefinition, type SerializerInput } from '../serializer';
+import { parseDsl } from '../parser';
 import { HandleMap } from '../handleMap';
 import type { Connection, NodeInstance, NodeSpec, SerializableGroupDefinition } from '../../../store/types';
 import type {
@@ -240,6 +241,62 @@ describe('serializeGraph', () => {
     expect(output).toContain('glow1.image -> output.image');
     expect(output).toContain('node_group1 = NodeGroup()');
     expect(output).not.toContain('User123');
+  });
+
+  it('serializes built-in groups as node calls instead of lifted group definitions', () => {
+    const photoAdjustSpec: NodeSpec = {
+      id: 'group::photo_adjust',
+      display_name: 'Photo Adjust',
+      category: 'Color',
+      description: 'Basic photographic adjustments',
+      inputs: [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'mask', label: 'Mask', ty: 'Mask' },
+        {
+          name: 'exposure',
+          label: 'Exposure',
+          ty: 'Float',
+          default: { Float: 0 },
+          min: -5,
+          max: 5,
+          step: 0.01,
+          ui_hint: { type: 'Slider' },
+        },
+      ],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      params: [],
+    };
+    const nodes = new Map<string, NodeInstance>([
+      ['adjust-node', makeNodeInstance({
+        id: 'adjust-node',
+        typeId: 'group::photo_adjust',
+        inputDefaults: { exposure: { Float: 0.5 } },
+      })],
+    ]);
+    const output = serializeGraph({
+      nodes,
+      connections: [],
+      nodeSpecs: [...mockSpecs, photoAdjustSpec],
+      handleMap: new HandleMap(),
+      groupDefinitions: [{
+        id: 'group::photo_adjust',
+        name: 'Photo Adjust',
+        category: 'Color',
+        description: 'Built-in group',
+        internal_graph: { nodes: [], connections: [] },
+        promotions: [],
+        is_builtin: true,
+        explicit_inputs: null,
+        explicit_outputs: null,
+      }],
+    });
+
+    expect(output).toBe(graph(['photo_adjust1 = PhotoAdjust(exposure: 0.5)']));
+    expect(output).not.toContain('node PhotoAdjust = group');
+
+    const parsed = parseDsl(output, [...mockSpecs, photoAdjustSpec]);
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.ast?.nodes.get('photo_adjust1')?.nodeTypeId).toBe('group::photo_adjust');
   });
 
   it('uses shadow names for nested runtime groups inside group definitions', () => {

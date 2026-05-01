@@ -332,66 +332,6 @@ pub fn builtin_posterize_manifest() -> KernelManifest {
     }
 }
 
-pub fn builtin_white_balance_manifest() -> KernelManifest {
-    KernelManifest {
-        id: "gpu_kernel::white_balance".to_string(),
-        display_name: "White Balance".to_string(),
-        category: "Color".to_string(),
-        description: "Adjust white balance".to_string(),
-        inputs: vec![ManifestPort {
-            name: "image".to_string(),
-            label: "Image".to_string(),
-            ty: "Image".to_string(),
-            optional: false,
-            ..Default::default()
-        }],
-        outputs: vec![ManifestPort {
-            name: "image".to_string(),
-            label: "Image".to_string(),
-            ty: "Image".to_string(),
-            optional: false,
-            ..Default::default()
-        }],
-        params: vec![
-            ManifestParam {
-                key: "temperature".to_string(),
-                label: "Temperature".to_string(),
-                ty: "Float".to_string(),
-                default: serde_json::json!(0.0),
-                min: Some(-1.0),
-                max: Some(1.0),
-                step: Some(0.01),
-                ui: Some("Slider".to_string()),
-                options: vec![],
-            },
-            ManifestParam {
-                key: "tint".to_string(),
-                label: "Tint".to_string(),
-                ty: "Float".to_string(),
-                default: serde_json::json!(0.0),
-                min: Some(-1.0),
-                max: Some(1.0),
-                step: Some(0.01),
-                ui: Some("Slider".to_string()),
-                options: vec![],
-            },
-        ],
-        kernel: r#"
-    float temp_factor = temperature * 0.5;
-    float tint_factor = tint * 0.5;
-    vec3 v = color.rgb;
-    v.r *= 1.0 + temp_factor;
-    v.g *= 1.0 - tint_factor;
-    v.b *= 1.0 - temp_factor;
-    v = clamp(v, 0.0, 1.0);
-    return vec4(v, color.a);
-"#
-        .trim()
-        .to_string(),
-        ..KernelManifest::default()
-    }
-}
-
 pub fn builtin_clamp_manifest() -> KernelManifest {
     KernelManifest {
         id: "gpu_kernel::clamp".to_string(),
@@ -486,11 +426,6 @@ mod tests {
     #[test]
     fn test_posterize_manifest_transpiles() {
         assert_manifest_transpiles(builtin_posterize_manifest());
-    }
-
-    #[test]
-    fn test_white_balance_manifest_transpiles() {
-        assert_manifest_transpiles(builtin_white_balance_manifest());
     }
 
     #[test]

@@ -4,6 +4,8 @@ mod builtin_groups;
 pub mod document;
 pub mod migrations;
 
+pub use builtin_groups::{color_range_group, photo_adjust_group, pixelate_group};
+
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ai_provider::NativeAiProvider;
 use cascade_core::ai::AiProvider;
@@ -4896,6 +4898,19 @@ return pixelated;
     fn test_list_node_types_includes_groups() {
         let engine = Engine::new();
         let specs = engine.list_node_types();
+        assert!(
+            specs.iter().all(|s| s.id != "white_balance"),
+            "White Balance should be exposed through the GPU kernel namespace"
+        );
+        assert!(
+            specs.iter().all(|s| s.id != "photo_white_balance"),
+            "Photo-prefixed helper nodes should not be exposed as public node types"
+        );
+        assert!(
+            specs.iter().all(|s| s.id != "luma_adjust"),
+            "Luma Adjust should be exposed through the GPU kernel namespace"
+        );
+        let photo_adjust = specs.iter().find(|s| s.id == "group::photo_adjust");
         // GPU kernel groups require a GPU adapter.
         // On CI or headless environments without a GPU, these groups won't be
         // registered, so we only assert they exist when GPU init succeeded.
@@ -4904,9 +4919,142 @@ return pixelated;
         let has_pixelate = specs.iter().any(|s| s.id == "group::pixelate");
         if engine.gpu_context().is_some() {
             assert!(has_pixelate, "Pixelate group should appear in node types");
+            assert!(
+                specs.iter().any(|s| s.id == "gpu_kernel::white_balance"),
+                "White Balance GPU kernel should be registered when GPU init succeeds"
+            );
+            let photo_adjust = photo_adjust.expect("Photo Adjust group should appear with GPU");
+            assert_eq!(photo_adjust.category, "Color");
+            assert!(
+                photo_adjust.inputs.iter().any(|p| p.name == "exposure"),
+                "Photo Adjust should expose exposure as a wired input"
+            );
+            assert!(
+                photo_adjust.params.is_empty(),
+                "Photo Adjust controls should be group inputs, not hidden promoted params"
+            );
         } else {
             println!("GPU not available, skipping GPU kernel group assertions");
+            assert!(
+                photo_adjust.is_none(),
+                "Photo Adjust is GPU-only and should not register without GPU nodes"
+            );
         }
+    }
+
+    #[test]
+    fn test_photo_adjust_group_uses_visible_input_wiring() {
+        let group = photo_adjust_group();
+        assert!(group.promotions.is_empty());
+
+        let required_connections = [
+            ("gi", "temperature", "white_balance", "temperature"),
+            ("gi", "tint", "white_balance", "tint"),
+            ("gi", "exposure", "exposure", "exposure"),
+            ("gi", "contrast", "contrast", "contrast"),
+            ("gi", "shadows", "shadows", "amount"),
+            ("gi", "highlights", "highlights", "amount"),
+            ("gi", "blacks", "blacks", "amount"),
+            ("gi", "whites", "whites", "amount"),
+        ];
+
+        for (from_node, from_port, to_node, to_port) in required_connections {
+            assert!(
+                group.internal_graph.connections.iter().any(|connection| {
+                    connection.from_node == from_node
+                        && connection.from_port == from_port
+                        && connection.to_node == to_node
+                        && connection.to_port == to_port
+                }),
+                "{from_node}.{from_port} should connect to {to_node}.{to_port}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_photo_adjust_internal_graph_exposes_control_inputs() {
+        let mut engine = Engine::new();
+        let (adjust_id, _) = match engine.add_node("group::photo_adjust", 0.0, 0.0) {
+            Ok(result) => result,
+            Err(err) => {
+                println!("GPU not available, skipping Photo Adjust interface test: {err}");
+                return;
+            }
+        };
+
+        let internal_graph = engine
+            .get_group_internal_graph(&adjust_id)
+            .expect("Photo Adjust internal graph");
+        let input_names: Vec<&str> = internal_graph
+            .inputs
+            .iter()
+            .map(|input| input.name.as_str())
+            .collect();
+
+        for expected in [
+            "image",
+            "mask",
+            "temperature",
+            "tint",
+            "exposure",
+            "contrast",
+            "shadows",
+            "highlights",
+            "blacks",
+            "whites",
+        ] {
+            assert!(
+                input_names.contains(&expected),
+                "Photo Adjust internal graph should expose {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_photo_adjust_group_evaluates_wired_exposure_input() {
+        let mut engine = Engine::new();
+        let (load_id, _) = engine.add_node("load_image", -300.0, 0.0).unwrap();
+        let (adjust_id, _) = match engine.add_node("group::photo_adjust", 0.0, 0.0) {
+            Ok(result) => result,
+            Err(err) => {
+                println!("GPU not available, skipping Photo Adjust evaluation test: {err}");
+                return;
+            }
+        };
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+
+        let png_image = image::RgbaImage::from_pixel(1, 1, image::Rgba([64, 64, 64, 255]));
+        let mut png_bytes = Vec::new();
+        png_image
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_bytes),
+                image::ImageFormat::Png,
+            )
+            .expect("encode PNG");
+        engine
+            .load_image_data(&load_id, &png_bytes)
+            .expect("load image");
+        engine
+            .connect(&load_id, "image", &adjust_id, "image")
+            .expect("connect load to Photo Adjust");
+        engine
+            .connect(&adjust_id, "image", &viewer_id, "value")
+            .expect("connect Photo Adjust to viewer");
+
+        let neutral = engine.render_viewer(&viewer_id, 0).expect("neutral render");
+        engine
+            .set_input_default(&adjust_id, "exposure", ParamValue::Float(1.0))
+            .expect("set exposure");
+        let brighter = engine
+            .render_viewer(&viewer_id, 0)
+            .expect("brighter render");
+
+        assert_eq!(neutral.width, 1);
+        assert_eq!(neutral.height, 1);
+        assert!(
+            brighter.pixels[0] > neutral.pixels[0],
+            "positive exposure should brighten rendered output"
+        );
     }
 
     #[test]

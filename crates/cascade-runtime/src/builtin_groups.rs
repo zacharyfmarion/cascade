@@ -455,11 +455,263 @@ pub fn pixelate_group() -> GroupDefinition {
     }
 }
 
+pub fn photo_adjust_group() -> GroupDefinition {
+    fn slider_input(
+        name: &str,
+        label: &str,
+        default: f64,
+        min: f64,
+        max: f64,
+        step: f64,
+    ) -> PortSpec {
+        PortSpec {
+            name: name.to_string(),
+            label: label.to_string(),
+            ty: ValueType::Float,
+            default: Some(ParamDefault::Float(default)),
+            min: Some(min),
+            max: Some(max),
+            step: Some(step),
+            ui_hint: Some(UiHint::Slider),
+        }
+    }
+
+    let nodes = vec![
+        InternalNode {
+            id: "gi".to_string(),
+            type_id: "group_input".to_string(),
+            params: HashMap::new(),
+            muted: false,
+            position: (0.0, 0.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "white_balance".to_string(),
+            type_id: "gpu_kernel::white_balance".to_string(),
+            params: HashMap::from([
+                ("temperature".to_string(), ParamValue::Float(0.0)),
+                ("tint".to_string(), ParamValue::Float(0.0)),
+            ]),
+            muted: false,
+            position: (200.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "exposure".to_string(),
+            type_id: "gpu_kernel::exposure".to_string(),
+            params: HashMap::from([("exposure".to_string(), ParamValue::Float(0.0))]),
+            muted: false,
+            position: (420.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "contrast".to_string(),
+            type_id: "gpu_kernel::contrast".to_string(),
+            params: HashMap::from([("contrast".to_string(), ParamValue::Float(0.0))]),
+            muted: false,
+            position: (640.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "shadows".to_string(),
+            type_id: "gpu_kernel::luma_adjust".to_string(),
+            params: HashMap::from([
+                ("mode".to_string(), ParamValue::Int(0)),
+                ("amount".to_string(), ParamValue::Float(0.0)),
+            ]),
+            muted: false,
+            position: (860.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "highlights".to_string(),
+            type_id: "gpu_kernel::luma_adjust".to_string(),
+            params: HashMap::from([
+                ("mode".to_string(), ParamValue::Int(1)),
+                ("amount".to_string(), ParamValue::Float(0.0)),
+            ]),
+            muted: false,
+            position: (1080.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "blacks".to_string(),
+            type_id: "gpu_kernel::luma_adjust".to_string(),
+            params: HashMap::from([
+                ("mode".to_string(), ParamValue::Int(2)),
+                ("amount".to_string(), ParamValue::Float(0.0)),
+            ]),
+            muted: false,
+            position: (1300.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "whites".to_string(),
+            type_id: "gpu_kernel::luma_adjust".to_string(),
+            params: HashMap::from([
+                ("mode".to_string(), ParamValue::Int(3)),
+                ("amount".to_string(), ParamValue::Float(0.0)),
+            ]),
+            muted: false,
+            position: (1520.0, -120.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+        InternalNode {
+            id: "go".to_string(),
+            type_id: "group_output".to_string(),
+            params: HashMap::new(),
+            muted: false,
+            position: (1740.0, -80.0),
+            image_data: None,
+            input_defaults: HashMap::new(),
+        },
+    ];
+
+    let connections = vec![
+        InternalConnection {
+            from_node: "gi".to_string(),
+            from_port: "image".to_string(),
+            to_node: "white_balance".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "white_balance".to_string(),
+            from_port: "image".to_string(),
+            to_node: "exposure".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "exposure".to_string(),
+            from_port: "image".to_string(),
+            to_node: "contrast".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "contrast".to_string(),
+            from_port: "image".to_string(),
+            to_node: "shadows".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "shadows".to_string(),
+            from_port: "image".to_string(),
+            to_node: "highlights".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "highlights".to_string(),
+            from_port: "image".to_string(),
+            to_node: "blacks".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "blacks".to_string(),
+            from_port: "image".to_string(),
+            to_node: "whites".to_string(),
+            to_port: "image".to_string(),
+        },
+        InternalConnection {
+            from_node: "whites".to_string(),
+            from_port: "image".to_string(),
+            to_node: "go".to_string(),
+            to_port: "image".to_string(),
+        },
+    ];
+    let adjustment_nodes = [
+        "white_balance",
+        "exposure",
+        "contrast",
+        "shadows",
+        "highlights",
+        "blacks",
+        "whites",
+    ];
+    let mask_connections = adjustment_nodes.iter().map(|node| InternalConnection {
+        from_node: "gi".to_string(),
+        from_port: "mask".to_string(),
+        to_node: (*node).to_string(),
+        to_port: "mask".to_string(),
+    });
+    let control_connections = [
+        ("temperature", "white_balance", "temperature"),
+        ("tint", "white_balance", "tint"),
+        ("exposure", "exposure", "exposure"),
+        ("contrast", "contrast", "contrast"),
+        ("shadows", "shadows", "amount"),
+        ("highlights", "highlights", "amount"),
+        ("blacks", "blacks", "amount"),
+        ("whites", "whites", "amount"),
+    ]
+    .into_iter()
+    .map(|(from_port, to_node, to_port)| InternalConnection {
+        from_node: "gi".to_string(),
+        from_port: from_port.to_string(),
+        to_node: to_node.to_string(),
+        to_port: to_port.to_string(),
+    });
+    let connections = connections
+        .into_iter()
+        .chain(mask_connections)
+        .chain(control_connections)
+        .collect();
+
+    GroupDefinition {
+        id: "group::photo_adjust".to_string(),
+        name: "Photo Adjust".to_string(),
+        category: "Color".to_string(),
+        description: "Basic photographic exposure, color, and tone adjustments".to_string(),
+        internal_graph: SerializableInternalGraph { nodes, connections },
+        promotions: Vec::new(),
+        is_builtin: true,
+        explicit_inputs: Some(vec![
+            PortSpec {
+                name: "image".to_string(),
+                label: "Image".to_string(),
+                ty: ValueType::Image,
+                ..PortSpec::default()
+            },
+            PortSpec {
+                name: "mask".to_string(),
+                label: "Mask".to_string(),
+                ty: ValueType::Mask,
+                ..PortSpec::default()
+            },
+            slider_input("temperature", "Temperature", 0.0, -100.0, 100.0, 1.0),
+            slider_input("tint", "Tint", 0.0, -100.0, 100.0, 1.0),
+            slider_input("exposure", "Exposure", 0.0, -5.0, 5.0, 0.01),
+            slider_input("contrast", "Contrast", 0.0, -100.0, 100.0, 1.0),
+            slider_input("shadows", "Shadows", 0.0, -100.0, 100.0, 1.0),
+            slider_input("highlights", "Highlights", 0.0, -100.0, 100.0, 1.0),
+            slider_input("blacks", "Blacks", 0.0, -100.0, 100.0, 1.0),
+            slider_input("whites", "Whites", 0.0, -100.0, 100.0, 1.0),
+        ]),
+        explicit_outputs: Some(vec![PortSpec {
+            name: "image".to_string(),
+            label: "Image".to_string(),
+            ty: ValueType::Image,
+            ..PortSpec::default()
+        }]),
+    }
+}
+
 pub fn register_builtin_groups(engine: &mut Engine) {
     if let Err(err) = engine.register_group(color_range_group()) {
         eprintln!("[cascade-runtime] Failed to register Color Range group: {err}");
     }
-    if let Err(err) = engine.register_group(pixelate_group()) {
-        eprintln!("[cascade-runtime] Failed to register Pixelate group: {err}");
+    if engine.gpu_context().is_some() {
+        if let Err(err) = engine.register_group(photo_adjust_group()) {
+            eprintln!("[cascade-runtime] Failed to register Photo Adjust group: {err}");
+        }
+        if let Err(err) = engine.register_group(pixelate_group()) {
+            eprintln!("[cascade-runtime] Failed to register Pixelate group: {err}");
+        }
     }
 }

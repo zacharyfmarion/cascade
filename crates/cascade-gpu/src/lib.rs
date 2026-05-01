@@ -1,3 +1,4 @@
+pub mod adjustment_kernels;
 pub mod blend_kernels;
 pub mod color_kernels;
 pub mod color_kernels_advanced;
@@ -19,6 +20,10 @@ use crate::kernel_node::GpuKernelNode;
 use crate::kuwahara::GpuKuwaharaNode;
 use crate::manifest::builtin_pixelate_manifest;
 
+use crate::adjustment_kernels::{
+    builtin_contrast_manifest, builtin_exposure_manifest, builtin_luma_adjust_manifest,
+    builtin_white_balance_manifest,
+};
 use crate::blend_kernels::{
     builtin_alpha_over_manifest, builtin_blend_manifest, builtin_channel_shuffle_manifest,
     builtin_copy_channels_manifest, builtin_image_math_manifest, builtin_key_mix_manifest,
@@ -27,7 +32,7 @@ use crate::blend_kernels::{
 use crate::color_kernels::{
     builtin_brightness_contrast_manifest, builtin_clamp_manifest, builtin_gamma_manifest,
     builtin_hue_saturation_manifest, builtin_invert_manifest, builtin_posterize_manifest,
-    builtin_threshold_manifest, builtin_white_balance_manifest,
+    builtin_threshold_manifest,
 };
 use crate::color_kernels_advanced::{
     builtin_color_balance_manifest, builtin_grade_manifest, builtin_gradient_map_manifest,
@@ -90,8 +95,11 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
     register_kernel_node(registry, &context, builtin_gamma_manifest());
     register_kernel_node(registry, &context, builtin_threshold_manifest());
     register_kernel_node(registry, &context, builtin_posterize_manifest());
-    register_kernel_node(registry, &context, builtin_white_balance_manifest());
     register_kernel_node(registry, &context, builtin_clamp_manifest());
+    register_kernel_node(registry, &context, builtin_white_balance_manifest());
+    register_kernel_node(registry, &context, builtin_exposure_manifest());
+    register_kernel_node(registry, &context, builtin_contrast_manifest());
+    register_kernel_node(registry, &context, builtin_luma_adjust_manifest());
 
     // --- Color kernels (advanced) ---
     register_kernel_node(registry, &context, builtin_levels_manifest());

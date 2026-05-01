@@ -710,9 +710,9 @@ const parseGraphStatements = (
         errors.push({ line: lineNumber, message: `Unknown node type '${nodeType}'` });
       }
 
-      const params = new Map<string, DslParamValue>();
       const inputDefaults = new Map<string, DslParamValue>();
       const paramSpecByKey = new Map((spec?.params ?? []).map((param) => [param.key, param]));
+      const params = new Map<string, DslParamValue>();
       const entries = splitTopLevelParams(paramsSection.trim());
       for (const entry of entries) {
         if (!entry.trim()) continue;
@@ -1857,9 +1857,9 @@ const resolveGraphStatements = (
       errors.push({ line: statement.line, message: `Unknown node type '${statement.nodeType}'` });
     }
 
-    const params = new Map<string, DslParamValue>();
     const inputDefaults = new Map<string, DslParamValue>();
     const paramSpecByKey = new Map((spec?.params ?? []).map((param) => [param.key, param]));
+    const params = new Map<string, DslParamValue>();
     for (const entry of statement.params) {
       const explicitInputDefault = entry.key.startsWith('input.');
       const paramKey = explicitInputDefault ? entry.key.slice('input.'.length) : entry.key;

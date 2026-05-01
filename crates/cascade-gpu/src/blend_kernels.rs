@@ -184,6 +184,7 @@ pub fn builtin_blend_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        supports_mask: false,
         ..KernelManifest::default()
     }
 }
@@ -423,7 +424,7 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
         id: "gpu_kernel::key_mix".to_string(),
         display_name: "Key Mix".to_string(),
         category: "Composite".to_string(),
-        description: "Mix two images using a mask".to_string(),
+        description: "Mix two images using an optional mask".to_string(),
         inputs: vec![
             ManifestPort {
                 name: "A".to_string(),
@@ -442,8 +443,8 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
             ManifestPort {
                 name: "mask".to_string(),
                 label: "Mask".to_string(),
-                ty: "Image".to_string(),
-                optional: false,
+                ty: "Mask".to_string(),
+                optional: true,
                 ..Default::default()
             },
         ],
@@ -467,8 +468,13 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
         }],
         kernel: r#"
     vec4 b = imageLoad(u_B, pixel);
-    vec4 mask_tex = imageLoad(u_mask, pixel);
-    float m = luminance(mask_tex);
+    float m = 1.0;
+    if (has_mask == 1) {
+        ivec2 mask_dims = imageSize(u_mask);
+        ivec2 mask_coord = clamp(pixel, ivec2(0), mask_dims - 1);
+        vec4 mask_tex = imageLoad(u_mask, mask_coord);
+        m = clamp(luminance(mask_tex), 0.0, 1.0);
+    }
     if (invert_mask != 0) {
         m = 1.0 - m;
     }
@@ -478,6 +484,7 @@ pub fn builtin_key_mix_manifest() -> KernelManifest {
 "#
         .trim()
         .to_string(),
+        supports_mask: false,
         ..KernelManifest::default()
     }
 }
@@ -863,6 +870,19 @@ mod tests {
     #[test]
     fn test_key_mix_manifest_transpile() {
         assert_manifest_transpiles(builtin_key_mix_manifest());
+    }
+
+    #[test]
+    fn test_key_mix_has_single_optional_mask_input() {
+        let spec = builtin_key_mix_manifest()
+            .to_node_spec()
+            .expect("Spec should build");
+        let mask_inputs = spec
+            .inputs
+            .iter()
+            .filter(|input| input.name == "mask")
+            .count();
+        assert_eq!(mask_inputs, 1);
     }
 
     #[test]
