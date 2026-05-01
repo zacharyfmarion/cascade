@@ -53,6 +53,18 @@ const errorMessage = (error: unknown): string => {
   return String(error);
 };
 
+const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+type AiExecutionState = { status: string; isStale: boolean; error: string };
+
+const readAiExecutionState = async (
+  getNodeExecutionState: ((nodeId: string) => AiExecutionState | Promise<AiExecutionState>) | undefined,
+  nodeId: string,
+): Promise<AiExecutionState | null> => {
+  if (!getNodeExecutionState) return null;
+  return Promise.resolve(getNodeExecutionState(nodeId));
+};
+
 export const createAiSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -105,9 +117,22 @@ export const createAiSlice: StateCreator<
     }));
     try {
       await eng.runAiNode(nodeId);
+      let execState = await readAiExecutionState(eng.getNodeExecutionState, nodeId);
+      while (execState?.status === 'running') {
+        await wait(500);
+        execState = await readAiExecutionState(eng.getNodeExecutionState, nodeId);
+      }
+      if (execState?.status === 'error') {
+        const message = execState.error || 'AI node failed';
+        set(state => ({
+          aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${message}` },
+        }));
+        get().pushToast('error', 'AI node failed', message);
+        return;
+      }
       set(state => ({
         aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'complete' },
-        aiNodeStale: { ...state.aiNodeStale, [nodeId]: false },
+        aiNodeStale: { ...state.aiNodeStale, [nodeId]: execState?.isStale ?? false },
       }));
       get().renderAllViewersAsync();
     } catch (e) {

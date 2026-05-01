@@ -9,7 +9,7 @@ use cascade_runtime::{
 use project_package::{read_asset_blob, AssetBlob};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tauri::ipc::Response;
 use tauri::State;
@@ -20,7 +20,7 @@ struct AppState {
     packed_asset_bytes: HashMap<String, Vec<u8>>,
 }
 
-type EngineState = Mutex<AppState>;
+type EngineState = Arc<Mutex<AppState>>;
 
 fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
     match result {
@@ -1720,8 +1720,22 @@ fn is_ai_configured(state: State<'_, EngineState>) -> Result<bool, String> {
 
 #[tauri::command]
 fn run_ai_node(state: State<'_, EngineState>, node_id: String) -> Result<(), String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.engine.run_ai_node(&node_id).map_err(|e| e.to_string())
+    let state = Arc::clone(state.inner());
+    let prepared = {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.engine
+            .prepare_ai_node_run(&node_id)
+            .map_err(|e| e.to_string())?
+    };
+
+    std::thread::spawn(move || {
+        let result = Engine::evaluate_prepared_ai_node_run(&prepared);
+        if let Ok(mut s) = state.lock() {
+            let _ = s.engine.finish_ai_node_run(prepared, result);
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -1848,11 +1862,11 @@ pub fn run() {
     let engine = Engine::new();
 
     tauri::Builder::default()
-        .manage(Mutex::new(AppState {
+        .manage(Arc::new(Mutex::new(AppState {
             engine,
             project_assets: HashMap::new(),
             packed_asset_bytes: HashMap::new(),
-        }))
+        })))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             menu::setup_menu(app)?;

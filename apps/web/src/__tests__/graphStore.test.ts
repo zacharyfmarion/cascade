@@ -1523,6 +1523,41 @@ describe('graphStore AI node operations', () => {
     expect(useGraphStore.getState().aiNodeStale[id]).toBe(false);
   });
 
+  it('runAiNode stays running while desktop background execution is still running', async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+      mockEngine.runAiNode = async () => {};
+      let polls = 0;
+      mockEngine.getNodeExecutionState = () => {
+        polls += 1;
+        return polls === 1
+          ? { status: 'running', isStale: false, error: '' }
+          : { status: 'complete', isStale: false, error: '' };
+      };
+
+      const runPromise = useGraphStore.getState().runAiNode(id);
+      await Promise.resolve();
+      expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('running');
+
+      await vi.advanceTimersByTimeAsync(500);
+      await runPromise;
+      expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runAiNode preserves stale status reported by the engine on completion', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    mockEngine.getNodeExecutionState = () => ({ status: 'complete', isStale: true, error: '' });
+
+    await useGraphStore.getState().runAiNode(id);
+
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+    expect(useGraphStore.getState().aiNodeStale[id]).toBe(true);
+  });
+
   it('refreshAiNodeStale updates stale flags from engine', async () => {
     const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
     useGraphStore.setState({

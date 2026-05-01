@@ -113,7 +113,7 @@ pub struct Engine {
     nodes: HashMap<NodeId, Arc<dyn Node>>,
     evaluator: Evaluator,
     gpu_context: Option<Arc<GpuContext>>,
-    color_management: Box<dyn ColorManagement>,
+    color_management: Arc<dyn ColorManagement>,
     ai_provider: Option<Arc<dyn AiProvider>>,
     group_definitions: HashMap<String, Arc<GroupDefinition>>,
     uuid_map: HashMap<String, NodeId>,
@@ -139,6 +139,7 @@ enum RunStatus {
 struct NodeExecutionState {
     status: RunStatus,
     last_run_cache_key: Option<CacheKey>,
+    active_run_id: Option<String>,
 }
 
 impl NodeExecutionState {
@@ -146,6 +147,7 @@ impl NodeExecutionState {
         Self {
             status: RunStatus::Idle,
             last_run_cache_key: None,
+            active_run_id: None,
         }
     }
 }
@@ -156,6 +158,19 @@ pub struct AiNodeExecutionState {
     #[serde(rename = "isStale")]
     pub is_stale: bool,
     pub error: String,
+}
+
+pub struct PreparedAiNodeRun {
+    run_id: String,
+    node_id: NodeId,
+    node_uuid: String,
+    node: Arc<dyn Node>,
+    inputs: HashMap<String, Value>,
+    params: HashMap<String, ParamValue>,
+    color_management: Arc<dyn ColorManagement>,
+    ai_provider: Option<Arc<dyn AiProvider>>,
+    project_format: Format,
+    cache_key: Option<CacheKey>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -329,7 +344,7 @@ impl Engine {
             nodes: HashMap::new(),
             evaluator: Evaluator::new(),
             gpu_context,
-            color_management: Box::new(BuiltinColorManagement::new()),
+            color_management: Arc::new(BuiltinColorManagement::new()),
             ai_provider: None,
             group_definitions: HashMap::new(),
             uuid_map: HashMap::new(),
@@ -355,7 +370,7 @@ impl Engine {
     #[cfg(feature = "ocio")]
     pub fn load_ocio_config(&mut self, path: &str) -> Result<(), CascadeError> {
         let ocio = cascade_ocio::OcioColorManagement::from_file(path)?;
-        self.color_management = Box::new(ocio);
+        self.color_management = Arc::new(ocio);
         self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
@@ -364,14 +379,14 @@ impl Engine {
     #[cfg(feature = "ocio")]
     pub fn load_ocio_from_env(&mut self) -> Result<(), CascadeError> {
         let ocio = cascade_ocio::OcioColorManagement::from_env()?;
-        self.color_management = Box::new(ocio);
+        self.color_management = Arc::new(ocio);
         self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
     }
 
     pub fn reset_color_management(&mut self) {
-        self.color_management = Box::new(cascade_core::color::BuiltinColorManagement::new());
+        self.color_management = Arc::new(cascade_core::color::BuiltinColorManagement::new());
         self.active_display = "sRGB".to_string();
         self.active_view = "Standard".to_string();
         self.evaluator = Evaluator::new();
@@ -1916,6 +1931,7 @@ impl Engine {
             .entry(id)
             .or_insert_with(NodeExecutionState::new);
         state.status = RunStatus::Complete;
+        state.active_run_id = None;
         state.last_run_cache_key = self
             .evaluator
             .compute_node_cache_key(
@@ -1931,39 +1947,50 @@ impl Engine {
         Ok(())
     }
 
-    pub fn run_ai_node(&mut self, node_id: &str) -> Result<(), CascadeError> {
-        pollster::block_on(self.run_ai_node_async(node_id))
-    }
-
-    async fn run_ai_node_async(&mut self, node_id: &str) -> Result<(), CascadeError> {
+    pub fn prepare_ai_node_run(
+        &mut self,
+        node_id: &str,
+    ) -> Result<PreparedAiNodeRun, CascadeError> {
         let id = self.parse_node_id(node_id)?;
 
-        self.evaluator
-            .evaluate_upstream(
-                &mut self.graph,
+        pollster::block_on(self.evaluator.evaluate_upstream(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            FrameTime { frame: 0 },
+            self.color_management.as_ref(),
+            self.ai_provider.as_deref(),
+            &self.project_format,
+            &self.ai_node_cache,
+            1.0,
+        ))?;
+        let cache_key = self
+            .evaluator
+            .compute_node_cache_key(
+                &self.graph,
                 &self.registry,
-                &self.nodes,
                 id,
                 FrameTime { frame: 0 },
-                self.color_management.as_ref(),
-                self.ai_provider.as_deref(),
                 &self.project_format,
-                &self.ai_node_cache,
                 1.0,
             )
-            .await?;
+            .ok();
+        let run_id = Uuid::new_v4().to_string();
 
         let state = self
             .node_exec_state
             .entry(id)
             .or_insert_with(NodeExecutionState::new);
         state.status = RunStatus::Running;
+        state.active_run_id = Some(run_id.clone());
 
         let instance = self
             .graph
             .nodes
             .get(id)
             .ok_or(CascadeError::NodeNotFound(id))?;
+        let node_uuid = instance.uuid.clone();
         let spec = self
             .registry
             .get_spec(&instance.type_id)
@@ -1992,53 +2019,87 @@ impl Engine {
             .get(&id)
             .ok_or(CascadeError::NodeNotFound(id))?
             .clone();
-        let result = {
-            let ctx = cascade_core::node::EvalContext {
-                inputs,
-                extra_inputs: HashMap::new(),
-                params: &merged_params,
-                frame_time: FrameTime { frame: 0 },
-                color_management: self.color_management.as_ref(),
-                ai_provider: self.ai_provider.as_deref(),
-                project_format: &self.project_format,
-                ai_cached_outputs: None,
-                preview_scale: 1.0,
-            };
-            node.evaluate(&ctx).await
+
+        Ok(PreparedAiNodeRun {
+            run_id,
+            node_id: id,
+            node_uuid,
+            node,
+            inputs,
+            params: merged_params,
+            color_management: Arc::clone(&self.color_management),
+            ai_provider: self.ai_provider.clone(),
+            project_format: self.project_format.clone(),
+            cache_key,
+        })
+    }
+
+    pub fn evaluate_prepared_ai_node_run(
+        run: &PreparedAiNodeRun,
+    ) -> Result<HashMap<String, Value>, CascadeError> {
+        let ctx = cascade_core::node::EvalContext {
+            inputs: run.inputs.clone(),
+            extra_inputs: HashMap::new(),
+            params: &run.params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: run.color_management.as_ref(),
+            ai_provider: run.ai_provider.as_deref(),
+            project_format: &run.project_format,
+            ai_cached_outputs: None,
+            preview_scale: 1.0,
         };
+        pollster::block_on(run.node.evaluate(&ctx))
+    }
+
+    pub fn finish_ai_node_run(
+        &mut self,
+        run: PreparedAiNodeRun,
+        result: Result<HashMap<String, Value>, CascadeError>,
+    ) -> Result<(), CascadeError> {
+        let Some(instance) = self.graph.nodes.get(run.node_id) else {
+            return Ok(());
+        };
+        if instance.uuid != run.node_uuid {
+            return Ok(());
+        }
+        let is_current_run = self
+            .node_exec_state
+            .get(&run.node_id)
+            .and_then(|state| state.active_run_id.as_deref())
+            == Some(run.run_id.as_str());
+        if !is_current_run {
+            return Ok(());
+        }
 
         match result {
             Ok(outputs) => {
-                self.ai_node_cache.insert(id, outputs);
-                let cache_key = self
-                    .evaluator
-                    .compute_node_cache_key(
-                        &self.graph,
-                        &self.registry,
-                        id,
-                        FrameTime { frame: 0 },
-                        &self.project_format,
-                        1.0,
-                    )
-                    .ok();
+                self.ai_node_cache.insert(run.node_id, outputs);
                 let state = self
                     .node_exec_state
-                    .entry(id)
+                    .entry(run.node_id)
                     .or_insert_with(NodeExecutionState::new);
                 state.status = RunStatus::Complete;
-                state.last_run_cache_key = cache_key;
-                self.graph.mark_dirty(id);
+                state.active_run_id = None;
+                state.last_run_cache_key = run.cache_key;
+                self.graph.mark_dirty(run.node_id);
                 Ok(())
             }
             Err(error) => {
                 let state = self
                     .node_exec_state
-                    .entry(id)
+                    .entry(run.node_id)
                     .or_insert_with(NodeExecutionState::new);
                 state.status = RunStatus::Error(error.to_string());
+                state.active_run_id = None;
                 Err(error)
             }
         }
+    }
+
+    pub fn run_ai_node(&mut self, node_id: &str) -> Result<(), CascadeError> {
+        let run = self.prepare_ai_node_run(node_id)?;
+        let result = Self::evaluate_prepared_ai_node_run(&run);
+        self.finish_ai_node_run(run, result)
     }
 
     pub fn get_node_execution_state(&self, node_id: &str) -> AiNodeExecutionState {
@@ -3940,6 +4001,59 @@ mod tests {
         let state = engine.get_node_execution_state(&ai_id);
         assert_eq!(state.status, "complete");
         assert!(state.is_stale);
+    }
+
+    #[test]
+    fn test_prepared_ai_node_run_completion_is_stale_when_params_change_mid_run() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        engine
+            .set_param(
+                &ai_id,
+                "prompt",
+                ParamValue::String("first prompt".to_string()),
+            )
+            .expect("set prompt");
+
+        let run = engine.prepare_ai_node_run(&ai_id).expect("prepare run");
+        engine
+            .set_param(
+                &ai_id,
+                "prompt",
+                ParamValue::String("second prompt".to_string()),
+            )
+            .expect("change prompt while running");
+        let mut outputs = HashMap::new();
+        outputs.insert("image".to_string(), Value::None);
+
+        engine
+            .finish_ai_node_run(run, Ok(outputs))
+            .expect("finish run");
+        let state = engine.get_node_execution_state(&ai_id);
+        assert_eq!(state.status, "complete");
+        assert!(state.is_stale);
+    }
+
+    #[test]
+    fn test_prepared_ai_node_run_ignores_outdated_completion() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        let first_run = engine.prepare_ai_node_run(&ai_id).expect("first run");
+        let second_run = engine.prepare_ai_node_run(&ai_id).expect("second run");
+
+        let mut first_outputs = HashMap::new();
+        first_outputs.insert("image".to_string(), Value::None);
+        engine
+            .finish_ai_node_run(first_run, Ok(first_outputs))
+            .expect("outdated completion is ignored");
+        assert_eq!(engine.get_node_execution_state(&ai_id).status, "running");
+
+        let mut second_outputs = HashMap::new();
+        second_outputs.insert("image".to_string(), Value::None);
+        engine
+            .finish_ai_node_run(second_run, Ok(second_outputs))
+            .expect("current completion is accepted");
+        assert_eq!(engine.get_node_execution_state(&ai_id).status, "complete");
     }
 
     #[test]
