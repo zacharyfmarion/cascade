@@ -101,6 +101,22 @@ const loaderSpecs: NodeSpec[] = [
       promotable: true,
     }],
   },
+  {
+    id: 'load_image_batch',
+    display_name: 'Load Image Batch',
+    category: 'Input',
+    description: 'Load an image batch',
+    inputs: [],
+    outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+    params: [{
+      key: 'files',
+      label: 'Files',
+      ty: 'String',
+      default: { String: '' },
+      ui_hint: { type: 'Hidden' },
+      promotable: true,
+    }],
+  },
 ];
 
 const glowSpec: NodeSpec = {
@@ -322,6 +338,40 @@ describe('serializeGraph', () => {
     }));
     const output = serializeGraph(buildInput(nodes, []));
     expect(output).toBe(graph(['load1 = LoadImage(path: image("file:///plate.exr"))']));
+  });
+
+  it('serializes internal asset URIs with existing asset constructors', () => {
+    const imageUri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const sequenceUri = 'asset://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const videoUri = 'asset://sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('image-node', makeNodeInstance({
+      id: 'image-node',
+      typeId: 'load_image',
+      params: { path: { String: imageUri } },
+    }));
+    nodes.set('sequence-node', makeNodeInstance({
+      id: 'sequence-node',
+      typeId: 'load_image_sequence',
+      params: { directory: { String: sequenceUri } },
+    }));
+    nodes.set('video-node', makeNodeInstance({
+      id: 'video-node',
+      typeId: 'load_video',
+      params: { file_path: { String: videoUri } },
+    }));
+    nodes.set('batch-node', makeNodeInstance({
+      id: 'batch-node',
+      typeId: 'load_image_batch',
+      params: { files: { String: `images(["${imageUri}", "${videoUri}"])` } },
+    }));
+
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], loaderSpecs));
+
+    expect(output).toContain(`LoadImage(path: image("${imageUri}"))`);
+    expect(output).toContain(`LoadImageSequence(directory: sequence("${sequenceUri}"))`);
+    expect(output).toContain(`LoadVideo(file_path: video("${videoUri}"))`);
+    expect(output).toContain(`LoadImageBatch(files: images(["${imageUri}", "${videoUri}"]))`);
   });
 
   it('omits embedded web image data from load image DSL', () => {

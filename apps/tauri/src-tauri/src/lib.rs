@@ -1,11 +1,13 @@
 mod menu;
 mod project_package;
 
+use base64::{engine::general_purpose, Engine as _};
 use cascade_runtime::{
     migrations, AssetReference, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
     SerializableGraph, UiNodeSpec, ViewerRenderResult,
 };
 use project_package::{read_asset_blob, AssetBlob};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -14,6 +16,8 @@ use tauri::State;
 
 struct AppState {
     engine: Engine,
+    project_assets: HashMap<String, AssetReference>,
+    packed_asset_bytes: HashMap<String, Vec<u8>>,
 }
 
 type EngineState = Mutex<AppState>;
@@ -83,6 +87,8 @@ fn external_asset_ref(asset_type: &str, path: String, original_filename: String)
         path,
         original_filename,
         hash: String::new(),
+        uri: String::new(),
+        data: String::new(),
     }
 }
 
@@ -97,7 +103,29 @@ fn packed_asset_ref(
         path: blob.package_path.clone(),
         original_filename,
         hash: blob.hash.clone(),
+        uri: format!("asset://sha256/{}", blob.hash),
+        data: String::new(),
     }
+}
+
+fn embedded_asset_ref(
+    asset_type: &str,
+    blob: &AssetBlob,
+    original_filename: String,
+) -> AssetReference {
+    AssetReference {
+        asset_type: asset_type.to_string(),
+        source: "embedded".to_string(),
+        path: String::new(),
+        original_filename,
+        hash: blob.hash.clone(),
+        uri: format!("asset://sha256/{}", blob.hash),
+        data: general_purpose::STANDARD.encode(&blob.bytes),
+    }
+}
+
+fn is_asset_uri(path: &str) -> bool {
+    path.starts_with("asset://sha256/")
 }
 
 #[tauri::command]
@@ -438,7 +466,10 @@ fn export_graph(state: State<'_, EngineState>) -> Result<String, String> {
 fn import_graph(state: State<'_, EngineState>, data: String) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let graph: SerializableGraph = serde_json::from_str(&data).map_err(|e| e.to_string())?;
-    s.engine.import_graph(graph).map_err(|e| e.to_string())
+    s.engine.import_graph(graph).map_err(|e| e.to_string())?;
+    s.project_assets.clear();
+    s.packed_asset_bytes.clear();
+    Ok(())
 }
 
 #[tauri::command]
@@ -447,9 +478,13 @@ fn save_project(
     path: String,
     dsl: Option<serde_json::Value>,
     bundle_media: Option<bool>,
-) -> Result<(), String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
+    asset_storage: Option<String>,
+) -> Result<Option<String>, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let retained_assets = s.project_assets.clone();
+    let retained_bytes = s.packed_asset_bytes.clone();
     let mut document = s.engine.export_document();
+    document.asset_storage = asset_storage;
     if let Some(dsl) = dsl {
         document.dsl = serde_json::from_value(dsl).ok();
     }
@@ -462,89 +497,428 @@ fn save_project(
     let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
     let mut package_assets = Vec::new();
     if bundle_media.unwrap_or(false) {
-        collect_packed_assets(&s.engine, &mut document, &mut package_assets)?;
-        if project_package::strip_packed_asset_params(&mut document) {
-            document.dsl = None;
-        }
+        document.asset_storage = Some("bundled".to_string());
+        collect_packed_assets(
+            &s.engine,
+            &mut document,
+            &mut package_assets,
+            &retained_assets,
+            &retained_bytes,
+        )?;
+        project_package::apply_packed_asset_uris(&mut document);
         project_package::write_project_package(file_path, &document, &package_assets)?;
-        return Ok(());
+        s.project_assets = document
+            .assets
+            .iter()
+            .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
+            .collect();
+        s.packed_asset_bytes = package_assets
+            .iter()
+            .map(|asset| (asset.package_path.clone(), asset.bytes.clone()))
+            .collect();
+        return serde_json::to_string(&document)
+            .map(Some)
+            .map_err(|e| e.to_string());
     }
 
-    collect_external_asset_refs(project_dir, &mut document);
+    document.asset_storage = Some("external".to_string());
+    collect_external_asset_refs(
+        &s.engine,
+        project_dir,
+        &mut document,
+        &retained_assets,
+        &retained_bytes,
+    )?;
     let json = serde_json::to_string_pretty(&document).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
-    Ok(())
+    s.project_assets = document
+        .assets
+        .iter()
+        .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
+        .collect();
+    s.packed_asset_bytes.clear();
+    Ok(None)
 }
 
-fn collect_external_asset_refs(project_dir: &Path, document: &mut CascadeDocument) {
-    document.assets.clear();
-    for node in &document.graph.nodes {
-        match node.type_id.as_str() {
-            "load_image" => {
-                if let Some(path) = param_string(&node.params, "path") {
-                    let resolved = resolve_project_path(project_dir, &path);
-                    document.assets.insert(
-                        node.id.clone(),
-                        external_asset_ref("image", path, original_filename(&resolved)),
-                    );
-                }
-            }
-            "load_image_sequence" => {
-                if let Some(directory) = param_string(&node.params, "directory") {
-                    let pattern = param_string(&node.params, "pattern").unwrap_or_default();
-                    document.assets.insert(
-                        node.id.clone(),
-                        external_asset_ref("image_sequence", directory, pattern),
-                    );
-                }
-            }
-            "load_video" => {
-                if let Some(path) = param_string(&node.params, "file_path") {
-                    let resolved = resolve_project_path(project_dir, &path);
-                    document.assets.insert(
-                        node.id.clone(),
-                        external_asset_ref("video", path, original_filename(&resolved)),
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn collect_packed_assets(
+fn collect_external_asset_refs(
     engine: &Engine,
+    project_dir: &Path,
     document: &mut CascadeDocument,
-    package_assets: &mut Vec<AssetBlob>,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
 ) -> Result<(), String> {
     document.assets.clear();
     for node in &document.graph.nodes {
         match node.type_id.as_str() {
             "load_image" => {
                 if let Some(path) = param_string(&node.params, "path") {
-                    let source_path = PathBuf::from(strip_file_url(&path));
-                    let blob = read_asset_blob(&source_path)?;
-                    document.assets.insert(
-                        node.id.clone(),
-                        packed_asset_ref("image", &blob, original_filename(&source_path)),
-                    );
-                    package_assets.push(blob);
-                } else if let Ok(bytes) = engine.get_image_data(&node.id) {
-                    let fallback = PathBuf::from(format!("{}.image", node.id));
+                    if is_asset_uri(&path) {
+                        if let Some(asset_ref) = embedded_asset_for_node(
+                            engine,
+                            &node.id,
+                            "image",
+                            &path,
+                            retained_assets,
+                            retained_bytes,
+                        )? {
+                            document.assets.insert(node.id.clone(), asset_ref);
+                        }
+                    } else {
+                        let resolved = resolve_project_path(project_dir, &path);
+                        document.assets.insert(
+                            node.id.clone(),
+                            external_asset_ref("image", path, original_filename(&resolved)),
+                        );
+                    }
+                }
+            }
+            "load_image_sequence" => {
+                if let Some(directory) = param_string(&node.params, "directory") {
+                    if is_asset_uri(&directory) {
+                        for (key, asset_ref) in
+                            embedded_sequence_assets(&node.id, retained_assets, retained_bytes)?
+                        {
+                            document.assets.insert(key, asset_ref);
+                        }
+                    } else {
+                        let pattern = param_string(&node.params, "pattern").unwrap_or_default();
+                        document.assets.insert(
+                            node.id.clone(),
+                            external_asset_ref("image_sequence", directory, pattern),
+                        );
+                    }
+                }
+            }
+            "load_video" => {
+                if let Some(path) = param_string(&node.params, "file_path") {
+                    if is_asset_uri(&path) {
+                        if let Some(asset_ref) = embedded_asset_for_node(
+                            engine,
+                            &node.id,
+                            "video",
+                            &path,
+                            retained_assets,
+                            retained_bytes,
+                        )? {
+                            document.assets.insert(node.id.clone(), asset_ref);
+                        }
+                    } else {
+                        let resolved = resolve_project_path(project_dir, &path);
+                        document.assets.insert(
+                            node.id.clone(),
+                            external_asset_ref("video", path, original_filename(&resolved)),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn retained_asset_for_node<'a>(
+    node_id: &str,
+    asset_type: &str,
+    uri: &str,
+    retained_assets: &'a HashMap<String, AssetReference>,
+) -> Option<(String, &'a AssetReference)> {
+    retained_assets
+        .iter()
+        .find(|(key, asset_ref)| {
+            key.split_once(':')
+                .map_or(key.as_str(), |(prefix, _)| prefix)
+                == node_id
+                && asset_ref.asset_type == asset_type
+                && (!uri.is_empty() && asset_ref.uri == uri)
+        })
+        .or_else(|| {
+            retained_assets.iter().find(|(key, asset_ref)| {
+                key.split_once(':')
+                    .map_or(key.as_str(), |(prefix, _)| prefix)
+                    == node_id
+                    && asset_ref.asset_type == asset_type
+            })
+        })
+        .map(|(key, asset_ref)| (key.clone(), asset_ref))
+}
+
+fn retained_asset_bytes(
+    asset_ref: &AssetReference,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<Option<Vec<u8>>, String> {
+    if !asset_ref.data.is_empty() {
+        return general_purpose::STANDARD
+            .decode(&asset_ref.data)
+            .map(Some)
+            .map_err(|e| e.to_string());
+    }
+    if asset_ref.source == "packed" && !asset_ref.path.is_empty() {
+        return Ok(retained_bytes.get(&asset_ref.path).cloned());
+    }
+    Ok(None)
+}
+
+fn embedded_asset_for_node(
+    engine: &Engine,
+    node_id: &str,
+    asset_type: &str,
+    uri: &str,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<Option<AssetReference>, String> {
+    if let Some((_, retained)) = retained_asset_for_node(node_id, asset_type, uri, retained_assets)
+    {
+        if let Some(bytes) = retained_asset_bytes(retained, retained_bytes)? {
+            let fallback = PathBuf::from(
+                retained
+                    .original_filename
+                    .clone()
+                    .if_empty_then(|| format!("{node_id}.{asset_type}")),
+            );
+            let blob = project_package::make_asset_blob(&fallback, bytes);
+            return Ok(Some(embedded_asset_ref(
+                asset_type,
+                &blob,
+                retained.original_filename.clone(),
+            )));
+        }
+    }
+    if asset_type == "image" {
+        let bytes = engine.get_image_data(node_id).map_err(|e| e.to_string())?;
+        let fallback = PathBuf::from(format!("{node_id}.image"));
+        let blob = project_package::make_asset_blob(&fallback, bytes);
+        return Ok(Some(embedded_asset_ref(asset_type, &blob, String::new())));
+    }
+    Ok(None)
+}
+
+fn embedded_sequence_assets(
+    node_id: &str,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<Vec<(String, AssetReference)>, String> {
+    let mut assets = Vec::new();
+    let mut sequence_manifest = Vec::new();
+    for (key, retained) in retained_assets {
+        if key
+            .split_once(':')
+            .map_or(key.as_str(), |(prefix, _)| prefix)
+            != node_id
+            || retained.asset_type != "image_sequence_frame"
+        {
+            continue;
+        }
+        let Some(bytes) = retained_asset_bytes(retained, retained_bytes)? else {
+            continue;
+        };
+        let fallback = PathBuf::from(
+            retained
+                .original_filename
+                .clone()
+                .if_empty_then(|| format!("{key}.image")),
+        );
+        let blob = project_package::make_asset_blob(&fallback, bytes);
+        let asset_ref = embedded_asset_ref(
+            "image_sequence_frame",
+            &blob,
+            retained.original_filename.clone(),
+        );
+        sequence_manifest.push(serde_json::json!({
+            "filename": retained.original_filename.clone(),
+            "hash": asset_ref.hash.clone(),
+            "uri": asset_ref.uri.clone(),
+        }));
+        assets.push((key.clone(), asset_ref));
+    }
+    if !sequence_manifest.is_empty() {
+        let manifest_bytes =
+            serde_json::to_vec(&serde_json::json!({ "frames": sequence_manifest }))
+                .map_err(|e| e.to_string())?;
+        let manifest_path = PathBuf::from(format!("{node_id}.sequence.json"));
+        let manifest_blob = project_package::make_asset_blob(&manifest_path, manifest_bytes);
+        assets.push((
+            node_id.to_string(),
+            embedded_asset_ref("image_sequence", &manifest_blob, String::new()),
+        ));
+    }
+    Ok(assets)
+}
+
+trait EmptyStringExt {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String;
+}
+
+impl EmptyStringExt for String {
+    fn if_empty_then(self, fallback: impl FnOnce() -> String) -> String {
+        if self.is_empty() {
+            fallback()
+        } else {
+            self
+        }
+    }
+}
+
+fn add_retained_packed_asset(
+    node_id: &str,
+    asset_type: &str,
+    uri: &str,
+    document: &mut CascadeDocument,
+    package_assets: &mut Vec<AssetBlob>,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<bool, String> {
+    let Some((key, retained)) = retained_asset_for_node(node_id, asset_type, uri, retained_assets)
+    else {
+        return Ok(false);
+    };
+    let Some(bytes) = retained_asset_bytes(retained, retained_bytes)? else {
+        return Ok(false);
+    };
+    let fallback = PathBuf::from(
+        retained
+            .original_filename
+            .clone()
+            .if_empty_then(|| format!("{node_id}.{asset_type}")),
+    );
+    let blob = project_package::make_asset_blob(&fallback, bytes);
+    document.assets.insert(
+        key,
+        packed_asset_ref(asset_type, &blob, retained.original_filename.clone()),
+    );
+    package_assets.push(blob);
+    Ok(true)
+}
+
+fn add_retained_packed_sequence(
+    node_id: &str,
+    document: &mut CascadeDocument,
+    package_assets: &mut Vec<AssetBlob>,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    let mut sequence_manifest = Vec::new();
+    for (key, retained) in retained_assets {
+        if key
+            .split_once(':')
+            .map_or(key.as_str(), |(prefix, _)| prefix)
+            != node_id
+            || retained.asset_type != "image_sequence_frame"
+        {
+            continue;
+        }
+        let Some(bytes) = retained_asset_bytes(retained, retained_bytes)? else {
+            continue;
+        };
+        let fallback = PathBuf::from(
+            retained
+                .original_filename
+                .clone()
+                .if_empty_then(|| format!("{key}.image")),
+        );
+        let blob = project_package::make_asset_blob(&fallback, bytes);
+        let asset_ref = packed_asset_ref(
+            "image_sequence_frame",
+            &blob,
+            retained.original_filename.clone(),
+        );
+        sequence_manifest.push(serde_json::json!({
+            "filename": retained.original_filename.clone(),
+            "path": asset_ref.path.clone(),
+            "hash": asset_ref.hash.clone(),
+            "uri": asset_ref.uri.clone(),
+        }));
+        document.assets.insert(key.clone(), asset_ref);
+        package_assets.push(blob);
+    }
+    if !sequence_manifest.is_empty() {
+        let manifest_bytes =
+            serde_json::to_vec(&serde_json::json!({ "frames": sequence_manifest }))
+                .map_err(|e| e.to_string())?;
+        let manifest_path = PathBuf::from(format!("{node_id}.sequence.json"));
+        let manifest_blob = project_package::make_asset_blob(&manifest_path, manifest_bytes);
+        document.assets.insert(
+            node_id.to_string(),
+            packed_asset_ref("image_sequence", &manifest_blob, String::new()),
+        );
+        package_assets.push(manifest_blob);
+    }
+    Ok(())
+}
+
+fn collect_packed_assets(
+    engine: &Engine,
+    document: &mut CascadeDocument,
+    package_assets: &mut Vec<AssetBlob>,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    document.assets.clear();
+    let nodes = document
+        .graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), node.type_id.clone(), node.params.clone()))
+        .collect::<Vec<_>>();
+    for (node_id, type_id, params) in nodes {
+        match type_id.as_str() {
+            "load_image" => {
+                if let Some(path) = param_string(&params, "path") {
+                    if is_asset_uri(&path) {
+                        if add_retained_packed_asset(
+                            &node_id,
+                            "image",
+                            &path,
+                            document,
+                            package_assets,
+                            retained_assets,
+                            retained_bytes,
+                        )? {
+                            continue;
+                        }
+                        let bytes = engine.get_image_data(&node_id).map_err(|e| e.to_string())?;
+                        let fallback = PathBuf::from(format!("{}.image", node_id));
+                        let blob = project_package::make_asset_blob(&fallback, bytes);
+                        document.assets.insert(
+                            node_id.clone(),
+                            packed_asset_ref("image", &blob, String::new()),
+                        );
+                        package_assets.push(blob);
+                    } else {
+                        let source_path = PathBuf::from(strip_file_url(&path));
+                        let blob = read_asset_blob(&source_path)?;
+                        document.assets.insert(
+                            node_id.clone(),
+                            packed_asset_ref("image", &blob, original_filename(&source_path)),
+                        );
+                        package_assets.push(blob);
+                    }
+                } else if let Ok(bytes) = engine.get_image_data(&node_id) {
+                    let fallback = PathBuf::from(format!("{}.image", node_id));
                     let blob = project_package::make_asset_blob(&fallback, bytes);
                     document.assets.insert(
-                        node.id.clone(),
+                        node_id.clone(),
                         packed_asset_ref("image", &blob, String::new()),
                     );
                     package_assets.push(blob);
                 }
             }
             "load_image_sequence" => {
-                let Some(directory) = param_string(&node.params, "directory") else {
+                let Some(directory) = param_string(&params, "directory") else {
                     continue;
                 };
+                if is_asset_uri(&directory) {
+                    add_retained_packed_sequence(
+                        &node_id,
+                        document,
+                        package_assets,
+                        retained_assets,
+                        retained_bytes,
+                    )?;
+                    continue;
+                }
                 let dir = PathBuf::from(strip_file_url(&directory));
-                let pattern = param_string(&node.params, "pattern")
+                let pattern = param_string(&params, "pattern")
                     .unwrap_or_else(|| "frame_{frame}.png".to_string());
                 let regex = sequence_pattern_regex(&pattern)?;
                 let mut entries = std::fs::read_dir(&dir)
@@ -569,24 +943,55 @@ fn collect_packed_assets(
                         dir.display()
                     ));
                 }
+                let mut sequence_manifest = Vec::new();
                 for (filename, path) in entries {
                     let blob = read_asset_blob(&path)?;
-                    document.assets.insert(
-                        format!("{}:{filename}", node.id),
-                        packed_asset_ref("image_sequence_frame", &blob, filename),
-                    );
+                    let asset_ref =
+                        packed_asset_ref("image_sequence_frame", &blob, filename.clone());
+                    sequence_manifest.push(serde_json::json!({
+                        "filename": filename.clone(),
+                        "path": asset_ref.path.clone(),
+                        "hash": asset_ref.hash.clone(),
+                        "uri": asset_ref.uri.clone(),
+                    }));
+                    document
+                        .assets
+                        .insert(format!("{}:{filename}", node_id), asset_ref);
                     package_assets.push(blob);
                 }
+                let manifest_bytes =
+                    serde_json::to_vec(&serde_json::json!({ "frames": sequence_manifest }))
+                        .map_err(|e| e.to_string())?;
+                let manifest_path = PathBuf::from(format!("{}.sequence.json", node_id));
+                let manifest_blob =
+                    project_package::make_asset_blob(&manifest_path, manifest_bytes);
+                document.assets.insert(
+                    node_id.clone(),
+                    packed_asset_ref("image_sequence", &manifest_blob, pattern),
+                );
+                package_assets.push(manifest_blob);
             }
             "load_video" => {
-                if let Some(path) = param_string(&node.params, "file_path") {
-                    let source_path = PathBuf::from(strip_file_url(&path));
-                    let blob = read_asset_blob(&source_path)?;
-                    document.assets.insert(
-                        node.id.clone(),
-                        packed_asset_ref("video", &blob, original_filename(&source_path)),
-                    );
-                    package_assets.push(blob);
+                if let Some(path) = param_string(&params, "file_path") {
+                    if is_asset_uri(&path) {
+                        add_retained_packed_asset(
+                            &node_id,
+                            "video",
+                            &path,
+                            document,
+                            package_assets,
+                            retained_assets,
+                            retained_bytes,
+                        )?;
+                    } else {
+                        let source_path = PathBuf::from(strip_file_url(&path));
+                        let blob = read_asset_blob(&source_path)?;
+                        document.assets.insert(
+                            node_id.clone(),
+                            packed_asset_ref("video", &blob, original_filename(&source_path)),
+                        );
+                        package_assets.push(blob);
+                    }
                 }
             }
             _ => {}
@@ -635,12 +1040,21 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
 
     if project_package::is_zip_project_bytes(&bytes) {
         let package = project_package::read_project_package(file_path)?;
-        return import_project_document(
+        let packed_asset_bytes = package.assets.clone();
+        let json = import_project_document(
             &mut s.engine,
             file_path,
             package.document,
             Some(package.assets),
-        );
+        )?;
+        let exported: CascadeDocument = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        s.project_assets = exported
+            .assets
+            .iter()
+            .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
+            .collect();
+        s.packed_asset_bytes = packed_asset_bytes;
+        return Ok(json);
     }
 
     let json = String::from_utf8(bytes).map_err(|e| e.to_string())?;
@@ -652,11 +1066,21 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         // Deserialize the migrated document
         let document: CascadeDocument =
             serde_json::from_value(doc_value).map_err(|e| e.to_string())?;
-        import_project_document(&mut s.engine, file_path, document, None)
+        let json = import_project_document(&mut s.engine, file_path, document, None)?;
+        let exported: CascadeDocument = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        s.project_assets = exported
+            .assets
+            .iter()
+            .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
+            .collect();
+        s.packed_asset_bytes.clear();
+        Ok(json)
     } else {
         // Fallback: try to load as SerializableGraph (without migration)
         let graph: SerializableGraph = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         s.engine.import_graph(graph).map_err(|e| e.to_string())?;
+        s.project_assets.clear();
+        s.packed_asset_bytes.clear();
         let exported = s.engine.export_graph();
         serde_json::to_string(&exported).map_err(|e| e.to_string())
     }
@@ -669,6 +1093,7 @@ fn import_project_document(
     packed_assets: Option<std::collections::HashMap<String, Vec<u8>>>,
 ) -> Result<String, String> {
     let dsl = document.dsl.take();
+    let asset_storage = document.asset_storage.clone();
     let project_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
     let assets: Vec<(String, AssetReference)> = document
         .assets
@@ -680,19 +1105,22 @@ fn import_project_document(
         .import_document(document)
         .map_err(|e| e.to_string())?;
 
-    for (asset_key, asset_ref) in assets {
+    for (asset_key, asset_ref) in &assets {
         hydrate_asset(
             engine,
             project_dir,
             file_path,
-            &asset_key,
-            &asset_ref,
+            asset_key,
+            asset_ref,
             packed_assets.as_ref(),
         )?;
     }
 
     let mut exported = engine.export_document();
     exported.dsl = dsl;
+    exported.assets = assets.into_iter().collect();
+    exported.asset_storage = asset_storage;
+    project_package::apply_packed_asset_uris(&mut exported);
     serde_json::to_string(&exported).map_err(|e| e.to_string())
 }
 
@@ -703,6 +1131,8 @@ fn clone_asset_reference(asset_ref: &AssetReference) -> AssetReference {
         path: asset_ref.path.clone(),
         original_filename: asset_ref.original_filename.clone(),
         hash: asset_ref.hash.clone(),
+        uri: asset_ref.uri.clone(),
+        data: asset_ref.data.clone(),
     }
 }
 
@@ -784,6 +1214,11 @@ fn read_project_asset_bytes(
     asset_ref: &AssetReference,
     packed_assets: Option<&std::collections::HashMap<String, Vec<u8>>>,
 ) -> Result<Vec<u8>, String> {
+    if !asset_ref.data.is_empty() {
+        return general_purpose::STANDARD
+            .decode(&asset_ref.data)
+            .map_err(|e| e.to_string());
+    }
     if asset_ref.source == "packed" {
         let assets = packed_assets.ok_or_else(|| "Project asset package is missing".to_string())?;
         assets
@@ -1365,7 +1800,11 @@ pub fn run() {
     let engine = Engine::new();
 
     tauri::Builder::default()
-        .manage(Mutex::new(AppState { engine }))
+        .manage(Mutex::new(AppState {
+            engine,
+            project_assets: HashMap::new(),
+            packed_asset_bytes: HashMap::new(),
+        }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             menu::setup_menu(app)?;

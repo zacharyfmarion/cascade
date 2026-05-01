@@ -76,6 +76,9 @@ const createInitialState = () => ({
   dirty: false,
   currentProjectPath: null,
   currentProjectName: 'Untitled',
+  currentProjectAssetStorage: null,
+  assetStoragePrompt: null,
+  projectAssets: {},
   projectSessionRevision: 0,
   unsavedChangesPrompt: null,
   hasSequenceNodes: false,
@@ -855,7 +858,10 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveProject();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined, { bundleMedia: false });
+    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined, {
+      bundleMedia: false,
+      assetStorage: 'external',
+    });
     expect(useGraphStore.getState().dirty).toBe(false);
   });
 
@@ -869,7 +875,10 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveProjectAs();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined, { bundleMedia: false });
+    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined, {
+      bundleMedia: false,
+      assetStorage: 'external',
+    });
     expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/saved_as.casc');
     expect(useGraphStore.getState().currentProjectName).toBe('saved_as');
   });
@@ -884,9 +893,70 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveBundledProject();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/bundled.casc', undefined, { bundleMedia: true });
+    expect(saveProject).toHaveBeenCalledWith('/tmp/bundled.casc', undefined, {
+      bundleMedia: true,
+      assetStorage: 'bundled',
+    });
     expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/bundled.casc');
     expect(useGraphStore.getState().dirty).toBe(false);
+  });
+
+  it('desktop first Save prompts for asset storage only when asset-backed nodes exist', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({
+      currentProjectPath: '/tmp/asset_project.casc',
+      dirty: true,
+      currentProjectAssetStorage: null,
+    });
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    useGraphStore.setState({
+      projectAssets: {
+        [load]: {
+          type: 'image',
+          source: 'external',
+          path: 'file:///tmp/plate.png',
+          original_filename: 'plate.png',
+        },
+      },
+    });
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
+    expect(saveProject).not.toHaveBeenCalled();
+
+    const resolved = await useGraphStore.getState().resolveAssetStoragePrompt('bundled');
+
+    expect(resolved).toBe(true);
+    expect(useGraphStore.getState().assetStoragePrompt).toBeNull();
+    expect(useGraphStore.getState().currentProjectAssetStorage).toBe('bundled');
+    expect(saveProject).toHaveBeenCalledWith('/tmp/asset_project.casc', undefined, {
+      bundleMedia: true,
+      assetStorage: 'bundled',
+    });
+  });
+
+  it('project asset storage setting marks the project dirty and warns when internal refs remain external', async () => {
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const uri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    useGraphStore.setState((state) => {
+      const nodes = new Map(state.nodes);
+      const node = nodes.get(load);
+      if (node) nodes.set(load, { ...node, params: { ...node.params, path: { String: uri } } });
+      return { nodes };
+    });
+    useGraphStore.setState({ dirty: false, toasts: [] });
+
+    useGraphStore.getState().setProjectAssetStorage('external');
+
+    const state = useGraphStore.getState();
+    expect(state.currentProjectAssetStorage).toBe('external');
+    expect(state.dirty).toBe(true);
+    expect(state.toasts[0]?.title).toBe('Some assets remain internal');
+    expect(state.dslShadow?.text).toContain(`image("${uri}")`);
   });
 
   it('web Save downloads a project and marks it clean without tracking a path', async () => {
@@ -1135,7 +1205,7 @@ describe('graphStore project hydration', () => {
     expect(state.dslShadow?.status).toBe('valid');
   });
 
-  it('loadProject clears stale DSL origin for bundled projects without a DSL shadow', async () => {
+  it('loadProject shows internal asset URIs for bundled projects without losing DSL graph output', async () => {
     useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
     const bundled = await createBundledProjectBlob({
       cascade: { format_version: '1.3.0' },
@@ -1180,14 +1250,17 @@ describe('graphStore project hydration', () => {
     const file = new File([bundled], 'bundled.casc');
 
     useGraphStore.getState().loadProject(file);
-    await flushPromises(3);
+    await flushPromises(10);
 
     const state = useGraphStore.getState();
     expect(state.nodes.has('load-node')).toBe(true);
-    expect(state.nodes.get('load-node')?.params.path).toBeUndefined();
+    const assetPath = state.nodes.get('load-node')?.params.path;
+    expect(assetPath).toMatchObject({ String: expect.stringMatching(/^asset:\/\/sha256\/[a-f0-9]{64}$/) });
     expect(state.connections).toHaveLength(1);
     expect(state.dslShadow).toBeNull();
     expect(state.lastTransactionOrigin).toBeNull();
+    expect(state.currentProjectAssetStorage).toBe('bundled');
+    expect(state.projectAssets['load-node']?.uri).toBe((assetPath as { String: string }).String);
 
     const regenerated = serializeGraph({
       nodes: state.nodes,
@@ -1196,7 +1269,7 @@ describe('graphStore project hydration', () => {
       handleMap: new HandleMap(),
       groupDefinitions: state.customGroupDefinitions,
     });
-    expect(regenerated).toContain('LoadImage()');
+    expect(regenerated).toContain(`LoadImage(path: image("${(assetPath as { String: string }).String}"))`);
     expect(regenerated).toContain('Viewer()');
     expect(regenerated).not.toBe('graph {\n\n}');
   });

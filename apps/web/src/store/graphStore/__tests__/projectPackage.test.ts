@@ -53,12 +53,18 @@ describe('projectPackage', () => {
     expect(zip.file(asset.path as string)).not.toBeNull();
   });
 
-  it('removes stale loader paths from graph params when assets are packed', async () => {
+  it('rewrites packed loader params and DSL to internal asset URIs', async () => {
     const blob = await createBundledProjectBlob({
       cascade: { format_version: '1.3.0' },
       dsl: {
         version: 1,
-        text: 'load1 = LoadImage(path: image("file:///Users/me/plate.png"))',
+        text: [
+          'graph {',
+          '  load1 = LoadImage(path: image("file:///Users/me/plate.png"))',
+          '  seq1 = LoadImageSequence(directory: sequence("/Users/me/frames"), pattern: "frame_{frame}.png")',
+          '  video1 = LoadVideo(file_path: video("/Users/me/clip.mov"))',
+          '}',
+        ].join('\n'),
         graph_hash: 'stale',
         handles: [],
         custom_definition_names: [],
@@ -124,18 +130,30 @@ describe('projectPackage', () => {
 
     const zip = await JSZip.loadAsync(await blobBytes(blob));
     const packedDoc = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
-      graph: { nodes: Array<{ id: string; params: Record<string, unknown> }> };
-      assets: Record<string, { source: string; path: string }>;
-      dsl?: unknown;
+      graph: { nodes: Array<{ id: string; params: Record<string, { String?: string }> }> };
+      assets: Record<string, { source: string; path: string; uri: string; type: string }>;
+      dsl?: { text: string };
     };
 
     expect(packedDoc.assets.load1.source).toBe('packed');
     expect(packedDoc.assets['seq1:frame_0001.png'].source).toBe('packed');
+    expect(packedDoc.assets.seq1.source).toBe('packed');
+    expect(packedDoc.assets.seq1.type).toBe('image_sequence');
     expect(packedDoc.assets.video1.source).toBe('packed');
-    expect(packedDoc.graph.nodes.find(node => node.id === 'load1')?.params).toEqual({});
-    expect(packedDoc.graph.nodes.find(node => node.id === 'seq1')?.params).toEqual({});
-    expect(packedDoc.graph.nodes.find(node => node.id === 'video1')?.params).toEqual({});
-    expect(packedDoc.dsl).toBeUndefined();
+    const loadUri = packedDoc.graph.nodes.find(node => node.id === 'load1')?.params.path.String;
+    const sequenceUri = packedDoc.graph.nodes.find(node => node.id === 'seq1')?.params.directory.String;
+    const videoUri = packedDoc.graph.nodes.find(node => node.id === 'video1')?.params.file_path.String;
+    expect(loadUri).toMatch(/^asset:\/\/sha256\/[a-f0-9]{64}$/);
+    expect(sequenceUri).toMatch(/^asset:\/\/sha256\/[a-f0-9]{64}$/);
+    expect(videoUri).toMatch(/^asset:\/\/sha256\/[a-f0-9]{64}$/);
+    expect(packedDoc.graph.nodes.find(node => node.id === 'load1')?.params.image_data).toBeUndefined();
+    expect(packedDoc.graph.nodes.find(node => node.id === 'seq1')?.params.pattern).toBeUndefined();
+    expect(packedDoc.dsl?.text).toContain(`image("${loadUri}")`);
+    expect(packedDoc.dsl?.text).toContain(`sequence("${sequenceUri}")`);
+    expect(packedDoc.dsl?.text).toContain(`video("${videoUri}")`);
+    expect(packedDoc.dsl?.text).not.toContain('/Users/me/plate.png');
+    expect(packedDoc.dsl?.text).not.toContain('/Users/me/frames');
+    expect(packedDoc.dsl?.text).not.toContain('/Users/me/clip.mov');
   });
 
   it('deduplicates identical asset bytes inside the package', async () => {
@@ -176,6 +194,38 @@ describe('projectPackage', () => {
 
     const loaded = await readCascadeProjectFile(file);
     expect((loaded.assets as Record<string, { data: string }>).load1.data).toBe(btoa('roundtrip-image'));
+  });
+
+  it('repairs older bundled manifests to internal asset URI params on load', async () => {
+    const sourceDoc = {
+      cascade: { format_version: '1.3.0' },
+      graph: {
+        nodes: [{
+          id: 'load1',
+          type_id: 'load_image',
+          params: {},
+          input_defaults: {},
+          position: [0, 0],
+          muted: false,
+        }],
+        connections: [],
+      },
+      assets: {
+        load1: {
+          type: 'image',
+          source: 'embedded',
+          data: btoa('legacy-image'),
+          original_filename: 'plate.png',
+          hash: '',
+        },
+      },
+    };
+    const blob = await createBundledProjectBlob(sourceDoc);
+    const file = new File([blob], 'legacy-bundled.casc');
+
+    const loaded = await readCascadeProjectFile(file);
+    const node = (loaded.graph as { nodes: Array<{ params: Record<string, { String?: string }> }> }).nodes[0];
+    expect(node.params.path.String).toMatch(/^asset:\/\/sha256\/[a-f0-9]{64}$/);
   });
 
   it('fails clearly when a bundled project is missing cascade.json', async () => {

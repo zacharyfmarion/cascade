@@ -3348,6 +3348,7 @@ impl Engine {
             },
             graph,
             assets: HashMap::new(),
+            asset_storage: None,
             scripts,
             view: None,
             dsl: None,

@@ -12,6 +12,7 @@ import { AboutModal } from './components/AboutModal';
 import { ShortcutsModal } from './components/ShortcutsModal';
 import { MenuBar } from './components/MenuBar';
 import { UnsavedChangesModal } from './components/UnsavedChangesModal';
+import { AssetStorageModal } from './components/AssetStorageModal';
 import { ToastHost } from './components/ui/ToastHost';
 import { TooltipProvider } from './components/ui/Tooltip';
 import { isFeatureVisible } from './platform/features';
@@ -207,6 +208,7 @@ function App() {
       <ShortcutsModal />
       <AboutModal />
       <UnsavedChangesModal />
+      <AssetStorageModal />
       <ToastHost />
     </TooltipProvider>
   );

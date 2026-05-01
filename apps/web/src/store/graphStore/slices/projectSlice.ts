@@ -9,6 +9,7 @@ import { hydrateRootGraphFromEngine } from '../hydration';
 import { syncAllCommitted } from '../nodeDraftStore';
 import { dslShadowMatchesGraph, graphSemanticHash, hydrateDslShadowMetadata, serializeDslShadowMetadata } from '../../../ai/dsl/shadow';
 import { createBundledProjectBlob, readCascadeProjectFile } from '../projectPackage';
+import { collectProjectAssets, hasAssetBackedNodes, type ProjectAssetRecord, type ProjectAssetStorage } from '../assetReferences';
 
 export type PendingProjectAction =
   | { kind: 'new' }
@@ -16,6 +17,7 @@ export type PendingProjectAction =
   | { kind: 'close' };
 
 export type UnsavedChangesChoice = 'save' | 'discard' | 'cancel';
+export type AssetStoragePromptAction = 'save' | 'saveAs';
 
 export interface ProjectSliceState {
   dirty: boolean;
@@ -23,6 +25,9 @@ export interface ProjectSliceState {
   currentProjectName: string;
   projectSessionRevision: number;
   unsavedChangesPrompt: PendingProjectAction | null;
+  currentProjectAssetStorage: ProjectAssetStorage | null;
+  assetStoragePrompt: AssetStoragePromptAction | null;
+  projectAssets: Record<string, ProjectAssetRecord>;
 }
 
 export interface ProjectSliceActions {
@@ -40,6 +45,9 @@ export interface ProjectSliceActions {
   requestCloseProject: () => Promise<void>;
   resolveUnsavedChanges: (choice: UnsavedChangesChoice) => Promise<void>;
   dismissUnsavedChangesPrompt: () => void;
+  setProjectAssetStorage: (mode: ProjectAssetStorage) => void;
+  resolveAssetStoragePrompt: (mode: ProjectAssetStorage) => Promise<boolean>;
+  dismissAssetStoragePrompt: () => void;
   hydrateProjectFromEngine: () => Promise<boolean>;
 }
 
@@ -131,7 +139,15 @@ export const createProjectSlice: StateCreator<
 
   const attachProjectMetadata = (projectDoc: unknown): Record<string, unknown> => {
     const projectRecord = projectDoc as Record<string, unknown>;
-    const framesArray = Array.from(get().frames.values());
+    const state = get();
+    projectRecord.asset_storage = state.currentProjectAssetStorage ?? undefined;
+    if (Object.keys(state.projectAssets).length > 0) {
+      projectRecord.assets = {
+        ...(typeof projectRecord.assets === 'object' && projectRecord.assets !== null ? projectRecord.assets : {}),
+        ...state.projectAssets,
+      };
+    }
+    const framesArray = Array.from(state.frames.values());
     if (framesArray.length > 0) {
       projectRecord.frames = framesArray;
     }
@@ -141,6 +157,12 @@ export const createProjectSlice: StateCreator<
     }
     return projectRecord;
   };
+
+  const projectAssetStorageFromData = (data: Record<string, unknown>): ProjectAssetStorage | null => (
+    data.asset_storage === 'bundled' || data.asset_storage === 'external'
+      ? data.asset_storage
+      : null
+  );
 
   const stableStringify = (value: unknown): string => {
     if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -221,29 +243,59 @@ export const createProjectSlice: StateCreator<
     return attachProjectMetadata(projectDoc);
   };
 
+  const currentProjectHasAssets = async (): Promise<boolean> => {
+    const doc = await currentProjectDocument();
+    return hasAssetBackedNodes(doc, doc.assets);
+  };
+
+  const shouldPromptForAssetStorage = async (): Promise<boolean> => (
+    get().currentProjectAssetStorage === null && await currentProjectHasAssets()
+  );
+
   const saveWebProject = async (): Promise<boolean> => {
     const projectRecord = await currentProjectDocument();
+    projectRecord.asset_storage = get().currentProjectAssetStorage ?? 'external';
     const json = JSON.stringify(projectRecord, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     downloadBlob(blob, `${get().currentProjectName || 'project'}.casc`);
-    set({ dirty: false, currentProjectPath: null });
+    set({ dirty: false, currentProjectPath: null, currentProjectAssetStorage: 'external' });
     return true;
   };
 
   const saveWebBundledProject = async (): Promise<boolean> => {
     const blob = await createBundledProjectBlob(await currentProjectDocument());
     downloadBlob(blob, `${get().currentProjectName || 'project'}.casc`);
-    set({ dirty: false, currentProjectPath: null });
+    set({ dirty: false, currentProjectPath: null, currentProjectAssetStorage: 'bundled' });
     return true;
   };
 
   const saveDesktopProjectToPath = async (path: string, bundleMedia = false): Promise<boolean> => {
     if (!await assertDesktopGraphInSync()) return false;
-    await getEngine().saveProject?.(path, currentSerializableDslShadow(), { bundleMedia });
+    const savedDocument = await getEngine().saveProject?.(path, currentSerializableDslShadow(), {
+      bundleMedia,
+      assetStorage: bundleMedia ? 'bundled' : 'external',
+    });
+    if (savedDocument && typeof savedDocument === 'object') {
+      const data = savedDocument as Record<string, unknown>;
+      const graphData = extractGraphData(data);
+      await hydrateRootGraphFromEngine(set, get, { resetFrames: false, graphData });
+      set({
+        dslShadow: hydrateDslShadowMetadata(
+          data.dsl,
+          get().nodes,
+          get().connections,
+          get().nodeSpecs,
+          get().graphRevision,
+          get().customGroupDefinitions,
+        ),
+        projectAssets: collectProjectAssets(data.assets),
+      });
+    }
     rememberDesktopPath(path);
     set({
       currentProjectPath: path,
       currentProjectName: projectNameFromPath(path),
+      currentProjectAssetStorage: bundleMedia ? 'bundled' : 'external',
       dirty: false,
     });
     return true;
@@ -271,6 +323,8 @@ export const createProjectSlice: StateCreator<
       currentProjectPath: identity.path,
       currentProjectName: identity.name,
       projectSessionRevision: get().projectSessionRevision + 1,
+      currentProjectAssetStorage: projectAssetStorageFromData(data),
+      projectAssets: collectProjectAssets(data.assets),
       dslShadow: hydrateDslShadowMetadata(
         data.dsl,
         state.nodes,
@@ -373,6 +427,9 @@ export const createProjectSlice: StateCreator<
     currentProjectName: 'Untitled',
     projectSessionRevision: 0,
     unsavedChangesPrompt: null,
+    currentProjectAssetStorage: null,
+    assetStoragePrompt: null,
+    projectAssets: {},
 
     newProject: async () => {
       const eng = getEngine();
@@ -415,6 +472,9 @@ export const createProjectSlice: StateCreator<
         currentProjectName: 'Untitled',
         projectSessionRevision: get().projectSessionRevision + 1,
         unsavedChangesPrompt: null,
+        currentProjectAssetStorage: null,
+        assetStoragePrompt: null,
+        projectAssets: {},
       });
       rememberDesktopPath(null);
       syncAllCommitted(new Map());
@@ -422,12 +482,18 @@ export const createProjectSlice: StateCreator<
 
     saveProject: async () => {
       try {
+        if (await shouldPromptForAssetStorage()) {
+          set({ assetStoragePrompt: 'save' });
+          return false;
+        }
         if (isTauri() && getEngine().saveProject) {
           const path = get().currentProjectPath ?? await chooseDesktopSavePath();
           if (!path) return false;
-          return await saveDesktopProjectToPath(path);
+          return await saveDesktopProjectToPath(path, get().currentProjectAssetStorage === 'bundled');
         }
-        return await saveWebProject();
+        return get().currentProjectAssetStorage === 'bundled'
+          ? await saveWebBundledProject()
+          : await saveWebProject();
       } catch (e) {
         const error = parseEngineError(e);
         set({ lastError: error });
@@ -438,12 +504,18 @@ export const createProjectSlice: StateCreator<
 
     saveProjectAs: async () => {
       try {
+        if (await shouldPromptForAssetStorage()) {
+          set({ assetStoragePrompt: 'saveAs' });
+          return false;
+        }
         if (isTauri() && getEngine().saveProject) {
           const path = await chooseDesktopSavePath();
           if (!path) return false;
-          return await saveDesktopProjectToPath(path);
+          return await saveDesktopProjectToPath(path, get().currentProjectAssetStorage === 'bundled');
         }
-        return await saveWebProject();
+        return get().currentProjectAssetStorage === 'bundled'
+          ? await saveWebBundledProject()
+          : await saveWebProject();
       } catch (e) {
         const error = parseEngineError(e);
         set({ lastError: error });
@@ -519,6 +591,28 @@ export const createProjectSlice: StateCreator<
     requestSaveProjectAs: () => get().saveProjectAs(),
 
     requestSaveBundledProject: () => get().saveBundledProject(),
+
+    setProjectAssetStorage: (mode) => {
+      set({ currentProjectAssetStorage: mode, dirty: true });
+      if (mode === 'external') {
+        const hasInternalRefs = Array.from(get().nodes.values()).some(node =>
+          Object.values(node.params).some(value => 'String' in value && value.String.startsWith('asset://sha256/')),
+        );
+        if (hasInternalRefs) {
+          get().pushToast('info', 'Some assets remain internal', 'Original file paths are not available for every bundled asset.');
+        }
+      }
+      get().refreshDslShadowFromGraph();
+    },
+
+    resolveAssetStoragePrompt: async (mode) => {
+      const action = get().assetStoragePrompt;
+      if (!action) return false;
+      set({ currentProjectAssetStorage: mode, assetStoragePrompt: null });
+      return action === 'saveAs' ? get().saveProjectAs() : get().saveProject();
+    },
+
+    dismissAssetStoragePrompt: () => set({ assetStoragePrompt: null }),
 
     requestCloseProject: async () => {
       if (get().dirty) {

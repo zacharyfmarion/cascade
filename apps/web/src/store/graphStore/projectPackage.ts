@@ -1,8 +1,6 @@
-const MANIFEST_NAME = 'cascade.json';
+import { applyPackedAssetUrisToDocument, assetUriFromHash, isRecord } from './assetReferences';
 
-const isRecord = (value: unknown): value is Record<string, unknown> => (
-  typeof value === 'object' && value !== null
-);
+const MANIFEST_NAME = 'cascade.json';
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
   let binary = '';
@@ -41,59 +39,6 @@ const extensionFromAsset = (asset: Record<string, unknown>): string => {
   }
   if (asset.type === 'image' || asset.asset_type === 'image') return 'image';
   return 'bin';
-};
-
-const packedAssetNodeId = (key: string): string => key.split(':', 1)[0] ?? key;
-
-const removeStringParams = (params: Record<string, unknown> | undefined, keys: string[]): boolean => {
-  if (!params) return false;
-  let removed = false;
-  for (const key of keys) {
-    if (key in params) {
-      delete params[key];
-      removed = true;
-    }
-  }
-  return removed;
-};
-
-const stripPackedAssetParams = (doc: Record<string, unknown>): boolean => {
-  if (!isRecord(doc.assets) || !isRecord(doc.graph) || !Array.isArray(doc.graph.nodes)) return false;
-
-  const packedTypesByNode = new Map<string, Set<string>>();
-  for (const [key, rawAsset] of Object.entries(doc.assets)) {
-    if (!isRecord(rawAsset) || rawAsset.source !== 'packed') continue;
-    const assetType = typeof rawAsset.type === 'string'
-      ? rawAsset.type
-      : typeof rawAsset.asset_type === 'string'
-        ? rawAsset.asset_type
-        : '';
-    const nodeId = packedAssetNodeId(key);
-    const types = packedTypesByNode.get(nodeId) ?? new Set<string>();
-    types.add(assetType);
-    packedTypesByNode.set(nodeId, types);
-  }
-
-  let stripped = false;
-  for (const rawNode of doc.graph.nodes) {
-    if (!isRecord(rawNode) || typeof rawNode.id !== 'string' || typeof rawNode.type_id !== 'string') continue;
-    const packedTypes = packedTypesByNode.get(rawNode.id);
-    if (!packedTypes || !isRecord(rawNode.params)) continue;
-
-    if (rawNode.type_id === 'load_image' && packedTypes.has('image')) {
-      stripped = removeStringParams(rawNode.params, ['path', 'image_data']) || stripped;
-    } else if (
-      rawNode.type_id === 'load_image_sequence'
-      && (packedTypes.has('image_sequence') || packedTypes.has('image_sequence_frame'))
-    ) {
-      stripped = removeStringParams(rawNode.params, ['directory', 'pattern']) || stripped;
-    } else if (rawNode.type_id === 'load_video' && packedTypes.has('video')) {
-      stripped = removeStringParams(rawNode.params, ['file_path']) || stripped;
-    } else if (rawNode.type_id === 'load_image_batch' && packedTypes.has('image_batch')) {
-      stripped = removeStringParams(rawNode.params, ['files']) || stripped;
-    }
-  }
-  return stripped;
 };
 
 export const isBundledProjectBytes = (bytes: Uint8Array): boolean => (
@@ -135,6 +80,7 @@ export const readCascadeProjectFile = async (file: File): Promise<Record<string,
     };
   }
   data.assets = nextAssets;
+  applyPackedAssetUrisToDocument(data);
   return data;
 };
 
@@ -166,13 +112,52 @@ export const createBundledProjectBlob = async (projectDoc: Record<string, unknow
       source: 'packed',
       path: packagePath,
       hash,
+      uri: assetUriFromHash(hash),
+    };
+  }
+
+  const sequenceFramesByNode = new Map<string, Array<Record<string, unknown>>>();
+  for (const [key, rawAsset] of Object.entries(packedAssets)) {
+    if (
+      !isRecord(rawAsset)
+      || (rawAsset.type !== 'image_sequence_frame' && rawAsset.asset_type !== 'image_sequence_frame')
+    ) continue;
+    const nodeId = key.split(':', 1)[0] ?? key;
+    const frames = sequenceFramesByNode.get(nodeId) ?? [];
+    frames.push({
+      filename: rawAsset.original_filename,
+      path: rawAsset.path,
+      hash: rawAsset.hash,
+      uri: rawAsset.uri,
+    });
+    sequenceFramesByNode.set(nodeId, frames);
+  }
+  for (const [nodeId, frames] of sequenceFramesByNode) {
+    if (
+      isRecord(packedAssets[nodeId])
+      && (packedAssets[nodeId].type === 'image_sequence' || packedAssets[nodeId].asset_type === 'image_sequence')
+    ) continue;
+    frames.sort((a, b) => String(a.filename ?? '').localeCompare(String(b.filename ?? '')));
+    const manifestBytes = new TextEncoder().encode(JSON.stringify({ frames }));
+    const hash = await hashBytes(manifestBytes);
+    const packagePath = `assets/${hash}.sequence.json`;
+    if (!writtenPaths.has(packagePath)) {
+      zip.file(packagePath, manifestBytes);
+      writtenPaths.add(packagePath);
+    }
+    packedAssets[nodeId] = {
+      type: 'image_sequence',
+      source: 'packed',
+      path: packagePath,
+      original_filename: '',
+      hash,
+      uri: assetUriFromHash(hash),
     };
   }
 
   doc.assets = packedAssets;
-  if (stripPackedAssetParams(doc)) {
-    delete doc.dsl;
-  }
+  applyPackedAssetUrisToDocument(doc);
+  doc.asset_storage = 'bundled';
   zip.file(MANIFEST_NAME, JSON.stringify(doc, null, 2));
   return zip.generateAsync({ type: 'blob' });
 };

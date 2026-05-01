@@ -781,6 +781,8 @@ function ProjectTab() {
   const projectWidth = useSettingsStore(s => s.projectWidth);
   const projectHeight = useSettingsStore(s => s.projectHeight);
   const setProjectFormat = useGraphStore(s => s.setProjectFormat);
+  const assetStorage = useGraphStore(s => s.currentProjectAssetStorage);
+  const setProjectAssetStorage = useGraphStore(s => s.setProjectAssetStorage);
   const [localWidth, setLocalWidth] = useState(projectWidth);
   const [localHeight, setLocalHeight] = useState(projectHeight);
 
@@ -863,6 +865,28 @@ function ProjectTab() {
             />
           </label>
         </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border-default)', paddingTop: '12px', marginTop: '16px' }}>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          Assets
+        </div>
+        <label style={{ ...rowStyle, gap: '12px' }}>
+          <span style={{ color: 'var(--text-secondary)' }}>Storage</span>
+          <select
+            value={assetStorage ?? ''}
+            onChange={event => {
+              if (event.target.value === 'external' || event.target.value === 'bundled') {
+                setProjectAssetStorage(event.target.value);
+              }
+            }}
+            style={selectStyle}
+          >
+            <option value="" disabled>Choose on first save</option>
+            <option value="bundled">Bundle with project</option>
+            <option value="external">Reference external files</option>
+          </select>
+        </label>
       </div>
     </div>
   );
