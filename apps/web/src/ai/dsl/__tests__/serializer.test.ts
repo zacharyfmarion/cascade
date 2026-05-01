@@ -518,6 +518,88 @@ describe('serializeGraph', () => {
     expect(output).toBe(graph(['blur1 = GaussianBlur(amount: 0.25)']));
   });
 
+  it('serializes scalar input defaults from node inputs', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'math-node',
+      makeNodeInstance({
+        id: 'math-node',
+        typeId: 'math',
+        params: { operation: { Int: 2 } },
+        inputDefaults: { a: { Float: 3 }, b: { Float: 7 } },
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe(graph(['math1 = Math(a: 3.0, b: 7.0, operation: "multiply")']));
+  });
+
+  it('omits scalar input defaults that match port defaults', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'math-node',
+      makeNodeInstance({
+        id: 'math-node',
+        typeId: 'math',
+        inputDefaults: { a: { Float: 0 }, b: { Float: 0 } },
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe(graph(['math1 = Math()']));
+  });
+
+  it('omits scalar input defaults for connected inputs', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('load-node', makeNodeInstance({ id: 'load-node', typeId: 'load_image' }));
+    nodes.set(
+      'math-node',
+      makeNodeInstance({
+        id: 'math-node',
+        typeId: 'math',
+        inputDefaults: { a: { Float: 3 }, b: { Float: 7 } },
+      })
+    );
+    const output = serializeGraph(buildInput(nodes, [
+      { id: 'c1', fromNode: 'load-node', fromPort: 'image', toNode: 'math-node', toPort: 'a' },
+    ]));
+    expect(output).toBe(graph([
+      'load1 = LoadImage()',
+      'math1 = Math(b: 7.0)',
+      '',
+      'load1.image -> math1.a',
+    ]));
+  });
+
+  it('prefixes input defaults when an input collides with a param name', () => {
+    const collisionSpec: NodeSpec = {
+      id: 'collision_node',
+      display_name: 'Collision Node',
+      category: 'Utility',
+      description: 'Has a param and input with the same name',
+      inputs: [{ name: 'amount', label: 'Amount Input', ty: 'Float', default: { Float: 0 } }],
+      outputs: [],
+      params: [{
+        key: 'amount',
+        label: 'Amount Param',
+        ty: 'Float',
+        default: { Float: 1 },
+        ui_hint: { type: 'NumberInput' },
+        promotable: false,
+      }],
+    };
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'collision-node',
+      makeNodeInstance({
+        id: 'collision-node',
+        typeId: 'collision_node',
+        params: { amount: { Float: 2 } },
+        inputDefaults: { amount: { Float: 3 } },
+      })
+    );
+    const output = serializeGraph(buildInputWithSpecs(nodes, [], [...mockSpecs, collisionSpec]));
+    expect(output).toBe(graph(['collision1 = CollisionNode(input.amount: 3.0, amount: 2.0)']));
+  });
+
   it('does not add blank line when no connections', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set(
@@ -864,10 +946,18 @@ const serConn = (fromHandle: string, fromPort: string, toHandle: string, toPort:
   fromHandle, fromPort, toHandle, toPort, line: 1,
 });
 
-const serNode = (handle: string, nodeType: string, nodeTypeId: string, params?: Record<string, DslParamValue>): DslNode => {
+const serNode = (
+  handle: string,
+  nodeType: string,
+  nodeTypeId: string,
+  params?: Record<string, DslParamValue>,
+  inputDefaults?: Record<string, DslParamValue>,
+): DslNode => {
   const paramMap = new Map<string, DslParamValue>();
   if (params) for (const [k, v] of Object.entries(params)) paramMap.set(k, v);
-  return { handle, nodeType, nodeTypeId, params: paramMap, muted: false, line: 1 };
+  const inputDefaultMap = new Map<string, DslParamValue>();
+  if (inputDefaults) for (const [k, v] of Object.entries(inputDefaults)) inputDefaultMap.set(k, v);
+  return { handle, nodeType, nodeTypeId, params: paramMap, inputDefaults: inputDefaultMap, muted: false, line: 1 };
 };
 
 const minimalGpu = (): DslGpuDefinition => ({

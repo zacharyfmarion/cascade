@@ -28,6 +28,26 @@ describe('DSL roundtrip', () => {
     expect(mutations).toHaveLength(0);
   });
 
+  it('roundtrips scalar input defaults', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set(
+      'node-math',
+      makeNodeInstance({
+        id: 'node-math',
+        typeId: 'math',
+        params: { operation: { Int: 2 } },
+        inputDefaults: { a: { Float: 3 }, b: { Float: 7 } },
+      })
+    );
+    const text = buildGraph(nodes, []);
+    expect(text).toContain('Math(a: 3.0, b: 7.0, operation: "multiply")');
+    const parsed = parseDsl(text, mockSpecs);
+    expect(parsed.errors).toHaveLength(0);
+    expect(parsed.ast?.nodes.get('math1')?.inputDefaults.get('a')).toEqual({ type: 'float', value: 3 });
+    expect(parsed.ast?.nodes.get('math1')?.inputDefaults.get('b')).toEqual({ type: 'float', value: 7 });
+    expect(diffAst(parsed.ast!, parseDsl(text, mockSpecs).ast!)).toHaveLength(0);
+  });
+
   it('roundtrips color palette', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set(

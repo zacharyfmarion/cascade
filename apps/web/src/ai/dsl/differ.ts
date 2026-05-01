@@ -19,6 +19,19 @@ const diffNodeParams = (oldNode: DslNode, newNode: DslNode): GraphMutation[] => 
   return mutations;
 };
 
+const diffNodeInputDefaults = (oldNode: DslNode, newNode: DslNode): GraphMutation[] => {
+  const mutations: GraphMutation[] = [];
+
+  for (const [portName, newValue] of newNode.inputDefaults.entries()) {
+    const oldValue = oldNode.inputDefaults.get(portName);
+    if (!oldValue || !paramValuesEqual(oldValue, newValue)) {
+      mutations.push({ type: 'setInputDefault', handle: newNode.handle, portName, value: newValue });
+    }
+  }
+
+  return mutations;
+};
+
 export const diffAst = (oldAst: DslAst, newAst: DslAst): GraphMutation[] => {
   const mutations: GraphMutation[] = [];
 
@@ -51,6 +64,7 @@ export const diffAst = (oldAst: DslAst, newAst: DslAst): GraphMutation[] => {
       handle: node.handle,
       typeId: node.nodeTypeId,
       params: node.params,
+      inputDefaults: node.inputDefaults,
       muted: node.muted,
     });
   });
@@ -60,6 +74,7 @@ export const diffAst = (oldAst: DslAst, newAst: DslAst): GraphMutation[] => {
     const newNode = newNodes.get(handle);
     if (!oldNode || !newNode) return;
     mutations.push(...diffNodeParams(oldNode, newNode));
+    mutations.push(...diffNodeInputDefaults(oldNode, newNode));
   });
 
   addedConnections.forEach(conn => {

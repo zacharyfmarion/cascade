@@ -240,6 +240,10 @@ const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition, runtimeIdO
         if (paramValue.type === 'ref') continue;
         params[paramKey] = dslParamToStoreParam(paramValue);
       }
+      for (const [portName, inputValue] of node.inputDefaults.entries()) {
+        if (inputValue.type === 'ref') continue;
+        inputDefaults[portName] = dslParamToStoreParam(inputValue);
+      }
       return {
         id: node.handle,
         type_id: node.nodeTypeId,
@@ -252,7 +256,10 @@ const groupDefinitionToRuntimeJson = (definition: DslGroupDefinition, runtimeIdO
     }),
   ];
   const promotions = Array.from(definition.graph.nodes.values()).flatMap(node =>
-    Array.from(node.params.entries()).flatMap(([paramKey, paramValue]) => {
+    [
+      ...Array.from(node.params.entries()),
+      ...Array.from(node.inputDefaults.entries()),
+    ].flatMap(([paramKey, paramValue]) => {
       if (paramValue.type !== 'ref' || !paramValue.value.startsWith('param.')) return [];
       const groupParamKey = paramValue.value.slice('param.'.length);
       const paramSpec = paramSpecByKey.get(groupParamKey);
@@ -410,6 +417,15 @@ const applyParamValue = async (
   }
 };
 
+const applyInputDefaultValue = async (
+  nodeId: string,
+  portName: string,
+  inputValue: DslParamValue,
+) => {
+  const store = useGraphStore.getState();
+  await store.setInputDefault(nodeId, portName, dslParamToStoreParam(inputValue));
+};
+
 const applyMutedState = async (nodeId: string, muted: boolean) => {
   const store = useGraphStore.getState();
   const node = store.nodes.get(nodeId);
@@ -441,6 +457,9 @@ const executeMutations = async (
         for (const [paramKey, paramValue] of mutation.params.entries()) {
           await applyParamValue(nodeId, paramKey, paramValue, nodeSpecs);
         }
+        for (const [portName, inputValue] of mutation.inputDefaults.entries()) {
+          await applyInputDefaultValue(nodeId, portName, inputValue);
+        }
         if (mutation.muted) {
           await applyMutedState(nodeId, true);
         }
@@ -463,6 +482,15 @@ const executeMutations = async (
           break;
         }
         await applyParamValue(nodeId, mutation.paramKey, mutation.value, nodeSpecs);
+        break;
+      }
+      case 'setInputDefault': {
+        const nodeId = handleMap.getNodeId(mutation.handle);
+        if (!nodeId) {
+          error = `Unknown handle for setInputDefault: ${mutation.handle}`;
+          break;
+        }
+        await applyInputDefaultValue(nodeId, mutation.portName, mutation.value);
         break;
       }
       case 'connect': {
@@ -565,11 +593,19 @@ const buildAstWithDefaults = (
         params.set(paramKey, paramDefaultToDsl(paramSpec.default));
       }
     }
+    const inputDefaults = new Map(newNode.inputDefaults);
+    for (const [portName] of oldNode.inputDefaults.entries()) {
+      if (inputDefaults.has(portName)) continue;
+      const inputSpec = spec?.inputs.find(input => input.name === portName);
+      if (inputSpec?.default) {
+        inputDefaults.set(portName, paramDefaultToDsl(inputSpec.default));
+      }
+    }
 
-    nextNodes.set(handle, { ...newNode, params });
+    nextNodes.set(handle, { ...newNode, params, inputDefaults });
   }
 
-  return { nodes: nextNodes, connections: newAst.connections };
+  return { nodes: nextNodes, connections: newAst.connections, customNodes: newAst.customNodes };
 };
 
 const getMutationLine = (mutation: GraphMutation, ast: DslAst): number | null => {
@@ -577,6 +613,7 @@ const getMutationLine = (mutation: GraphMutation, ast: DslAst): number | null =>
     case 'addNode':
     case 'removeNode':
     case 'setParam':
+    case 'setInputDefault':
     case 'setMuted':
       return ast.nodes.get(mutation.handle)?.line ?? null;
     case 'connect':

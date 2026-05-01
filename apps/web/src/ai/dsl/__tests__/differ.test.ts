@@ -8,11 +8,14 @@ function makeNode(
   nodeType: string,
   nodeTypeId: string,
   params?: Record<string, DslParamValue>,
-  muted?: boolean
+  muted?: boolean,
+  inputDefaults?: Record<string, DslParamValue>,
 ): DslNode {
   const paramMap = new Map<string, DslParamValue>();
   if (params) for (const [k, v] of Object.entries(params)) paramMap.set(k, v);
-  return { handle, nodeType, nodeTypeId, params: paramMap, muted: muted ?? false, line: 1 };
+  const inputDefaultMap = new Map<string, DslParamValue>();
+  if (inputDefaults) for (const [k, v] of Object.entries(inputDefaults)) inputDefaultMap.set(k, v);
+  return { handle, nodeType, nodeTypeId, params: paramMap, inputDefaults: inputDefaultMap, muted: muted ?? false, line: 1 };
 }
 
 function makeAst(nodes: DslNode[], connections: DslConnection[]): DslAst {
@@ -39,6 +42,7 @@ describe('differ', () => {
     const mutation = mutations[0] as Extract<GraphMutation, { type: 'addNode' }>;
     expect(mutation).toMatchObject({ type: 'addNode', handle: 'b', typeId: 'gaussian_blur', muted: false });
     expect(mutation.params.get('sigma')).toEqual({ type: 'float', value: 3 });
+    expect(mutation.inputDefaults.size).toBe(0);
   });
 
   it('adds node before connect mutation when new connection exists', () => {
@@ -85,6 +89,28 @@ describe('differ', () => {
 
     expect(mutations).toEqual([
       { type: 'setParam', handle: 'a', paramKey: 'sigma', value: { type: 'float', value: 2 } },
+    ]);
+  });
+
+  it('adds node with input defaults', () => {
+    const newNode = makeNode('math1', 'Math', 'math', { operation: { type: 'dropdown', value: 'multiply', index: 2 } }, false, {
+      a: { type: 'float', value: 3 },
+      b: { type: 'float', value: 7 },
+    });
+    const mutations = diffAst(makeAst([], []), makeAst([newNode], []));
+
+    const mutation = mutations[0] as Extract<GraphMutation, { type: 'addNode' }>;
+    expect(mutation.inputDefaults.get('a')).toEqual({ type: 'float', value: 3 });
+    expect(mutation.inputDefaults.get('b')).toEqual({ type: 'float', value: 7 });
+  });
+
+  it('updates changed input defaults', () => {
+    const oldNode = makeNode('math1', 'Math', 'math', {}, false, { a: { type: 'float', value: 1 } });
+    const newNode = makeNode('math1', 'Math', 'math', {}, false, { a: { type: 'float', value: 3 } });
+    const mutations = diffAst(makeAst([oldNode], []), makeAst([newNode], []));
+
+    expect(mutations).toEqual([
+      { type: 'setInputDefault', handle: 'math1', portName: 'a', value: { type: 'float', value: 3 } },
     ]);
   });
 

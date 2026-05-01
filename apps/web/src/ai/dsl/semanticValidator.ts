@@ -4,7 +4,7 @@ import type { HandleMap } from './handleMap';
 
 /**
  * Convert a GraphMutation to an EditOp for Rust-side validation.
- * Only connect/disconnect/addNode/removeNode are relevant — setParam
+ * Only connect/disconnect/addNode/removeNode are relevant — value edits
  * and setMuted don't need semantic validation.
  */
 function resolveValidationNodeId(
@@ -56,7 +56,7 @@ function toEditOp(
       };
     }
     default:
-      // setParam, setMuted — no semantic validation needed
+      // Value edits and setMuted don't need semantic validation.
       return null;
   }
 }
@@ -70,6 +70,7 @@ function resolveLineFromMutation(mutation: GraphMutation, sourceMap: DslSourceMa
     case 'addNode':
     case 'removeNode':
     case 'setParam':
+    case 'setInputDefault':
     case 'setMuted': {
       const handle = 'handle' in mutation ? mutation.handle : '';
       const span = sourceMap.nodeSpans.get(handle);
