@@ -7,8 +7,37 @@ vi.mock('../../engine/wasmEngine', () => ({
   wasmEngine: null,
 }));
 
+const setTauriMode = (enabled: boolean) => {
+  const host = globalThis as unknown as Record<string, unknown>;
+  if (enabled) {
+    host.__TAURI_INTERNALS__ = {};
+  } else {
+    delete host.__TAURI_INTERNALS__;
+  }
+};
+
 describe('menuDefinition', () => {
+  it('hides Save Bundled Copy on web', () => {
+    setTauriMode(false);
+    const fileMenu = getMenuBarDef().find(menu => menu.label === 'File');
+    const actions = fileMenu?.items.flatMap(item => item.type === 'action' ? [item] : []);
+
+    expect(actions?.map(action => action.id)).not.toContain('file.saveBundled');
+  });
+
+  it('shows Save Bundled Copy on desktop', () => {
+    setTauriMode(true);
+    const fileMenu = getMenuBarDef().find(menu => menu.label === 'File');
+    const actions = fileMenu?.items.flatMap(item => item.type === 'action' ? [item] : []);
+
+    expect(actions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'file.saveBundled', label: 'Save Bundled Copy...' }),
+    ]));
+    setTauriMode(false);
+  });
+
   it('exposes project lifecycle file actions', () => {
+    setTauriMode(false);
     const fileMenu = getMenuBarDef().find(menu => menu.label === 'File');
     const actions = fileMenu?.items.flatMap(item => item.type === 'action' ? [item] : []);
 

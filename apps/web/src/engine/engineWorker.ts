@@ -593,7 +593,7 @@ const engineAPI = {
     });
   },
 
-  saveProject(_path: string): Promise<void> {
+  saveProject(_path: string): Promise<unknown> {
     return Promise.reject(new Error('Project save is not supported in WASM engine'));
   },
 

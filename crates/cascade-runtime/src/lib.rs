@@ -9,7 +9,7 @@ use crate::ai_provider::NativeAiProvider;
 use cascade_core::ai::AiProvider;
 use cascade_core::color::{BuiltinColorManagement, ColorManagement};
 use cascade_core::error::CascadeError;
-use cascade_core::eval::Evaluator;
+use cascade_core::eval::{CacheKey, Evaluator};
 use cascade_core::graph::{Graph, InstanceAwareSpecProvider, NodeId};
 use cascade_core::group::{
     CustomNodeInfo, GroupDefinition, InternalConnection, InternalNode, NodePackage,
@@ -28,8 +28,8 @@ use cascade_nodes_std::group::InternalOutputEvalRequest;
 use cascade_nodes_std::input::LoadImage as InputLoadImage;
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
-    register_standard_nodes, ColorPaletteNode, GpuScriptDraftNode, GroupNode, LoadImageSequence,
-    Viewer,
+    decode_response_image, encode_image_png, register_standard_nodes, ColorPaletteNode,
+    GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
 };
 #[cfg(all(feature = "video", target_os = "macos"))]
 use cascade_nodes_std::{srgb_to_linear_lut, LoadVideo};
@@ -113,7 +113,7 @@ pub struct Engine {
     nodes: HashMap<NodeId, Arc<dyn Node>>,
     evaluator: Evaluator,
     gpu_context: Option<Arc<GpuContext>>,
-    color_management: Box<dyn ColorManagement>,
+    color_management: Arc<dyn ColorManagement>,
     ai_provider: Option<Arc<dyn AiProvider>>,
     group_definitions: HashMap<String, Arc<GroupDefinition>>,
     uuid_map: HashMap<String, NodeId>,
@@ -123,6 +123,54 @@ pub struct Engine {
     active_display: String,
     active_view: String,
     project_format: Format,
+    ai_node_cache: HashMap<NodeId, HashMap<String, Value>>,
+    node_exec_state: HashMap<NodeId, NodeExecutionState>,
+}
+
+#[derive(Debug, Clone)]
+enum RunStatus {
+    Idle,
+    Running,
+    Complete,
+    Error(String),
+}
+
+#[derive(Debug, Clone)]
+struct NodeExecutionState {
+    status: RunStatus,
+    last_run_cache_key: Option<CacheKey>,
+    active_run_id: Option<String>,
+}
+
+impl NodeExecutionState {
+    fn new() -> Self {
+        Self {
+            status: RunStatus::Idle,
+            last_run_cache_key: None,
+            active_run_id: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AiNodeExecutionState {
+    pub status: String,
+    #[serde(rename = "isStale")]
+    pub is_stale: bool,
+    pub error: String,
+}
+
+pub struct PreparedAiNodeRun {
+    run_id: String,
+    node_id: NodeId,
+    node_uuid: String,
+    node: Arc<dyn Node>,
+    inputs: HashMap<String, Value>,
+    params: HashMap<String, ParamValue>,
+    color_management: Arc<dyn ColorManagement>,
+    ai_provider: Option<Arc<dyn AiProvider>>,
+    project_format: Format,
+    cache_key: Option<CacheKey>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -296,7 +344,7 @@ impl Engine {
             nodes: HashMap::new(),
             evaluator: Evaluator::new(),
             gpu_context,
-            color_management: Box::new(BuiltinColorManagement::new()),
+            color_management: Arc::new(BuiltinColorManagement::new()),
             ai_provider: None,
             group_definitions: HashMap::new(),
             uuid_map: HashMap::new(),
@@ -306,6 +354,8 @@ impl Engine {
             active_display: "sRGB".to_string(),
             active_view: "Standard".to_string(),
             project_format: Format::hd(),
+            ai_node_cache: HashMap::new(),
+            node_exec_state: HashMap::new(),
         };
         builtin_groups::register_builtin_groups(&mut engine);
         if let Some(kernels_dir) = find_kernels_dir() {
@@ -320,7 +370,7 @@ impl Engine {
     #[cfg(feature = "ocio")]
     pub fn load_ocio_config(&mut self, path: &str) -> Result<(), CascadeError> {
         let ocio = cascade_ocio::OcioColorManagement::from_file(path)?;
-        self.color_management = Box::new(ocio);
+        self.color_management = Arc::new(ocio);
         self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
@@ -329,14 +379,14 @@ impl Engine {
     #[cfg(feature = "ocio")]
     pub fn load_ocio_from_env(&mut self) -> Result<(), CascadeError> {
         let ocio = cascade_ocio::OcioColorManagement::from_env()?;
-        self.color_management = Box::new(ocio);
+        self.color_management = Arc::new(ocio);
         self.sync_active_display_view();
         self.evaluator = Evaluator::new();
         Ok(())
     }
 
     pub fn reset_color_management(&mut self) {
-        self.color_management = Box::new(cascade_core::color::BuiltinColorManagement::new());
+        self.color_management = Arc::new(cascade_core::color::BuiltinColorManagement::new());
         self.active_display = "sRGB".to_string();
         self.active_view = "Standard".to_string();
         self.evaluator = Evaluator::new();
@@ -1849,6 +1899,250 @@ impl Engine {
         Ok(node.spec())
     }
 
+    pub fn get_ai_node_image_data(&self, node_id: &str) -> Result<Vec<u8>, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let cached = self
+            .ai_node_cache
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("No cached AI result".to_string()))?;
+        let image = match cached.get("image") {
+            Some(Value::Image(image)) => image,
+            _ => {
+                return Err(CascadeError::Other(
+                    "No image in cached AI result".to_string(),
+                ));
+            }
+        };
+        encode_image_png(image)
+    }
+
+    pub fn set_ai_node_image_data(
+        &mut self,
+        node_id: &str,
+        data: &[u8],
+    ) -> Result<(), CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let image = decode_response_image(data)?;
+        let mut outputs = HashMap::new();
+        outputs.insert("image".to_string(), Value::Image(image));
+        self.ai_node_cache.insert(id, outputs);
+        let state = self
+            .node_exec_state
+            .entry(id)
+            .or_insert_with(NodeExecutionState::new);
+        state.status = RunStatus::Complete;
+        state.active_run_id = None;
+        state.last_run_cache_key = self
+            .evaluator
+            .compute_node_cache_key(
+                &self.graph,
+                &self.registry,
+                id,
+                FrameTime { frame: 0 },
+                &self.project_format,
+                1.0,
+            )
+            .ok();
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
+    pub fn prepare_ai_node_run(
+        &mut self,
+        node_id: &str,
+    ) -> Result<PreparedAiNodeRun, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+
+        pollster::block_on(self.evaluator.evaluate_upstream(
+            &mut self.graph,
+            &self.registry,
+            &self.nodes,
+            id,
+            FrameTime { frame: 0 },
+            self.color_management.as_ref(),
+            self.ai_provider.as_deref(),
+            &self.project_format,
+            &self.ai_node_cache,
+            1.0,
+        ))?;
+        let cache_key = self
+            .evaluator
+            .compute_node_cache_key(
+                &self.graph,
+                &self.registry,
+                id,
+                FrameTime { frame: 0 },
+                &self.project_format,
+                1.0,
+            )
+            .ok();
+        let run_id = Uuid::new_v4().to_string();
+
+        let state = self
+            .node_exec_state
+            .entry(id)
+            .or_insert_with(NodeExecutionState::new);
+        state.status = RunStatus::Running;
+        state.active_run_id = Some(run_id.clone());
+
+        let instance = self
+            .graph
+            .nodes
+            .get(id)
+            .ok_or(CascadeError::NodeNotFound(id))?;
+        let node_uuid = instance.uuid.clone();
+        let spec = self
+            .registry
+            .get_spec(&instance.type_id)
+            .ok_or_else(|| CascadeError::InvalidConnection(instance.type_id.clone()))?;
+
+        let mut inputs = HashMap::new();
+        for input in spec.all_inputs() {
+            if let Some((up_node, up_port)) = self.graph.get_upstream(id, &input.name) {
+                if let Some(cached_val) = self.evaluator.get_cached(up_node, &up_port) {
+                    inputs.insert(input.name.clone(), cached_val.clone());
+                }
+            }
+        }
+
+        let mut merged_params = Evaluator::merge_params(instance, spec);
+        Evaluator::apply_promoted_params(
+            &mut merged_params,
+            spec,
+            instance,
+            &self.graph,
+            id,
+            |node_id, port| self.evaluator.get_cached(node_id, port).cloned(),
+        );
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or(CascadeError::NodeNotFound(id))?
+            .clone();
+
+        Ok(PreparedAiNodeRun {
+            run_id,
+            node_id: id,
+            node_uuid,
+            node,
+            inputs,
+            params: merged_params,
+            color_management: Arc::clone(&self.color_management),
+            ai_provider: self.ai_provider.clone(),
+            project_format: self.project_format.clone(),
+            cache_key,
+        })
+    }
+
+    pub fn evaluate_prepared_ai_node_run(
+        run: &PreparedAiNodeRun,
+    ) -> Result<HashMap<String, Value>, CascadeError> {
+        let ctx = cascade_core::node::EvalContext {
+            inputs: run.inputs.clone(),
+            extra_inputs: HashMap::new(),
+            params: &run.params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: run.color_management.as_ref(),
+            ai_provider: run.ai_provider.as_deref(),
+            project_format: &run.project_format,
+            ai_cached_outputs: None,
+            preview_scale: 1.0,
+        };
+        pollster::block_on(run.node.evaluate(&ctx))
+    }
+
+    pub fn finish_ai_node_run(
+        &mut self,
+        run: PreparedAiNodeRun,
+        result: Result<HashMap<String, Value>, CascadeError>,
+    ) -> Result<(), CascadeError> {
+        let Some(instance) = self.graph.nodes.get(run.node_id) else {
+            return Ok(());
+        };
+        if instance.uuid != run.node_uuid {
+            return Ok(());
+        }
+        let is_current_run = self
+            .node_exec_state
+            .get(&run.node_id)
+            .and_then(|state| state.active_run_id.as_deref())
+            == Some(run.run_id.as_str());
+        if !is_current_run {
+            return Ok(());
+        }
+
+        match result {
+            Ok(outputs) => {
+                self.ai_node_cache.insert(run.node_id, outputs);
+                let state = self
+                    .node_exec_state
+                    .entry(run.node_id)
+                    .or_insert_with(NodeExecutionState::new);
+                state.status = RunStatus::Complete;
+                state.active_run_id = None;
+                state.last_run_cache_key = run.cache_key;
+                self.graph.mark_dirty(run.node_id);
+                Ok(())
+            }
+            Err(error) => {
+                let state = self
+                    .node_exec_state
+                    .entry(run.node_id)
+                    .or_insert_with(NodeExecutionState::new);
+                state.status = RunStatus::Error(error.to_string());
+                state.active_run_id = None;
+                Err(error)
+            }
+        }
+    }
+
+    pub fn run_ai_node(&mut self, node_id: &str) -> Result<(), CascadeError> {
+        let run = self.prepare_ai_node_run(node_id)?;
+        let result = Self::evaluate_prepared_ai_node_run(&run);
+        self.finish_ai_node_run(run, result)
+    }
+
+    pub fn get_node_execution_state(&self, node_id: &str) -> AiNodeExecutionState {
+        let Ok(id) = self.parse_node_id(node_id) else {
+            return AiNodeExecutionState {
+                status: "idle".to_string(),
+                is_stale: false,
+                error: String::new(),
+            };
+        };
+        let state = self.node_exec_state.get(&id);
+        let status = match state.map(|s| &s.status) {
+            Some(RunStatus::Running) => "running",
+            Some(RunStatus::Complete) => "complete",
+            Some(RunStatus::Error(_)) => "error",
+            _ => "idle",
+        };
+        let is_stale = match state {
+            Some(state) if state.last_run_cache_key.is_some() => self
+                .evaluator
+                .compute_node_cache_key(
+                    &self.graph,
+                    &self.registry,
+                    id,
+                    FrameTime { frame: 0 },
+                    &self.project_format,
+                    1.0,
+                )
+                .map(|current_key| state.last_run_cache_key.as_ref() != Some(&current_key))
+                .unwrap_or(false),
+            _ => false,
+        };
+        let error = match state.map(|s| &s.status) {
+            Some(RunStatus::Error(message)) => message.clone(),
+            _ => String::new(),
+        };
+        AiNodeExecutionState {
+            status: status.to_string(),
+            is_stale,
+            error,
+        }
+    }
+
     pub fn gpu_context(&self) -> Option<Arc<GpuContext>> {
         self.gpu_context.clone()
     }
@@ -1876,6 +2170,8 @@ impl Engine {
         }
         self.graph.remove_node(node_id);
         self.nodes.remove(&node_id);
+        self.ai_node_cache.remove(&node_id);
+        self.node_exec_state.remove(&node_id);
     }
 
     /// Returns `(node_uuid, actual_type_id)`. For most nodes, `actual_type_id` equals the
@@ -2219,7 +2515,7 @@ impl Engine {
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
-            &HashMap::new(),
+            &self.ai_node_cache,
             Self::normalize_preview_scale(preview_scale),
         ))
     }
@@ -2505,7 +2801,7 @@ impl Engine {
                     self.color_management.as_ref(),
                     self.ai_provider.as_deref(),
                     &self.project_format,
-                    &HashMap::new(),
+                    &self.ai_node_cache,
                     preview_scale,
                 ))?;
                 inputs.insert(input.name.clone(), eval_result.value);
@@ -2703,7 +2999,7 @@ impl Engine {
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
-            &HashMap::new(),
+            &self.ai_node_cache,
             1.0,
         ))
     }
@@ -2736,7 +3032,7 @@ impl Engine {
             cm,
             self.ai_provider.as_deref(),
             &self.project_format,
-            &HashMap::new(),
+            &self.ai_node_cache,
             1.0,
         ))?;
         match eval_result.value {
@@ -2937,6 +3233,7 @@ impl Engine {
         let render_cm = Box::new(BuiltinColorManagement::new());
         let ai_provider = self.ai_provider.clone();
         let render_project_format = self.project_format.clone();
+        let render_ai_node_cache = self.ai_node_cache.clone();
 
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2959,7 +3256,7 @@ impl Engine {
                         cm,
                         ai_provider.as_deref(),
                         &render_project_format,
-                        &HashMap::new(),
+                        &render_ai_node_cache,
                         1.0,
                     )) {
                         Ok(eval_result) => {
@@ -3115,6 +3412,7 @@ impl Engine {
         let render_cm = Box::new(BuiltinColorManagement::new());
         let ai_provider = self.ai_provider.clone();
         let render_project_format = self.project_format.clone();
+        let render_ai_node_cache = self.ai_node_cache.clone();
 
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -3130,7 +3428,7 @@ impl Engine {
                     cm,
                     ai_provider.as_deref(),
                     &render_project_format,
-                    &HashMap::new(),
+                    &render_ai_node_cache,
                     1.0,
                 ));
 
@@ -3198,7 +3496,7 @@ impl Engine {
                         cm,
                         ai_provider.as_deref(),
                         &render_project_format,
-                        &HashMap::new(),
+                        &render_ai_node_cache,
                         1.0,
                     )) {
                         Ok(eval_result) => {
@@ -3348,6 +3646,7 @@ impl Engine {
             },
             graph,
             assets: HashMap::new(),
+            asset_storage: None,
             scripts,
             view: None,
             dsl: None,
@@ -3373,6 +3672,8 @@ impl Engine {
         self.evaluator = Evaluator::new();
         self.uuid_map.clear();
         self.kernel_manifests.clear();
+        self.ai_node_cache.clear();
+        self.node_exec_state.clear();
 
         let mut gpu_script_manifests: HashMap<String, Option<KernelManifest>> = HashMap::new();
         for def in &data.group_definitions {
@@ -3646,6 +3947,132 @@ mod tests {
             ..KernelManifest::default()
         };
         serde_json::to_string(&manifest).expect("manifest json")
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
+        let mut buf = Vec::new();
+        let mut cursor = std::io::Cursor::new(&mut buf);
+        img.write_to(&mut cursor, image::ImageFormat::Png)
+            .expect("tiny png encodes");
+        buf
+    }
+
+    #[test]
+    fn test_ai_node_cached_image_feeds_viewer_render() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 200.0, 0.0).unwrap();
+        engine
+            .connect(&ai_id, "image", &viewer_id, "value")
+            .expect("connect AI image to viewer");
+
+        engine
+            .set_ai_node_image_data(&ai_id, &tiny_png())
+            .expect("cache AI image");
+        let state = engine.get_node_execution_state(&ai_id);
+        assert_eq!(state.status, "complete");
+        assert!(!state.is_stale);
+
+        let render = engine
+            .render_viewer(&viewer_id, 0)
+            .expect("viewer renders cached AI image");
+        assert_eq!(render.width, 1);
+        assert_eq!(render.height, 1);
+    }
+
+    #[test]
+    fn test_ai_node_execution_state_reports_stale_after_param_change() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        engine
+            .set_ai_node_image_data(&ai_id, &tiny_png())
+            .expect("cache AI image");
+        assert!(!engine.get_node_execution_state(&ai_id).is_stale);
+
+        engine
+            .set_param(
+                &ai_id,
+                "prompt",
+                ParamValue::String("new prompt".to_string()),
+            )
+            .expect("update prompt");
+
+        let state = engine.get_node_execution_state(&ai_id);
+        assert_eq!(state.status, "complete");
+        assert!(state.is_stale);
+    }
+
+    #[test]
+    fn test_prepared_ai_node_run_completion_is_stale_when_params_change_mid_run() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        engine
+            .set_param(
+                &ai_id,
+                "prompt",
+                ParamValue::String("first prompt".to_string()),
+            )
+            .expect("set prompt");
+
+        let run = engine.prepare_ai_node_run(&ai_id).expect("prepare run");
+        engine
+            .set_param(
+                &ai_id,
+                "prompt",
+                ParamValue::String("second prompt".to_string()),
+            )
+            .expect("change prompt while running");
+        let mut outputs = HashMap::new();
+        outputs.insert("image".to_string(), Value::None);
+
+        engine
+            .finish_ai_node_run(run, Ok(outputs))
+            .expect("finish run");
+        let state = engine.get_node_execution_state(&ai_id);
+        assert_eq!(state.status, "complete");
+        assert!(state.is_stale);
+    }
+
+    #[test]
+    fn test_prepared_ai_node_run_ignores_outdated_completion() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        let first_run = engine.prepare_ai_node_run(&ai_id).expect("first run");
+        let second_run = engine.prepare_ai_node_run(&ai_id).expect("second run");
+
+        let mut first_outputs = HashMap::new();
+        first_outputs.insert("image".to_string(), Value::None);
+        engine
+            .finish_ai_node_run(first_run, Ok(first_outputs))
+            .expect("outdated completion is ignored");
+        assert_eq!(engine.get_node_execution_state(&ai_id).status, "running");
+
+        let mut second_outputs = HashMap::new();
+        second_outputs.insert("image".to_string(), Value::None);
+        engine
+            .finish_ai_node_run(second_run, Ok(second_outputs))
+            .expect("current completion is accepted");
+        assert_eq!(engine.get_node_execution_state(&ai_id).status, "complete");
+    }
+
+    #[test]
+    fn test_run_ai_node_without_configured_provider_sets_visible_error_state() {
+        let mut engine = Engine::new();
+        let (ai_id, _) = engine.add_node("ai_generate_image", 0.0, 0.0).unwrap();
+        engine
+            .set_param(
+                &ai_id,
+                "prompt",
+                ParamValue::String("a small red square".to_string()),
+            )
+            .expect("set prompt");
+
+        let error = engine.run_ai_node(&ai_id).expect_err("provider is missing");
+        assert!(error.to_string().contains("AI provider not configured"));
+        let state = engine.get_node_execution_state(&ai_id);
+        assert_eq!(state.status, "error");
+        assert!(state.error.contains("AI provider not configured"));
     }
 
     #[test]

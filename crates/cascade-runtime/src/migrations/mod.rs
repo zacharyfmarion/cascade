@@ -5,9 +5,10 @@ use std::fmt;
 pub mod v1_0_0_to_v1_1_0;
 pub mod v1_1_0_to_v1_2_0;
 pub mod v1_2_0_to_v1_3_0;
+pub mod v1_3_0_to_v1_4_0;
 
 /// Current document format version
-pub const CURRENT_VERSION: &str = "1.3.0";
+pub const CURRENT_VERSION: &str = "1.4.0";
 
 /// Error type for migration operations
 #[derive(Debug, Clone)]
@@ -82,6 +83,12 @@ static MIGRATIONS: &[Migration] = &[
         to_version: "1.3.0",
         description: "Add optional DSL shadow document metadata",
         migrate: v1_2_0_to_v1_3_0::migrate,
+    },
+    Migration {
+        from_version: "1.3.0",
+        to_version: "1.4.0",
+        description: "Add optional asset storage mode and bundled asset URI metadata",
+        migrate: v1_3_0_to_v1_4_0::migrate,
     },
 ];
 
@@ -315,7 +322,10 @@ mod tests {
         let report = migrate_document(&mut doc).unwrap();
 
         assert_eq!(report.to_version, CURRENT_VERSION);
-        assert_eq!(doc["cascade"]["format_version"].as_str().unwrap(), "1.3.0");
+        assert_eq!(
+            doc["cascade"]["format_version"].as_str().unwrap(),
+            CURRENT_VERSION
+        );
         assert!(doc.get("dsl").is_none());
     }
 
@@ -342,7 +352,10 @@ mod tests {
 
         migrate_document(&mut doc).unwrap();
 
-        assert_eq!(doc["cascade"]["format_version"].as_str().unwrap(), "1.3.0");
+        assert_eq!(
+            doc["cascade"]["format_version"].as_str().unwrap(),
+            CURRENT_VERSION
+        );
         assert_eq!(doc["dsl"]["text"].as_str().unwrap(), "graph {}");
         assert_eq!(
             doc["dsl"]["handles"][0]["handle"].as_str().unwrap(),
@@ -361,6 +374,44 @@ mod tests {
             migrate_document(&mut doc),
             Err(MigrationError::FutureVersion(_, _))
         ));
+    }
+
+    #[test]
+    fn test_migrate_1_3_0_to_1_4_0_preserves_asset_metadata() {
+        let mut doc = json!({
+            "cascade": {
+                "format_version": "1.3.0"
+            },
+            "project": {},
+            "graph": {
+                "nodes": [],
+                "connections": [],
+                "group_definitions": []
+            },
+            "asset_storage": "bundled",
+            "assets": {
+                "load-1": {
+                    "type": "image",
+                    "source": "packed",
+                    "path": "assets/abc.png",
+                    "hash": "abc",
+                    "uri": "asset://sha256/abc"
+                }
+            }
+        });
+
+        let report = migrate_document(&mut doc).unwrap();
+
+        assert_eq!(report.to_version, CURRENT_VERSION);
+        assert_eq!(
+            doc["cascade"]["format_version"].as_str().unwrap(),
+            CURRENT_VERSION
+        );
+        assert_eq!(doc["asset_storage"].as_str(), Some("bundled"));
+        assert_eq!(
+            doc["assets"]["load-1"]["uri"].as_str(),
+            Some("asset://sha256/abc")
+        );
     }
 
     #[test]

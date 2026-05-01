@@ -368,6 +368,7 @@ export const hydrateDslShadowMetadata = (
     : 'invalid';
   return {
     ...baseShadow,
+    graphHash: status === 'valid' ? graphHash : baseShadow.graphHash,
     status,
     sourceMap: parseResult.sourceMap,
   };

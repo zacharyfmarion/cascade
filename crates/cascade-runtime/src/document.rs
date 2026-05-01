@@ -9,7 +9,8 @@ use crate::SerializableGraph;
 // 1.1.0 - Viewer node input port renamed from "image" to "value" for universal value inspection
 // 1.2.0 - CPU/GPU node ID and port unification
 // 1.3.0 - Optional DSL shadow document metadata
-pub const CURRENT_FORMAT_VERSION: &str = "1.3.0";
+// 1.4.0 - Asset storage mode and canonical internal asset URIs for bundled assets
+pub const CURRENT_FORMAT_VERSION: &str = "1.4.0";
 
 #[derive(Serialize, Deserialize)]
 pub struct CascadeDocument {
@@ -18,6 +19,8 @@ pub struct CascadeDocument {
     pub graph: SerializableGraph,
     #[serde(default)]
     pub assets: HashMap<String, AssetReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_storage: Option<String>,
     #[serde(default)]
     pub scripts: HashMap<String, ScriptEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,7 +54,7 @@ pub struct ProjectMetadata {
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AssetReference {
     #[serde(rename = "type")]
     pub asset_type: String,
@@ -62,6 +65,10 @@ pub struct AssetReference {
     pub original_filename: String,
     #[serde(default)]
     pub hash: String,
+    #[serde(default)]
+    pub uri: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub data: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -238,6 +245,7 @@ mod tests {
                 group_definitions: vec![],
             },
             assets: HashMap::new(),
+            asset_storage: None,
             scripts: HashMap::new(),
             view: None,
             dsl: Some(DslShadowMetadata {

@@ -106,7 +106,11 @@ export interface EngineBridge {
   importGraph(data: unknown): Promise<void> | void;
   exportDocument?(): Promise<unknown> | unknown;
   importDocument?(data: unknown): Promise<void> | void;
-  saveProject?(path: string, dsl?: unknown): Promise<void>;
+  saveProject?(
+    path: string,
+    dsl?: unknown,
+    options?: { bundleMedia?: boolean; assetStorage?: 'external' | 'bundled' },
+  ): Promise<unknown>;
   loadProject?(path: string): Promise<unknown>;
   getImageData?(nodeId: string): Promise<Uint8Array | null> | Uint8Array | null;
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;

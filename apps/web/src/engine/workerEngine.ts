@@ -334,7 +334,7 @@ export class WorkerEngine implements EngineBridge {
   // Tauri-only: these are no-ops in the Worker (web-only) path
   // -----------------------------------------------------------------------
 
-  saveProject(_path: string): Promise<void> {
+  saveProject(_path: string): Promise<unknown> {
     return Promise.reject(new Error('saveProject not available in web Worker mode'));
   }
 

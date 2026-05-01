@@ -43,6 +43,11 @@ const createInitialState = () => ({
   isRendering: false,
   previewScale: 1,
   dirty: false,
+  currentProjectPath: null,
+  currentProjectName: 'Untitled',
+  currentProjectAssetStorage: null,
+  assetStoragePrompt: null,
+  projectAssets: {},
   projectSessionRevision: 0,
   hasSequenceNodes: false,
   sequenceLength: 0,
@@ -117,6 +122,41 @@ describe('applyDsl', () => {
     expect(result.success).toBe(true);
     expect(loadImagePath).toHaveBeenCalledWith(nodeId, 'file:///tmp/new.png');
     expect(useGraphStore.getState().nodes.get(nodeId)?.params.path).toEqual({ String: 'file:///tmp/new.png' });
+  });
+
+  it('resolves internal image asset URIs through the project asset manifest', async () => {
+    const store = useGraphStore.getState();
+    const nodeId = await store.addNode('load_image', { x: 0, y: 0 });
+    const uri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    useGraphStore.setState({
+      projectAssets: {
+        [nodeId]: {
+          type: 'image',
+          source: 'embedded',
+          uri,
+          hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          data: btoa('embedded-image'),
+          original_filename: 'plate.png',
+        },
+      },
+    });
+
+    const loadImageData = vi.spyOn(mockEngine as EngineBridge, 'loadImageData');
+    const loadImagePath = vi.spyOn(mockEngine as EngineBridge, 'loadImagePath');
+    const handleMap = new HandleMap();
+    handleMap.set('load1', nodeId);
+    const result = await applyDsl(
+      `graph {\n  load1 = LoadImage(path: image("${uri}"))\n}`,
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    expect(loadImageData).toHaveBeenCalledWith(nodeId, new TextEncoder().encode('embedded-image'));
+    expect(loadImagePath).not.toHaveBeenCalled();
+    expect(useGraphStore.getState().nodes.get(nodeId)?.params.path).toEqual({ String: uri });
   });
 
   it('returns a visible DSL error when loading an image path fails', async () => {

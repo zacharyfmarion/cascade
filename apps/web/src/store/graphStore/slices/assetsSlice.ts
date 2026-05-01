@@ -2,6 +2,26 @@ import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { ParamValue } from '../../types';
 import { getEngine, markGraphMutation } from '../kernel';
+import { assetUriFromHash } from '../assetReferences';
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
+
+const bytesToHex = (bytes: Uint8Array): string => (
+  Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+);
+
+const hashBytes = async (bytes: Uint8Array): Promise<string> => {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await crypto.subtle.digest('SHA-256', copy.buffer);
+  return bytesToHex(new Uint8Array(digest));
+};
 
 export type AssetsSliceState = object;
 
@@ -50,11 +70,38 @@ export const createAssetsSlice: StateCreator<
 
   loadImageFile: (nodeId, file) => {
     file.arrayBuffer().then(async buffer => {
-      const data = new Uint8Array(buffer);
-      const change = await getEngine().loadImageData(nodeId, data);
+      const assetBytes = new Uint8Array(buffer);
+      const engineBytes = new Uint8Array(assetBytes);
+      const hash = await hashBytes(assetBytes);
+      const uri = assetUriFromHash(hash);
+      const change = await getEngine().loadImageData(nodeId, engineBytes);
       get().applyNodeInterfaceChange(nodeId, change);
+      const newNodes = new Map(get().nodes);
+      const node = newNodes.get(nodeId);
+      if (node) {
+        newNodes.set(nodeId, {
+          ...node,
+          params: { ...node.params, path: { String: uri } as ParamValue },
+        });
+      }
+      const projectAssets = {
+        ...get().projectAssets,
+        [nodeId]: {
+          type: 'image',
+          source: 'embedded',
+          uri,
+          hash,
+          data: bytesToBase64(assetBytes),
+          original_filename: file.name,
+        },
+      };
       markGraphMutation(set, 'ui');
-      set({ dirty: true });
+      set({
+        nodes: newNodes,
+        projectAssets,
+        currentProjectAssetStorage: get().currentProjectAssetStorage,
+        dirty: true,
+      });
       get().refreshDslShadowFromGraph();
       get().triggerAllViewers();
     }).catch(e => {

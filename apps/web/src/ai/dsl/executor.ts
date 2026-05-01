@@ -9,12 +9,14 @@ import { validateAst } from './validator';
 import { diffAst } from './differ';
 import { validateSemantics } from './semanticValidator';
 import { serializeGraph } from './serializer';
+import { getEngine } from '../../store/graphStore/kernel';
 import type { GpuScriptManifest } from '../gpuScript';
 import {
   buildDefaultGpuScriptManifest,
   parseGpuScriptManifestJson,
 } from '../gpuScript';
 import { pascalToSnake } from './types';
+import { findAssetByUri, isAssetUri } from '../../store/graphStore/assetReferences';
 
 export type ApplyResult =
   | { success: true; evalErrors?: DiagnosticItem[] }
@@ -395,6 +397,20 @@ const applyParamValue = async (
   const store = useGraphStore.getState();
   const node = store.nodes.get(nodeId);
   if (node?.typeId === 'load_image' && paramKey === 'path' && paramValue.type === 'string') {
+    if (isAssetUri(paramValue.value)) {
+      const asset = findAssetByUri(store.projectAssets, paramValue.value);
+      if (asset?.[1].data) {
+        const binary = atob(asset[1].data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const change = await getEngine().loadImageData(nodeId, bytes);
+        store.applyNodeInterfaceChange(nodeId, change);
+      }
+      await store.setParam(nodeId, paramKey, dslParamToStoreParam(paramValue));
+      return;
+    }
     await store.loadImagePath(nodeId, paramValue.value);
     return;
   }

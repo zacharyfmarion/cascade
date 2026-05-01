@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import JSZip from 'jszip';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
 import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../ai/gpuScript';
 import { serializeGraph } from '../ai/dsl/serializer';
 import { HandleMap } from '../ai/dsl/handleMap';
+import { createBundledProjectBlob } from '../store/graphStore/projectPackage';
 
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', { value: globalThis, writable: true });
@@ -75,6 +77,9 @@ const createInitialState = () => ({
   dirty: false,
   currentProjectPath: null,
   currentProjectName: 'Untitled',
+  currentProjectAssetStorage: null,
+  assetStoragePrompt: null,
+  projectAssets: {},
   projectSessionRevision: 0,
   unsavedChangesPrompt: null,
   hasSequenceNodes: false,
@@ -854,7 +859,10 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveProject();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/current.casc', undefined, {
+      bundleMedia: false,
+      assetStorage: 'external',
+    });
     expect(useGraphStore.getState().dirty).toBe(false);
   });
 
@@ -868,9 +876,257 @@ describe('graphStore project hydration', () => {
     const saved = await useGraphStore.getState().saveProjectAs();
 
     expect(saved).toBe(true);
-    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/saved_as.casc', undefined, {
+      bundleMedia: false,
+      assetStorage: 'external',
+    });
     expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/saved_as.casc');
     expect(useGraphStore.getState().currentProjectName).toBe('saved_as');
+  });
+
+  it('desktop Save Bundled Copy requests bundled media', async () => {
+    setTauriMode(true);
+    dialogMocks.save.mockResolvedValue('/tmp/bundled.casc');
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({ dirty: true, currentProjectName: 'current' });
+
+    const saved = await useGraphStore.getState().saveBundledProject();
+
+    expect(saved).toBe(true);
+    expect(saveProject).toHaveBeenCalledWith('/tmp/bundled.casc', undefined, {
+      bundleMedia: true,
+      assetStorage: 'bundled',
+    });
+    expect(useGraphStore.getState().currentProjectPath).toBe('/tmp/bundled.casc');
+    expect(useGraphStore.getState().dirty).toBe(false);
+  });
+
+  it('desktop first Save prompts for asset storage only when asset-backed nodes exist', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({
+      currentProjectPath: '/tmp/asset_project.casc',
+      dirty: true,
+      currentProjectAssetStorage: null,
+    });
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    useGraphStore.setState({
+      projectAssets: {
+        [load]: {
+          type: 'image',
+          source: 'external',
+          path: 'file:///tmp/plate.png',
+          original_filename: 'plate.png',
+        },
+      },
+    });
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
+    expect(saveProject).not.toHaveBeenCalled();
+
+    const resolved = await useGraphStore.getState().resolveAssetStoragePrompt('bundled');
+
+    expect(resolved).toBe(true);
+    expect(useGraphStore.getState().assetStoragePrompt).toBeNull();
+    expect(useGraphStore.getState().currentProjectAssetStorage).toBe('bundled');
+    expect(saveProject).toHaveBeenCalledWith('/tmp/asset_project.casc', undefined, {
+      bundleMedia: true,
+      assetStorage: 'bundled',
+    });
+  });
+
+  it('desktop file-object image loads do not default the project to bundled before first save', async () => {
+    setTauriMode(true);
+    const saveProject = vi.fn(async () => {});
+    mockEngine.saveProject = saveProject;
+    useGraphStore.setState({
+      currentProjectPath: '/tmp/dragged_image_project.casc',
+      dirty: true,
+      currentProjectAssetStorage: null,
+    });
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+
+    useGraphStore.getState().loadImageFile(load, new File([new Uint8Array([1, 2, 3])], 'plate.png'));
+    await flushPromises(5);
+
+    expect(useGraphStore.getState().currentProjectAssetStorage).toBeNull();
+    expect(useGraphStore.getState().projectAssets[load]?.original_filename).toBe('plate.png');
+
+    const saved = await useGraphStore.getState().saveProject();
+
+    expect(saved).toBe(false);
+    expect(useGraphStore.getState().assetStoragePrompt).toBe('save');
+    expect(saveProject).not.toHaveBeenCalled();
+  });
+
+  it('web file-object image loads do not show the asset storage prompt on save', async () => {
+    const originalLoadImageData = mockEngine.loadImageData;
+    mockEngine.loadImageData = (nodeId, data) => {
+      const transferred = structuredClone(data, { transfer: [data.buffer] });
+      expect(data.byteLength).toBe(0);
+      return originalLoadImageData(nodeId, transferred);
+    };
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+
+    useGraphStore.getState().loadImageFile(load, new File([new Uint8Array([1, 2, 3, 4])], 'plate.png'));
+    await flushPromises(5);
+
+    expect(useGraphStore.getState().currentProjectAssetStorage).toBeNull();
+    expect(useGraphStore.getState().projectAssets[load]?.data).toBe('AQIDBA==');
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cascade-bundled-project');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveProject();
+
+      expect(saved).toBe(true);
+      expect(useGraphStore.getState().assetStoragePrompt).toBeNull();
+      expect(useGraphStore.getState().currentProjectAssetStorage).toBe('bundled');
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('web Save writes non-empty uploaded image assets to a bundled project', async () => {
+    const originalLoadImageData = mockEngine.loadImageData;
+    mockEngine.loadImageData = (nodeId, data) => {
+      const transferred = structuredClone(data, { transfer: [data.buffer] });
+      return originalLoadImageData(nodeId, transferred);
+    };
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    useGraphStore.setState({ currentProjectName: 'web_bundle' });
+    useGraphStore.getState().loadImageFile(load, new File([new Uint8Array([5, 6, 7, 8])], 'plate.png'));
+    await flushPromises(5);
+
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      blobs.push(blob as Blob);
+      return 'blob:cascade-bundled-project';
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveProject();
+
+      expect(saved).toBe(true);
+      expect(blobs).toHaveLength(1);
+      expect(link.download).toBe('web_bundle.casc');
+      const zip = await JSZip.loadAsync(await blobs[0].arrayBuffer());
+      const manifest = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
+        assets: Record<string, { path: string; hash: string; uri: string }>;
+        asset_storage: string;
+        graph: { nodes: Array<{ id: string; params: Record<string, { String?: string }> }> };
+      };
+      expect(manifest.asset_storage).toBe('bundled');
+      const asset = manifest.assets[load];
+      expect(asset.path).toMatch(/^assets\/[a-f0-9]{64}\.png$/);
+      expect(asset.uri).toBe(`asset://sha256/${asset.hash}`);
+      expect(await zip.file(asset.path)!.async('uint8array')).toEqual(new Uint8Array([5, 6, 7, 8]));
+      expect(manifest.graph.nodes.find(node => node.id === load)?.params.path.String).toBe(asset.uri);
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('web Save packs the latest exported AI result over retained project asset data', async () => {
+    const ai = await useGraphStore.getState().addNode('ai_generate_image', { x: 0, y: 0 });
+    useGraphStore.setState({
+      currentProjectName: 'ai_regenerated',
+      projectAssets: {
+        [ai]: {
+          type: 'ai_result',
+          source: 'embedded',
+          data: btoa('first-result'),
+          original_filename: '',
+          hash: '',
+        },
+      },
+    });
+    mockEngine.exportDocument = async () => ({
+      cascade: { format_version: '1.4.0' },
+      graph: {
+        nodes: [{
+          id: ai,
+          type_id: 'ai_generate_image',
+          params: {},
+          input_defaults: {},
+          position: [0, 0],
+          muted: false,
+        }],
+        connections: [],
+        group_definitions: [],
+      },
+      assets: {
+        [ai]: {
+          type: 'ai_result',
+          source: 'embedded',
+          data: btoa('second-result'),
+          original_filename: '',
+          hash: '',
+        },
+      },
+    });
+
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      blobs.push(blob as Blob);
+      return 'blob:cascade-ai-regenerated';
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      const saved = await useGraphStore.getState().saveProject();
+
+      expect(saved).toBe(true);
+      const zip = await JSZip.loadAsync(await blobs[0].arrayBuffer());
+      const manifest = JSON.parse(await zip.file('cascade.json')!.async('text')) as {
+        assets: Record<string, { path: string }>;
+      };
+      const asset = manifest.assets[ai];
+      expect(await zip.file(asset.path)!.async('uint8array')).toEqual(new TextEncoder().encode('second-result'));
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('project asset storage setting marks the project dirty and warns when internal refs remain external', async () => {
+    const load = await useGraphStore.getState().addNode('load_image', { x: 0, y: 0 });
+    const uri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    useGraphStore.setState((state) => {
+      const nodes = new Map(state.nodes);
+      const node = nodes.get(load);
+      if (node) nodes.set(load, { ...node, params: { ...node.params, path: { String: uri } } });
+      return { nodes };
+    });
+    useGraphStore.setState({ dirty: false, toasts: [] });
+
+    useGraphStore.getState().setProjectAssetStorage('external');
+
+    const state = useGraphStore.getState();
+    expect(state.currentProjectAssetStorage).toBe('external');
+    expect(state.dirty).toBe(true);
+    expect(state.toasts[0]?.title).toBe('Some assets remain internal');
+    expect(state.dslShadow?.text).toContain(`image("${uri}")`);
   });
 
   it('web Save downloads a project and marks it clean without tracking a path', async () => {
@@ -1119,6 +1375,75 @@ describe('graphStore project hydration', () => {
     expect(state.dslShadow?.status).toBe('valid');
   });
 
+  it('loadProject shows internal asset URIs for bundled projects without losing DSL graph output', async () => {
+    useGraphStore.setState({ lastTransactionOrigin: 'dsl' });
+    const bundled = await createBundledProjectBlob({
+      cascade: { format_version: '1.3.0' },
+      graph: {
+        nodes: [
+          {
+            id: 'load-node',
+            type_id: 'load_image',
+            params: { path: { String: 'file:///Users/me/plate.png' } },
+            input_defaults: {},
+            position: [0, 0],
+            muted: false,
+          },
+          {
+            id: 'viewer-node',
+            type_id: 'viewer',
+            params: {},
+            input_defaults: {},
+            position: [240, 0],
+            muted: false,
+          },
+        ],
+        connections: [
+          {
+            from_node: 'load-node',
+            from_port: 'image',
+            to_node: 'viewer-node',
+            to_port: 'image',
+          },
+        ],
+      },
+      assets: {
+        'load-node': {
+          type: 'image',
+          source: 'embedded',
+          data: btoa('packed-image-bytes'),
+          original_filename: 'plate.png',
+          hash: '',
+        },
+      },
+    });
+    const file = new File([bundled], 'bundled.casc');
+
+    useGraphStore.getState().loadProject(file);
+    await flushPromises(10);
+
+    const state = useGraphStore.getState();
+    expect(state.nodes.has('load-node')).toBe(true);
+    const assetPath = state.nodes.get('load-node')?.params.path;
+    expect(assetPath).toMatchObject({ String: expect.stringMatching(/^asset:\/\/sha256\/[a-f0-9]{64}$/) });
+    expect(state.connections).toHaveLength(1);
+    expect(state.dslShadow).toBeNull();
+    expect(state.lastTransactionOrigin).toBeNull();
+    expect(state.currentProjectAssetStorage).toBe('bundled');
+    expect(state.projectAssets['load-node']?.uri).toBe((assetPath as { String: string }).String);
+
+    const regenerated = serializeGraph({
+      nodes: state.nodes,
+      connections: state.connections,
+      nodeSpecs: state.nodeSpecs,
+      handleMap: new HandleMap(),
+      groupDefinitions: state.customGroupDefinitions,
+    });
+    expect(regenerated).toContain(`LoadImage(path: image("${(assetPath as { String: string }).String}"))`);
+    expect(regenerated).toContain('Viewer()');
+    expect(regenerated).not.toBe('graph {\n\n}');
+  });
+
   it('loadProject treats semantically matching GPU DSL shadow as valid after engine manifest normalization', async () => {
     const gpuManifest = {
       id: 'gpu_script::saved',
@@ -1330,6 +1655,8 @@ describe('graphStore AI node operations', () => {
     mockEngine.getNodeExecutionState = () => ({ status: 'error', isStale: false, error: 'API failure' });
     await useGraphStore.getState().runAiNode(id);
     expect(useGraphStore.getState().aiNodeStatuses[id]).toMatch(/^error:/);
+    expect(useGraphStore.getState().toasts[0]?.title).toBe('AI node failed');
+    expect(useGraphStore.getState().toasts[0]?.message).toBe('API failure');
   });
 
   it('runAiNode clears stale flag on success', async () => {
@@ -1340,6 +1667,56 @@ describe('graphStore AI node operations', () => {
     });
     await useGraphStore.getState().runAiNode(id);
     expect(useGraphStore.getState().aiNodeStale[id]).toBe(false);
+  });
+
+  it('runAiNode preserves the engine this binding while polling state', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    const engineWithState = mockEngine as typeof mockEngine & {
+      executionState: { status: string; isStale: boolean; error: string };
+    };
+    engineWithState.executionState = { status: 'complete', isStale: false, error: '' };
+    mockEngine.getNodeExecutionState = function getNodeExecutionState(this: typeof engineWithState) {
+      return this.executionState;
+    };
+
+    await useGraphStore.getState().runAiNode(id);
+
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+  });
+
+  it('runAiNode stays running while desktop background execution is still running', async () => {
+    vi.useFakeTimers();
+    try {
+      const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+      mockEngine.runAiNode = async () => {};
+      let polls = 0;
+      mockEngine.getNodeExecutionState = () => {
+        polls += 1;
+        return polls === 1
+          ? { status: 'running', isStale: false, error: '' }
+          : { status: 'complete', isStale: false, error: '' };
+      };
+
+      const runPromise = useGraphStore.getState().runAiNode(id);
+      await Promise.resolve();
+      expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('running');
+
+      await vi.advanceTimersByTimeAsync(500);
+      await runPromise;
+      expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runAiNode preserves stale status reported by the engine on completion', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    mockEngine.getNodeExecutionState = () => ({ status: 'complete', isStale: true, error: '' });
+
+    await useGraphStore.getState().runAiNode(id);
+
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+    expect(useGraphStore.getState().aiNodeStale[id]).toBe(true);
   });
 
   it('refreshAiNodeStale updates stale flags from engine', async () => {
@@ -1365,13 +1742,14 @@ describe('graphStore AI node operations', () => {
     expect(Object.keys(state.aiNodeStale).length).toBe(0);
   });
 
-  it('runAiNode is a no-op when engine lacks runAiNode', async () => {
+  it('runAiNode reports an error when engine lacks runAiNode', async () => {
     const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
     const originalRunAiNode = mockEngine.runAiNode;
     const mutableEngine = mockEngine as { runAiNode?: typeof mockEngine.runAiNode };
     delete mutableEngine.runAiNode;
     await useGraphStore.getState().runAiNode(id);
-    expect(useGraphStore.getState().aiNodeStatuses[id]).toBeUndefined();
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('error:AI node execution is not supported in this build.');
+    expect(useGraphStore.getState().toasts[0]?.title).toBe('AI node failed');
     mockEngine.runAiNode = originalRunAiNode;
   });
 });

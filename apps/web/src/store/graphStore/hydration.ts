@@ -143,6 +143,11 @@ async function buildRootGraphState(
       if (node.type_id.startsWith('gpu_script::') && node.params?.['__script_manifest']) {
         params['__script_manifest'] = normalizeParamValue(node.params['__script_manifest'] as ParamValue);
       }
+      for (const key of ['path', 'directory', 'file_path', 'files']) {
+        if (!(key in params) && node.params?.[key]) {
+          params[key] = normalizeParamValue(node.params[key] as ParamValue);
+        }
+      }
 
       const [x, y] = node.position;
       newNodes.set(node.id, {
@@ -205,6 +210,7 @@ export async function hydrateRootGraphFromEngine(
     editingStack: createRootEditingStack(),
     dirty: false,
     lastError: null,
+    lastTransactionOrigin: null,
     fitViewRequestId: get().fitViewRequestId + 1,
   };
 

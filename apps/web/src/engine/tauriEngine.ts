@@ -219,6 +219,22 @@ export class TauriEngine implements EngineBridge {
     }
   }
 
+  async getAiNodeImageData(nodeId: string): Promise<Uint8Array | null> {
+    try {
+      const buf = await invoke<ArrayBuffer>('get_ai_node_image_data', { nodeId });
+      if (!buf || buf.byteLength === 0) return null;
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
+  }
+
+  async setAiNodeImageData(nodeId: string, data: Uint8Array): Promise<void> {
+    await invoke('set_ai_node_image_data', data, {
+      headers: { 'x-node-id': nodeId },
+    });
+  }
+
   async renderViewer(viewerNodeId: string, frame: number, _previewScale = 1): Promise<ViewerResult | null> {
     try {
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame });
@@ -255,16 +271,62 @@ export class TauriEngine implements EngineBridge {
   async exportDocument(): Promise<unknown> {
     const json = await invoke<string>('export_graph');
     const graph = JSON.parse(json);
-    return createDocumentEnvelope(graph);
+    const document = createDocumentEnvelope(graph);
+    const graphData = graph as { nodes?: Array<{ id: string; type_id: string }> };
+    if (graphData.nodes) {
+      const assets: Record<string, { type: string; source: string; data: string; original_filename: string; hash: string }> = {};
+      for (const node of graphData.nodes) {
+        if (!node.type_id.startsWith('ai_')) continue;
+        const aiData = await this.getAiNodeImageData(node.id);
+        if (!aiData || aiData.length === 0) continue;
+        let binary = '';
+        for (let i = 0; i < aiData.length; i++) {
+          binary += String.fromCharCode(aiData[i]);
+        }
+        assets[node.id] = {
+          type: 'ai_result',
+          source: 'embedded',
+          data: btoa(binary),
+          original_filename: '',
+          hash: '',
+        };
+      }
+      (document as Record<string, unknown>).assets = assets;
+    }
+    return document;
   }
 
   async importDocument(data: unknown): Promise<void> {
     const graph = extractGraphData(data);
     await invoke('import_graph', { data: JSON.stringify(graph) });
+    if (!isRecord(data) || !isRecord(data.assets)) return;
+    const assets = data.assets as Record<string, Record<string, unknown>>;
+    for (const [nodeId, assetRef] of Object.entries(assets)) {
+      if (assetRef.type !== 'ai_result' || typeof assetRef.data !== 'string') continue;
+      const binary = atob(assetRef.data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      await this.setAiNodeImageData(nodeId, bytes);
+    }
   }
 
-  async saveProject(path: string, dsl?: unknown): Promise<void> {
-    await invoke('save_project', { path, dsl });
+  async saveProject(
+    path: string,
+    dsl?: unknown,
+    options?: { bundleMedia?: boolean; assetStorage?: 'external' | 'bundled' },
+  ): Promise<unknown> {
+    const result = await invoke<unknown>('save_project', {
+      path,
+      dsl,
+      bundleMedia: options?.bundleMedia ?? false,
+      assetStorage: options?.assetStorage,
+    });
+    if (typeof result === 'string') {
+      return JSON.parse(result);
+    }
+    return result;
   }
 
   async loadProject(path: string): Promise<unknown> {
@@ -430,6 +492,20 @@ export class TauriEngine implements EngineBridge {
 
   async isAiConfigured(): Promise<boolean> {
     return invoke<boolean>('is_ai_configured');
+  }
+
+  async runAiNode(nodeId: string): Promise<void> {
+    await invoke('run_ai_node', { nodeId });
+  }
+
+  async getNodeExecutionState(nodeId: string): Promise<{ status: string; isStale: boolean; error: string }> {
+    const json = await invoke<string>('get_node_execution_state', { nodeId });
+    const result = JSON.parse(json) as Partial<{ status: string; isStale: boolean; error: string }>;
+    return {
+      status: result.status ?? 'idle',
+      isStale: result.isStale ?? false,
+      error: result.error ?? '',
+    };
   }
 
   async getColorManagementInfo(): Promise<ColorManagementInfo> {

@@ -48,6 +48,26 @@ const inputDefaultsForSpec = (
   return defaults;
 };
 
+const errorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  return String(error);
+};
+
+const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+type AiExecutionState = { status: string; isStale: boolean; error: string };
+type AiExecutionStateReader = {
+  getNodeExecutionState?: (nodeId: string) => AiExecutionState | Promise<AiExecutionState>;
+};
+
+const readAiExecutionState = async (
+  engine: AiExecutionStateReader,
+  nodeId: string,
+): Promise<AiExecutionState | null> => {
+  if (!engine.getNodeExecutionState) return null;
+  return Promise.resolve(engine.getNodeExecutionState(nodeId));
+};
+
 export const createAiSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -87,22 +107,44 @@ export const createAiSlice: StateCreator<
 
   runAiNode: async (nodeId) => {
     const eng = getEngine();
-    if (!eng.runAiNode) return;
+    if (!eng.runAiNode) {
+      const message = 'AI node execution is not supported in this build.';
+      set(state => ({
+        aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${message}` },
+      }));
+      get().pushToast('error', 'AI node failed', message);
+      return;
+    }
     set(state => ({
       aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'running' },
     }));
     try {
       await eng.runAiNode(nodeId);
+      let execState = await readAiExecutionState(eng, nodeId);
+      while (execState?.status === 'running') {
+        await wait(500);
+        execState = await readAiExecutionState(eng, nodeId);
+      }
+      if (execState?.status === 'error') {
+        const message = execState.error || 'AI node failed';
+        set(state => ({
+          aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${message}` },
+        }));
+        get().pushToast('error', 'AI node failed', message);
+        return;
+      }
       set(state => ({
         aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: 'complete' },
-        aiNodeStale: { ...state.aiNodeStale, [nodeId]: false },
+        aiNodeStale: { ...state.aiNodeStale, [nodeId]: execState?.isStale ?? false },
       }));
       get().renderAllViewersAsync();
     } catch (e) {
       const execState = await Promise.resolve(eng.getNodeExecutionState?.(nodeId));
+      const message = execState?.error || errorMessage(e);
       set(state => ({
-        aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${execState?.error ?? e}` },
+        aiNodeStatuses: { ...state.aiNodeStatuses, [nodeId]: `error:${message}` },
       }));
+      get().pushToast('error', 'AI node failed', message);
     }
   },
 

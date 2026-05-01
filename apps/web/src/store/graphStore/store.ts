@@ -1,77 +1,33 @@
-// ---------------------------------------------------------------------------
-// store.ts — Composition shell only. Do NOT add logic here.
-//
-// All store actions and state belong in slice files under ./slices/.
-// This file should only contain:
-//   1. The GraphState interface
-//   2. The CoreSlice (initEngine only)
-//   3. The useGraphStore composition (slice spreads)
-//
-// To add a new store action: create or extend a slice in ./slices/.
-// An ESLint max-lines rule enforces this — CI will fail if this file grows.
-// ---------------------------------------------------------------------------
-
 import { create } from 'zustand';
 import type { StateCreator } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type {
-  NodeInstance,
-  Connection,
-  NodeSpec,
-  PortSpec,
-  ParamValue,
-  ViewerResult,
-  EditingContext,
-  SerializableGroupDefinition,
-
-  Frame,
-  TransactionOptions,
-  TransactionResult,
-  TransactionOrigin,
-  DslShadowDocument,
+  Connection, DslShadowDocument, EditingContext, Frame, NodeInstance, NodeSpec, ParamValue, PortSpec,
+  SerializableGroupDefinition, TransactionOptions, TransactionOrigin, TransactionResult, ViewerResult,
 } from '../types';
 import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
 import type { NodeInterfaceChange } from '../../engine/bridge';
 import type { EngineError } from '../../engine/engineError';
 import { useSettingsStore } from '../settingsStore';
 import { isDesktopRuntime } from '../../platform/runtime';
-import {
-  kernel,
-  createEngine,
-} from './kernel';
+import { createEngine, kernel } from './kernel';
 import type { UndoSnapshot } from './kernel';
-import type { FramesSlice } from './slices/framesSlice';
-import { createFramesSlice } from './slices/framesSlice';
-import type { SelectionSlice } from './slices/selectionSlice';
-import { createSelectionSlice } from './slices/selectionSlice';
-import type { BatchExportSlice } from './slices/batchExportSlice';
-import { createBatchExportSlice } from './slices/batchExportSlice';
-import type { SequenceVideoSlice } from './slices/sequenceVideoSlice';
-import { createSequenceVideoSlice } from './slices/sequenceVideoSlice';
-import type { ProjectSlice } from './slices/projectSlice';
-import type { PendingProjectAction, UnsavedChangesChoice } from './slices/projectSlice';
-import { createProjectSlice } from './slices/projectSlice';
-import type { AssetsSlice } from './slices/assetsSlice';
-import { createAssetsSlice } from './slices/assetsSlice';
-import type { ColorSlice } from './slices/colorSlice';
-import { createColorSlice } from './slices/colorSlice';
-import type { AiSlice } from './slices/aiSlice';
-import { createAiSlice } from './slices/aiSlice';
-import type { DslSlice } from './slices/dslSlice';
-import { createDslSlice } from './slices/dslSlice';
-import type { GraphSlice } from './slices/graphSlice';
-import { createGraphSlice } from './slices/graphSlice';
-import type { UndoSlice } from './slices/undoSlice';
-import { createUndoSlice } from './slices/undoSlice';
-import type { RenderSlice } from './slices/renderSlice';
-import { createRenderSlice } from './slices/renderSlice';
-import type { LiveParamsSlice } from './slices/liveParamsSlice';
-import { createLiveParamsSlice } from './slices/liveParamsSlice';
+import { createFramesSlice, type FramesSlice } from './slices/framesSlice';
+import { createSelectionSlice, type SelectionSlice } from './slices/selectionSlice';
+import { createBatchExportSlice, type BatchExportSlice } from './slices/batchExportSlice';
+import { createSequenceVideoSlice, type SequenceVideoSlice } from './slices/sequenceVideoSlice';
+import { createProjectSlice, type AssetStoragePromptAction, type PendingProjectAction, type ProjectSlice, type UnsavedChangesChoice } from './slices/projectSlice';
+import type { ProjectAssetRecord, ProjectAssetStorage } from './assetReferences';
+import { createAssetsSlice, type AssetsSlice } from './slices/assetsSlice';
+import { createColorSlice, type ColorSlice } from './slices/colorSlice';
+import { createAiSlice, type AiSlice } from './slices/aiSlice';
+import { createDslSlice, type DslSlice } from './slices/dslSlice';
+import { createGraphSlice, type GraphSlice } from './slices/graphSlice';
+import { createUndoSlice, type UndoSlice } from './slices/undoSlice';
+import { createRenderSlice, type RenderSlice } from './slices/renderSlice';
+import { createLiveParamsSlice, type LiveParamsSlice } from './slices/liveParamsSlice';
 import type { ToastSlice, Toast, ToastKind } from './slices/toastSlice';
-
 import { createToastSlice } from './slices/toastSlice';
-
-
 
 export { ADD_INPUT_PORT, ADD_OUTPUT_PORT, getEngine } from './kernel';
 
@@ -97,18 +53,18 @@ export interface GraphState {
   currentProjectName: string;
   projectSessionRevision: number;
   unsavedChangesPrompt: PendingProjectAction | null;
+  currentProjectAssetStorage: ProjectAssetStorage | null;
+  assetStoragePrompt: AssetStoragePromptAction | null;
+  projectAssets: Record<string, ProjectAssetRecord>;
   fitViewRequestId: number;
-
   hasSequenceNodes: boolean;
   sequenceLength: number;
   sequenceStart: number;
   sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
-
   isPlaying: boolean;
   fps: number;
   loopPlayback: boolean;
   playbackFps: number | null;
-
   nodeTimings: Map<string, number>;
   nodeErrors: Map<string, EngineError>;
   dslShadow: DslShadowDocument | null;
@@ -151,15 +107,20 @@ export interface GraphState {
   newProject: () => Promise<void>;
   saveProject: () => Promise<boolean>;
   saveProjectAs: () => Promise<boolean>;
+  saveBundledProject: () => Promise<boolean>;
   loadProject: (file: File) => void;
   loadProjectFromPath?: () => Promise<boolean>;
   requestNewProject: () => Promise<void>;
   requestOpenProject: (file?: File) => Promise<void>;
   requestSaveProject: () => Promise<boolean>;
   requestSaveProjectAs: () => Promise<boolean>;
+  requestSaveBundledProject: () => Promise<boolean>;
   requestCloseProject: () => Promise<void>;
   resolveUnsavedChanges: (choice: UnsavedChangesChoice) => Promise<void>;
   dismissUnsavedChangesPrompt: () => void;
+  setProjectAssetStorage: (mode: ProjectAssetStorage) => void;
+  resolveAssetStoragePrompt: (mode: ProjectAssetStorage) => Promise<boolean>;
+  dismissAssetStoragePrompt: () => void;
   hydrateProjectFromEngine: () => Promise<boolean>;
   exportImage: (nodeId: string) => void;
   exportExr: (nodeId: string) => void;
@@ -309,7 +270,6 @@ const createCoreSlice: StateCreator<GraphState, [['zustand/devtools', never]], [
       },
     };
 };
-
 export const useGraphStore = create<GraphState>()(
   devtools((...args) => ({
     ...createCoreSlice(...args),
@@ -329,7 +289,6 @@ export const useGraphStore = create<GraphState>()(
     ...createToastSlice(...args),
   }))
 );
-
 
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   const debugWindow = window as Window & { __cascadeStore?: typeof useGraphStore };

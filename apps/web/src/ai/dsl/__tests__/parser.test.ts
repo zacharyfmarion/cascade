@@ -395,6 +395,78 @@ describe('parseDsl', () => {
     });
   });
 
+  it('parses internal asset URIs inside asset constructors as string params', () => {
+    const imageUri = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const sequenceUri = 'asset://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const videoUri = 'asset://sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    const specs: NodeSpec[] = [
+      ...mockSpecs,
+      {
+        id: 'load_image_sequence',
+        display_name: 'Load Image Sequence',
+        category: 'Input',
+        description: 'Loads an image sequence',
+        inputs: [],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'directory',
+          label: 'Directory',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'FilePicker' },
+          promotable: false,
+        }],
+      },
+      {
+        id: 'load_video',
+        display_name: 'Load Video',
+        category: 'Input',
+        description: 'Loads a video file',
+        inputs: [],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'file_path',
+          label: 'Path',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'FilePicker' },
+          promotable: false,
+        }],
+      },
+      {
+        id: 'load_image_batch',
+        display_name: 'Load Image Batch',
+        category: 'Input',
+        description: 'Loads an image batch',
+        inputs: [],
+        outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+        params: [{
+          key: 'files',
+          label: 'Files',
+          ty: 'String',
+          default: { String: '' },
+          ui_hint: { type: 'FilePicker' },
+          promotable: false,
+        }],
+      },
+    ];
+    const result = parseGraph([
+      `load1 = LoadImage(path: image("${imageUri}"))`,
+      `seq1 = LoadImageSequence(directory: sequence("${sequenceUri}"))`,
+      `clip1 = LoadVideo(file_path: video("${videoUri}"))`,
+      `batch1 = LoadImageBatch(files: images(["${imageUri}", "${sequenceUri}"]))`,
+    ].join('\n'), specs);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.ast?.nodes.get('load1')?.params.get('path')).toEqual({ type: 'string', value: imageUri });
+    expect(result.ast?.nodes.get('seq1')?.params.get('directory')).toEqual({ type: 'string', value: sequenceUri });
+    expect(result.ast?.nodes.get('clip1')?.params.get('file_path')).toEqual({ type: 'string', value: videoUri });
+    expect(result.ast?.nodes.get('batch1')?.params.get('files')).toEqual({
+      type: 'string',
+      value: `images(["${imageUri}", "${sequenceUri}"])`,
+    });
+  });
+
   it('parses single node with float param', () => {
     const result = parseGraph('blur1 = GaussianBlur(amount: 5.0)', mockSpecs);
     const node = result.ast?.nodes.get('blur1');
