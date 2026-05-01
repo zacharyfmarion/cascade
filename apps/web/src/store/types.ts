@@ -192,6 +192,7 @@ export type ViewerResult =
   | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
   | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
   | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
+  | { type: 'compare'; nodeId: string; width: number; height: number; beforePixels: Uint8ClampedArray; afterPixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
   | { type: 'float'; nodeId: string; value: number }
   | { type: 'int'; nodeId: string; value: number }
   | { type: 'bool'; nodeId: string; value: boolean }
@@ -202,6 +203,9 @@ export type ViewerResult =
 /** Type guard: does the result carry pixel data? */
 export const isPixelResult = (r: ViewerResult): r is Extract<ViewerResult, { pixels: Uint8ClampedArray }> =>
   r.type === 'image' || r.type === 'mask' || r.type === 'field';
+
+export const isCompareResult = (r: ViewerResult): r is Extract<ViewerResult, { type: 'compare' }> =>
+  r.type === 'compare';
 
 /** @deprecated Use ViewerResult instead */
 export type RenderResult = Extract<ViewerResult, { type: 'image' }>;

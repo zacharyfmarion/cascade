@@ -975,32 +975,57 @@ impl Engine {
             .map_err(to_js_error)
     }
 
-    pub async fn render_viewer(
+    async fn evaluate_viewer_output(
         &mut self,
-        viewer_node_id: &str,
+        viewer_id: NodeId,
+        output_port: &str,
         frame: u64,
-    ) -> Result<JsValue, JsValue> {
-        let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
-        let cm = &self.color_management;
-        let eval_result = self
-            .evaluator
+        scale: f32,
+    ) -> Result<cascade_core::eval::EvalResult, JsValue> {
+        self.evaluator
             .evaluate(
                 &mut self.graph,
                 &self.registry,
                 &self.nodes,
-                id,
-                "display",
+                viewer_id,
+                output_port,
                 FrameTime { frame },
-                cm,
+                &self.color_management,
                 self.ai_provider.as_deref(),
                 &self.project_format,
                 &self.ai_node_cache,
-                1.0,
+                scale,
             )
             .await
-            .map_err(to_js_error)?;
-        self.last_timings = eval_result
-            .node_timings
+            .map_err(to_js_error)
+    }
+
+    async fn render_compare_viewer_scaled(
+        &mut self,
+        viewer_id: NodeId,
+        frame: u64,
+        scale: f32,
+    ) -> Result<ViewerResultWasm, JsValue> {
+        let before_eval = self
+            .evaluate_viewer_output(viewer_id, "before_display", frame, scale)
+            .await?;
+        let mut merged_timings = before_eval.node_timings;
+        let before = match before_eval.value {
+            Value::Image(image) => image,
+            _ => {
+                return Err(JsValue::from_str(
+                    "Compare Viewer before output is not an image",
+                ))
+            }
+        };
+
+        let after_eval = self
+            .evaluate_viewer_output(viewer_id, "after_display", frame, scale)
+            .await?;
+        for (node_id, duration) in after_eval.node_timings {
+            merged_timings.insert(node_id, duration);
+        }
+        self.last_timings = merged_timings
             .into_iter()
             .map(|(node_id, duration)| {
                 (
@@ -1009,87 +1034,46 @@ impl Engine {
                 )
             })
             .collect();
-        let result = match eval_result.value {
-            Value::Image(ref image) => {
-                let pixels = Viewer::image_to_rgba8_with_display(
-                    image,
-                    cm,
-                    &self.active_display,
-                    &self.active_view,
-                );
-                ViewerResultWasm::Pixels {
-                    value_type: "image".to_string(),
-                    width: image.width,
-                    height: image.height,
-                    pixels,
-                }
+
+        let after = match after_eval.value {
+            Value::Image(image) => image,
+            _ => {
+                return Err(JsValue::from_str(
+                    "Compare Viewer after output is not an image",
+                ))
             }
-            Value::Float(v) => ViewerResultWasm::Float {
-                value_type: "float".to_string(),
-                value: v,
-            },
-            Value::Int(v) => ViewerResultWasm::Int {
-                value_type: "int".to_string(),
-                value: v,
-            },
-            Value::Bool(v) => ViewerResultWasm::Bool {
-                value_type: "bool".to_string(),
-                value: v,
-            },
-            Value::Color(c) => ViewerResultWasm::Color {
-                value_type: "color".to_string(),
-                value: c,
-            },
-            Value::String(ref s) => ViewerResultWasm::StringVal {
-                value_type: "string".to_string(),
-                value: s.clone(),
-            },
-            Value::Field(ref field) => {
-                // Rasterize field at project format resolution for preview
-                let w = self.project_format.width();
-                let h = self.project_format.height();
-                self.rasterize_field(field, w, h, cm)
-            }
-            Value::Bytes(_) => ViewerResultWasm::None {
-                value_type: "bytes".to_string(),
-            },
-            Value::None => ViewerResultWasm::None {
-                value_type: "none".to_string(),
-            },
         };
-        result.into_js()
+        if before.width != after.width || before.height != after.height {
+            return Err(JsValue::from_str(&format!(
+                "Compare Viewer requires matching image dimensions, got before {}x{} and after {}x{}",
+                before.width, before.height, after.width, after.height
+            )));
+        }
+
+        Ok(ViewerResultWasm::Compare {
+            width: after.width,
+            height: after.height,
+            before_pixels: Viewer::image_to_rgba8_with_display(
+                &before,
+                &self.color_management,
+                &self.active_display,
+                &self.active_view,
+            ),
+            after_pixels: Viewer::image_to_rgba8_with_display(
+                &after,
+                &self.color_management,
+                &self.active_display,
+                &self.active_view,
+            ),
+        })
     }
 
-    /// Rasterize a field to pixels at the given dimensions.
-    fn rasterize_field(
-        &self,
-        field: &cascade_core::types::Field,
-        w: u32,
-        h: u32,
-        cm: &dyn cascade_core::color::ColorManagement,
-    ) -> ViewerResultWasm {
-        let w = w.max(1);
-        let h = h.max(1);
-        // Use Field::rasterize() which parallelizes with Rayon par_chunks_exact_mut
-        match field.rasterize(w, h) {
-            Ok(img) => {
-                let rgba8 = Viewer::image_to_rgba8_with_display(
-                    &img,
-                    cm,
-                    &self.active_display,
-                    &self.active_view,
-                );
-                ViewerResultWasm::Pixels {
-                    value_type: "field".to_string(),
-                    width: w,
-                    height: h,
-                    pixels: rgba8,
-                }
-            }
-            Err(_) => ViewerResultWasm::None {
-                value_type: "field_error".to_string(),
-            },
-        }
+    pub async fn render_viewer(
+        &mut self,
+        viewer_node_id: &str,
+        frame: u64,
+    ) -> Result<JsValue, JsValue> {
+        self.render_viewer_scaled(viewer_node_id, frame, 1.0).await
     }
 
     /// Render a viewer at reduced resolution for preview.
@@ -1106,6 +1090,18 @@ impl Engine {
             preview_scale
         };
         let id = parse_node_id(&self.uuid_map, viewer_node_id).map_err(to_js_error)?;
+        if self
+            .graph
+            .nodes
+            .get(id)
+            .map(|node| node.type_id.as_str() == "compare_viewer")
+            .unwrap_or(false)
+        {
+            return self
+                .render_compare_viewer_scaled(id, frame, scale)
+                .await?
+                .into_js();
+        }
         let cm = &self.color_management;
         let eval_result = self
             .evaluator
@@ -1149,12 +1145,6 @@ impl Engine {
                     pixels,
                 }
             }
-            Value::Field(ref field) => {
-                // Rasterize field at scaled resolution for preview
-                let w = (self.project_format.width() as f32 * scale).round() as u32;
-                let h = (self.project_format.height() as f32 * scale).round() as u32;
-                self.rasterize_field(field, w, h, cm)
-            }
             Value::Float(v) => ViewerResultWasm::Float {
                 value_type: "float".to_string(),
                 value: v,
@@ -1175,6 +1165,12 @@ impl Engine {
                 value_type: "string".to_string(),
                 value: s.clone(),
             },
+            Value::Field(ref field) => {
+                // Rasterize field at scaled project format resolution for preview
+                let w = (self.project_format.width() as f32 * scale).round() as u32;
+                let h = (self.project_format.height() as f32 * scale).round() as u32;
+                self.rasterize_field(field, w, h, cm)
+            }
             Value::Bytes(_) => ViewerResultWasm::None {
                 value_type: "bytes".to_string(),
             },
@@ -1183,6 +1179,38 @@ impl Engine {
             },
         };
         result.into_js()
+    }
+
+    /// Rasterize a field to pixels at the given dimensions.
+    fn rasterize_field(
+        &self,
+        field: &cascade_core::types::Field,
+        w: u32,
+        h: u32,
+        cm: &dyn cascade_core::color::ColorManagement,
+    ) -> ViewerResultWasm {
+        let w = w.max(1);
+        let h = h.max(1);
+        // Use Field::rasterize() which parallelizes with Rayon par_chunks_exact_mut
+        match field.rasterize(w, h) {
+            Ok(img) => {
+                let rgba8 = Viewer::image_to_rgba8_with_display(
+                    &img,
+                    cm,
+                    &self.active_display,
+                    &self.active_view,
+                );
+                ViewerResultWasm::Pixels {
+                    value_type: "field".to_string(),
+                    width: w,
+                    height: h,
+                    pixels: rgba8,
+                }
+            }
+            Err(_) => ViewerResultWasm::None {
+                value_type: "field_error".to_string(),
+            },
+        }
     }
 
     pub async fn render_internal_viewer(
@@ -1264,6 +1292,83 @@ impl Engine {
             .map(|param| (param.key.clone(), param_default_to_value(&param.default)))
             .collect();
         params.extend(group_instance.params.clone());
+
+        if group_node
+            .internal_node_type(internal_viewer_id)
+            .map_err(to_js_error)?
+            == "compare_viewer"
+        {
+            let before_eval = group_node
+                .evaluate_internal_output(InternalOutputEvalRequest {
+                    internal_node_id: internal_viewer_id,
+                    output_port: "before_display",
+                    inputs: inputs.clone(),
+                    params: params.clone(),
+                    frame_time,
+                    color_management: &self.color_management,
+                    ai_provider: self.ai_provider.as_deref(),
+                    project_format: &self.project_format,
+                    preview_scale: scale,
+                })
+                .await
+                .map_err(to_js_error)?;
+            let after_eval = group_node
+                .evaluate_internal_output(InternalOutputEvalRequest {
+                    internal_node_id: internal_viewer_id,
+                    output_port: "after_display",
+                    inputs,
+                    params,
+                    frame_time,
+                    color_management: &self.color_management,
+                    ai_provider: self.ai_provider.as_deref(),
+                    project_format: &self.project_format,
+                    preview_scale: scale,
+                })
+                .await
+                .map_err(to_js_error)?;
+            self.last_timings.clear();
+
+            let before = match before_eval.value {
+                Value::Image(image) => image,
+                _ => {
+                    return Err(JsValue::from_str(
+                        "Compare Viewer before output is not an image",
+                    ))
+                }
+            };
+            let after = match after_eval.value {
+                Value::Image(image) => image,
+                _ => {
+                    return Err(JsValue::from_str(
+                        "Compare Viewer after output is not an image",
+                    ))
+                }
+            };
+            if before.width != after.width || before.height != after.height {
+                return Err(JsValue::from_str(&format!(
+                    "Compare Viewer requires matching image dimensions, got before {}x{} and after {}x{}",
+                    before.width, before.height, after.width, after.height
+                )));
+            }
+
+            return ViewerResultWasm::Compare {
+                width: after.width,
+                height: after.height,
+                before_pixels: Viewer::image_to_rgba8_with_display(
+                    &before,
+                    &self.color_management,
+                    &self.active_display,
+                    &self.active_view,
+                ),
+                after_pixels: Viewer::image_to_rgba8_with_display(
+                    &after,
+                    &self.color_management,
+                    &self.active_display,
+                    &self.active_view,
+                ),
+            }
+            .into_js();
+        }
 
         let eval_result = group_node
             .evaluate_internal_output(InternalOutputEvalRequest {
@@ -3451,6 +3556,12 @@ enum ViewerResultWasm {
         height: u32,
         pixels: Vec<u8>,
     },
+    Compare {
+        width: u32,
+        height: u32,
+        before_pixels: Vec<u8>,
+        after_pixels: Vec<u8>,
+    },
     Float {
         #[serde(rename = "type")]
         value_type: String,
@@ -3500,6 +3611,22 @@ impl ViewerResultWasm {
                 // Use Uint8ClampedArray for zero-copy pixel transfer
                 let arr = js_sys::Uint8ClampedArray::from(pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"pixels".into(), &arr)?;
+                Ok(obj.into())
+            }
+            ViewerResultWasm::Compare {
+                width,
+                height,
+                before_pixels,
+                after_pixels,
+            } => {
+                let obj = js_sys::Object::new();
+                js_sys::Reflect::set(&obj, &"type".into(), &"compare".into())?;
+                js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
+                js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                let before = js_sys::Uint8ClampedArray::from(before_pixels.as_slice());
+                js_sys::Reflect::set(&obj, &"beforePixels".into(), &before)?;
+                let after = js_sys::Uint8ClampedArray::from(after_pixels.as_slice());
+                js_sys::Reflect::set(&obj, &"afterPixels".into(), &after)?;
                 Ok(obj.into())
             }
             other => {

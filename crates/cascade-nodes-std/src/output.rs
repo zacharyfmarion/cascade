@@ -1,4 +1,5 @@
 use cascade_core::color::{BuiltinColorManagement, ColorManagement};
+use cascade_core::error::CascadeError;
 use cascade_core::exr::encode_multilayer_exr;
 use cascade_core::node::{EvalContext, Node, NodeFuture};
 use cascade_core::types::*;
@@ -90,6 +91,96 @@ impl Node for Viewer {
             let value = ctx.inputs.get("value").cloned().unwrap_or(Value::None);
             let mut outputs = HashMap::new();
             outputs.insert("display".to_string(), value);
+            Ok(outputs)
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+pub struct CompareViewer;
+
+impl Default for CompareViewer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompareViewer {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Node for CompareViewer {
+    fn spec(&self) -> NodeSpec {
+        NodeSpec {
+            id: "compare_viewer".to_string(),
+            display_name: "Compare Viewer".to_string(),
+            category: "Output".to_string(),
+            description: "Compare before and after images with an interactive viewer wipe"
+                .to_string(),
+            inputs: vec![
+                PortSpec {
+                    name: "before".to_string(),
+                    label: "Before".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "after".to_string(),
+                    label: "After".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+            ],
+            outputs: vec![
+                PortSpec {
+                    name: "display".to_string(),
+                    label: "Display".to_string(),
+                    ty: ValueType::Image,
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "before_display".to_string(),
+                    label: "Before Display".to_string(),
+                    ty: ValueType::Image,
+                    ui_hint: Some(UiHint::Hidden),
+                    ..Default::default()
+                },
+                PortSpec {
+                    name: "after_display".to_string(),
+                    label: "After Display".to_string(),
+                    ty: ValueType::Image,
+                    ui_hint: Some(UiHint::Hidden),
+                    ..Default::default()
+                },
+            ],
+            params: vec![],
+        }
+    }
+
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
+        Box::pin(async move {
+            let before = ctx.get_input_image("before")?;
+            let after = ctx.get_input_image("after")?;
+            if before.width != after.width || before.height != after.height {
+                return Err(CascadeError::Other(format!(
+                    "Compare Viewer requires matching image dimensions, got before {}x{} and after {}x{}",
+                    before.width, before.height, after.width, after.height
+                )));
+            }
+
+            let mut outputs = HashMap::new();
+            outputs.insert("display".to_string(), Value::Image(after.clone()));
+            outputs.insert("before_display".to_string(), Value::Image(before.clone()));
+            outputs.insert("after_display".to_string(), Value::Image(after.clone()));
             Ok(outputs)
         })
     }

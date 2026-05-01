@@ -11,7 +11,7 @@ import type {
   SerializableGroupDefinition,
   TransactionOrigin,
 } from '../types';
-import { isPixelResult } from '../types';
+import { isCompareResult, isPixelResult } from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { isDesktopRuntime } from '../../platform/runtime';
 import { useSettingsStore } from '../settingsStore';
@@ -116,7 +116,7 @@ const createScalingCanvas = (width: number, height: number): OffscreenCanvas | H
 
 export const downscaleRenderResult = async (result: ViewerResult, scale: number): Promise<ViewerResult> => {
   // Only pixel-carrying results can be downscaled
-  if (!isPixelResult(result)) return result;
+  if (!isPixelResult(result) && !isCompareResult(result)) return result;
 
   if (!Number.isFinite(scale) || scale >= 1) {
     return { ...result, previewScale: 1 };
@@ -137,20 +137,37 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
     return { ...result, previewScale: 1 };
   }
 
-  const imageData = new ImageData(result.width, result.height);
-  imageData.data.set(result.pixels);
-  sourceCtx.putImageData(imageData, 0, 0);
+  const scalePixels = (pixels: Uint8ClampedArray): Uint8ClampedArray => {
+    const imageData = new ImageData(result.width, result.height);
+    imageData.data.set(pixels);
+    sourceCtx.putImageData(imageData, 0, 0);
 
-  targetCtx.imageSmoothingEnabled = true;
-  const sourceImage: CanvasImageSource = sourceCanvas;
-  targetCtx.drawImage(sourceImage, 0, 0, targetWidth, targetHeight);
+    targetCtx.clearRect(0, 0, targetWidth, targetHeight);
+    targetCtx.imageSmoothingEnabled = true;
+    const sourceImage: CanvasImageSource = sourceCanvas;
+    targetCtx.drawImage(sourceImage, 0, 0, targetWidth, targetHeight);
 
-  const scaledImage = targetCtx.getImageData(0, 0, targetWidth, targetHeight);
+    return targetCtx.getImageData(0, 0, targetWidth, targetHeight).data;
+  };
+
+  if (isCompareResult(result)) {
+    return {
+      ...result,
+      width: targetWidth,
+      height: targetHeight,
+      beforePixels: scalePixels(result.beforePixels),
+      afterPixels: scalePixels(result.afterPixels),
+      previewScale: scale,
+      originalWidth: result.originalWidth ?? result.width,
+      originalHeight: result.originalHeight ?? result.height,
+    };
+  }
+
   return {
     ...result,
     width: targetWidth,
     height: targetHeight,
-    pixels: scaledImage.data,
+    pixels: scalePixels(result.pixels),
     previewScale: scale,
     originalWidth: result.originalWidth ?? result.width,
     originalHeight: result.originalHeight ?? result.height,

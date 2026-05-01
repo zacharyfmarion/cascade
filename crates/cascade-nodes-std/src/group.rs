@@ -246,6 +246,24 @@ impl GroupNode {
         Ok(snapshot)
     }
 
+    pub fn internal_node_type(&self, internal_node_id: &str) -> Result<String, CascadeError> {
+        let node_id = self.id_map.get(internal_node_id).copied().ok_or_else(|| {
+            CascadeError::Other(format!("Internal node not found: {internal_node_id}"))
+        })?;
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| CascadeError::Other("Group state lock poisoned".to_string()))?;
+        state
+            .internal_graph
+            .nodes
+            .get(node_id)
+            .map(|node| node.type_id.clone())
+            .ok_or_else(|| {
+                CascadeError::Other(format!("Internal node not found: {internal_node_id}"))
+            })
+    }
+
     pub async fn evaluate_internal_output(
         &self,
         request: InternalOutputEvalRequest<'_>,

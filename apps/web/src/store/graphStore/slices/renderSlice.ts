@@ -19,6 +19,9 @@ import {
   nextRenderGeneration,
 } from '../kernel';
 
+const VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer', 'export_image', 'export_image_sequence', 'export_video']);
+const PANEL_VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer']);
+
 // ---------------------------------------------------------------------------
 // Slice interface
 // ---------------------------------------------------------------------------
@@ -104,7 +107,7 @@ export const createRenderSlice: StateCreator<
     }
     const { nodes } = get();
     for (const [viewerId, node] of nodes) {
-      if (node.typeId === 'viewer' || node.typeId === 'export_image' || node.typeId === 'export_image_sequence' || node.typeId === 'export_video') {
+      if (VIEWER_NODE_TYPES.has(node.typeId)) {
         get().triggerRender(viewerId);
       }
     }
@@ -167,7 +170,7 @@ export const createRenderSlice: StateCreator<
       const newResults = new Map(get().renderResults);
       let changed = false;
       for (const [viewerId, node] of nodes) {
-        if (node.typeId !== 'viewer') continue;
+        if (!PANEL_VIEWER_NODE_TYPES.has(node.typeId)) continue;
         try {
           const result = await renderViewerForCurrentContext(viewerId, frame, scale);
           if (result) {

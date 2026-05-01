@@ -67,6 +67,7 @@ const NODE_ICON_MAP: Record<string, React.ReactElement> = {
   load_image_batch: <Images size={ICON_SIZE} />,
   // ── Output ──
   viewer: <Eye size={ICON_SIZE} />,
+  compare_viewer: <Eye size={ICON_SIZE} />,
   export_image: <Download size={ICON_SIZE} />,
   export_image_sequence: <FileOutput size={ICON_SIZE} />,
   export_video: <FileVideo size={ICON_SIZE} />,

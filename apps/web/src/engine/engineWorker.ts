@@ -232,7 +232,8 @@ const engineAPI = {
 
       if (useThreads) {
         try {
-          const threaded = await import('../wasm-pkg-threads/cascade_wasm');
+          const threadedModulePath = '../wasm-pkg-threads/cascade_wasm';
+          const threaded = await import(/* @vite-ignore */ threadedModulePath);
           await threaded.default();
           const cores = navigator.hardwareConcurrency ?? 4;
           const threads = Math.min(8, Math.max(1, cores - 1));
@@ -418,9 +419,12 @@ const engineAPI = {
     });
   },
 
-  renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
+  renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     return scheduler.enqueue(async (): Promise<ViewerResult | null> => {
-      const raw = await getEngine().render_viewer(viewerNodeId, BigInt(frame));
+      const eng = getEngineWithBindings();
+      const raw = previewScale < 1 && typeof eng.render_viewer_scaled === 'function'
+        ? await eng.render_viewer_scaled(viewerNodeId, BigInt(frame), previewScale)
+        : await getEngine().render_viewer(viewerNodeId, BigInt(frame));
 
       try {
         const timingsRaw = getEngine().get_last_render_timings();

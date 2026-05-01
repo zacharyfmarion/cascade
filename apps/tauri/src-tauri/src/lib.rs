@@ -2,7 +2,7 @@ mod menu;
 
 use cascade_runtime::{
     migrations, AssetReference, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
-    RenderResult, SerializableGraph, UiNodeSpec,
+    SerializableGraph, UiNodeSpec, ViewerRenderResult,
 };
 use std::sync::Mutex;
 use std::time::Instant;
@@ -14,6 +14,33 @@ struct AppState {
 }
 
 type EngineState = Mutex<AppState>;
+
+fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
+    match result {
+        ViewerRenderResult::Image(render) => {
+            buf.push(0);
+            buf.extend_from_slice(&render.width.to_le_bytes());
+            buf.extend_from_slice(&render.height.to_le_bytes());
+            buf.extend_from_slice(&render.pixels);
+        }
+        ViewerRenderResult::Compare(render) => {
+            buf.push(1);
+            buf.extend_from_slice(&render.width.to_le_bytes());
+            buf.extend_from_slice(&render.height.to_le_bytes());
+            buf.extend_from_slice(&render.before_pixels);
+            buf.extend_from_slice(&render.after_pixels);
+        }
+    }
+}
+
+fn viewer_render_result_size(result: &ViewerRenderResult) -> usize {
+    match result {
+        ViewerRenderResult::Image(render) => 1 + 8 + render.pixels.len(),
+        ViewerRenderResult::Compare(render) => {
+            1 + 8 + render.before_pixels.len() + render.after_pixels.len()
+        }
+    }
+}
 
 #[tauri::command]
 fn list_node_types(state: State<'_, EngineState>) -> Result<String, String> {
@@ -206,19 +233,13 @@ fn render_viewer(
     frame: u64,
 ) -> Result<Response, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let RenderResult {
-        width,
-        height,
-        pixels,
-    } = s
+    let result = s
         .engine
-        .render_viewer(&viewer_node_id, frame)
+        .render_viewer_result(&viewer_node_id, frame)
         .map_err(|e| e.to_string())?;
 
-    let mut buf = Vec::with_capacity(8 + pixels.len());
-    buf.extend_from_slice(&width.to_le_bytes());
-    buf.extend_from_slice(&height.to_le_bytes());
-    buf.extend_from_slice(&pixels);
+    let mut buf = Vec::with_capacity(viewer_render_result_size(&result));
+    write_viewer_render_result(&mut buf, &result);
     Ok(Response::new(buf))
 }
 
@@ -231,13 +252,9 @@ fn render_internal_viewer(
     preview_scale: Option<f32>,
 ) -> Result<Response, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    let RenderResult {
-        width,
-        height,
-        pixels,
-    } = s
+    let result = s
         .engine
-        .render_internal_viewer_scaled(
+        .render_internal_viewer_result_scaled(
             &group_node_id,
             &internal_viewer_id,
             frame,
@@ -245,17 +262,17 @@ fn render_internal_viewer(
         )
         .map_err(|e| e.to_string())?;
 
-    let mut buf = Vec::with_capacity(8 + pixels.len());
-    buf.extend_from_slice(&width.to_le_bytes());
-    buf.extend_from_slice(&height.to_le_bytes());
-    buf.extend_from_slice(&pixels);
+    let mut buf = Vec::with_capacity(viewer_render_result_size(&result));
+    write_viewer_render_result(&mut buf, &result);
     Ok(Response::new(buf))
 }
 
 /// Batched: set param + render all viewers in one IPC call.
 /// Response binary format:
 /// [u32 viewer_count LE]
-/// For each viewer: [u32 id_len LE][utf8 id bytes][u32 width LE][u32 height LE][RGBA8 pixels]
+/// For each viewer: [u32 id_len LE][utf8 id bytes][u8 kind][payload]
+/// kind 0 payload: [u32 width LE][u32 height LE][RGBA8 pixels]
+/// kind 1 payload: [u32 width LE][u32 height LE][before RGBA8 pixels][after RGBA8 pixels]
 #[tauri::command]
 fn set_param_and_render(
     state: State<'_, EngineState>,
@@ -271,7 +288,7 @@ fn set_param_and_render(
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     let results = s
         .engine
-        .set_param_and_render_viewers_scaled(
+        .set_param_and_render_viewer_results_scaled(
             &node_id,
             &key,
             param_value,
@@ -288,16 +305,14 @@ fn set_param_and_render(
 
     let total_size: usize = 4 + results
         .iter()
-        .map(|(id, r)| 4 + id.len() + 8 + r.pixels.len())
+        .map(|(id, r)| 4 + id.len() + viewer_render_result_size(r))
         .sum::<usize>();
     let mut buf = Vec::with_capacity(total_size);
     buf.extend_from_slice(&(results.len() as u32).to_le_bytes());
     for (id, r) in &results {
         buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
         buf.extend_from_slice(id.as_bytes());
-        buf.extend_from_slice(&r.width.to_le_bytes());
-        buf.extend_from_slice(&r.height.to_le_bytes());
-        buf.extend_from_slice(&r.pixels);
+        write_viewer_render_result(&mut buf, r);
     }
     Ok(Response::new(buf))
 }
@@ -317,7 +332,7 @@ fn set_input_default_and_render(
         serde_json::from_value(value).map_err(|e| e.to_string())?;
     let results = s
         .engine
-        .set_input_default_and_render_viewers_scaled(
+        .set_input_default_and_render_viewer_results_scaled(
             &node_id,
             &port_name,
             param_value,
@@ -334,16 +349,14 @@ fn set_input_default_and_render(
 
     let total_size: usize = 4 + results
         .iter()
-        .map(|(id, r)| 4 + id.len() + 8 + r.pixels.len())
+        .map(|(id, r)| 4 + id.len() + viewer_render_result_size(r))
         .sum::<usize>();
     let mut buf = Vec::with_capacity(total_size);
     buf.extend_from_slice(&(results.len() as u32).to_le_bytes());
     for (id, r) in &results {
         buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
         buf.extend_from_slice(id.as_bytes());
-        buf.extend_from_slice(&r.width.to_le_bytes());
-        buf.extend_from_slice(&r.height.to_le_bytes());
-        buf.extend_from_slice(&r.pixels);
+        write_viewer_render_result(&mut buf, r);
     }
     Ok(Response::new(buf))
 }

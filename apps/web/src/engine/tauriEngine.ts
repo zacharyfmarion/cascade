@@ -56,6 +56,41 @@ const createDocumentEnvelope = (graph: unknown) => ({
   scripts: {},
 });
 
+const decodeBinaryViewerResult = (
+  buf: ArrayBuffer,
+  nodeId: string,
+  initialOffset = 0,
+): { result: ViewerResult | null; offset: number } => {
+  if (buf.byteLength < initialOffset + 9) return { result: null, offset: initialOffset };
+  const view = new DataView(buf);
+  let offset = initialOffset;
+  const kind = view.getUint8(offset);
+  offset += 1;
+  const width = view.getUint32(offset, true);
+  offset += 4;
+  const height = view.getUint32(offset, true);
+  offset += 4;
+  const pixelLen = width * height * 4;
+
+  if (kind === 0) {
+    if (buf.byteLength < offset + pixelLen) return { result: null, offset };
+    const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
+    offset += pixelLen;
+    return { result: { type: 'image', nodeId, width, height, pixels }, offset };
+  }
+
+  if (kind === 1) {
+    if (buf.byteLength < offset + pixelLen * 2) return { result: null, offset };
+    const beforePixels = new Uint8ClampedArray(buf, offset, pixelLen);
+    offset += pixelLen;
+    const afterPixels = new Uint8ClampedArray(buf, offset, pixelLen);
+    offset += pixelLen;
+    return { result: { type: 'compare', nodeId, width, height, beforePixels, afterPixels }, offset };
+  }
+
+  return { result: null, offset };
+};
+
 export class TauriEngine implements EngineBridge {
   private lastTimings: Record<string, number> = {};
 
@@ -130,14 +165,11 @@ export class TauriEngine implements EngineBridge {
       const idBytes = new Uint8Array(buf, offset, idLen);
       const id = new TextDecoder().decode(idBytes);
       offset += idLen;
-      const width = view.getUint32(offset, true);
-      offset += 4;
-      const height = view.getUint32(offset, true);
-      offset += 4;
-      const pixelLen = width * height * 4;
-      const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
-      offset += pixelLen;
-      results.push([id, { type: 'image' as const, nodeId: id, width, height, pixels }]);
+      const decoded = decodeBinaryViewerResult(buf, id, offset);
+      offset = decoded.offset;
+      if (decoded.result) {
+        results.push([id, decoded.result]);
+      }
     }
     await this.fetchTimings();
     return results;
@@ -187,18 +219,13 @@ export class TauriEngine implements EngineBridge {
     }
   }
 
-  async renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
+  async renderViewer(viewerNodeId: string, frame: number, _previewScale = 1): Promise<ViewerResult | null> {
     try {
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame });
-      if (!buf || buf.byteLength < 8) return null;
-
-      const view = new DataView(buf);
-      const width = view.getUint32(0, true);
-      const height = view.getUint32(4, true);
-      const pixels = new Uint8ClampedArray(buf, 8);
+      if (!buf || buf.byteLength < 9) return null;
 
       await this.fetchTimings();
-      return { type: 'image', nodeId: viewerNodeId, width, height, pixels };
+      return decodeBinaryViewerResult(buf, viewerNodeId).result;
     } catch {
       return null;
     }
@@ -207,15 +234,10 @@ export class TauriEngine implements EngineBridge {
   async renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
       const buf = await invoke<ArrayBuffer>('render_internal_viewer', { groupNodeId, internalViewerId, frame, previewScale });
-      if (!buf || buf.byteLength < 8) return null;
-
-      const view = new DataView(buf);
-      const width = view.getUint32(0, true);
-      const height = view.getUint32(4, true);
-      const pixels = new Uint8ClampedArray(buf, 8);
+      if (!buf || buf.byteLength < 9) return null;
 
       await this.fetchTimings();
-      return { type: 'image', nodeId: internalViewerId, width, height, pixels };
+      return decodeBinaryViewerResult(buf, internalViewerId).result;
     } catch {
       return null;
     }
