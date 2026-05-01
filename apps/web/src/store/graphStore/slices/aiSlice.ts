@@ -56,13 +56,16 @@ const errorMessage = (error: unknown): string => {
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 type AiExecutionState = { status: string; isStale: boolean; error: string };
+type AiExecutionStateReader = {
+  getNodeExecutionState?: (nodeId: string) => AiExecutionState | Promise<AiExecutionState>;
+};
 
 const readAiExecutionState = async (
-  getNodeExecutionState: ((nodeId: string) => AiExecutionState | Promise<AiExecutionState>) | undefined,
+  engine: AiExecutionStateReader,
   nodeId: string,
 ): Promise<AiExecutionState | null> => {
-  if (!getNodeExecutionState) return null;
-  return Promise.resolve(getNodeExecutionState(nodeId));
+  if (!engine.getNodeExecutionState) return null;
+  return Promise.resolve(engine.getNodeExecutionState(nodeId));
 };
 
 export const createAiSlice: StateCreator<
@@ -117,10 +120,10 @@ export const createAiSlice: StateCreator<
     }));
     try {
       await eng.runAiNode(nodeId);
-      let execState = await readAiExecutionState(eng.getNodeExecutionState, nodeId);
+      let execState = await readAiExecutionState(eng, nodeId);
       while (execState?.status === 'running') {
         await wait(500);
-        execState = await readAiExecutionState(eng.getNodeExecutionState, nodeId);
+        execState = await readAiExecutionState(eng, nodeId);
       }
       if (execState?.status === 'error') {
         const message = execState.error || 'AI node failed';

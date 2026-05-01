@@ -1523,6 +1523,21 @@ describe('graphStore AI node operations', () => {
     expect(useGraphStore.getState().aiNodeStale[id]).toBe(false);
   });
 
+  it('runAiNode preserves the engine this binding while polling state', async () => {
+    const id = await useGraphStore.getState().addNode('ai_depth_estimate', { x: 0, y: 0 });
+    const engineWithState = mockEngine as typeof mockEngine & {
+      executionState: { status: string; isStale: boolean; error: string };
+    };
+    engineWithState.executionState = { status: 'complete', isStale: false, error: '' };
+    mockEngine.getNodeExecutionState = function getNodeExecutionState(this: typeof engineWithState) {
+      return this.executionState;
+    };
+
+    await useGraphStore.getState().runAiNode(id);
+
+    expect(useGraphStore.getState().aiNodeStatuses[id]).toBe('complete');
+  });
+
   it('runAiNode stays running while desktop background execution is still running', async () => {
     vi.useFakeTimers();
     try {
