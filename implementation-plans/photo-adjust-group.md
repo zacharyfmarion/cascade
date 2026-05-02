@@ -11,7 +11,7 @@ Ship a photographer-friendly built-in `Photo Adjust` group that covers common ex
 - Give each adjustment kernel one intentional mask input and route the group mask into each internal operation.
 - Keep `gpu_kernel::key_mix` available as a standalone optional-mask mixer, but do not use it inside Photo Adjust because per-operation masks already preserve the original image outside the mask.
 - Add the built-in `group::photo_adjust` composition using those GPU kernels, with the group control ports visibly wired into the internal node control ports.
-- Register `Photo Adjust` only when GPU kernels are available, matching the existing Pixelate group behavior.
+- Register `Photo Adjust` only when GPU kernels are available.
 - Keep the DSL representation concise by treating `PhotoAdjust(...)` as a built-in node call, not a lifted custom group definition, while storing the controls as scalar input defaults instead of hidden promoted params.
 - Add targeted Rust and DSL tests for the new behavior.
 

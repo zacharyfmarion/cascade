@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
 import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
@@ -56,6 +56,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 type GraphStore = typeof import('../store/graphStore')['useGraphStore'];
 
 let useGraphStore: GraphStore;
+const originalFetch = globalThis.fetch;
 
 const createInitialState = () => ({
   nodes: new Map<string, NodeInstance>(),
@@ -121,6 +122,10 @@ beforeEach(async () => {
   useGraphStore.setState(createInitialState());
   resetNodeCounter();
   await useGraphStore.getState().initEngine();
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 describe('graphStore initialization', () => {
@@ -841,6 +846,74 @@ describe('graphStore project hydration', () => {
     expect(state.unsavedChangesPrompt).toBeNull();
     expect(state.nodes.has('load-node')).toBe(true);
     expect(state.currentProjectName).toBe('loaded_project');
+    expect(state.currentProjectPath).toBeNull();
+    expect(state.dirty).toBe(false);
+    expect(state.projectSessionRevision).toBe(initialSessionRevision + 1);
+  });
+
+  const stubExampleFetch = (nodeId = 'example-load-node') => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      cascade: { format_version: '1.4.0' },
+      project: { name: 'Fetched Example' },
+      asset_storage: 'bundled',
+      graph: {
+        nodes: [{
+          id: nodeId,
+          type_id: 'load_image',
+          position: [12, 24],
+          params: {},
+        }],
+        connections: [],
+        group_definitions: [],
+      },
+      assets: {},
+      scripts: {},
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return fetchMock;
+  };
+
+  it('requestOpenExample opens a clean project as a bundled template copy', async () => {
+    const fetchMock = stubExampleFetch();
+    const initialSessionRevision = useGraphStore.getState().projectSessionRevision;
+
+    await useGraphStore.getState().requestOpenExample('halftone-shader');
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(fetchMock).toHaveBeenCalled();
+    expect(state.nodes.has('example-load-node')).toBe(true);
+    expect(state.currentProjectName).toBe('Halftone Shader');
+    expect(state.currentProjectPath).toBeNull();
+    expect(state.currentProjectAssetStorage).toBe('bundled');
+    expect(state.dirty).toBe(false);
+    expect(state.projectSessionRevision).toBe(initialSessionRevision + 1);
+  });
+
+  it('requestOpenExample prompts when dirty and discard opens the example', async () => {
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+    const fetchMock = stubExampleFetch('discard-example-node');
+    const initialSessionRevision = useGraphStore.getState().projectSessionRevision;
+
+    await useGraphStore.getState().requestOpenExample('halftone-shader');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(useGraphStore.getState().unsavedChangesPrompt).toEqual({
+      kind: 'example',
+      exampleId: 'halftone-shader',
+    });
+
+    await useGraphStore.getState().resolveUnsavedChanges('discard');
+    await flushPromises(3);
+
+    const state = useGraphStore.getState();
+    expect(fetchMock).toHaveBeenCalled();
+    expect(state.unsavedChangesPrompt).toBeNull();
+    expect(state.nodes.has('discard-example-node')).toBe(true);
+    expect(state.currentProjectName).toBe('Halftone Shader');
     expect(state.currentProjectPath).toBeNull();
     expect(state.dirty).toBe(false);
     expect(state.projectSessionRevision).toBe(initialSessionRevision + 1);

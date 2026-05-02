@@ -11,10 +11,12 @@ import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { dslShadowMatchesGraph, graphSemanticHash, hydrateDslShadowMetadata, serializeDslShadowMetadata } from '../../../ai/dsl/shadow';
 import { createBundledProjectBlob, readCascadeProjectFile } from '../projectPackage';
 import { collectProjectAssets, hasAssetBackedNodes, type ProjectAssetRecord, type ProjectAssetStorage } from '../assetReferences';
+import { getExampleById, missingRequiredNodeTypes } from '../../../examples/catalog';
 
 export type PendingProjectAction =
   | { kind: 'new' }
   | { kind: 'open'; file?: File }
+  | { kind: 'example'; exampleId: string }
   | { kind: 'close' };
 
 export type UnsavedChangesChoice = 'save' | 'discard' | 'cancel';
@@ -40,6 +42,7 @@ export interface ProjectSliceActions {
   loadProjectFromPath?: () => Promise<boolean>;
   requestNewProject: () => Promise<void>;
   requestOpenProject: (file?: File) => Promise<void>;
+  requestOpenExample: (exampleId: string) => Promise<void>;
   requestSaveProject: () => Promise<boolean>;
   requestSaveProjectAs: () => Promise<boolean>;
   requestSaveBundledProject: () => Promise<boolean>;
@@ -367,7 +370,7 @@ export const createProjectSlice: StateCreator<
     rememberDesktopPath(identity.path);
   };
 
-  const loadProjectFile = async (file: File) => {
+  const loadProjectFile = async (file: File, displayName?: string) => {
     let data = await readCascadeProjectFile(file);
     const text = JSON.stringify(data);
     const eng = getEngine();
@@ -392,7 +395,45 @@ export const createProjectSlice: StateCreator<
 
     resetProjectRuntimeState(frameMapFromProjectData(data));
     await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
-    await loadProjectData(data, { name: projectNameFromFile(file), path: null }, { resetRuntime: false });
+    await loadProjectData(data, { name: displayName ?? projectNameFromFile(file), path: null }, { resetRuntime: false });
+  };
+
+  const openExampleNow = async (exampleId: string): Promise<boolean> => {
+    const example = getExampleById(exampleId);
+    if (!example) {
+      throw makeEngineError(`Example "${exampleId}" was not found.`, 'EXAMPLE_NOT_FOUND', 'io');
+    }
+
+    const missing = missingRequiredNodeTypes(example, get().nodeSpecs);
+    if (missing.length > 0) {
+      get().pushToast(
+        'info',
+        'Example unavailable',
+        `Missing required nodes: ${missing.join(', ')}`,
+      );
+      return false;
+    }
+
+    const response = await fetch(example.projectUrl);
+    if (!response.ok) {
+      throw makeEngineError(
+        `Failed to load ${example.title} (${response.status})`,
+        'EXAMPLE_LOAD_FAILED',
+        'io',
+      );
+    }
+
+    const blob = await response.blob();
+    const file = new File([blob], `${example.id}.casc`, { type: blob.type || 'application/octet-stream' });
+    await loadProjectFile(file, example.title);
+    set({
+      currentProjectName: example.title,
+      currentProjectPath: null,
+      currentProjectAssetStorage: 'bundled',
+      dirty: false,
+    });
+    rememberDesktopPath(null);
+    return true;
   };
 
   const loadProjectPath = async (path: string): Promise<boolean> => {
@@ -446,6 +487,10 @@ export const createProjectSlice: StateCreator<
     }
     if (action.kind === 'open') {
       await openProjectNow(action.file);
+      return;
+    }
+    if (action.kind === 'example') {
+      await openExampleNow(action.exampleId);
       return;
     }
     set({ dirty: false });
@@ -611,6 +656,20 @@ export const createProjectSlice: StateCreator<
         const error = parseEngineError(e);
         set({ lastError: error });
         get().pushToast('error', 'Project load failed', error.message);
+      }
+    },
+
+    requestOpenExample: async (exampleId: string) => {
+      if (get().dirty) {
+        set({ unsavedChangesPrompt: { kind: 'example', exampleId } });
+        return;
+      }
+      try {
+        await openExampleNow(exampleId);
+      } catch (e) {
+        const error = parseEngineError(e);
+        set({ lastError: error });
+        get().pushToast('error', 'Example load failed', error.message);
       }
     },
 

@@ -3,6 +3,7 @@ import type { IDockviewPanelProps, IDockviewPanelHeaderProps } from 'dockview';
 import { ReactFlowProvider } from '@xyflow/react';
 import { NodeCanvas } from '../NodeCanvas';
 import { NodeLibrary } from '../NodeLibrary';
+import { ExamplesPanel } from '../ExamplesPanel';
 import { Inspector } from '../Inspector';
 import { Viewer } from '../Viewer';
 import { Timeline } from '../Timeline';
@@ -36,6 +37,7 @@ const NodeCanvasPanel: React.FC<IDockviewPanelProps> = () => {
 };
 
 const NodeLibraryPanel: React.FC<IDockviewPanelProps> = () => <NodeLibrary />;
+const ExamplesPanelDock: React.FC<IDockviewPanelProps> = () => <ExamplesPanel />;
 const InspectorPanel: React.FC<IDockviewPanelProps> = () => <Inspector />;
 const ViewerPanel: React.FC<IDockviewPanelProps> = (props) => <Viewer panelApi={props.api} />;
 const TimelinePanel: React.FC<IDockviewPanelProps> = () => <Timeline />;
@@ -45,6 +47,7 @@ const DslEditorPanel: React.FC<IDockviewPanelProps> = () => <DslEditor />;
 export const panelComponents: Record<string, React.FC<IDockviewPanelProps>> = {
   'node-canvas': withPanelErrorBoundary(NodeCanvasPanel, 'node-canvas', 'Node Editor'),
   'node-library': withPanelErrorBoundary(NodeLibraryPanel, 'node-library', 'Node Library'),
+  'examples': withPanelErrorBoundary(ExamplesPanelDock, 'examples', 'Examples'),
   'inspector': withPanelErrorBoundary(InspectorPanel, 'inspector', 'Inspector'),
   'viewer': withPanelErrorBoundary(ViewerPanel, 'viewer', 'Viewer'),
   'timeline': withPanelErrorBoundary(TimelinePanel, 'timeline', 'Timeline'),
@@ -62,6 +65,7 @@ export const PANEL_TYPES: PanelTypeInfo[] = [
   { id: 'node-canvas', label: 'Node Editor', icon: '⬡' },
   { id: 'dsl-editor', label: 'DSL', icon: '{ }' },
   { id: 'node-library', label: 'Node Library', icon: '☰' },
+  { id: 'examples', label: 'Examples', icon: '▦' },
   { id: 'inspector', label: 'Inspector', icon: '⚙' },
   { id: 'viewer', label: 'Viewer', icon: '◉' },
   { id: 'timeline', label: 'Timeline', icon: '▶' },

@@ -27,7 +27,7 @@ use cascade_nodes_std::{
     Viewer,
 };
 use cascade_runtime::migrations;
-use cascade_runtime::{color_range_group, photo_adjust_group, pixelate_group};
+use cascade_runtime::{color_range_group, photo_adjust_group};
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -374,11 +374,6 @@ impl Engine {
             if let Err(err) = self.register_group(photo_adjust_group()) {
                 web_sys::console::warn_1(
                     &format!("Failed to register Photo Adjust group: {err}").into(),
-                );
-            }
-            if let Err(err) = self.register_group(pixelate_group()) {
-                web_sys::console::warn_1(
-                    &format!("Failed to register Pixelate group: {err}").into(),
                 );
             }
         }
