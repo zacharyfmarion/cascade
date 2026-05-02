@@ -38,6 +38,7 @@ import { ColorRampNode } from './nodes/ColorRampNode';
 import { GroupInputNode } from './nodes/GroupInputNode';
 import { GroupOutputNode } from './nodes/GroupOutputNode';
 import { GroupNodeComponent } from './nodes/GroupNodeComponent';
+import { Button } from './ui/Button';
 import { GpuScriptNodeComponent } from './nodes/GpuScriptNodeComponent';
 import { ColorPaletteNode } from './nodes/ColorPaletteNode';
 import { CurvesNode } from './nodes/CurvesNode';
@@ -1196,22 +1197,14 @@ export const NodeCanvas: React.FC = () => {
         <Controls />
         {showMinimap && <MiniMap />}
         <Panel position="top-right">
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={onCleanupNodes}
-            style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border-default)',
-              borderRadius: '4px',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              padding: '4px 8px',
-            }}
             title="Auto-arrange all nodes (left-to-right)"
           >
             Cleanup Nodes
-          </button>
+          </Button>
         </Panel>
       </ReactFlow>
       {contextMenu && (
@@ -1257,23 +1250,9 @@ export const NodeCanvas: React.FC = () => {
           >
             Want a starting point? Browse examples.
           </p>
-          <button
-            type="button"
-            onClick={focusExamplesPanel}
-            style={{
-              minHeight: '34px',
-              border: '1px solid var(--accent-primary)',
-              borderRadius: '4px',
-              background: 'var(--accent-primary)',
-              color: 'var(--text-on-accent)',
-              cursor: 'pointer',
-              font: 'inherit',
-              fontSize: '0.82rem',
-              padding: '0 14px',
-            }}
-          >
+          <Button size="md" variant="primary" onClick={focusExamplesPanel}>
             Browse Examples
-          </button>
+          </Button>
         </div>
       )}
 

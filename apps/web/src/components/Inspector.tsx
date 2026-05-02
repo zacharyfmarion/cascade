@@ -9,6 +9,8 @@ import { CurveEditor } from './nodes/CurveEditor';
 import type { ParamSpec, ParamValue, ColorStop, CurvePoint, PortSpec, NodeSpec, ValueType } from '../store/types';
 import { createParamValue, extractParamValue, isConnectableParam } from '../store/types';
 import { useNodeParams } from '../store/graphStore/nodeDraftStore';
+import { Button } from './ui/Button';
+import { IconButton as UiIconButton } from './ui/IconButton';
 
 const ParamControl: React.FC<{
   nodeId: string;
@@ -263,24 +265,17 @@ const GroupNameEditor: React.FC<{
           />
         </label>
       </div>
-      <button
-        type="button"
+      <Button
+        size="md"
+        variant="secondary"
         onClick={() => enterGroup(nodeId)}
         style={{
           width: '100%',
-          padding: '8px 12px',
-          background: 'var(--node-header-group)',
-          color: 'var(--text-primary)',
-          border: 'none',
-          borderRadius: 4,
-          cursor: 'pointer',
-          fontSize: '0.85rem',
           fontWeight: 600,
-          fontFamily: 'inherit',
         }}
       >
         Edit Group
-      </button>
+      </Button>
     </div>
   );
 };
@@ -417,23 +412,16 @@ export const Inspector: React.FC = () => {
             </div>
           </div>
 
-          <button
-            type="button"
+          <Button
+            size="md"
+            variant="danger"
             onClick={() => removeFrame(selectedFrame.id)}
             style={{
               width: '100%',
-              padding: '8px 12px',
-              background: 'transparent',
-              color: 'var(--status-danger)',
-              border: '1px solid var(--status-danger)',
-              borderRadius: 4,
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              fontFamily: 'inherit',
             }}
           >
             Delete Frame
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -628,27 +616,18 @@ const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = 
     marginBottom: '8px',
     position: 'relative'
   }}>
-    <button
-      type="button"
+    <UiIconButton
+      size="sm"
       onClick={onRemove}
       title="Remove port"
       style={{
         position: 'absolute',
         top: '6px',
         right: '6px',
-        background: 'transparent',
-        border: 'none',
-        color: 'var(--text-muted)',
-        cursor: 'pointer',
-        fontSize: '14px',
-        lineHeight: 1,
-        padding: '2px',
       }}
-      onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent-primary)'; }}
-      onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
     >
       ×
-    </button>
+    </UiIconButton>
     <div style={{ marginRight: '16px' }}>
       {children}
     </div>
@@ -656,24 +635,9 @@ const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = 
 );
 
 const IconButton: React.FC<{ onClick: () => void; children: React.ReactNode; title?: string }> = ({ onClick, children, title }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    title={title}
-    style={{
-      background: 'transparent',
-      border: 'none',
-      color: 'var(--text-secondary)',
-      cursor: 'pointer',
-      padding: '2px 6px',
-      borderRadius: '3px',
-      fontSize: '0.8rem',
-    }}
-    onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; }}
-    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
-  >
+  <UiIconButton size="sm" onClick={onClick} title={title}>
     {children}
-  </button>
+  </UiIconButton>
 );
 
 const TextInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
@@ -720,32 +684,18 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) 
 );
 
 const AddButton: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
-  <button
-    type="button"
+  <Button
+    size="md"
+    variant="ghost"
     onClick={onClick}
     style={{
-      fontSize: '0.75rem',
-      background: 'transparent',
       border: '1px dashed var(--border-default)',
-      color: 'var(--text-secondary)',
-      borderRadius: '4px',
-      padding: '6px 12px',
-      cursor: 'pointer',
       width: '100%',
-      transition: 'all 0.2s',
       textAlign: 'center'
-    }}
-    onMouseEnter={e => {
-      e.currentTarget.style.borderColor = 'var(--accent-primary)';
-      e.currentTarget.style.color = 'var(--accent-primary)';
-    }}
-    onMouseLeave={e => {
-      e.currentTarget.style.borderColor = 'var(--border-default)';
-      e.currentTarget.style.color = 'var(--text-secondary)';
     }}
   >
     {children}
-  </button>
+  </Button>
 );
 
 const GroupIOEditor: React.FC<{

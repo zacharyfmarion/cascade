@@ -5,6 +5,8 @@ import { useThemeStore } from '../store/themeStore';
 import { useLayoutStore } from '../store/layoutStore';
 import { useGraphStore } from '../store/graphStore';
 import type { CascadeTheme } from '../themes/types';
+import { Button } from './ui/Button';
+import { IconButton } from './ui/IconButton';
 
 type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'privacy' | 'color' | 'ai';
 
@@ -184,22 +186,14 @@ function AppearanceTab() {
       ))}
 
       <div style={{ paddingTop: '8px' }}>
-        <button
-          type="button"
+        <Button
+          size="md"
+          variant="secondary"
           onClick={() => fileInputRef.current?.click()}
-          style={{
-            background: 'var(--bg-surface)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: '3px',
-            fontSize: '0.8rem',
-            padding: '6px 12px',
-            cursor: 'pointer',
-            width: '100%',
-          }}
+          style={{ width: '100%' }}
         >
           Import VS Code Theme...
-        </button>
+        </Button>
         <input
           ref={fileInputRef}
           type="file"
@@ -211,26 +205,18 @@ function AppearanceTab() {
 
       <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-default)', paddingTop: '16px' }}>
         <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>Layout</div>
-        <button
-          type="button"
+        <Button
+          size="md"
+          variant="secondary"
           onClick={() => {
             if (confirm('Reset layout to default? This will refresh the page.')) {
               resetLayout();
             }
           }}
-          style={{
-            background: 'var(--bg-surface)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: '3px',
-            fontSize: '0.8rem',
-            padding: '6px 12px',
-            cursor: 'pointer',
-            width: '100%',
-          }}
+          style={{ width: '100%' }}
         >
           Reset Layout
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -522,17 +508,6 @@ function ColorTab() {
     setOcioActiveView(view);
   };
 
-  const smallButtonStyle: React.CSSProperties = {
-    background: 'var(--bg-secondary)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border-default)',
-    borderRadius: '3px',
-    fontSize: '0.75rem',
-    padding: '3px 8px',
-    cursor: applying ? 'not-allowed' : 'pointer',
-    opacity: applying ? 0.6 : 1,
-  };
-
   return (
     <div>
       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
@@ -581,9 +556,9 @@ function ColorTab() {
           }}>
             {ocioConfigPath ? ocioConfigPath.split('/').pop() : 'No file selected'}
           </span>
-          <button type="button" style={smallButtonStyle} disabled={applying} onClick={handleBrowse}>
+          <Button size="sm" variant="secondary" disabled={applying} onClick={handleBrowse}>
             Browse…
-          </button>
+          </Button>
         </div>
       )}
 
@@ -696,17 +671,6 @@ function AiTab() {
     fontFamily: 'monospace',
   };
 
-  const saveButtonStyle = (isSaved: boolean): React.CSSProperties => ({
-    background: isSaved ? 'var(--accent-primary)' : 'var(--bg-surface)',
-    color: isSaved ? 'var(--bg-primary)' : 'var(--text-secondary)',
-    border: '1px solid var(--border-default)',
-    borderRadius: '3px',
-    fontSize: '0.8rem',
-    padding: '6px 12px',
-    cursor: 'pointer',
-    width: '100%',
-  });
-
   return (
     <div>
       <div style={sectionHeaderStyle}>AI Nodes</div>
@@ -725,9 +689,14 @@ function AiTab() {
         />
       </label>
       <div style={{ marginTop: '12px' }}>
-        <button type="button" onClick={handleSave} style={saveButtonStyle(saved)}>
+        <Button
+          size="md"
+          variant={saved ? 'primary' : 'secondary'}
+          onClick={handleSave}
+          style={{ width: '100%' }}
+        >
           {saved ? 'Saved' : 'Save API Key'}
-        </button>
+        </Button>
       </div>
 
       <div style={{ ...sectionHeaderStyle, marginTop: '24px' }}>AI Assistant</div>
@@ -758,9 +727,14 @@ function AiTab() {
         </select>
       </div>
       <div style={{ marginTop: '12px' }}>
-        <button type="button" onClick={handleAssistantSave} style={saveButtonStyle(assistantSaved)}>
+        <Button
+          size="md"
+          variant={assistantSaved ? 'primary' : 'secondary'}
+          onClick={handleAssistantSave}
+          style={{ width: '100%' }}
+        >
           {assistantSaved ? 'Saved' : 'Save API Key'}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -810,27 +784,27 @@ function ProjectTab() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '4px', marginBottom: '16px' }}>
         {RESOLUTION_PRESETS.map(preset => (
-          <button
+          <Button
             key={preset.label}
-            type="button"
+            size="md"
+            variant="secondary"
+            isActive={activePreset === preset}
             onClick={() => applyResolution(preset.width, preset.height)}
             style={{
               display: 'block',
               width: '100%',
               textAlign: 'left',
-              padding: '6px 10px',
-              fontSize: '0.75rem',
               color: activePreset === preset ? 'var(--text-primary)' : 'var(--text-secondary)',
-              background: activePreset === preset ? 'var(--bg-surface)' : 'transparent',
-              border: activePreset === preset ? '1px solid var(--accent-primary)' : '1px solid var(--border-default)',
-              borderRadius: '3px',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
+              height: 'auto',
+              minHeight: '62px',
+              padding: '8px 14px',
+              lineHeight: 1.18,
+              justifyContent: 'flex-start',
             }}
           >
-            <div style={{ fontWeight: activePreset === preset ? 600 : 400 }}>{preset.label}</div>
-            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '1px' }}>{preset.width} × {preset.height}</div>
-          </button>
+            <div style={{ fontWeight: activePreset === preset ? 600 : 400, lineHeight: 1.18 }}>{preset.label}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px', lineHeight: 1.2 }}>{preset.width} × {preset.height}</div>
+          </Button>
         ))}
       </div>
 
@@ -997,27 +971,24 @@ const SettingsModalContent: React.FC<{ initialTab: Tab; closeSettings: () => voi
             Settings
           </div>
           {TAB_LABELS.map(tab => (
-            <button
+            <Button
               key={tab.key}
-              type="button"
+              size="md"
+              variant="ghost"
+              isActive={activeTab === tab.key}
               onClick={() => setActiveTab(tab.key)}
               style={{
                 display: 'block',
                 width: '100%',
                 textAlign: 'left',
-                padding: '8px 20px',
-                fontSize: '0.8rem',
                 fontWeight: activeTab === tab.key ? 600 : 400,
-                color: activeTab === tab.key ? 'var(--text-primary)' : 'var(--text-secondary)',
-                background: activeTab === tab.key ? 'var(--bg-surface)' : 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
                 borderLeft: activeTab === tab.key ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                borderRadius: 0,
+                justifyContent: 'flex-start',
               }}
             >
               {tab.label}
-            </button>
+            </Button>
           ))}
         </div>
 
@@ -1046,24 +1017,13 @@ const SettingsModalContent: React.FC<{ initialTab: Tab; closeSettings: () => voi
                 {sectionDescriptions[activeTab]}
               </div>
             </div>
-            <button
-              type="button"
+            <IconButton
+              size="sm"
               onClick={closeSettings}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                fontSize: '1.1rem',
-                cursor: 'pointer',
-                padding: '4px 8px',
-                borderRadius: '3px',
-                lineHeight: 1,
-                fontFamily: 'inherit',
-              }}
               title="Close settings"
             >
               &times;
-            </button>
+            </IconButton>
           </div>
 
           <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>

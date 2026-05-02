@@ -3,6 +3,7 @@ import { AlertTriangle, FolderOpen } from 'lucide-react';
 import { CASCADE_EXAMPLES, EXAMPLE_SECTIONS, missingRequiredNodeTypes } from '../examples/catalog';
 import type { CascadeExample } from '../examples/catalog';
 import { useGraphStore } from '../store/graphStore';
+import { Button } from './ui/Button';
 
 const ExampleCard: React.FC<{
   example: CascadeExample;
@@ -95,28 +96,18 @@ const ExampleCard: React.FC<{
           </div>
         )}
 
-        <button
-          type="button"
+        <Button
+          size="md"
+          variant="primary"
           disabled={disabled}
           onClick={() => void onOpen(example.id)}
           style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            gap: '6px',
-            minHeight: '32px',
-            border: '1px solid var(--border-default)',
-            borderRadius: '4px',
-            background: disabled ? 'var(--bg-primary)' : 'var(--accent-primary)',
-            color: disabled ? 'var(--text-muted)' : 'var(--text-on-accent)',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            font: 'inherit',
-            fontSize: '0.8rem',
+            width: '100%',
           }}
         >
           <FolderOpen size={14} />
           {isOpening ? 'Opening...' : 'Open Example'}
-        </button>
+        </Button>
       </div>
     </article>
   );

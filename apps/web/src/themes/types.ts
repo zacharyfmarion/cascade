@@ -24,6 +24,7 @@ export interface ThemeTokens {
   'text.primary': string;
   'text.secondary': string;
   'text.muted': string;
+  'text.inverse': string;
 
   // ── Accent ───────────────────────────────────────────────────
   'accent.primary': string;
@@ -145,6 +146,7 @@ export const THEME_TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
   'text.primary',
   'text.secondary',
   'text.muted',
+  'text.inverse',
 
   'accent.primary',
   'accent.hover',

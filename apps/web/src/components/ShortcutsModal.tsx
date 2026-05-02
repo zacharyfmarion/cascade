@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
+import { Button } from './ui/Button';
 import { SHORTCUT_REGISTRY } from '../shortcuts/registry';
 import { groupByCategory } from '../shortcuts/formatDisplay';
 
@@ -121,24 +122,17 @@ export function ShortcutsModal() {
           ))}
         </div>
 
-        <button
-          type="button"
+        <Button
+          size="md"
+          variant="secondary"
           onClick={close}
           style={{
             marginTop: '24px',
-            background: 'var(--bg-surface)',
-            color: 'var(--text-secondary)',
-            border: '1px solid var(--border-default)',
-            borderRadius: '4px',
-            fontSize: '0.8rem',
-            padding: '6px 24px',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
             alignSelf: 'center',
           }}
         >
           Close
-        </button>
+        </Button>
       </div>
     </div>
   );

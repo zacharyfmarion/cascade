@@ -4,6 +4,7 @@ import { APP_VERSION } from '../constants/release';
 import { useMacDownloadUrl } from '../hooks/useMacDownloadUrl';
 import { isFeatureVisible } from '../platform/features';
 import { getRuntimeSurface } from '../platform/runtime';
+import { Button } from './ui/Button';
 
 export const ABOUT_MODAL_COPY = {
   title: 'Cascade',
@@ -49,29 +50,9 @@ const descriptionStyle: CSSProperties = {
 };
 
 const primaryLinkStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
   width: '100%',
-  minHeight: '44px',
-  borderRadius: '6px',
-  background: 'var(--accent-primary)',
-  color: 'var(--text-on-accent)',
   textDecoration: 'none',
-  fontSize: '0.95rem',
-  fontWeight: 600,
   marginBottom: '20px',
-};
-
-const closeButtonStyle: CSSProperties = {
-  background: 'var(--bg-surface)',
-  color: 'var(--text-secondary)',
-  border: '1px solid var(--border-default)',
-  borderRadius: '4px',
-  fontSize: '0.8rem',
-  padding: '6px 24px',
-  cursor: 'pointer',
-  fontFamily: 'inherit',
 };
 
 export function AboutModal() {
@@ -139,14 +120,20 @@ export function AboutModal() {
         <div style={descriptionStyle}>{ABOUT_MODAL_COPY.description}</div>
 
         {showDownloadCta && (
-          <a href={downloadUrl} target="_blank" rel="noreferrer" style={primaryLinkStyle}>
+          <a
+            href={downloadUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ui-button ui-button--primary ui-control--rounded ui-control--lg"
+            style={primaryLinkStyle}
+          >
             {ABOUT_MODAL_COPY.downloadLabel}
           </a>
         )}
 
-        <button type="button" onClick={close} style={closeButtonStyle}>
+        <Button size="md" variant="secondary" onClick={close}>
           Close
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from 'lucide-react';
 import type { ChannelMode } from './Viewer';
+import { IconButton } from './ui/IconButton';
 
 interface ViewerToolbarProps {
   zoomIn: () => void;
@@ -70,14 +71,14 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
   return (
     <div className="viewer-toolbar" style={hasError ? { bottom: 44 } : undefined}>
       {/* Zoom controls */}
-      <button 
-        type="button" 
-        className="viewer-toolbar__btn" 
+      <IconButton
+        size="sm"
+        variant="default"
         onClick={zoomOut} 
         title="Zoom Out"
       >
         <ZoomOut size={14} />
-      </button>
+      </IconButton>
 
       <div className="viewer-toolbar__zoom-display">
         <button
@@ -117,34 +118,34 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
         )}
       </div>
 
-      <button 
-        type="button" 
-        className="viewer-toolbar__btn" 
+      <IconButton
+        size="sm"
+        variant="default"
         onClick={zoomIn} 
         title="Zoom In"
       >
         <ZoomIn size={14} />
-      </button>
+      </IconButton>
 
       <div className="viewer-toolbar__separator" />
 
-      <button 
-        type="button" 
-        className="viewer-toolbar__btn" 
+      <IconButton
+        size="sm"
+        variant="default"
         onClick={fitToView} 
         title="Fit to View"
       >
         <Maximize2 size={14} />
-      </button>
+      </IconButton>
 
-      <button 
-        type="button" 
-        className="viewer-toolbar__btn" 
+      <IconButton
+        size="sm"
+        variant="default"
         onClick={setActualPixels} 
         title="Actual Pixels"
       >
         1:1
-      </button>
+      </IconButton>
 
       {showDisplayControls && (
         <>
@@ -198,15 +199,15 @@ export const ViewerToolbar: React.FC<ViewerToolbarProps> = ({
 
           {/* Reset display controls */}
           {showResetDisplayControls && (
-            <button
-              type="button"
-              className="viewer-toolbar__btn viewer-toolbar__reset-btn"
+            <IconButton
+              size="sm"
+              variant="default"
               onClick={onResetDisplayControls}
               title="Reset Display Controls"
               data-testid="reset-display-btn"
             >
               <RotateCcw size={12} />
-            </button>
+            </IconButton>
           )}
         </>
       )}

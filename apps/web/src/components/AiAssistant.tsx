@@ -10,6 +10,8 @@ import { captureViewerThumbnail } from '../ai/viewerSnapshot';
 import { AiActionItem } from './AiActionFeed';
 import type { ToolAction } from './AiActionFeed';
 import { MarkdownMessage } from './MarkdownMessage';
+import { Button } from './ui/Button';
+import { IconButton } from './ui/IconButton';
 
 interface AiAssistantProps {
   isOpen: boolean;
@@ -152,8 +154,9 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
 
   if (!isOpen) {
     return (
-      <button
-        type="button"
+      <Button
+        size="sm"
+        variant="secondary"
         onClick={onToggle}
         style={{
           position: 'absolute',
@@ -161,19 +164,12 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 50,
-          background: 'var(--bg-secondary)',
-          border: '1px solid var(--border-default)',
           borderRadius: '16px',
-          padding: '6px 14px',
-          fontSize: '0.75rem',
-          color: 'var(--text-secondary)',
-          cursor: 'pointer',
-          fontFamily: 'inherit',
           boxShadow: '0 2px 8px var(--shadow-overlay)',
         }}
       >
         ✦ AI
-      </button>
+      </Button>
     );
   }
 
@@ -211,21 +207,9 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
           }}>
             {error ? 'Error' : isLoading ? 'Thinking...' : 'Ready'}
           </span>
-          <button
-            type="button"
-            onClick={onToggle}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              fontSize: '0.8rem',
-              padding: '2px',
-              lineHeight: 1,
-            }}
-          >
+          <IconButton size="sm" onClick={onToggle} title="Close AI assistant">
             ✕
-          </button>
+          </IconButton>
         </div>
       </div>
 
@@ -253,22 +237,20 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
             padding: '20px 0',
           }}>
             Set your Anthropic API key in{' '}
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => openSettings('ai')}
               style={{
-                background: 'none',
-                border: 'none',
                 color: 'var(--accent-primary)',
-                cursor: 'pointer',
                 fontSize: 'inherit',
-                fontFamily: 'inherit',
                 padding: 0,
                 textDecoration: 'underline',
+                height: 'auto',
               }}
             >
               Settings → AI
-            </button>
+            </Button>
             {' '}to get started.
           </div>
         )}
@@ -316,9 +298,10 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
                 'Set up a composite with alpha over',
                 'Build a sharpen and contrast workflow',
               ].map((suggestion) => (
-                <button
+                <Button
                   key={suggestion}
-                  type="button"
+                  size="sm"
+                  variant="secondary"
                   onClick={() => {
                     const thumbnail = captureViewerThumbnail();
                     if (thumbnail) {
@@ -331,27 +314,12 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
                     }
                   }}
                   style={{
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-default)',
                     borderRadius: '12px',
-                    padding: '4px 10px',
                     fontSize: '0.7rem',
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    transition: 'border-color 0.15s, color 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--accent-primary)';
-                    e.currentTarget.style.color = 'var(--text-primary)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--border-default)';
-                    e.currentTarget.style.color = 'var(--text-secondary)';
                   }}
                 >
                   {suggestion}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -458,42 +426,18 @@ export const AiAssistant: React.FC<AiAssistantProps> = ({ isOpen, onToggle }) =>
           }}
         />
         {isLoading ? (
-          <button
-            type="button"
-            onClick={() => stop()}
-            style={{
-              background: 'var(--status-error)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '4px 12px',
-              fontSize: '0.7rem',
-              color: 'var(--bg-primary)',
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              whiteSpace: 'nowrap',
-            }}
-          >
+          <Button size="sm" variant="danger" onClick={() => stop()}>
             Stop
-          </button>
+          </Button>
         ) : (
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="primary"
             onClick={handleSend}
             disabled={!input.trim() || !isConfigured}
-            style={{
-              background: input.trim() && isConfigured ? 'var(--accent-primary)' : 'var(--bg-surface)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '4px 12px',
-              fontSize: '0.7rem',
-              color: input.trim() && isConfigured ? 'var(--bg-primary)' : 'var(--text-muted)',
-              cursor: input.trim() && isConfigured ? 'pointer' : 'default',
-              fontFamily: 'inherit',
-              whiteSpace: 'nowrap',
-            }}
           >
             Send
-          </button>
+          </Button>
         )}
       </div>
     </div>

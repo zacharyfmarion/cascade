@@ -1,6 +1,7 @@
 import React from 'react';
 import type { IDockviewPanelProps } from 'dockview';
 import type { NodeProps } from '@xyflow/react';
+import { Button } from './ui/Button';
 
 type ErrorBoundaryKind = 'node' | 'pane';
 
@@ -98,23 +99,17 @@ export class AppErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorB
         >
           {error.message}
         </pre>
-        <button
-          type="button"
+        <Button
+          size={isNode ? 'sm' : 'md'}
+          variant="secondary"
           onClick={this.handleRetry}
           style={{
             marginTop: '8px',
             width: '100%',
-            padding: isNode ? '4px 8px' : '8px 12px',
-            border: '1px solid var(--border-default)',
-            borderRadius: '4px',
-            background: 'var(--bg-primary)',
-            color: 'var(--text-primary)',
-            cursor: 'pointer',
-            fontSize: isNode ? '0.7rem' : '0.8rem',
           }}
         >
           Retry {isNode ? 'node' : 'pane'}
-        </button>
+        </Button>
       </div>
     );
   }

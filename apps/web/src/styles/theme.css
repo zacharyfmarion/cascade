@@ -6,6 +6,147 @@ body {
   overflow: hidden;
 }
 
+/* ── Shared UI Controls ──────────────────────────────────────── */
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.ui-button:focus {
+  outline: none;
+}
+
+.ui-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-primary);
+}
+
+.ui-button:disabled {
+  background: var(--bg-secondary);
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.ui-control--rounded {
+  border-radius: 8px;
+}
+
+.ui-control--sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 0.75rem;
+}
+
+.ui-control--md {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 0.875rem;
+}
+
+.ui-control--lg {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 1rem;
+}
+
+.ui-icon-control--sm {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.ui-icon-control--md {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+}
+
+.ui-icon-control--lg {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.ui-button--primary {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--text-inverse);
+  box-shadow: inset 0 0 0 1px var(--button-primary-inset);
+}
+
+.ui-button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.ui-button--secondary {
+  background: var(--bg-secondary);
+  border-color: var(--border-default);
+  color: var(--text-primary);
+}
+
+.ui-button--secondary:hover:not(:disabled) {
+  background: var(--button-secondary-hover);
+}
+
+.ui-button--secondary[data-active] {
+  background: var(--button-secondary-active);
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.ui-button--secondary[data-active]:hover:not(:disabled) {
+  background: var(--button-secondary-active-hover);
+}
+
+.ui-button--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-secondary);
+}
+
+.ui-button--ghost:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.ui-button--ghost[data-active] {
+  background: var(--button-secondary-active);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.ui-button--success {
+  background: var(--status-success);
+  border-color: var(--status-success);
+  color: var(--text-inverse);
+}
+
+.ui-button--danger {
+  background: var(--status-danger);
+  border-color: var(--status-danger);
+  color: var(--text-inverse);
+}
+
+.ui-button--icon {
+  flex: 0 0 auto;
+}
+
+.ui-icon-button--toolbar {
+  box-shadow: 0 1px 2px var(--shadow-overlay);
+}
+
 /* ── React Flow Controls (zoom in/out, fit view, lock) ────────── */
 .react-flow__controls {
   --xy-controls-button-background-color: var(--bg-secondary);
@@ -344,23 +485,26 @@ body {
 /* ── Node Button ──────────────────────────────────────────────── */
 .node-btn {
   width: 100%;
-  padding: 5px 0;
-  border: none;
-  border-radius: 4px;
-  font-size: 0.72rem;
-  font-weight: 600;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  transition: opacity 0.2s, background-color 0.2s;
+  transition: opacity 0.2s, background-color 0.2s, border-color 0.2s, color 0.2s;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
 }
 
 .node-btn--primary {
   background: var(--accent-primary);
-  color: #fff;
+  border-color: var(--accent-primary);
+  color: var(--text-inverse);
 }
 
 .node-btn--primary:hover:not(:disabled) {
@@ -368,18 +512,19 @@ body {
 }
 
 .node-btn--secondary {
-  background: var(--bg-surface);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border-default);
 }
 
 .node-btn--secondary:hover:not(:disabled) {
-  background: var(--bg-secondary);
+  background: var(--button-secondary-hover);
 }
 
 .node-btn--danger {
   background: var(--status-danger);
-  color: #fff;
+  border-color: var(--status-danger);
+  color: var(--text-inverse);
 }
 
 .node-btn--dashed {
@@ -431,12 +576,12 @@ body {
 
 .node-badge--success {
   background: var(--status-success);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .node-badge--danger {
   background: var(--status-danger);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 /* ── Node Progress ────────────────────────────────────────────── */
@@ -696,7 +841,7 @@ body {
 /* ── Timing Badge ─────────────────────────────────────────────── */
 .node-timing {
   background: var(--timing-color, #ff8f00);
-  color: #fff;
+  color: var(--text-inverse);
   border-radius: 10px;
   padding: 1px 5px;
   font-size: 0.65rem;
@@ -710,7 +855,7 @@ body {
 /* ── Error Badge ──────────────────────────────────────────────── */
 .node-error-badge {
   background: var(--timing-slow);
-  color: #fff;
+  color: var(--text-inverse);
   border-radius: 10px;
   padding: 1px 5px;
   font-size: 0.65rem;
@@ -928,6 +1073,10 @@ body {
 /* Shared node-control tokens */
 :root {
   --node-label-font-size: 0.72rem;
+  --button-primary-inset: rgb(255 255 255 / 6%);
+  --button-secondary-hover: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-secondary));
+  --button-secondary-active: color-mix(in srgb, var(--accent-primary) 15%, var(--bg-secondary));
+  --button-secondary-active-hover: color-mix(in srgb, var(--accent-primary) 22%, var(--bg-secondary));
   
   /* Added for lint fix */
   --code-bg: #0d1117;

@@ -1,37 +1,21 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
-import { Tooltip, TooltipContent, TooltipTrigger } from './Tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './Tooltip';
+import { CONTROL_RADIUS_CLASS, ICON_CONTROL_SIZE_CLASSES } from './controlStyles';
 
 const iconButton = cva(
   [
-    'inline-flex items-center justify-center rounded-lg transition-colors',
-    'focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]',
-    'disabled:opacity-65 disabled:cursor-not-allowed',
+    'ui-button',
+    'ui-button--icon',
+    CONTROL_RADIUS_CLASS,
   ].join(' '),
   {
     variants: {
       variant: {
-        // Transparent base — for palette/sidebar icon buttons
-        default: [
-          'border border-transparent bg-transparent text-[var(--text-secondary)]',
-          'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-          'disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]',
-          'data-[active]:bg-[var(--bg-tertiary)] data-[active]:text-[var(--accent-primary)] data-[active]:border-[var(--accent-primary)]',
-          'data-[active]:hover:bg-[var(--bg-tertiary)]',
-        ].join(' '),
-        // Elevated base — for toolbar buttons floating over the canvas
-        toolbar: [
-          'border border-[var(--border-primary)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]',
-          'hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]',
-          'disabled:hover:bg-[var(--bg-elevated)] disabled:hover:text-[var(--text-secondary)]',
-          'data-[active]:bg-[var(--bg-tertiary)] data-[active]:text-[var(--accent-primary)] data-[active]:border-[var(--accent-primary)]',
-          'data-[active]:hover:bg-[var(--bg-tertiary)]',
-        ].join(' '),
+        default: 'ui-button--ghost ui-icon-button--default',
+        toolbar: 'ui-button--secondary ui-icon-button--toolbar',
       },
-      size: {
-        sm: 'h-7 w-7',
-        md: 'h-8 w-8',
-      },
+      size: ICON_CONTROL_SIZE_CLASSES,
     },
     defaultVariants: {
       variant: 'default',
@@ -77,10 +61,12 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
     if (!title) return button;
 
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>{button}</TooltipTrigger>
-        <TooltipContent side={tooltipSide}>{title}</TooltipContent>
-      </Tooltip>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>{button}</TooltipTrigger>
+          <TooltipContent side={tooltipSide}>{title}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     );
   }
 );

@@ -1,5 +1,6 @@
 import { useEffect, type CSSProperties } from 'react';
 import { useGraphStore } from '../store/graphStore';
+import { Button } from './ui/Button';
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -38,24 +39,6 @@ const actionsStyle: CSSProperties = {
   display: 'flex',
   justifyContent: 'flex-end',
   gap: '8px',
-};
-
-const buttonStyle: CSSProperties = {
-  minHeight: '34px',
-  borderRadius: '4px',
-  border: '1px solid var(--border-default)',
-  background: 'var(--bg-surface)',
-  color: 'var(--text-primary)',
-  padding: '0 14px',
-  font: 'inherit',
-  cursor: 'pointer',
-};
-
-const primaryButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  borderColor: 'var(--accent-primary)',
-  background: 'var(--accent-primary)',
-  color: 'var(--text-on-accent)',
 };
 
 export function UnsavedChangesModal() {
@@ -102,15 +85,15 @@ export function UnsavedChangesModal() {
           or cancel to return to the project.
         </p>
         <div style={actionsStyle}>
-          <button type="button" style={buttonStyle} onClick={() => void resolve('cancel')}>
+          <Button size="md" variant="secondary" onClick={() => void resolve('cancel')}>
             Cancel
-          </button>
-          <button type="button" style={buttonStyle} onClick={() => void resolve('discard')}>
+          </Button>
+          <Button size="md" variant="secondary" onClick={() => void resolve('discard')}>
             Discard
-          </button>
-          <button type="button" style={primaryButtonStyle} onClick={() => void resolve('save')}>
+          </Button>
+          <Button size="md" variant="primary" onClick={() => void resolve('save')}>
             Save
-          </button>
+          </Button>
         </div>
       </div>
     </div>

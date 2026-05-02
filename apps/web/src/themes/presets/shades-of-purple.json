@@ -11,6 +11,7 @@
     "text.primary": "#e3dfff",
     "text.secondary": "#b362ff",
     "text.muted": "#6943ff",
+    "text.inverse": "#ffffff",
     "accent.primary": "#fad000",
     "accent.hover": "#ffe044",
     "border.default": "#4d21fc",
