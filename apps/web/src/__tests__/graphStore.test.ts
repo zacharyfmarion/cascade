@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import JSZip from 'jszip';
-import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph } from '../store/types';
+import type { Connection, NodeInstance, NodeSpec, ParamValue, PortSpec, GroupInternalGraph, ViewerResult } from '../store/types';
 import { createMockEngine, resetNodeCounter, NODE_SPECS } from './engineMock';
 import { useSettingsStore } from '../store/settingsStore';
 import { buildDefaultGpuScriptManifest, buildGpuScriptManifest, buildGpuScriptNodeSpec } from '../ai/gpuScript';
@@ -106,6 +106,14 @@ const flushPromises = async (ticks = 1) => {
     await new Promise(resolve => setTimeout(resolve, 0));
   }
 };
+
+const imageResult = (nodeId: string, width: number, height: number): ViewerResult => ({
+  type: 'image',
+  nodeId,
+  width,
+  height,
+  pixels: new Uint8ClampedArray(Math.min(width * height * 4, 4)),
+});
 
 beforeEach(async () => {
   vi.resetModules();
@@ -392,6 +400,88 @@ describe('graphStore analytics', () => {
     expect(trackAnalyticsEvent).toHaveBeenCalledWith('node muted', {
       node_type_id: 'gaussian_blur',
       muted: true,
+    });
+  });
+});
+
+describe('graphStore preview rendering', () => {
+  it('passes previewScale to the engine and does not downscale engine preview results again', async () => {
+    const store = useGraphStore.getState();
+    const viewerId = 'viewer-preview';
+    const fullResult = imageResult(viewerId, 4096, 3072);
+    const enginePreview = imageResult(viewerId, 1024, 768);
+
+    mockEngine._setRenderResult(enginePreview);
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      previewScale: 0.25,
+      renderResults: new Map([[viewerId, fullResult]]),
+    });
+
+    store.triggerRender(viewerId);
+    await flushPromises(3);
+
+    expect(mockEngine._renderCalls).toEqual([viewerId]);
+    expect(mockEngine._renderScales).toEqual([0.25]);
+    const stored = useGraphStore.getState().renderResults.get(viewerId);
+    expect(stored).toMatchObject({
+      type: 'image',
+      width: 1024,
+      height: 768,
+      previewScale: 0.25,
+      originalWidth: 4096,
+      originalHeight: 3072,
+    });
+  });
+
+  it('passes the minimum-edge effective previewScale to the engine for clamped previews', async () => {
+    const store = useGraphStore.getState();
+    const viewerId = 'viewer-preview';
+    const fullResult = imageResult(viewerId, 1200, 900);
+    const enginePreview = imageResult(viewerId, 800, 600);
+
+    mockEngine._setRenderResult(enginePreview);
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      previewScale: 0.25,
+      renderResults: new Map([[viewerId, fullResult]]),
+    });
+
+    store.triggerRender(viewerId);
+    await flushPromises(3);
+
+    expect(mockEngine._renderScales).toEqual([600 / 900]);
+    const stored = useGraphStore.getState().renderResults.get(viewerId);
+    expect(stored).toMatchObject({
+      type: 'image',
+      width: 800,
+      height: 600,
+      previewScale: 600 / 900,
+      originalWidth: 1200,
+      originalHeight: 900,
+    });
+  });
+
+  it('uses full scale when there is no previous image size for a preview render', async () => {
+    const store = useGraphStore.getState();
+    const viewerId = 'viewer-preview';
+    const engineResult = imageResult(viewerId, 400, 300);
+
+    mockEngine._setRenderResult(engineResult);
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      previewScale: 0.25,
+      renderResults: new Map(),
+    });
+
+    store.triggerRender(viewerId);
+    await flushPromises(3);
+
+    expect(mockEngine._renderScales).toEqual([1]);
+    expect(useGraphStore.getState().renderResults.get(viewerId)).toMatchObject({
+      type: 'image',
+      width: 400,
+      height: 300,
     });
   });
 });

@@ -37,6 +37,7 @@ export type GlslManifest = {
   }>;
   kernel: string;
   supports_mask?: boolean;
+  pixel_space_params?: string[];
 };
 
 export type GpuScriptManifest = {
@@ -58,6 +59,7 @@ export type GpuScriptManifest = {
   }>;
   kernel: string;
   supports_mask: boolean;
+  pixel_space_params: string[];
 };
 
 export const GPU_SCRIPT_SYSTEM_PROMPT = `You are a GLSL compute shader expert. You generate GPU kernel code for a Cascade image editor.
@@ -90,6 +92,8 @@ Available globals:
 4. Image inputs/outputs must be type "Image" or "Mask".
 5. Keep kernels efficient — they run per-pixel on the GPU.
 6. Use \`clamp()\`, \`mix()\`, \`smoothstep()\` for clean blending.
+7. If a scalar input represents pixels (radius, blur size, offset, distance, width, height, etc.),
+   include its input name in \`pixel_space_params\` so Cascade scales it during low-resolution previews.
 
 ## Output Format
 Respond with ONLY a JSON object (no markdown, no explanation):
@@ -100,6 +104,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   ],
   "outputs": [{"name": "image", "label": "Image", "ty": "Image"}],
   "params": [],
+  "pixel_space_params": [],
   "kernel": "// GLSL code here\\nreturn vec4(...);"
 }
 
@@ -214,6 +219,7 @@ export const buildGpuScriptManifest = (
   params: ScriptParam[],
   kernel: string,
   supportsMask = true,
+  pixelSpaceParams: string[] = [],
 ): GpuScriptManifest => ({
   id: typeId,
   display_name: 'GPU Script',
@@ -229,6 +235,7 @@ export const buildGpuScriptManifest = (
   params: [],
   kernel,
   supports_mask: supportsMask,
+  pixel_space_params: pixelSpaceParams,
 });
 
 export const buildGpuScriptManifestFromGlsl = (typeId: string, manifest: GlslManifest): GpuScriptManifest => {
@@ -249,6 +256,7 @@ export const buildGpuScriptManifestFromGlsl = (typeId: string, manifest: GlslMan
     params,
     manifest.kernel,
     manifest.supports_mask ?? true,
+    manifest.pixel_space_params ?? [],
   );
 };
 
@@ -260,6 +268,7 @@ export const buildDefaultGpuScriptManifest = (typeId: string): GpuScriptManifest
     [],
     'return color;',
     true,
+    [],
   );
 
 export const parseGpuScriptManifestJson = (manifestJson?: string | null): GpuScriptManifest | null => {
@@ -281,6 +290,9 @@ export const parseGpuScriptManifestJson = (manifestJson?: string | null): GpuScr
       params: Array.isArray(parsed.params) ? parsed.params as GpuScriptManifest['params'] : [],
       kernel: parsed.kernel,
       supports_mask: parsed.supports_mask ?? true,
+      pixel_space_params: Array.isArray(parsed.pixel_space_params)
+        ? parsed.pixel_space_params.filter((value): value is string => typeof value === 'string')
+        : [],
     };
   } catch {
     return null;

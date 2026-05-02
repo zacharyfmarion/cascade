@@ -173,6 +173,74 @@ export const getPreviewScaleFromDimensions = (
   return Math.min(width / originalWidth, height / originalHeight);
 };
 
+export const annotateEnginePreviewResult = (
+  result: ViewerResult,
+  scale: number,
+  previous?: ViewerResult,
+): ViewerResult => {
+  if (scale >= 1 || (!isPixelResult(result) && !isCompareResult(result))) {
+    return result;
+  }
+  if (result.previewScale !== undefined) {
+    return result;
+  }
+  if (!previous || (!isPixelResult(previous) && !isCompareResult(previous))) {
+    return result;
+  }
+
+  const originalWidth = previous.originalWidth ?? previous.width;
+  const originalHeight = previous.originalHeight ?? previous.height;
+  const previewScale = getPreviewScaleFromDimensions(
+    result.width,
+    result.height,
+    originalWidth,
+    originalHeight,
+  );
+  if (previewScale >= 1) {
+    return result;
+  }
+
+  return {
+    ...result,
+    previewScale,
+    originalWidth,
+    originalHeight,
+  };
+};
+
+export const getEffectivePreviewScaleForResult = (
+  requestedScale: number,
+  result?: ViewerResult,
+): number => {
+  if (
+    !Number.isFinite(requestedScale)
+    || requestedScale <= 0
+    || requestedScale >= 1
+  ) {
+    return requestedScale;
+  }
+  if (!result || (!isPixelResult(result) && !isCompareResult(result))) {
+    return 1;
+  }
+
+  const originalWidth = result.originalWidth ?? result.width;
+  const originalHeight = result.originalHeight ?? result.height;
+  const targetSize = getPreviewDownscaleSize(originalWidth, originalHeight, requestedScale);
+  return targetSize?.scale ?? 1;
+};
+
+export const getEffectivePreviewScaleForResults = (
+  requestedScale: number,
+  results: Iterable<ViewerResult>,
+): number => {
+  let scale: number | null = null;
+  for (const result of results) {
+    const resultScale = getEffectivePreviewScaleForResult(requestedScale, result);
+    scale = scale === null ? resultScale : Math.max(scale, resultScale);
+  }
+  return scale ?? getEffectivePreviewScaleForResult(requestedScale);
+};
+
 export const downscaleRenderResult = async (result: ViewerResult, scale: number): Promise<ViewerResult> => {
   // Only pixel-carrying results can be downscaled
   if (!isPixelResult(result) && !isCompareResult(result)) return result;

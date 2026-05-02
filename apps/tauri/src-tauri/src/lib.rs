@@ -347,11 +347,12 @@ fn render_viewer(
     state: State<'_, EngineState>,
     viewer_node_id: String,
     frame: u64,
+    preview_scale: Option<f32>,
 ) -> Result<Response, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let result = s
         .engine
-        .render_viewer_result(&viewer_node_id, frame)
+        .render_viewer_result_scaled(&viewer_node_id, frame, preview_scale.unwrap_or(1.0))
         .map_err(|e| e.to_string())?;
 
     let mut buf = Vec::with_capacity(viewer_render_result_size(&result));

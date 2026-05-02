@@ -553,6 +553,51 @@ describe('applyDsl — gpu_script instance recompile', () => {
     expect(manifest.id).toBe(typeId);
   });
 
+  it('preserves pixel_space_params from existing manifest when recompiling', async () => {
+    const store = useGraphStore.getState();
+    const nodeId = await store.addNode('gpu_script', { x: 0, y: 0 });
+    const typeId = useGraphStore.getState().nodes.get(nodeId)!.typeId;
+    const existingManifest = {
+      id: typeId,
+      display_name: 'Pixel Script',
+      category: 'GPU',
+      description: 'Custom GPU shader node',
+      inputs: [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'radius', label: 'Radius', ty: 'Float', default: 12, min: 0, max: 100, step: 1, ui: 'Slider' },
+      ],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      params: [],
+      kernel: 'return color;',
+      supports_mask: true,
+      pixel_space_params: ['radius'],
+    };
+    useGraphStore.getState().nodes.get(nodeId)!.params.__script_manifest = {
+      String: JSON.stringify(existingManifest),
+    };
+
+    const handleMap = new HandleMap();
+    handleMap.set('crazy_thing1', nodeId);
+    const compileScriptNode = vi.spyOn(mockEngine as EngineBridge, 'compileScriptNode');
+
+    const result = await applyDsl(
+      makeGpuDsl({
+        scalarParams: '    float radius = 12.0 min 0.0 max 100.0 step 1.0',
+        code: '  return vec4(color.rgb, color.a);',
+      }),
+      handleMap,
+      useGraphStore.getState().nodeSpecs,
+      useGraphStore.getState().nodes,
+      useGraphStore.getState().connections,
+    );
+
+    expect(result.success).toBe(true);
+    const manifest = JSON.parse(compileScriptNode.mock.calls[0]?.[1] ?? '{}') as {
+      pixel_space_params?: string[];
+    };
+    expect(manifest.pixel_space_params).toEqual(['radius']);
+  });
+
   it('propagates a new input port added in the definition', async () => {
     const store = useGraphStore.getState();
     const nodeId = await store.addNode('gpu_script', { x: 0, y: 0 });

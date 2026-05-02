@@ -29,6 +29,7 @@ import {
   kernel,
   cloneEditingStack,
   getPreviewScaleFromDimensions,
+  getEffectivePreviewScaleForResults,
   getEngine,
   markGraphMutation,
 } from './kernel';
@@ -335,7 +336,10 @@ export function setParamLive(
   captureParamDelta('param', nodeId, key, get);
   setDraftParam(nodeId, key, value);
 
-  const liveScale = useSettingsStore.getState().livePreviewScale;
+  const liveScale = getEffectivePreviewScaleForResults(
+    useSettingsStore.getState().livePreviewScale,
+    get().renderResults.values(),
+  );
   if (get().previewScale !== liveScale) {
     set({ previewScale: liveScale });
   }
@@ -398,7 +402,10 @@ export function setInputDefaultLive(
   captureParamDelta('inputDefault', nodeId, portName, get);
   setDraftInputDefault(nodeId, portName, value);
 
-  const liveScale = useSettingsStore.getState().livePreviewScale;
+  const liveScale = getEffectivePreviewScaleForResults(
+    useSettingsStore.getState().livePreviewScale,
+    get().renderResults.values(),
+  );
   if (get().previewScale !== liveScale) {
     set({ previewScale: liveScale });
   }
