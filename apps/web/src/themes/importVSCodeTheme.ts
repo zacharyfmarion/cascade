@@ -107,6 +107,7 @@ export function importVSCodeTheme(json: VSCodeThemeJson): CascadeTheme {
     'text.primary': result['text.primary'] ?? fg,
     'text.secondary': result['text.secondary'] ?? (isDark ? lighten(fg, -0.15) : darken(fg, 0.15)),
     'text.muted': result['text.muted'] ?? (isDark ? '#606080' : '#93a1a1'),
+    'text.inverse': isDark ? '#ffffff' : '#1a1a1a',
 
     'accent.primary': result['accent.primary'] ?? accent,
     'accent.hover': result['accent.hover'] ?? lighten(accent, 0.08),

@@ -56,6 +56,7 @@ describe('NodeCanvas examples CTA', () => {
 
     expect(screen.getByTestId('empty-node-editor-cta')).toBeTruthy();
     expect(screen.getByText('Want a starting point? Browse examples.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Browse Examples' }).className).toContain('ui-button--primary');
   });
 
   it('focuses the examples panel from the CTA button', () => {

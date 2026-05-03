@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useGraphStore } from '../../store/graphStore';
 import type { Toast } from '../../store/graphStore/slices/toastSlice';
 import { Info, CheckCircle2, AlertTriangle, AlertCircle, X } from 'lucide-react';
+import { IconButton } from './IconButton';
 import '../../styles/toast.css';
 
 const ICONS = {
@@ -42,14 +43,14 @@ function ToastItem({ toast }: { toast: Toast }) {
         {toast.message && <div className="toast__message">{toast.message}</div>}
       </div>
 
-      <button 
-        type="button" 
-        className="toast__dismiss" 
+      <IconButton
+        size="sm"
+        className="toast__dismiss"
         onClick={handleDismiss}
         aria-label="Dismiss"
       >
         <X size={16} />
-      </button>
+      </IconButton>
     </div>
   );
 }

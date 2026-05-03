@@ -29,7 +29,7 @@ describe('UnsavedChangesModal', () => {
 
     expect(screen.getByRole('dialog', { name: 'Unsaved changes' })).toBeTruthy();
     expect(screen.getByText('Save changes to Shot 01?')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Save' }).className).toContain('ui-button--primary');
     expect(screen.getByRole('button', { name: 'Discard' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
   });

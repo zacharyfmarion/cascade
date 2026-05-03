@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import { useGraphStore } from '../store/graphStore';
+import { Button } from './ui/Button';
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -33,24 +34,6 @@ const actionsStyle: CSSProperties = {
   gap: '8px',
 };
 
-const buttonStyle: CSSProperties = {
-  minHeight: '34px',
-  borderRadius: '4px',
-  border: '1px solid var(--border-default)',
-  background: 'var(--bg-surface)',
-  color: 'var(--text-primary)',
-  padding: '0 14px',
-  font: 'inherit',
-  cursor: 'pointer',
-};
-
-const primaryButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  borderColor: 'var(--accent-primary)',
-  background: 'var(--accent-primary)',
-  color: 'var(--text-on-accent)',
-};
-
 export function AssetStorageModal() {
   const prompt = useGraphStore(s => s.assetStoragePrompt);
   const resolve = useGraphStore(s => s.resolveAssetStoragePrompt);
@@ -68,15 +51,15 @@ export function AssetStorageModal() {
           Bundle assets for a portable project file, or keep references to files on this computer.
         </p>
         <div style={actionsStyle}>
-          <button type="button" style={buttonStyle} onClick={dismiss}>
+          <Button size="md" variant="secondary" onClick={dismiss}>
             Cancel
-          </button>
-          <button type="button" style={buttonStyle} onClick={() => void resolve('external')}>
+          </Button>
+          <Button size="md" variant="secondary" onClick={() => void resolve('external')}>
             Reference files
-          </button>
-          <button type="button" style={primaryButtonStyle} onClick={() => void resolve('bundled')}>
+          </Button>
+          <Button size="md" variant="primary" onClick={() => void resolve('bundled')}>
             Bundle assets
-          </button>
+          </Button>
         </div>
       </div>
     </div>

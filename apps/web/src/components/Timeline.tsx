@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Repeat,
 } from 'lucide-react';
+import { IconButton } from './ui/IconButton';
 
 export const Timeline: React.FC = () => {
   const hasSequenceNodes = useGraphStore((s) => s.hasSequenceNodes);
@@ -97,27 +98,6 @@ export const Timeline: React.FC = () => {
   const progress =
     max > min ? Math.max(0, Math.min(1, (currentFrame - min) / (max - min))) : 0;
 
-  const buttonStyle: React.CSSProperties = {
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--text-secondary)',
-    cursor: 'pointer',
-    padding: '4px',
-    borderRadius: '4px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '28px',
-    height: '28px',
-    transition: 'background 0.1s, color 0.1s',
-  };
-
-  const activeButtonStyle: React.CSSProperties = {
-    ...buttonStyle,
-    color: 'var(--accent-primary)',
-    background: 'var(--bg-surface)',
-  };
-
   return (
     <div
       className="timeline"
@@ -133,56 +113,41 @@ export const Timeline: React.FC = () => {
       }}
     >
       <div style={{ display: 'flex', gap: '2px' }}>
-        <button
-          type="button"
+        <IconButton
+          size="sm"
           onClick={goToStart}
-          style={buttonStyle}
           title="Go to Start"
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <SkipBack size={16} />
-        </button>
-        <button
-          type="button"
+        </IconButton>
+        <IconButton
+          size="sm"
           onClick={stepBackward}
-          style={buttonStyle}
           title="Previous Frame"
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <ChevronLeft size={16} />
-        </button>
-        <button
-          type="button"
+        </IconButton>
+        <IconButton
+          size="sm"
           onClick={isPlaying ? pause : play}
-          style={{ ...buttonStyle, color: 'var(--text-primary)' }}
           title={isPlaying ? 'Pause' : 'Play'}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           {isPlaying ? <Pause size={16} /> : <Play size={16} fill="currentColor" />}
-        </button>
-        <button
-          type="button"
+        </IconButton>
+        <IconButton
+          size="sm"
           onClick={stepForward}
-          style={buttonStyle}
           title="Next Frame"
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <ChevronRight size={16} />
-        </button>
-        <button
-          type="button"
+        </IconButton>
+        <IconButton
+          size="sm"
           onClick={goToEnd}
-          style={buttonStyle}
           title="Go to End"
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-surface)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <SkipForward size={16} />
-        </button>
+        </IconButton>
       </div>
 
       <div
@@ -286,20 +251,14 @@ export const Timeline: React.FC = () => {
           </select>
         </div>
 
-        <button
-          type="button"
+        <IconButton
+          size="sm"
           onClick={() => setLoopPlayback(!loopPlayback)}
-          style={loopPlayback ? activeButtonStyle : buttonStyle}
+          isActive={loopPlayback}
           title="Toggle Loop"
-          onMouseEnter={(e) => {
-            if (!loopPlayback) e.currentTarget.style.background = 'var(--bg-surface)';
-          }}
-          onMouseLeave={(e) => {
-            if (!loopPlayback) e.currentTarget.style.background = 'transparent';
-          }}
         >
           <Repeat size={16} />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

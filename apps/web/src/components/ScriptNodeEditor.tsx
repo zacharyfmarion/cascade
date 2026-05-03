@@ -14,6 +14,8 @@ import {
   type ScriptDraftPort,
   type ScriptEditorState,
 } from './scriptNodeEditorModel';
+import { Button } from './ui/Button';
+import { IconButton as UiIconButton } from './ui/IconButton';
 
 const SectionHeader: React.FC<{ children: React.ReactNode; action?: React.ReactNode }> = ({ children, action }) => (
   <div style={{
@@ -73,27 +75,18 @@ const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = 
     marginBottom: '8px',
     position: 'relative'
   }}>
-    <button
-      type="button"
+    <UiIconButton
+      size="sm"
       onClick={onRemove}
       title="Remove port"
       style={{
         position: 'absolute',
         top: '6px',
         right: '6px',
-        background: 'transparent',
-        border: 'none',
-        color: 'var(--text-muted)',
-        cursor: 'pointer',
-        fontSize: '14px',
-        lineHeight: 1,
-        padding: '2px',
       }}
-      onMouseEnter={e => { e.currentTarget.style.color = 'var(--status-error-bright)'; }}
-      onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
     >
       x
-    </button>
+    </UiIconButton>
     <div style={{ marginRight: '16px' }}>
       {children}
     </div>
@@ -101,24 +94,9 @@ const PortCard: React.FC<{ children: React.ReactNode; onRemove: () => void }> = 
 );
 
 const IconButton: React.FC<{ onClick: () => void; children: React.ReactNode; title?: string }> = ({ onClick, children, title }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    title={title}
-    style={{
-      background: 'transparent',
-      border: 'none',
-      color: 'var(--text-secondary)',
-      cursor: 'pointer',
-      padding: '2px 6px',
-      borderRadius: '3px',
-      fontSize: '0.8rem',
-    }}
-    onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-primary)'; }}
-    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
-  >
+  <UiIconButton size="sm" onClick={onClick} title={title}>
     {children}
-  </button>
+  </UiIconButton>
 );
 
 const TextInput: React.FC<React.InputHTMLAttributes<HTMLInputElement>> = (props) => (
@@ -256,22 +234,18 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
           {state.compileStatus === 'success' && <span style={{ color: 'var(--accent-primary)', fontSize: '0.7rem', fontWeight: 600 }}>Compiled</span>}
           {state.compileStatus === 'error' && <span style={{ color: 'var(--status-error-bright)', fontSize: '0.7rem', fontWeight: 600 }}>Error</span>}
           {state.compileStatus === 'compiling' && <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>Compiling...</span>}
-          <button
-            type="button"
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={openAiAssistant}
             style={{
-              background: 'var(--bg-surface)',
               color: 'var(--accent-primary)',
-              border: '1px solid var(--accent-primary)',
               borderRadius: '999px',
-              padding: '4px 10px',
-              fontSize: '0.75rem',
               fontWeight: 600,
-              cursor: 'pointer',
             }}
           >
             Edit With AI
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -496,26 +470,17 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
         />
 
         <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <button
-            type="button"
+          <Button
+            size="lg"
+            variant="primary"
             onClick={handleCompile}
             disabled={state.compileStatus === 'compiling'}
             style={{
-              background: 'var(--accent-primary)',
-              color: 'var(--text-inverse)',
-              border: 'none',
-              borderRadius: '4px',
-              padding: '10px 16px',
-              fontSize: '0.9rem',
-              fontWeight: 600,
-              cursor: state.compileStatus === 'compiling' ? 'not-allowed' : 'pointer',
-              opacity: state.compileStatus === 'compiling' ? 0.7 : 1,
-              transition: 'background 0.2s',
-              boxShadow: 'var(--shadow-sm)'
+              width: '100%',
             }}
           >
             {state.compileStatus === 'compiling' ? 'Compiling...' : 'Apply & Compile'}
-          </button>
+          </Button>
 
           {state.compileError && (
             <div style={{
