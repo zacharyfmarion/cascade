@@ -16,6 +16,7 @@ import {
 } from './scriptNodeEditorModel';
 import { Button } from './ui/Button';
 import { IconButton as UiIconButton } from './ui/IconButton';
+import { Toggle } from './ui/Toggle';
 
 const SectionHeader: React.FC<{ children: React.ReactNode; action?: React.ReactNode }> = ({ children, action }) => (
   <div style={{
@@ -324,11 +325,10 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
                 <Label>Control Default & Range</Label>
                 {input.ty === 'Bool' ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--text-primary)' }}>
-                    <input
+                    <Toggle
                       id={`default-${input.id}`}
-                      type="checkbox"
                       checked={Boolean(input.default)}
-                      onChange={e => updateInput(idx, { default: e.target.checked })}
+                      onChange={checked => updateInput(idx, { default: checked })}
                     />
                     <label htmlFor={`default-${input.id}`} style={{ cursor: 'pointer' }}>Default Value</label>
                   </div>
@@ -424,7 +424,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
         ))}
 
         <SectionHeader>Node Options</SectionHeader>
-        <label style={{
+        <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -432,14 +432,13 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
           cursor: 'pointer',
           marginBottom: '12px',
         }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Enable mask input</span>
-          <input
-            type="checkbox"
+          <label htmlFor="script-node-enable-mask-input" style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}>Enable mask input</label>
+          <Toggle
+            id="script-node-enable-mask-input"
             checked={state.supportsMask}
-            onChange={(e) => markDraft(s => ({ ...s, supportsMask: e.target.checked }))}
-            style={{ accentColor: 'var(--accent-primary)' }}
+            onChange={(checked) => markDraft(s => ({ ...s, supportsMask: checked }))}
           />
-        </label>
+        </div>
 
         <SectionHeader>GLSL Kernel (body of process)</SectionHeader>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '8px', fontFamily: 'monospace', background: 'var(--bg-surface)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>

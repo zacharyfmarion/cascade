@@ -7,6 +7,7 @@ import { useGraphStore } from '../store/graphStore';
 import type { CascadeTheme } from '../themes/types';
 import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
+import { Toggle } from './ui/Toggle';
 
 type Tab = 'project' | 'appearance' | 'canvas' | 'performance' | 'playback' | 'privacy' | 'color' | 'ai';
 
@@ -62,6 +63,33 @@ const rowStyle: React.CSSProperties = {
   fontSize: '0.8rem',
   padding: '6px 0',
 };
+
+const SettingsToggleRow: React.FC<{
+  id: string;
+  label: React.ReactNode;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  style?: React.CSSProperties;
+}> = ({ id, label, checked, onChange, disabled, style }) => (
+  <div style={{ ...rowStyle, ...style }}>
+    <label
+      htmlFor={id}
+      style={{
+        color: 'var(--text-secondary)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    >
+      {label}
+    </label>
+    <Toggle
+      id={id}
+      checked={checked}
+      onChange={onChange}
+      disabled={disabled}
+    />
+  </div>
+);
 
 const ThemeCard = ({ theme, isSelected, onClick }: { theme: CascadeTheme; isSelected: boolean; onClick: () => void }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -234,15 +262,12 @@ function CanvasTab() {
 
   return (
     <div>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Snap to Grid</span>
-        <input
-          type="checkbox"
-          checked={snapToGrid}
-          onChange={e => setSnapToGrid(e.target.checked)}
-          style={{ accentColor: 'var(--accent-primary)' }}
-        />
-      </label>
+      <SettingsToggleRow
+        id="settings-snap-to-grid"
+        label="Snap to Grid"
+        checked={snapToGrid}
+        onChange={setSnapToGrid}
+      />
       <label style={rowStyle}>
         <span style={{ color: 'var(--text-secondary)' }}>Grid Size</span>
         <input
@@ -255,24 +280,18 @@ function CanvasTab() {
           style={numberInputStyle}
         />
       </label>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Show Minimap</span>
-        <input
-          type="checkbox"
-          checked={showMinimap}
-          onChange={e => setShowMinimap(e.target.checked)}
-          style={{ accentColor: 'var(--accent-primary)' }}
-        />
-      </label>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Show Node Timings</span>
-        <input
-          type="checkbox"
-          checked={showTimings}
-          onChange={e => setShowTimings(e.target.checked)}
-          style={{ accentColor: 'var(--accent-primary)' }}
-        />
-      </label>
+      <SettingsToggleRow
+        id="settings-show-minimap"
+        label="Show Minimap"
+        checked={showMinimap}
+        onChange={setShowMinimap}
+      />
+      <SettingsToggleRow
+        id="settings-show-node-timings"
+        label="Show Node Timings"
+        checked={showTimings}
+        onChange={setShowTimings}
+      />
     </div>
   );
 }
@@ -347,15 +366,12 @@ function PlaybackTab() {
           style={numberInputStyle}
         />
       </label>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Loop Playback</span>
-        <input
-          type="checkbox"
-          checked={loopPlayback}
-          onChange={e => setLoopPlayback(e.target.checked)}
-          style={{ accentColor: 'var(--accent-primary)' }}
-        />
-      </label>
+      <SettingsToggleRow
+        id="settings-loop-playback"
+        label="Loop Playback"
+        checked={loopPlayback}
+        onChange={setLoopPlayback}
+      />
     </div>
   );
 }
@@ -369,15 +385,12 @@ function PrivacyTab() {
       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
         Cascade can send anonymous product analytics to PostHog so we can understand DAUs, core workflow usage, and graph-building behavior without collecting graph parameter values, prompts, keys, or file paths.
       </div>
-      <label style={rowStyle}>
-        <span style={{ color: 'var(--text-secondary)' }}>Enable Anonymous Analytics</span>
-        <input
-          type="checkbox"
-          checked={analyticsEnabled}
-          onChange={e => setAnalyticsEnabled(e.target.checked)}
-          style={{ accentColor: 'var(--accent-primary)' }}
-        />
-      </label>
+      <SettingsToggleRow
+        id="settings-enable-analytics"
+        label="Enable Anonymous Analytics"
+        checked={analyticsEnabled}
+        onChange={setAnalyticsEnabled}
+      />
       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '12px', lineHeight: 1.5 }}>
         Current high-signal events include app open plus structural node graph actions such as adding nodes, removing nodes, connecting nodes, disconnecting nodes, muting nodes, and linking nodes to the viewer.
       </div>
@@ -515,18 +528,19 @@ function ColorTab() {
         <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{statusLine}</span>
       </div>
 
-      <label style={{ ...rowStyle, cursor: applying ? 'not-allowed' : 'pointer' }}>
-        <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <SettingsToggleRow
+        id="settings-enable-ocio"
+        checked={applying || (ocioEnabled && isOcioLoaded)}
+        disabled={applying}
+        onChange={handleToggle}
+        style={{ cursor: applying ? 'not-allowed' : 'default' }}
+        label={(
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           Enable OCIO
           {applying && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Applying…</span>}
-        </span>
-        <input
-          type="checkbox"
-          checked={applying || (ocioEnabled && isOcioLoaded)}
-          disabled={applying}
-          onChange={e => handleToggle(e.target.checked)}
-        />
-      </label>
+          </span>
+        )}
+      />
 
       <label style={rowStyle}>
         <span style={{ color: 'var(--text-secondary)' }}>Source</span>

@@ -11,6 +11,7 @@ import { createParamValue, extractParamValue, isConnectableParam } from '../stor
 import { useNodeParams } from '../store/graphStore/nodeDraftStore';
 import { Button } from './ui/Button';
 import { IconButton as UiIconButton } from './ui/IconButton';
+import { Toggle } from './ui/Toggle';
 
 const ParamControl: React.FC<{
   nodeId: string;
@@ -19,8 +20,9 @@ const ParamControl: React.FC<{
   onLive: (key: string, value: ParamValue) => void;
   onCommit: (key: string, value: ParamValue) => void;
   onChange: (key: string, value: ParamValue) => void;
-}> = ({ paramSpec, value, onLive, onCommit, onChange }) => {
+}> = ({ nodeId, paramSpec, value, onLive, onCommit, onChange }) => {
   const rawValue = extractParamValue(value);
+  const paramToggleId = `param-toggle-${nodeId}-${paramSpec.key}`;
 
   if (paramSpec.ui_hint.type === 'Hidden') return null;
 
@@ -60,21 +62,20 @@ const ParamControl: React.FC<{
       )}
 
       {paramSpec.ui_hint.type === 'Checkbox' && (
-        <label style={{
+        <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           fontSize: '0.8rem',
           cursor: 'pointer',
         }}>
-          <span style={{ color: 'var(--text-secondary)' }}>{paramSpec.label}</span>
-          <input
-            type="checkbox"
+          <label htmlFor={paramToggleId} style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}>{paramSpec.label}</label>
+          <Toggle
+            id={paramToggleId}
             checked={Boolean(rawValue)}
-            onChange={(e) => onChange(paramSpec.key, createParamValue(paramSpec.ty, e.target.checked))}
-            style={{ accentColor: 'var(--accent-primary)' }}
+            onChange={(checked) => onChange(paramSpec.key, createParamValue(paramSpec.ty, checked))}
           />
-        </label>
+        </div>
       )}
 
       {paramSpec.ui_hint.type === 'Dropdown' && (() => {
@@ -859,18 +860,16 @@ const GroupIOEditor: React.FC<{
           {port.ty === 'Bool' && (
             <div style={{ background: 'var(--bg-primary)', padding: '8px', borderRadius: '4px', border: '1px solid var(--border-default)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: 'var(--text-primary)' }}>
-                <input
+                <Toggle
                   id={`group-bool-${port.id}`}
-                  type="checkbox"
                   checked={Boolean(port.default)}
-                  onChange={e => {
+                  onChange={checked => {
                     const nextPorts = editablePorts.map((p, i) => (
-                      i === idx ? { ...p, default: e.target.checked } : p
+                      i === idx ? { ...p, default: checked } : p
                     ));
                     setEditablePorts(nextPorts);
                     commitPorts(nextPorts);
                   }}
-                  style={{ accentColor: 'var(--accent-primary)' }}
                 />
                 <label htmlFor={`group-bool-${port.id}`} style={{ cursor: 'pointer' }}>Default Value</label>
               </div>
