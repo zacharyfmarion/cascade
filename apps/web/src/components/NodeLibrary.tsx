@@ -115,7 +115,7 @@ export const NodeLibrary: React.FC = () => {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".compnode"
+          accept=".cnode"
           multiple
           style={{ display: 'none' }}
           onChange={handleFileChange}

@@ -1,6 +1,7 @@
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ai_provider;
 mod builtin_groups;
+pub mod cnode;
 pub mod document;
 pub mod migrations;
 
@@ -541,41 +542,97 @@ impl Engine {
         let mut visited = HashSet::new();
         self.collect_group_deps(group_def_id, &mut collected, &mut visited);
 
-        let package = NodePackage {
-            version: 2,
-            cascade_version: env!("CARGO_PKG_VERSION").to_string(),
-            exported_at: String::new(),
-            nodes: collected,
-        };
-        serde_json::to_string_pretty(&package)
-            .map_err(|e| CascadeError::Other(format!("Serialization failed: {e}")))
+        cnode::export_package_json(collected, env!("CARGO_PKG_VERSION").to_string())
+            .map_err(CascadeError::from)
     }
 
     pub fn import_custom_nodes(&mut self, json: &str) -> Result<Vec<NodeSpec>, CascadeError> {
-        let package: NodePackage = serde_json::from_str(json)
-            .map_err(|e| CascadeError::Other(format!("Invalid node package: {e}")))?;
+        let package = cnode::parse_package_json(json)?;
+        let original_registry = self.registry.clone();
+        let original_group_definitions = self.group_definitions.clone();
+        let original_kernel_manifests = self.kernel_manifests.clone();
 
-        let mut id_remap: HashMap<String, String> = HashMap::new();
-        let mut imported_specs: Vec<NodeSpec> = Vec::new();
-
-        for mut def in package.nodes {
-            let original_id = def.id.clone();
-            let new_id = format!("group::imported_{}", Uuid::new_v4());
-            def.id = new_id.clone();
-            def.is_builtin = false;
-            id_remap.insert(original_id, new_id);
-
-            for node in &mut def.internal_graph.nodes {
-                if let Some(remapped) = id_remap.get(&node.type_id) {
-                    node.type_id = remapped.clone();
-                }
+        let result = (|| {
+            self.register_cnode_gpu_scripts(&package)?;
+            let prepared =
+                cnode::prepare_import(package, &self.registry, &self.group_definitions, || {
+                    format!("group::imported_{}", Uuid::new_v4())
+                })?;
+            let mut imported_specs = Vec::new();
+            for def in prepared.definitions {
+                imported_specs.push(self.register_group(def).map_err(|err| {
+                    cnode::CnodeError::new(cnode::CnodeErrorKind::InvalidDefinition, "$.nodes", err)
+                })?);
             }
+            Ok::<Vec<NodeSpec>, cnode::CnodeError>(imported_specs)
+        })();
 
-            let spec = self.register_group(def).map_err(CascadeError::Other)?;
-            imported_specs.push(spec);
+        match result {
+            Ok(specs) => Ok(specs),
+            Err(err) => {
+                self.registry = original_registry;
+                self.group_definitions = original_group_definitions;
+                self.kernel_manifests = original_kernel_manifests;
+                Err(CascadeError::from(err))
+            }
         }
+    }
 
-        Ok(imported_specs)
+    fn register_cnode_gpu_scripts(
+        &mut self,
+        package: &NodePackage,
+    ) -> Result<(), cnode::CnodeError> {
+        for def in &package.nodes {
+            for node in &def.internal_graph.nodes {
+                if !node.type_id.starts_with("gpu_script::") {
+                    continue;
+                }
+                let Some(manifest) = extract_gpu_script_manifest(&node.type_id, &node.params)
+                else {
+                    continue;
+                };
+                if let Some(gpu_context) = self.gpu_context.clone() {
+                    if GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()).is_ok() {
+                        let manifest_for_factory = manifest.clone();
+                        let gpu_ctx = gpu_context.clone();
+                        let type_id = node.type_id.clone();
+                        let fallback_spec = manifest.to_node_spec().map_err(|err| {
+                            cnode::CnodeError::new(
+                                cnode::CnodeErrorKind::InvalidDefinition,
+                                "$.nodes",
+                                format!("Invalid GPU script manifest '{}': {err}", node.type_id),
+                            )
+                        })?;
+                        Arc::make_mut(&mut self.registry).register_or_replace(
+                            &type_id,
+                            move || match GpuKernelNode::from_manifest(
+                                manifest_for_factory.clone(),
+                                gpu_ctx.clone(),
+                            ) {
+                                Ok(node) => Arc::new(node) as Arc<dyn Node>,
+                                Err(_) => {
+                                    Arc::new(GpuScriptDraftNode::with_spec(fallback_spec.clone()))
+                                        as Arc<dyn Node>
+                                }
+                            },
+                        );
+                        self.kernel_manifests.insert(type_id, manifest);
+                        continue;
+                    }
+                }
+                register_gpu_script_draft(&mut self.registry, &node.type_id, &manifest).map_err(
+                    |err| {
+                        cnode::CnodeError::new(
+                            cnode::CnodeErrorKind::InvalidDefinition,
+                            "$.nodes",
+                            format!("Invalid GPU script manifest '{}': {err}", node.type_id),
+                        )
+                    },
+                )?;
+                self.kernel_manifests.insert(node.type_id.clone(), manifest);
+            }
+        }
+        Ok(())
     }
 
     pub fn register_group_definition_json(&mut self, json: &str) -> Result<NodeSpec, CascadeError> {
@@ -604,7 +661,7 @@ impl Engine {
                 }
             };
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("compnode") {
+            if path.extension().and_then(|e| e.to_str()) != Some(cnode::CNODE_EXTENSION) {
                 continue;
             }
             match fs::read_to_string(&path) {

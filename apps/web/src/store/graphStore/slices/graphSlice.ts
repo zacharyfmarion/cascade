@@ -1076,7 +1076,7 @@ export const createGraphSlice: StateCreator<
         const a = document.createElement('a');
         const name = groupDefId.replace(/^group::/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
         a.href = url;
-        a.download = `${name}.compnode`;
+        a.download = `${name}.cnode`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

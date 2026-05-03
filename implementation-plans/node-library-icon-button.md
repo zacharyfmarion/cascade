@@ -2,7 +2,7 @@
 
 ## Goal
 
-Replace the full-width "Import .compnode" button in the Node Library with a compact icon button to the right of the search field. Introduce Tailwind CSS v3 and Radix UI as the production styling foundation.
+Replace the full-width "Import .cnode" button in the Node Library with a compact icon button to the right of the search field. Introduce Tailwind CSS v3 and Radix UI as the production styling foundation.
 
 ## Approach
 

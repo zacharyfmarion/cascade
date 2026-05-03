@@ -557,6 +557,48 @@ describe('graphStore group editing state', () => {
     });
   });
 
+  it('exportGroupAsPackage downloads .cnode files', async () => {
+    Object.assign(mockEngine, {
+      exportGroupAsPackage: vi.fn(async () => ({
+        format_version: '1.0.0',
+        package_id: 'pkg',
+        nodes: [],
+      })),
+    });
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:cnode');
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const link = document.createElement('a');
+    const click = vi.spyOn(link, 'click').mockImplementation(() => {});
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link);
+
+    try {
+      await useGraphStore.getState().exportGroupAsPackage('group::My Node');
+      expect(link.download).toBe('My_Node.cnode');
+    } finally {
+      createElement.mockRestore();
+      click.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
+  it('importCustomNodes surfaces structured cnode failures', async () => {
+    Object.assign(mockEngine, {
+      importCustomNodes: vi.fn(async () => {
+        throw new Error('InvalidVersion at $.format_version: Missing cnode format_version');
+      }),
+    });
+
+    const imported = await useGraphStore.getState().importCustomNodes('{"nodes":[]}');
+
+    expect(imported).toEqual([]);
+    expect(useGraphStore.getState().lastError?.message).toContain('Missing cnode format_version');
+    expect(useGraphStore.getState().toasts[0]).toMatchObject({
+      kind: 'error',
+      title: 'Import failed',
+    });
+  });
+
   it('renaming a group node updates the DSL definition name', async () => {
     const store = useGraphStore.getState();
     const load = await store.addNode('load_image', { x: 0, y: 0 });

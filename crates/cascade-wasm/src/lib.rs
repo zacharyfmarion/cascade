@@ -26,7 +26,7 @@ use cascade_nodes_std::{
     GpuScriptDraftNode, GroupNode, LoadImage, LoadImageBatch, LoadImageSequence, SequenceInfo,
     Viewer,
 };
-use cascade_runtime::migrations;
+use cascade_runtime::{cnode, migrations};
 use cascade_runtime::{color_range_group, photo_adjust_group};
 use js_sys::Array;
 use serde::{Deserialize, Serialize};
@@ -456,46 +456,51 @@ impl Engine {
 
         let sanitized_nodes = collected
             .into_iter()
-            .map(|definition| sanitize_group_definition(&definition))
+            .map(|definition| cnode::sanitize_group_definition(&definition))
             .collect();
 
-        let package = NodePackage {
-            version: 2,
-            cascade_version: env!("CARGO_PKG_VERSION").to_string(),
-            exported_at: String::new(),
-            nodes: sanitized_nodes,
-        };
-        let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
-        package
-            .serialize(&serializer)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
+        let json =
+            cnode::export_package_json(sanitized_nodes, env!("CARGO_PKG_VERSION").to_string())
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        js_sys::JSON::parse(&json).map_err(|e| JsValue::from_str(&format!("{e:?}")))
     }
 
     pub fn import_custom_nodes(&mut self, package_js: JsValue) -> Result<JsValue, JsValue> {
-        let package: NodePackage = serde_wasm_bindgen::from_value(package_js)
-            .map_err(|e| JsValue::from_str(&format!("Invalid node package: {e}")))?;
+        let package_json = js_sys::JSON::stringify(&package_js)
+            .map_err(|e| JsValue::from_str(&format!("{e:?}")))?
+            .as_string()
+            .ok_or_else(|| JsValue::from_str("Invalid cnode package"))?;
+        let package = cnode::parse_package_json(&package_json)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-        let mut id_remap: HashMap<String, String> = HashMap::new();
-        let mut imported_specs: Vec<NodeSpec> = Vec::new();
+        let original_registry = self.registry.clone();
+        let original_group_definitions = self.group_definitions.clone();
+        let original_kernel_manifests = self.kernel_manifests.clone();
 
-        for mut def in package.nodes {
-            let original_id = def.id.clone();
-            let new_id = format!("group::imported_{}", Uuid::new_v4());
-            def.id = new_id.clone();
-            def.is_builtin = false;
-            id_remap.insert(original_id, new_id);
-
-            for node in &mut def.internal_graph.nodes {
-                if let Some(remapped) = id_remap.get(&node.type_id) {
-                    node.type_id = remapped.clone();
-                }
+        let result = (|| {
+            self.register_cnode_gpu_scripts(&package)?;
+            let prepared =
+                cnode::prepare_import(package, &self.registry, &self.group_definitions, || {
+                    format!("group::imported_{}", Uuid::new_v4())
+                })?;
+            let mut imported_specs: Vec<NodeSpec> = Vec::new();
+            for def in prepared.definitions {
+                imported_specs.push(self.register_group(def).map_err(|err| {
+                    cnode::CnodeError::new(cnode::CnodeErrorKind::InvalidDefinition, "$.nodes", err)
+                })?);
             }
+            Ok::<Vec<NodeSpec>, cnode::CnodeError>(imported_specs)
+        })();
 
-            let spec = self
-                .register_group(def)
-                .map_err(|e| JsValue::from_str(&e))?;
-            imported_specs.push(spec);
-        }
+        let imported_specs = match result {
+            Ok(specs) => specs,
+            Err(err) => {
+                self.registry = original_registry;
+                self.group_definitions = original_group_definitions;
+                self.kernel_manifests = original_kernel_manifests;
+                return Err(JsValue::from_str(&err.to_string()));
+            }
+        };
 
         let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
         imported_specs
@@ -519,6 +524,63 @@ impl Engine {
         let serializer = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
         spec.serialize(&serializer)
             .map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    fn register_cnode_gpu_scripts(
+        &mut self,
+        package: &NodePackage,
+    ) -> Result<(), cnode::CnodeError> {
+        for def in &package.nodes {
+            for node in &def.internal_graph.nodes {
+                if !node.type_id.starts_with("gpu_script::") {
+                    continue;
+                }
+                let Some(manifest) = extract_gpu_script_manifest(&node.type_id, &node.params)
+                else {
+                    continue;
+                };
+                if let Some(gpu_context) = self.gpu_context.clone() {
+                    if GpuKernelNode::from_manifest(manifest.clone(), gpu_context.clone()).is_ok() {
+                        let manifest_for_factory = manifest.clone();
+                        let gpu_ctx = gpu_context.clone();
+                        let type_id = node.type_id.clone();
+                        let fallback_spec = manifest.to_node_spec().map_err(|err| {
+                            cnode::CnodeError::new(
+                                cnode::CnodeErrorKind::InvalidDefinition,
+                                "$.nodes",
+                                format!("Invalid GPU script manifest '{}': {err}", node.type_id),
+                            )
+                        })?;
+                        Arc::make_mut(&mut self.registry).register_or_replace(
+                            &type_id,
+                            move || match GpuKernelNode::from_manifest(
+                                manifest_for_factory.clone(),
+                                gpu_ctx.clone(),
+                            ) {
+                                Ok(node) => Arc::new(node) as Arc<dyn Node>,
+                                Err(_) => {
+                                    Arc::new(GpuScriptDraftNode::with_spec(fallback_spec.clone()))
+                                        as Arc<dyn Node>
+                                }
+                            },
+                        );
+                        self.kernel_manifests.insert(type_id, manifest);
+                        continue;
+                    }
+                }
+                register_gpu_script_draft(&mut self.registry, &node.type_id, &manifest).map_err(
+                    |err| {
+                        cnode::CnodeError::new(
+                            cnode::CnodeErrorKind::InvalidDefinition,
+                            "$.nodes",
+                            format!("Invalid GPU script manifest '{}': {err}", node.type_id),
+                        )
+                    },
+                )?;
+                self.kernel_manifests.insert(node.type_id.clone(), manifest);
+            }
+        }
+        Ok(())
     }
 
     pub fn add_node(&mut self, type_id: &str, x: f64, y: f64) -> Result<JsValue, JsValue> {
@@ -1561,7 +1623,7 @@ impl Engine {
             .group_definitions
             .values()
             .filter(|def| !def.is_builtin)
-            .map(|def| sanitize_group_definition(def))
+            .map(|def| cnode::sanitize_group_definition(def))
             .collect();
         let graph = SerializableGraph {
             nodes,
@@ -3455,21 +3517,6 @@ fn strip_internal_params(params: &HashMap<String, ParamValue>) -> HashMap<String
         .filter(|(key, _)| key.as_str() == GPU_SCRIPT_MANIFEST_PARAM_KEY || !key.starts_with("__"))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
-}
-
-fn sanitize_group_definition(definition: &GroupDefinition) -> GroupDefinition {
-    let mut sanitized = definition.clone();
-    sanitized.internal_graph.nodes = sanitized
-        .internal_graph
-        .nodes
-        .iter()
-        .map(|node| {
-            let mut node = node.clone();
-            node.params = strip_internal_params(&node.params);
-            node
-        })
-        .collect();
-    sanitized
 }
 
 #[derive(Serialize, Deserialize)]
