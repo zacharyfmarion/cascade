@@ -16,6 +16,7 @@ Thanks for considering a contribution.
 - Node.js 22+
 - `wasm-pack`
 - Nightly Rust plus `rust-src` for threaded WASM builds
+- Optional native dependencies for desktop/color/video workflows as needed by the crate you are touching
 
 ### Install Dependencies
 
@@ -58,6 +59,8 @@ cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
+
+Some CI jobs exclude system-dependent desktop and color-management crates that are not available on GitHub-hosted Linux runners. If you are touching those areas, run the relevant local checks on a machine with the needed native dependencies installed.
 
 ## Pull Requests
 

@@ -65,15 +65,16 @@ const result = useGraphStore(s => s.renderResults.get(props.id));
 
 ```tsx
 export interface EngineBridge {
-  renderViewer(viewerNodeId: string, frame: number): 
+  renderViewer(viewerNodeId: string, frame: number, previewScale?: number):
     Promise<ViewerResult | null> | ViewerResult | null;
-  setParamAndRender?(nodeId: string, key: string, value: ParamValue, frame: number): 
-    Promise<Map<string, ViewerResult>>;  // Desktop only (Tauri)
+  setAndRender?(mutation: { type: 'param' | 'inputDefault'; nodeId: string; key: string; value: ParamValue }, frame: number, previewScale?: number):
+    Promise<Array<[string, ViewerResult]>>;
   // ... 30+ other methods
 }
 
 export type ViewerResult = 
   | { type: 'image' | 'mask' | 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number }
+  | { type: 'compare'; nodeId: string; width: number; height: number; beforePixels: Uint8ClampedArray; afterPixels: Uint8ClampedArray; previewScale?: number }
   | { type: 'float' | 'int'; nodeId: string; value: number }
   | { type: 'bool'; nodeId: string; value: boolean }
   | { type: 'color'; nodeId: string; value: [number, number, number, number] }
@@ -86,7 +87,7 @@ export type ViewerResult =
 **Location:** `apps/web/src/engine/wasmEngine.ts:239–303`
 
 ```tsx
-renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | null> {
+renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
   return this.scheduler.enqueue(async (): Promise<ViewerResult | null> => {
     const raw = await this.getEngine().render_viewer(viewerNodeId, BigInt(frame));
     
@@ -154,19 +155,19 @@ async renderViewer(viewerNodeId: string, frame: number): Promise<ViewerResult | 
 - Only returns **image results** (desktop app always renders as image)
 - Scalar types are only available in WASM (Tauri always downconverts)
 
-**setParamAndRender (Tauri Desktop Only):**
+**setAndRender (Combined Mutation/Render):**
 ```tsx
-async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: number): 
-  Promise<Map<string, ViewerResult>> {
+async setAndRender(mutation, frame: number, previewScale?: number):
+  Promise<Array<[string, ViewerResult]>> {
   const buf = await invoke<ArrayBuffer>('set_param_and_render', ...);
   // Returns multi-result buffer: [count: u32][id_len][id_bytes][width][height][pixels]...
   // Parses all viewer outputs from the single IPC call
   return resultsMap;
 }
 ```
-- **Desktop-specific optimization**: Set param AND render all viewers in one IPC call
-- Returns `Map<viewerId, ViewerResult>` (batch update)
-- Used only in `setParamLive()` for interactive slider feedback
+- Combines the mutation and affected viewer renders when the active bridge supports it
+- Returns viewer result entries for batch update
+- Used by the live param/input-default controller for interactive feedback
 
 ---
 
@@ -178,10 +179,10 @@ async setParamAndRender(nodeId: string, key: string, value: ParamValue, frame: n
 ```
 User changes param slider
   ↓
-setParamLive(nodeId, key, value)  [graphStore.ts:951]
+setParamLive(nodeId, key, value)  [graphStore/paramController.ts]
   ↓
-If Tauri: setParamAndRender() returns Map → direct setState
-If WASM:  Schedule pendingLiveRender via requestAnimationFrame
+If bridge supports it: setAndRender() returns viewer entries → direct setState
+Otherwise: schedule mutation + affected viewer renders
   ↓
 downscaleRenderResult(result, liveScale)  // Apply preview scaling
   ↓
@@ -194,8 +195,8 @@ useEffect([activeResult]) re-renders canvas
 
 **Two-Phase Pattern:**
 1. **Live render** (`setParamLive`): Uses `livePreviewScale` (0.25x) for responsiveness
-   - Desktop: `setParamAndRender` (batch IPC)
-   - Web: `requestAnimationFrame` debounce + `setParamAndRender` if available
+   - Worker/Tauri: `setAndRender` can batch mutation and render
+   - Direct WASM fallback: separate mutation and render calls
 2. **Commit** (`setParamCommit`): Finishes param interaction, returns to full scale
 
 **Debouncing:**
@@ -392,11 +393,11 @@ triggerRender: (viewerNodeId) => {
 
 ### Live Render Generation Tracking
 
-**Desktop-specific (`setParamAndRender`):**
+**Combined mutation/render (`setAndRender`):**
 ```tsx
 const renderGeneration = ++liveRenderGeneration;
 pendingLiveRender = () => {
-  eng.setParamAndRender!(nodeId, key, value, frame).then(async results => {
+  eng.setAndRender!(mutation, frame, previewScale).then(async results => {
     if (renderGeneration !== liveRenderGeneration) return;  // Stale check
     set({ renderResults: newResults });
   });
@@ -533,12 +534,11 @@ const downscaleRenderResult = async (result: ViewerResult, scale: number): Promi
 | **Trigger Sources** | Param change, frame change, connection change, explicit `triggerRender()` |
 | **Render Call** | `EngineBridge.renderViewer(viewerId, frame)` |
 | **WASM** | Sync engine wrapped in Promise, serialized via EngineScheduler |
-| **Tauri** | Async IPC, single `set_param_and_render` for batch updates |
+| **Tauri** | Async IPC, `setAndRender` bridge method for batch updates |
 | **State Storage** | `renderResults: Map<viewerId, ViewerResult>` in Zustand |
 | **Preview Scaling** | `livePreviewScale` (0.25x) during interaction, full scale after 5s idle |
 | **Stale Prevention** | Generation counter + conditional update |
 | **Serialization** | Render lock ensures sequential engine calls |
 | **Downsampling** | Canvas bilinear filter, applied to every render result |
 | **Error Handling** | Caught, parsed to `EngineError`, displayed in UI |
-| **Batching** | `renderAllViewersAsync()` for frame changes, `setParamAndRender` on desktop |
-
+| **Batching** | `renderAllViewersAsync()` for frame changes, `setAndRender` for combined mutation/render paths |

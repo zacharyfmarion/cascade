@@ -38,7 +38,7 @@ Sequence diagrams and architecture flowcharts for key scenarios.
 - **Sequence 1:** Param Change → Live Render (most common path)
 - **Sequence 2:** Frame Navigation (playback/scrubbing)
 - **Sequence 3:** Graph Edit (connect/disconnect nodes)
-- **Sequence 4:** Desktop "setParamAndRender" Optimization
+- **Sequence 4:** Combined mutation/render optimization
 - **Sequence 5:** Stale Render Prevention (generation tracking)
 - **Sequence 6:** Render Suspension (undo/group operations)
 - Data Structure: ViewerResult Union Type
@@ -93,7 +93,7 @@ const result = useGraphStore(s => s.renderResults.get(props.id));
 
 | Trigger | Code Path | Result |
 |---------|-----------|--------|
-| Param change | `setParamLive()` → `setParamAndRender()` | Live preview at 0.25x, then full quality after 5s idle |
+| Param change | `setParamLive()` → `setAndRender()` when available, otherwise `setParam()` + render | Live preview, then full quality after idle |
 | Frame change | `setCurrentFrame()` → `renderAllViewersAsync()` | All viewers render at current preview scale |
 | Graph edit | `connect()`/`disconnect()` → `triggerAllViewers()` | All viewers re-render |
 | Explicit call | `triggerRender(viewerId)` | Single viewer renders |
@@ -102,18 +102,19 @@ const result = useGraphStore(s => s.renderResults.get(props.id));
 
 | Method | WASM | Tauri |
 |--------|------|-------|
-| `renderViewer(viewerId, frame)` | Serialized via EngineScheduler, returns Promise | IPC call, returns Promise |
-| `setParamAndRender(nodeId, key, value, frame)` | Not implemented (web fallback: setParam + triggerRender) | IPC call, batch renders, returns Map |
-| `setParam(nodeId, key, value)` | Scheduler.enqueue() | IPC call |
-| Performance | 2 calls per param change | 1 call via setParamAndRender |
+| `renderViewer(viewerId, frame, previewScale)` | Worker/direct WASM call, returns Promise | IPC call, returns Promise |
+| `setAndRender(mutation, frame, previewScale)` | Worker-backed WASM can combine mutation and render; direct WASM can fall back to separate calls | IPC call, batch renders, returns entries |
+| `setParam(nodeId, key, value)` | Worker/direct WASM bridge call | IPC call |
+| Performance | Worker path can combine mutation and render | Desktop path combines mutation and render over IPC |
 
 ### State Management
 
 ```tsx
 // Zustand store fields (renderResults map)
 renderResults: Map<viewerId, ViewerResult>
-  ├─ Type: 'image' | 'mask' | 'field' | 'float' | 'int' | 'bool' | 'color' | 'string' | 'none'
+  ├─ Type: 'image' | 'mask' | 'field' | 'compare' | 'float' | 'int' | 'bool' | 'color' | 'string' | 'none'
   ├─ For pixels: width, height, pixels (Uint8ClampedArray)
+  ├─ For compare: width, height, beforePixels, afterPixels
   ├─ For scalars: value (typed)
   └─ Metadata: previewScale (current downscale factor)
 
@@ -203,11 +204,19 @@ apps/web/src/
 │       └── ViewerNode.tsx         (Inline viewer node)
 │
 ├── store/
-│   ├── graphStore.ts             (Zustand store, main logic)
-│   └── types.ts                  (ViewerResult type definitions)
+│   ├── graphStore.ts             (Public store re-export)
+│   ├── types.ts                  (ViewerResult type definitions)
+│   └── graphStore/
+│       ├── store.ts              (Composed Zustand store surface)
+│       ├── kernel.ts             (Engine/runtime helpers and render generations)
+│       ├── paramController.ts    (Live/commit parameter controller)
+│       └── slices/renderSlice.ts (Viewer render orchestration)
 │
 └── engine/
     ├── bridge.ts                 (EngineBridge interface)
+    ├── workerEngine.ts           (Worker-backed WASM wrapper)
+    ├── engineWorker.ts           (WASM worker implementation)
+    ├── viewerResult.ts           (ViewerResult utilities)
     ├── wasmEngine.ts             (WASM implementation)
     ├── tauriEngine.ts            (Tauri IPC implementation)
     ├── engineError.ts            (Error parsing & handling)
@@ -223,12 +232,12 @@ apps/web/src/
 1. Add case to `ViewerResult` union in `apps/web/src/store/types.ts`
 2. Update `isPixelResult()` if needed (for pixel detection)
 3. Add rendering logic in `Viewer.tsx` ScalarViewer component
-4. Update WASM bridge (`wasmEngine.ts`) to parse new type
-5. Update Tauri bridge if needed
+4. Update `apps/web/src/engine/viewerResult.ts` if shared parsing/downscaling logic needs the new type
+5. Update WASM and Tauri bridge parsing if the engine payload changes
 
 ### Q: Why do I see jagged previews when dragging sliders?
 **A:**
-Preview scaling uses canvas bilinear filtering, but very low scales (0.1x) can still look blocky. This is expected. Full-resolution render appears after 5 seconds idle.
+Preview scaling renders fewer pixels during interaction, so very low scales can look blocky. This is expected. Full-resolution render appears after the idle commit.
 
 ### Q: Why don't multiple viewers update independently?
 **A:**
@@ -245,13 +254,9 @@ console.log(renderGenerations.get(viewerId));  // Should increment each trigger
 ```
 If `triggerRender()` is called but generation doesn't increment, check if `renderSuspendCount > 0` (render is suspended).
 
-### Q: Why are renders serialized via renderLock?
+### Q: Why are stale renders ignored?
 **A:**
-Two reasons:
-1. **WASM:** RefCell panic if nested mutable borrows (FIFO scheduler prevents it)
-2. **General:** Predictable execution order, easier to reason about state mutations
-
-Parallel renders would be faster but harder to debug and maintain.
+Viewer render generations are incremented before each render. If an older render finishes after a newer generation has started, its result is discarded instead of overwriting current output.
 
 ### Q: How do I force a full-quality render immediately?
 **A:**
@@ -272,14 +277,14 @@ Not directly. Renders are queued in `renderLock` promise chain. The generation c
 2. **Batch Edits:** Wrap in `editTransaction()` to suspend renders
 3. **Multiple Viewers:** Use selector per viewer, not entire `renderResults` map
 4. **Export/Batch:** Always render at `previewScale: 1`, never export preview
-5. **Desktop App:** Uses `setParamAndRender` (1 IPC) not separate calls (2+ IPC)
+5. **Combined Mutation/Render:** Prefer `setAndRender` when the active bridge supports it
 
 ---
 
 ## References
 
 - **Main Graph Engine:** `crates/cascade-core/src/lib.rs`
-- **Render Evaluation:** `crates/cascade-core/src/evaluator.rs`
+- **Render Evaluation:** `crates/cascade-core/src/eval.rs`
 - **Viewer Node Spec:** `crates/cascade-nodes-std/src/output.rs` → Viewer node definition
 - **WASM Bridge:** `crates/cascade-wasm/src/lib.rs`
 - **Tauri Backend:** `apps/tauri/src-tauri/src/engine.rs`
@@ -292,4 +297,3 @@ Not directly. Renders are queued in `renderLock` promise chain. The generation c
 - 📊 **VIEWER_RENDERING_FLOW_DIAGRAMS.md** - Visual sequences and flows
 - 🎯 **VIEWER_RENDERING_PATTERNS.md** - Design patterns and rationale
 - 📄 **This file** - Quick reference and navigation
-

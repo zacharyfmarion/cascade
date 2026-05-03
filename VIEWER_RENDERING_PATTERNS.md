@@ -195,7 +195,7 @@ setParamLive: (nodeId, key, value) => {
   
   // Schedule render, don't execute yet
   pendingLiveRender = () => {
-    eng.setParamAndRender(nodeId, key, value, frame);
+    eng.setAndRender?.({ type: 'param', nodeId, key, value }, frame, previewScale);
   };
   
   // Coalesce into next frame
@@ -441,11 +441,11 @@ updateNodeTimings: () => {
 - Downsampling is applied to each viewer independently
 - After idle, all viewers re-render at 1.0x
 
-### C. Tauri Desktop Has Optimization Web Doesn't
-- `setParamAndRender`: Set param + render all viewers in 1 IPC
-- Web WASM: `setParam` (no render), then separate `triggerRender` calls
-- Desktop is ~2x faster for interactive param changes
-- Web/WASM uses requestAnimationFrame debounce to compensate
+### C. Combined Mutation/Render Is Bridge-Dependent
+- `setAndRender`: Set a param/input default and render affected viewers in one bridge call
+- Worker-backed WASM and Tauri support the combined path
+- Direct WASM can fall back to separate mutation and `triggerRender` calls
+- Live updates still use requestAnimationFrame/coalescing to avoid rendering every pointer event
 
 ### D. Errors Are Per-Node or Global
 - `nodeErrors: Map<nodeId, EngineError>`: Node-specific errors (used for highlighting)
@@ -464,11 +464,11 @@ updateNodeTimings: () => {
 
 | Operation | WASM | Tauri |
 |-----------|------|-------|
-| `setParam` + `renderViewer` | 2 calls (sequential) | 1 call via `setParamAndRender` |
+| `setParam` + `renderViewer` | Separate calls when `setAndRender` is unavailable | 1 bridge call via `setAndRender` |
 | Interactive latency | ~16-33ms (rAF debounce) | ~5-10ms (direct IPC) |
 | Preview scale | User-configurable (default 0.25) | Same |
 | Idle full-render | 5s timeout | Same |
-| Multi-viewer batch | renderAllViewersAsync (lock queue) | `setParamAndRender` returns all |
+| Multi-viewer batch | `renderAllViewersAsync()` for frame-wide updates | `setAndRender` returns viewer entries for live edits |
 | FIFO Scheduling | EngineScheduler + renderLock | renderLock only (no RefCell) |
 
 ---
@@ -526,5 +526,4 @@ set({ renderResults: newResults })  // newResults is entirely new Map
 7. **Canvas bilinear downsampling** provides smooth preview
 8. **Error suppression** for expected conditions (MISSING_INPUT)
 9. **Node timings** extracted per render, preserved across cached renders
-10. **Desktop optimization** (setParamAndRender) reduces interactive latency by 2x
-
+10. **Combined mutation/render** (`setAndRender`) reduces interactive bridge overhead
