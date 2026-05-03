@@ -5,7 +5,24 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { NodeInstance } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { NodeCanvas } from '../NodeCanvas';
+
+const FIRST_TIME_EMPTY_STATE_TITLES = [
+  "Welcome! Let's get you started.",
+  'Ready to build your first graph?',
+  'Start your first Cascade graph.',
+  'Create your first image workflow.',
+  'New project, clean canvas.',
+];
+
+const RETURNING_EMPTY_STATE_TITLES = [
+  'Welcome back.',
+  'Ready for another graph?',
+  'Pick up with a fresh canvas.',
+  'Start your next image workflow.',
+  'Your node editor is ready.',
+];
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({ children }: { children: React.ReactNode }) => React.createElement('div', { 'data-testid': 'react-flow' }, children),
@@ -40,10 +57,12 @@ const resetCanvasState = () => {
     editingStack: [{ id: 'root', label: 'Root' }],
     fitViewRequestId: 0,
   });
+  useSettingsStore.setState({ isAiAssistantOpen: false });
 };
 
 describe('NodeCanvas examples CTA', () => {
   beforeEach(() => {
+    localStorage.clear();
     resetCanvasState();
   });
 
@@ -55,8 +74,18 @@ describe('NodeCanvas examples CTA', () => {
     render(React.createElement(NodeCanvas));
 
     expect(screen.getByTestId('empty-node-editor-cta')).toBeTruthy();
-    expect(screen.getByText('Want a starting point? Browse examples.')).toBeTruthy();
+    expect(FIRST_TIME_EMPTY_STATE_TITLES.some(title => screen.queryByText(title))).toBe(true);
+    expect(screen.getByText('Browse a ready-made workflow or ask AI to build the first node setup for you.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Browse Examples' }).className).toContain('ui-button--primary');
+    expect(screen.getByRole('button', { name: 'Ask AI' }).className).toContain('ui-button--secondary');
+  });
+
+  it('uses returning-user title copy when Cascade has saved browser state', () => {
+    localStorage.setItem('cascade-layout', JSON.stringify({ grid: true }));
+
+    render(React.createElement(NodeCanvas));
+
+    expect(RETURNING_EMPTY_STATE_TITLES.some(title => screen.queryByText(title))).toBe(true);
   });
 
   it('focuses the examples panel from the CTA button', () => {
@@ -67,6 +96,13 @@ describe('NodeCanvas examples CTA', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Browse Examples' }));
 
     expect(focusExamplesPanel).toHaveBeenCalled();
+  });
+
+  it('opens the AI assistant from the secondary CTA button', () => {
+    render(React.createElement(NodeCanvas));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask AI' }));
+
+    expect(useSettingsStore.getState().isAiAssistantOpen).toBe(true);
   });
 
   it('hides the examples CTA once the graph has nodes', () => {
@@ -84,6 +120,21 @@ describe('NodeCanvas examples CTA', () => {
     });
 
     render(React.createElement(NodeCanvas));
+
+    expect(screen.queryByTestId('empty-node-editor-cta')).toBeNull();
+  });
+
+  it('hides the empty state while files are dragged over the node editor', () => {
+    render(React.createElement(NodeCanvas));
+
+    expect(screen.getByTestId('empty-node-editor-cta')).toBeTruthy();
+
+    fireEvent.dragOver(screen.getByLabelText('Node Graph Canvas'), {
+      dataTransfer: {
+        types: ['Files'],
+        dropEffect: 'copy',
+      },
+    });
 
     expect(screen.queryByTestId('empty-node-editor-cta')).toBeNull();
   });
