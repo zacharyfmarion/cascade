@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { BookOpen, Sparkles, Workflow } from 'lucide-react';
 import {
   ReactFlow,
   Background,
@@ -80,6 +81,45 @@ const PORT_COLORS: Record<string, string> = {
 
  const DEFAULT_EDGE_COLOR = 'var(--text-muted)';
 
+const FIRST_TIME_EMPTY_STATE_TITLES = [
+  "Welcome! Let's get you started.",
+  'Ready to build your first graph?',
+  'Start your first Cascade graph.',
+  'Create your first image workflow.',
+  'New project, clean canvas.',
+];
+
+const RETURNING_EMPTY_STATE_TITLES = [
+  'Welcome back.',
+  'Ready for another graph?',
+  'Pick up with a fresh canvas.',
+  'Start your next image workflow.',
+  'Your node editor is ready.',
+];
+
+const RETURNING_USER_STORAGE_KEYS = [
+  'cascade-settings',
+  'cascade-layout',
+  'cascade-layout-version',
+  'cascade-theme',
+];
+
+const hasSavedCascadeState = (): boolean => {
+  try {
+    return RETURNING_USER_STORAGE_KEYS.some(key => localStorage.getItem(key) !== null);
+  } catch {
+    return false;
+  }
+};
+
+const randomItem = (items: string[]): string => (
+  items[Math.floor(Math.random() * items.length)] ?? items[0]
+);
+
+const getEmptyStateTitle = (): string => (
+  randomItem(hasSavedCascadeState() ? RETURNING_EMPTY_STATE_TITLES : FIRST_TIME_EMPTY_STATE_TITLES)
+);
+
 const getGpuScriptSpecFromNode = (node: NodeInstance): NodeSpec | undefined => {
   if (!node.typeId.startsWith('gpu_script::')) return undefined;
   const manifestValue = node.params.__script_manifest;
@@ -145,8 +185,12 @@ export const NodeCanvas: React.FC = () => {
   const dslShadow = useGraphStore(s => s.dslShadow);
   const isRootGraph = useGraphStore(s => s.editingStack.length === 1);
   const focusExamplesPanel = useLayoutStore(s => s.focusExamplesPanel);
+  const openAiAssistant = useSettingsStore(s => s.openAiAssistant);
   const { screenToFlowPosition, getNodes, getEdges, fitView } = useReactFlow();
-  const showExamplesCta = isRootGraph && nodesStore.size === 0 && framesStore.size === 0;
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const dragLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emptyStateTitle = useMemo(() => getEmptyStateTitle(), []);
+  const showExamplesCta = isRootGraph && nodesStore.size === 0 && framesStore.size === 0 && !isDraggingFile;
 
   const nodeTypes = useMemo((): NodeTypes => {
     const types: NodeTypes = { ...SPECIAL_NODE_TYPES };
@@ -809,9 +853,6 @@ export const NodeCanvas: React.FC = () => {
     edgeReconnectSuccessful.current = true;
   }, [storeDisconnect]);
 
-  const [isDraggingFile, setIsDraggingFile] = useState(false);
-  const dragLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const onDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     // Show 'copy' cursor for image file drops, 'move' for node library drags
@@ -1230,29 +1271,70 @@ export const NodeCanvas: React.FC = () => {
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            gap: '10px',
-            width: 'min(320px, calc(100% - 48px))',
-            padding: '16px',
-            border: '1px solid var(--border-default)',
-            borderRadius: '8px',
-            background: 'var(--bg-secondary)',
-            boxShadow: '0 8px 32px var(--shadow-contextMenu)',
+            width: 'min(440px, calc(100% - 48px))',
+            padding: '24px',
+            pointerEvents: 'auto',
           }}
         >
-          <p
+          <div
+            aria-hidden="true"
+            style={{
+              display: 'grid',
+              placeItems: 'center',
+              width: '64px',
+              height: '64px',
+              marginBottom: '18px',
+              border: '1px solid var(--border-default)',
+              borderRadius: '8px',
+              color: 'var(--accent-primary)',
+              background: 'var(--bg-secondary)',
+              boxShadow: '0 8px 32px var(--shadow-contextMenu)',
+            }}
+          >
+            <Workflow size={32} strokeWidth={1.6} />
+          </div>
+          <h2
             style={{
               margin: 0,
-              color: 'var(--text-secondary)',
-              fontSize: '0.9rem',
-              lineHeight: 1.4,
+              color: 'var(--text-primary)',
+              fontSize: '1.2rem',
+              fontWeight: 700,
+              lineHeight: 1.25,
               textAlign: 'center',
             }}
           >
-            Want a starting point? Browse examples.
+            {emptyStateTitle}
+          </h2>
+          <p
+            style={{
+              margin: '8px 0 18px',
+              color: 'var(--text-secondary)',
+              fontSize: '0.92rem',
+              lineHeight: 1.4,
+              textAlign: 'center',
+              maxWidth: '360px',
+            }}
+          >
+            Browse a ready-made workflow or ask AI to build the first node setup for you.
           </p>
-          <Button size="md" variant="primary" onClick={focusExamplesPanel}>
-            Browse Examples
-          </Button>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <Button size="md" variant="primary" onClick={focusExamplesPanel}>
+              <BookOpen size={14} aria-hidden="true" />
+              Browse Examples
+            </Button>
+            <Button size="md" variant="secondary" onClick={openAiAssistant}>
+              <Sparkles size={14} aria-hidden="true" />
+              Ask AI
+            </Button>
+          </div>
         </div>
       )}
 
