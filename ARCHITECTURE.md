@@ -1,255 +1,153 @@
 # Architecture
 
-## 1. Overview
-- Node-based image processing application inspired by Nuke/Blender processor
-- Rust core compiled to WASM for browser, will also compile native for Tauri desktop
-- Goal: blazing-fast compositing with AI-powered nodes in the future
+Cascade is a node-based image processing application. The shared Rust engine owns graph validation, evaluation, image processing, color management, GPU kernels, and native runtime behavior. The web app renders the editor UI with React and talks to the engine through WebAssembly; the desktop app wraps the same UI in Tauri and talks to the native runtime over IPC.
 
-## 2. Project Structure
-```
-cascade/
-├── Cargo.toml                    # Workspace: 3 crates
-├── .cargo/config.toml            # getrandom_backend="wasm_js" for WASM target
-├── crates/
-│   ├── cascade-core/          # Graph, evaluator, node trait, types
-│   ├── cascade-nodes-std/     # 6 built-in nodes
-│   └── cascade-wasm/          # wasm-bindgen bridge
-├── Cargo.toml                    # Workspace: 3 crates
-├── .cargo/config.toml            # getrandom_backend="wasm_js" for WASM target
-├── crates/
-│   ├── cascade-core/          # Graph, evaluator, node trait, types
-│   ├── cascade-nodes-std/     # 6 built-in nodes
-│   └── cascade-wasm/          # wasm-bindgen bridge
-├── apps/
-│   └── web/                      # React + Vite frontend
-│       ├── src/
-│       │   ├── components/       # React components
-│       │   ├── engine/           # WASM bridge layer
-│       │   ├── store/            # Zustand state management
-│       │   └── wasm-pkg/         # wasm-pack build output
-│       └── public/test-image.png
-└── tests/                        # Integration tests
+## Project Structure
+
+```text
+crates/
+  cascade-core/       Graph model, evaluator, node trait, type system, image domain model
+  cascade-nodes-std/  Built-in CPU node implementations and benchmarks
+  cascade-gpu/        wgpu compute pipeline, GLSL kernel manifests, kernel-node support
+  cascade-ocio/       OpenColorIO integration for display/view transforms
+  cascade-ocio-sys/   OpenColorIO FFI bindings with generated stubs when OCIO is absent
+  cascade-video/      Video I/O support; currently kept outside workspace membership
+  cascade-wasm/       wasm-bindgen bridge exposing the engine to the web app
+  cascade-runtime/    Native runtime engine used by Tauri and CLI-style workflows
+apps/
+  web/                React 19 + Vite + @xyflow/react + Zustand frontend
+  tauri/              Tauri v2 desktop shell
 ```
 
-## 3. Core Architecture (Rust)
+The Cargo workspace includes the core, GPU, standard-node, WASM, runtime, OCIO, and Tauri crates. `crates/cascade-video` exists in the repository but is excluded from workspace membership; video support is pulled through runtime features where needed.
 
-### Image Format
-- Internal format: f32 RGBA linear color space
-- `Image { width: u32, height: u32, data: Arc<Vec<f32>> }`
-- `Arc` enables cheap cloning through the graph — images are immutable once created
-- All processing happens in linear color space for physical accuracy
-- Color pipeline: sRGB u8 (file) → linear f32 (on load via sRGB transfer function) → processing → linear f32 → sRGB u8 (on display via inverse transfer function)
-- f16 is used only at GPU I/O boundaries (`to_f16_bytes()` / `from_f16_data()`) for wgpu texture upload/readback
+## Core Engine
 
-### Graph (graph.rs)
-- `NodeId`: SlotMap key type — stable handles that survive deletions
-- `NodeInstance`: id, type_id, params (HashMap<String, ParamValue>), position, param_revision (u64)
-- `Connection`: from_node/port → to_node/port
-- `Graph`: SlotMap<NodeId, NodeInstance> + Vec<Connection> + dirty_nodes HashSet
-- Cycle detection via has_path() DFS before adding connections
-- Type checking on connect: output port type must match input port type
-- Single-input constraint: connecting to an already-connected input replaces the old connection
-- Dirty propagation: setting a param marks that node + all downstream nodes dirty
+### Image Model
 
-### Evaluator (eval.rs)
-- Pull-based: evaluation starts from a viewer node and pulls upstream
-- Postorder DFS traversal: visit_postorder walks inputs recursively, pushes to order list
-- Nodes processed in topological order (sources first, viewers last)
-- Per-output caching with CacheKey { frame_time, param_revision, upstream_hash }
-  - frame_time: for future animation/sequence support
-  - param_revision: u64 counter incremented on each param change
-  - upstream_hash: AHash of all upstream CacheKeys (recursive content-based)
-- Cache hit: skipped if node is NOT dirty AND all output CacheKeys match
-- Cache miss: evaluates node, stores results in cache HashMap<(NodeId, String), (CacheKey, Value)>
-- After evaluation, clears dirty flag on node
-- merge_params: merges instance params with spec defaults (instance params override)
+Pixel processing uses linear `f32` RGBA. sRGB conversion happens at load/display boundaries, and `f16` is used only for GPU I/O (`to_f16_bytes()` / `from_f16_data()`). `Image` stores:
 
-### Node Trait (node.rs)
+- `width` and `height` for the dense pixel buffer
+- `data: Arc<Vec<f32>>` for cheap immutable sharing
+- `color_space`
+- `format`, the display canvas
+- `data_window`, the half-open integer domain containing actual pixels
+
+Images can be smaller, larger, or offset relative to the project format. Sampling outside `data_window` returns transparent black, which lets compositing and transforms operate in a shared coordinate space.
+
+### Graph
+
+`Graph` uses SlotMap-backed `NodeId` handles, `NodeInstance` records, typed connections, and downstream dirty propagation. Connection validation checks port existence, type compatibility, cycle prevention, and the single-input rule. Dynamic node interfaces are supported through instance-aware specs.
+
+### Node Trait
+
+Every node implements `cascade_core::node::Node`:
+
 ```rust
 pub trait Node: Send + Sync + Any {
     fn spec(&self) -> NodeSpec;
-    fn evaluate(&self, ctx: &EvalContext) -> Result<HashMap<String, Value>, CascadeError>;
+    fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a>;
+    fn requested_frames(
+        &self,
+        _current_frame: FrameTime,
+        _params: &HashMap<String, ParamValue>,
+    ) -> Vec<(String, FrameTime)> {
+        Vec::new()
+    }
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
 ```
-- `EvalContext`: provides inputs (HashMap<String, Value>), params (&HashMap<String, ParamValue>), frame_time
-- Helper methods: get_input_image(), get_param_float(), get_param_int(), get_param_bool(), get_param_string()
-- `NodeRegistry`: HashMap of factory functions (Fn() -> Box<dyn Node>) + cached specs
-- register() creates one instance to capture spec, then stores factory
 
-### Type System (types.rs)
-- `ValueType` enum: Image, Mask, Float, Int, Bool, Color
-- `Value` enum: the actual runtime values flowing through connections
-- `ParamSpec`: key, label, type, default, min/max/step, UiHint
-- `UiHint` enum: Slider, NumberInput, Checkbox, ColorPicker, Dropdown(Vec<String>), FilePicker, Hidden
-- `NodeSpec`: id, display_name, category, description, inputs/outputs (Vec<PortSpec>), params (Vec<ParamSpec>)
-  - This is the self-describing metadata that drives the UI — nodes declare their own UI requirements
+Node instances and registry factories use `Arc<dyn Node>`, allowing cheap cloning for background renders and runtime registration. `EvalContext` carries normal inputs, extra frame inputs, params, frame time, color management, optional AI provider, project format, optional AI cached outputs, and preview scale.
 
-### Error Handling (error.rs)
-- `CascadeError` enum with thiserror derive
-- Variants: NodeNotFound, MissingInput, MissingParam, TypeMismatch, CycleDetected, InvalidConnection, ImageDecode, PortNotFound, Other
+### Type System
 
-## 4. Standard Nodes (cascade-nodes-std)
+`ValueType` includes `Image`, `Mask`, `Float`, `Int`, `Bool`, `Color`, `Field`, `String`, `Any`, and `Bytes`. Runtime `Value` variants include image, scalar, field, string, none, and bytes. Masks are represented by normal image values with mask-typed ports for UI and connection semantics.
 
-6 nodes registered via `register_standard_nodes()`:
+`NodeSpec`, `PortSpec`, `ParamSpec`, `ParamDefault`, and `UiHint` describe node interfaces and drive frontend controls. UI hints include sliders, numeric inputs, checkboxes, color pickers, dropdowns, file pickers, color ramps, palettes, text areas, curve editors, and hidden params.
 
-| Node | Category | Inputs | Outputs | Params | Notes |
-|------|----------|--------|---------|--------|-------|
-| LoadImage | Input | — | image (Image) | image_data (Hidden) | Mutex-wrapped state; set_image_data() decodes PNG/JPEG/BMP/WebP via `image` crate, converts sRGB u8 → linear f32 |
-| Viewer | Output | image (Image) | display (Image) | — | Passthrough; image_to_rgba8() converts linear f32 → sRGB u8 for display |
-| BrightnessContrast | Color | image (Image) | image (Image) | brightness [-1,1], contrast [-1,1] | Per-pixel: v = (v - 0.5) * (1 + contrast) + 0.5 + brightness, clamped |
-| HueSaturation | Color | image (Image) | image (Image) | hue [-180°,180°], saturation [-1,1], value [-1,1] | RGB→HSL, shift hue/sat/lightness, HSL→RGB |
-| Invert | Color | image (Image) | image (Image) | — | Per-channel: 1.0 - value (alpha preserved) |
-| GaussianBlur | Filter | image (Image) | image (Image) | sigma [0.1, 100] | Separable 2-pass (horizontal then vertical), kernel radius = ceil(3σ), edge clamping |
+### Evaluation
 
-### Adding a Custom Node
-1. Create a struct implementing the `Node` trait
-2. Define `spec()` with inputs, outputs, params, and UI hints
-3. Implement `evaluate()` — read inputs via EvalContext, write outputs to HashMap
-4. Register with `registry.register("my_node", || Box::new(MyNode::new()))`
-5. The frontend will automatically render it with appropriate controls based on the spec
+Evaluation is pull-based from viewer/output nodes. The evaluator walks upstream in dependency order, merges instance params with spec defaults, rasterizes fields when an image input is required, evaluates async node futures, and caches outputs. Cache keys include frame time, param revision, upstream state, project format, node interface signatures, requested frame dependencies, and preview scale so stale results are avoided across interactive and sequence workflows.
 
-## 5. WASM Bridge (cascade-wasm)
+## Standard Nodes
 
-### Architecture
-- `Engine` struct wraps Graph + NodeRegistry + HashMap<NodeId, Box<dyn Node>> + Evaluator
-- All methods are `#[wasm_bindgen]` — callable from JS
-- NodeId serialization: SlotMap KeyData → u64 → String (decimal) on the JS side
-- JsValue conversion: `serde_wasm_bindgen` for complex types (NodeSpec lists, graph export)
-- Raw `Vec<u8>` for pixel data (direct memory sharing, no serialization overhead)
+`cascade-nodes-std` currently registers 60 built-in nodes. Broad categories include:
 
-### Key Methods
-- `new()`: creates Engine with registered standard nodes + console_error_panic_hook
-- `list_node_types()`: returns all NodeSpecs as JsValue
-- `add_node(type_id, x, y)`: creates node in graph + instantiates via registry, returns string ID
-- `remove_node(node_id)`: removes from graph + instances map
-- `connect(from, from_port, to, to_port)`: validates types, checks cycles, connects
-- `set_param(node_id, key, value)`: type-aware param conversion (uses spec to determine type)
-- `load_image_data(node_id, data)`: downcasts to LoadImage via as_any_mut(), calls set_image_data()
-- `render_viewer(viewer_id)`: evaluates graph from viewer, converts result to rgba8
-- `get_render_dimensions(viewer_id)`: returns {width, height} for a viewer
-- `export_graph() / import_graph(json)`: serialization for save/load
+- input/output: images, sequences, batches, video, viewers, compare viewer, image/sequence/video export, EXR export
+- AI: inpaint, depth estimate, remove background, upscale, generate image
+- color and utility: color conversion, curves, palette, HSVA split/combine, color ramp, math, dot, project/image info
+- filters and mattes: blur, sharpen, dilate, erode, median, directional/radial blur, edge blur, matte expand/shrink, shape, glow
+- transforms and time: resize, crop, flip, translate, corner pin, ST map, time offset, frame hold, frame blend
+- generators: solid color, noise, gradient, checkerboard, rasterize field, constants, text, UV map
+- programmable/group nodes: GPU script and custom group definitions
 
-### WASM Build
-- Built with `wasm-pack build --target web --release` from `crates/cascade-wasm/`
-- Output goes to `apps/web/src/wasm-pkg/`
-- `.cargo/config.toml` sets `getrandom_backend="wasm_js"` for the wasm32 target
-- Production WASM binary: ~711KB raw, ~276KB gzipped
+Add CPU nodes in `crates/cascade-nodes-std/src/`, export them from `lib.rs`, register them in `register_standard_nodes()`, and add focused tests. Prefer GPU kernel nodes for per-pixel operations that fit the shader model.
 
-## 6. Frontend Architecture (React + TypeScript)
+## GPU Pipeline
 
-### Stack
-- Vite with `vite-plugin-wasm` + `vite-plugin-top-level-await`
-- React 18+ with StrictMode
-- @xyflow/react for the node canvas (formerly React Flow)
-- Zustand for state management
-- CSS custom properties for theming
+`cascade-gpu` provides the wgpu context, kernel manifests, GLSL-to-WGSL transpilation, and reusable built-in kernel definitions. Kernel manifests declare ports, params, pixel-space params, and a GLSL `process(vec4 color, vec2 uv, ivec2 pixel)` body. Pixel-space params are scaled automatically during preview execution.
 
-### Layout
-Three-column layout: NodeLibrary (240px) | NodeCanvas (flex) | Inspector + Viewer (280px)
+## WASM Bridge
 
-### State Management (Zustand — graphStore/)
-- Single Zustand store composed from 12 focused slice files via `StateCreator` spread
-- `store.ts`: composition shell (~250 lines) — `initEngine` + slice spreads. ESLint `max-lines` rule prevents regression.
-- `kernel.ts`: shared mutable state (engine instance, render lock, undo stacks, render generations) — avoids ES module reassignment issues
-- Slices in `store/graphStore/slices/`: graphSlice, renderSlice, undoSlice, liveParamsSlice, framesSlice, selectionSlice, projectSlice, batchExportSlice, sequenceVideoSlice, assetsSlice, colorSlice, aiSlice
-- All mutations sync to WASM engine first, then update local state
-- Cross-slice calls use `get().actionName()` pattern
-- `nodes: Map<string, NodeInstance>` — mirrors WASM graph
-- `connections: Connection[]` — with client-generated UUIDs
-- `renderResults: Map<string, RenderResult>` — cached viewer outputs
-- `triggerAffectedViewers(changedNodeIds)`: selective re-render after mutations (falls back to `triggerAllViewers()`)
-- Dev mode: `window.__cascadeStore` exposed for Playwright testing
+`cascade-wasm` exposes the engine through `wasm-bindgen`. It owns the graph, registry, node instances, evaluator, GPU script registration, group definitions, project format, color-management state, and render/export commands for the browser path. Public bridge functions return `Result<_, JsValue>` and map engine errors into structured frontend errors.
 
-### Type System (types.ts)
-- TypeScript types mirror Rust types exactly: NodeSpec, ParamSpec, ParamValue, etc.
-- `ParamValue` is a tagged union: `{ Float: number } | { Int: number } | { Bool: boolean } | ...`
-- `extractParamValue()` / `createParamValue()` helpers for conversion
+The web build produces both single-threaded and threaded WASM bundles:
 
-### Engine Bridge (bridge.ts + wasmEngine.ts)
-- `EngineBridge` interface: abstraction allowing WASM, native (Tauri), or mock implementations
-- `WasmEngine` class implements EngineBridge, delegates to WASM Engine
-- `initWasmEngine()`: promise-based deduplication prevents React StrictMode race condition
-  - StrictMode double-fires useEffect — without dedup, two concurrent init() + new Engine() calls corrupt wasm-bindgen's internal Rc refcount
-  - Fix: `if (initPromise) return initPromise;` — second call reuses the same promise
-
-### Components
-- **NodeCanvas**: ReactFlow wrapper with custom nodeTypes map, drag-drop from library, snap-to-grid
-- **NodeLibrary**: categorized sidebar with search, drag-to-create via dataTransfer
-- **Inspector**: dynamic param controls driven by NodeSpec (Slider for Float with min/max, Checkbox for Bool, etc.)
-- **Viewer**: canvas element rendering from renderResults, auto-selects viewer nodes, shows dimensions
-- **Custom Nodes** (nodes/):
-  - `BaseNode`: shared wrapper with typed input/output handles, port colors by type (Image=cyan, Float=green, etc.)
-  - `ImageInputNode`: file drop/click with thumbnail preview
-  - `ViewerNode`: inline canvas preview subscribing to renderResults
-  - `ProcessingNode`: shows first 2 param values inline
-
-### Theme
-- Dark professional theme via CSS custom properties
-- Deep blue/purple palette (#0d0f1a background, #1a1d2e surfaces)
-- Port colors by type: Image=#00d4ff, Float=#00ff88, Mask=#ff6600, etc.
-
-## 7. Data Flow
-
-Complete render cycle:
-```
-User drops image file
-  → File.arrayBuffer() → Uint8Array
-    → wasmEngine.loadImageData(nodeId, data)
-      → LoadImage.set_image_data(bytes)
-        → image crate decodes PNG/JPEG/BMP/WebP
-        → sRGB u8 → linear f32 conversion per pixel
-        → stored in Mutex<Option<Image>>
-    → triggerAllViewers()
-      → for each viewer node:
-        → wasmEngine.renderViewer(viewerId)
-          → Evaluator.evaluate(graph, registry, nodes, viewerId, "display", frame_time)
-            → visit_postorder: LoadImage → [processing nodes...] → Viewer
-            → for each node in order:
-              → check CacheKey: (frame_time, param_revision, upstream_hash)
-              → cache miss? evaluate node:
-                → collect inputs from upstream cache
-                → merge params (instance overrides + spec defaults)
-                → node.evaluate(ctx) → HashMap<String, Value>
-                → store outputs in cache
-            → return Viewer's "display" output
-          → Viewer::image_to_rgba8(image) — linear f32 → sRGB u8
-          → return Vec<u8> to JS
-        → create RenderResult { nodeId, width, height, pixels: Uint8ClampedArray }
-        → store in renderResults Map
-      → React re-renders Viewer + ViewerNode components
-        → canvas.putImageData(new ImageData(pixels, width, height))
+```bash
+cd apps/web
+yarn build:wasm
 ```
 
-## 8. Testing
+Threaded WASM requires cross-origin isolation headers. Without them, the frontend falls back to the single-threaded engine path.
 
-### Rust Tests (25 total, 0 warnings)
-- `cascade-core/src/graph.rs`: 17 unit tests (add/remove, connect/disconnect, cycle detection, type mismatch, dirty propagation, param revision, get_upstream/downstream)
-- `cascade-core/src/eval.rs`: 5 unit tests (chain evaluation, cache hit/miss, param change invalidation, frame_time changes)
-- `cascade-core/src/eval.rs`: 5 unit tests (chain evaluation, cache hit/miss, param change invalidation, frame_time changes)
-- `tests/basic.rs`: 3 integration tests (full pipeline through standard nodes)
+## Native Runtime And Desktop
 
-### E2E Tests (Playwright)
-- App loads and WASM initializes
-- All 6 node types appear in library
-- Node creation, connection, parameter adjustment
-- Full render pipeline with actual pixel verification
-- Inspector displays correct params
-- Zero console errors
+`cascade-runtime` mirrors the engine surface for native use, including project/file workflows used by Tauri. `apps/tauri` is a Tauri v2 desktop shell with native filesystem access, packaging, signing/notarization support, and feature flags for video and OCIO.
 
-## 9. Performance Considerations
+## Frontend
 
-### Current Optimizations
-- f32 format: native CPU ALU width — no conversion overhead on x86-64 (f16 requires F16C convert instructions, no native f16 arithmetic)
-- Arc<Vec<f32>>: cheap clone through graph (reference counted, no deep copy)
-- Per-output caching: unchanged subgraphs are never re-evaluated
-- Content-based cache keys: upstream_hash captures the full upstream state
-- Separable Gaussian blur: O(n·k) per pass instead of O(n·k²) for 2D kernel
+The web app is React 19, Vite, `@xyflow/react`, Zustand, and TypeScript. `EngineBridge` abstracts over worker-backed WASM, direct WASM, and Tauri IPC implementations.
 
-### Planned Optimizations (not yet implemented)
-- Rayon parallelism for per-pixel operations in native builds
-- Proxy resolution during slider interaction (lower res while dragging, full res on release)
-- WGSL shader nodes for GPU-accelerated processing
-- wgpu native viewport for 60fps 4K rendering in Tauri
-- Tiled processing for large images (process in tiles to fit cache)
+State lives in a single graph store:
+
+- `apps/web/src/store/graphStore/store.ts` defines the composed Zustand store surface.
+- `apps/web/src/store/graphStore/slices/` contains 14 focused slices for graph, render, undo, live params, frames, selection, project, batch export, sequence/video, assets, color, AI, DSL, and toasts.
+- `apps/web/src/store/graphStore/kernel.ts` holds shared mutable runtime state such as the engine instance and render generations.
+
+All graph mutations sync to the engine first, then update local Zustand state. Components should use store actions rather than calling the engine directly.
+
+Theming uses CSS custom properties in `apps/web/src/styles/theme.css`; components should not use raw color literals.
+
+## Rendering Flow
+
+1. The user edits graph state in the UI.
+2. Store actions apply the mutation to the engine.
+3. Affected viewers are identified.
+4. The selected engine bridge renders viewers at the current frame and preview scale.
+5. Results are normalized into the `ViewerResult` union.
+6. Zustand publishes `renderResults`, `nodeErrors`, and timing metadata.
+7. Viewer components draw pixels or scalar values.
+
+Interactive param edits use preview-scale rendering and commit back to full quality. Generation counters prevent stale renders from overwriting newer results.
+
+## Validation
+
+Common local checks:
+
+```bash
+cargo check --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+
+cd apps/web
+yarn lint
+yarn lint:css
+yarn test
+npx tsc -b --noEmit
+npx playwright test
+```
+
+CI uses `.github/workflows/ci.yml`. It performs path-based change detection, skips heavy jobs for docs-only changes, and conditionally runs Rust check/test, clippy/fmt, benchmark compile checks, frontend lint/typecheck/unit/CSS checks, and Playwright E2E tests.

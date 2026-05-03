@@ -28,7 +28,7 @@ apps/
 ### Rust
 
 - **Image format**: All pixel processing uses `f32` RGBA in linear color space. sRGB conversion happens only at load (input) and display (output) boundaries. Never process pixels in sRGB space. `f16` is used only at I/O boundaries (GPU upload/readback via `to_f16_bytes()`/`from_f16_data()`).
-- **Node trait**: Every node implements `cascade_core::node::Node`. The `spec()` method returns a `NodeSpec` declaring inputs, outputs, params, and UI hints. The `evaluate()` method receives an `EvalContext` and returns `HashMap<String, Value>`.
+- **Node trait**: Every node implements `cascade_core::node::Node`. The `spec()` method returns a `NodeSpec` declaring inputs, outputs, params, and UI hints. The async `evaluate()` method receives an `EvalContext` and returns `HashMap<String, Value>` through `NodeFuture`.
 - **Adding a new node**: Create the struct in `cascade-nodes-std`, implement `Node`, register it in `register_standard_nodes()` in `lib.rs`. The frontend auto-discovers it via `list_node_types()` — no frontend changes needed.
 - **Graph**: Uses `SlotMap` for stable node IDs. Connections are type-checked. Cycles are rejected via DFS. Dirty propagation flows downstream on param changes.
 - **Evaluator**: Pull-based from viewer nodes. Cached per-output with keys `(frame_time, param_revision, upstream_hash)`. Only recomputes dirty subgraphs.
@@ -48,7 +48,7 @@ Performance and robust error handling are first-class concerns in this project �
 
 ### Frontend (TypeScript/React)
 
-- **State management**: Single Zustand store composed from 12 slice files in `store/graphStore/slices/`. `store.ts` is a thin composition shell — new actions go in slice files, not `store.ts` (enforced by ESLint `max-lines`). Shared mutable state (engine, render lock, undo stacks) lives in `kernel.ts`. All mutations sync to the engine first, then update local state.
+- **State management**: Single Zustand store composed from 14 slice files in `store/graphStore/slices/`. `store.ts` is a thin composition shell — new actions go in slice files, not `store.ts` (enforced by ESLint `max-lines`). Shared mutable state (engine, render generations, undo stacks, runtime helpers) lives in `kernel.ts`. All mutations sync to the engine first, then update local state.
 - **Engine bridge**: `EngineBridge` interface abstracts over WASM and Tauri backends. `WasmEngine` is synchronous, `TauriEngine` is async IPC.
 - **Theming**: All colors use CSS custom properties defined in `src/styles/theme.css`. An ESLint rule (`no-hardcoded-colors`) enforces this — never use raw hex/rgb values in components.
 - **Node components**: Custom React Flow nodes live in `src/components/nodes/`. `BaseNode` is the shared wrapper. UI controls are driven by `NodeSpec` metadata from Rust.
@@ -58,9 +58,9 @@ Performance and robust error handling are first-class concerns in this project �
 
 ```bash
 # Rust
-cargo check --workspace          # Type check all crates
-cargo test --workspace           # Run all tests
-cargo clippy --workspace         # Lint
+cargo check --workspace          # Type check workspace crates
+cargo test --workspace           # Run workspace tests
+cargo clippy --workspace --all-targets -- -D warnings  # Lint
 cargo fmt --all -- --check       # Format check
 cargo bench --package cascade-nodes-std  # Run Criterion benchmarks
 
@@ -68,6 +68,8 @@ cargo bench --package cascade-nodes-std  # Run Criterion benchmarks
 yarn install                     # Install deps
 yarn dev                         # Dev server
 yarn lint                        # ESLint
+yarn lint:css                    # Stylelint
+yarn test                        # Vitest
 npx tsc -b --noEmit              # Typecheck
 
 # WASM bridge
@@ -80,11 +82,11 @@ wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wa
 - **Integration tests**: `crates/cascade-core/tests/basic.rs` — full pipeline tests through standard nodes.
 - **GPU tests**: In `cascade-gpu/src/lib.rs`. Tests that need a GPU gracefully skip when `GpuContext::new()` fails (expected in CI).
 - **Benchmarks**: Criterion benchmarks in `crates/cascade-nodes-std/benches/node_benchmarks.rs`. Covers blur, blend, brightness/contrast, invert, resize, alpha_over, sRGB conversion.
-- **Frontend linting**: ESLint with TypeScript, React Hooks, and custom `no-hardcoded-colors` rule.
+- **Frontend linting/testing**: ESLint with TypeScript, React Hooks, custom `no-hardcoded-colors`, Stylelint for CSS, Vitest for unit tests, and Playwright for E2E coverage.
 
 ## CI
 
-GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and PRs. Four parallel jobs: Rust check+test, Rust lint (clippy+fmt), benchmark compile check, frontend lint+typecheck.
+GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and PRs. It starts with path-based change detection, skips heavy jobs for docs-only changes, and conditionally runs Rust check/test, Rust lint (clippy+fmt), benchmark compile checks, frontend lint/typecheck/unit/CSS checks, and Playwright E2E tests.
 
 ## Common patterns
 

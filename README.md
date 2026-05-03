@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/github/v/release/zacharyfmarion/cascade?display_name=tag" alt="Latest Release">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License">
   <img src="https://img.shields.io/badge/Tauri-2.0-24C8DB.svg" alt="Tauri">
-  <img src="https://img.shields.io/badge/React-18-61DAFB.svg" alt="React">
+  <img src="https://img.shields.io/badge/React-19-61DAFB.svg" alt="React">
   <img src="https://img.shields.io/badge/Rust-stable-f74c00.svg" alt="Rust">
 </p>
 

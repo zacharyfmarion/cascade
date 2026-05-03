@@ -12,11 +12,11 @@ useGraphStore.setParamLive(nodeId, key, value)
     ├─ Update local node.params in store
     ├─ Set previewScale = livePreviewScale (0.25x for speed)
     │
-    ├─ If Tauri:
-    │   └─ eng.setParamAndRender(nodeId, key, value, frame)
-    │       └─ IPC call: Set param + render all viewers in one shot
-    │       └─ Returns Map<viewerId, ViewerResult>
-    │       └─ Batch apply downscaleRenderResult()
+    ├─ If bridge supports combined mutation/render:
+    │   └─ eng.setAndRender({ type: 'param', nodeId, key, value }, frame, previewScale)
+    │       └─ Set param/input default + render affected viewers in one shot
+    │       └─ Returns Array<[viewerId, ViewerResult]>
+    │       └─ Batch apply results
     │       └─ set({ renderResults })
     │
     └─ If WASM:
@@ -167,10 +167,10 @@ useGraphStore.connect(fromNode, fromPort, toNode, toPort)
 
 ---
 
-## Sequence 4: Desktop "setParamAndRender" Optimization
+## Sequence 4: Combined `setAndRender` Optimization
 
 ```
-[Desktop only: Tauri backend]
+[Worker-backed WASM or Tauri backend]
 
 User drags slider on BrightnessContrast node
     ↓
@@ -178,9 +178,9 @@ setParamLive(nodeId='brightness', key='amount', value=0.5)
     ├─ update local node.params
     ├─ set({ previewScale: 0.25 })
     │
-    └─ eng.setParamAndRender('brightness', 'amount', 0.5, frame)
+    └─ eng.setAndRender({ type: 'param', nodeId, key: 'amount', value: 0.5 }, frame, previewScale)
        │
-       ├─ IPC invoke('set_param_and_render', {nodeId, key, value, frame})
+       ├─ Bridge call combines mutation and viewer rendering
        │   │
        │   └─ Tauri backend (Rust):
        │      ├─ engine.set_param(nodeId, key, value)
@@ -398,4 +398,3 @@ function isPixelResult(result: ViewerResult): result is {type: 'image'|'mask'|'f
         │  Browser Paint                    │
         └──────────────────────────────────┘
 ```
-

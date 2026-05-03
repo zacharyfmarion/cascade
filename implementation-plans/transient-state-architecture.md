@@ -70,7 +70,7 @@ beginParamEdit(nodeId: string, key: string): void
 
 setParamLive(nodeId: string, key: string, value: ParamValue): void
   → Update draft store (only this node re-renders)
-  → Send to Worker engine via RAF-coalesced setParamAndRender
+  → Send to Worker engine via RAF-coalesced setAndRender
   → Do NOT touch durable nodes Map
 
 commitParamEdit(nodeId: string): void

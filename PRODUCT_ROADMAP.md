@@ -297,7 +297,7 @@ These engineering investments from the [Engineering Roadmap](./ENGINEERING_ROADM
 |---|---|---|
 | Full-stack error handling | Phase 1 (reliability) | ✅ Done |
 | Cache eviction, selective invalidation | Phase 1 (performance) | ✅ Done |
-| Store split (12 slices) | Phase 1 (frontend) | ✅ Done |
+| Store split (14 slices) | Phase 1 (frontend) | ✅ Done |
 | GPU/CPU node unification | Phase 1 (node library) | ✅ Done |
 | System-level mask support | Phase 1 (GPU node usability) | ✅ Done |
 | WASM multi-threading | Phase 1 (performance) | ✅ Done |
