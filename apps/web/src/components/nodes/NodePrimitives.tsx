@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { Toggle } from '../ui/Toggle';
 
 /* ───────────────────────────────────────────────────────────────
  *  Shared UI primitives for all node components.
@@ -180,22 +181,26 @@ interface NodeCheckboxProps {
   disabled?: boolean;
 }
 
-export const NodeCheckbox: React.FC<NodeCheckboxProps> = ({ label, checked, onChange, disabled }) => (
-  <label
-    className="node-checkbox nopan nodrag"
-    onPointerDown={(e) => e.stopPropagation()}
-    style={{ opacity: disabled ? 0.5 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
-  >
-    <span className="node-checkbox__label">{label}</span>
-    <input
-      type="checkbox"
-      className="node-checkbox__input"
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-      disabled={disabled}
-    />
-  </label>
-);
+export const NodeCheckbox: React.FC<NodeCheckboxProps> = ({ label, checked, onChange, disabled }) => {
+  const id = React.useId();
+
+  return (
+    <div
+      className="node-checkbox nopan nodrag"
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{ opacity: disabled ? 0.5 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
+    >
+      <label htmlFor={id} className="node-checkbox__label">{label}</label>
+      <Toggle
+        id={id}
+        className="node-checkbox__toggle"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    </div>
+  );
+};
 
 // ── Number input ────────────────────────────────────────────────
 
