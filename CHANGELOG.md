@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.2.0] - 2026-05-04
+
+### Added
+- Added bundled example projects and source assets so new users can explore finished Cascade workflows from the editor.
+- Added a Compare Viewer node for side-by-side visual review.
+- Added a Photo Adjust group for common color and tonal adjustments.
+- Added hardened cnode package support and expanded DSL execution, serialization, and semantic validation coverage.
+
+### Changed
+- Moved macOS release builds to the local release pipeline for signed, notarized desktop artifacts.
+- Refined editor controls with studio-styled buttons, toggles, and a personalized empty state.
+- Updated the default image model to GPT Image 2.
+
+### Fixed
+- Restored preview-scale handling for pixel-space GPU parameters.
+- Fixed duplicate DSL parameter mirrors and DSL input-default roundtripping.
+- Improved live preview downscaling limits and web image sequence playback/caching.
+- Fixed rotate edge sampling to zero-fill out-of-bounds pixels.
+
 ## [0.1.0] - 2026-04-24
 
 ### Added
