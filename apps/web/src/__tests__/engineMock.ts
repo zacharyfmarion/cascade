@@ -226,6 +226,7 @@ export function createMockEngine(): EngineBridge & {
   _renderResult: ViewerResult | null;
   _setRenderResult: (r: ViewerResult | null) => void;
   _renderCalls: string[];
+  _renderScales: number[];
   _sequenceFrameLoads: Array<{ nodeId: string; frame: number; data: Uint8Array }>;
   _clearRenderCalls: () => void;
   _groupGraphs: Map<string, GroupInternalGraph>;
@@ -239,6 +240,7 @@ export function createMockEngine(): EngineBridge & {
   let graphState: unknown = { nodes: [], connections: [] };
   let renderResult: ViewerResult | null = null;
   const renderCalls: string[] = [];
+  const renderScales: number[] = [];
   const sequenceFrameLoads: Array<{ nodeId: string; frame: number; data: Uint8Array }> = [];
 
   const syncGraphState = () => {
@@ -267,8 +269,12 @@ export function createMockEngine(): EngineBridge & {
     _renderResult: renderResult,
     _setRenderResult: (r: ViewerResult | null) => { renderResult = r; },
     _renderCalls: renderCalls,
+    _renderScales: renderScales,
     _sequenceFrameLoads: sequenceFrameLoads,
-    _clearRenderCalls: () => { renderCalls.length = 0; },
+    _clearRenderCalls: () => {
+      renderCalls.length = 0;
+      renderScales.length = 0;
+    },
     _groupGraphs: groupGraphs,
 
     listNodeTypes: () => [...NODE_SPECS, ...extraSpecs],
@@ -586,8 +592,9 @@ export function createMockEngine(): EngineBridge & {
       return imageDataStore.get(nodeId) ?? null;
     },
 
-    renderViewer: (viewerNodeId: string, _frame: number): ViewerResult | null => {
+    renderViewer: (viewerNodeId: string, _frame: number, previewScale = 1): ViewerResult | null => {
       renderCalls.push(viewerNodeId);
+      renderScales.push(previewScale);
       return renderResult;
     },
 

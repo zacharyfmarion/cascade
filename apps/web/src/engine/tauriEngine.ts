@@ -235,9 +235,9 @@ export class TauriEngine implements EngineBridge {
     });
   }
 
-  async renderViewer(viewerNodeId: string, frame: number, _previewScale = 1): Promise<ViewerResult | null> {
+  async renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
-      const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame });
+      const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame, previewScale });
       if (!buf || buf.byteLength < 9) return null;
 
       await this.fetchTimings();

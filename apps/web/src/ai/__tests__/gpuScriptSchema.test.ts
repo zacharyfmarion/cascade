@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGraphStore } from '../../store/graphStore';
-import { buildDefaultGpuScriptManifest, buildGpuScriptNodeSpec } from '../gpuScript';
+import {
+  buildDefaultGpuScriptManifest,
+  buildGpuScriptManifest,
+  buildGpuScriptManifestFromGlsl,
+  buildGpuScriptNodeSpec,
+  parseGpuScriptManifestJson,
+} from '../gpuScript';
 import { cascadeTools, executeCascadeTool } from '../tools';
 import { buildSystemPrompt } from '../systemPrompt';
 
@@ -76,5 +82,38 @@ describe('GPU script AI schema', () => {
   it('does not expose GPU-script-specific tools to the model', () => {
     expect(Object.keys(cascadeTools)).not.toContain('create_gpu_script');
     expect(Object.keys(cascadeTools)).not.toContain('get_gpu_script_manifest');
+  });
+});
+
+describe('GPU script manifests', () => {
+  it('preserves pixel-space params when parsing persisted manifests', () => {
+    const manifest = buildGpuScriptManifest(
+      'gpu_script::blur',
+      [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'radius', label: 'Radius', ty: 'Float', default: 12, min: 0, max: 100, step: 1 },
+      ],
+      [{ name: 'image', label: 'Image', ty: 'Image' }],
+      [],
+      'return color;',
+      true,
+      ['radius'],
+    );
+
+    expect(parseGpuScriptManifestJson(JSON.stringify(manifest))?.pixel_space_params).toEqual(['radius']);
+  });
+
+  it('carries pixel-space params from generated GLSL manifests', () => {
+    const manifest = buildGpuScriptManifestFromGlsl('gpu_script::generated', {
+      inputs: [
+        { name: 'image', label: 'Image', ty: 'Image' },
+        { name: 'offset_x', label: 'Offset X', ty: 'Float', default: 10 },
+      ],
+      outputs: [{ name: 'image', label: 'Image', ty: 'Image' }],
+      kernel: 'return color;',
+      pixel_space_params: ['offset_x'],
+    });
+
+    expect(manifest.pixel_space_params).toEqual(['offset_x']);
   });
 });

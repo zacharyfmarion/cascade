@@ -14,7 +14,8 @@ import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { useSettingsStore } from '../../settingsStore';
 import {
   kernel,
-  downscaleRenderResult,
+  annotateEnginePreviewResult,
+  getEffectivePreviewScaleForResult,
   getEngine,
   nextRenderGeneration,
 } from '../kernel';
@@ -194,10 +195,11 @@ export const createRenderSlice: StateCreator<
       for (const [viewerId, node] of nodes) {
         if (!PANEL_VIEWER_NODE_TYPES.has(node.typeId)) continue;
         try {
-          const result = await renderViewerForCurrentContext(viewerId, frame, scale);
+          const previous = get().renderResults.get(viewerId);
+          const renderScale = getEffectivePreviewScaleForResult(scale, previous);
+          const result = await renderViewerForCurrentContext(viewerId, frame, renderScale);
           if (result) {
-            const scaled = await downscaleRenderResult(result, scale);
-            newResults.set(viewerId, scaled);
+            newResults.set(viewerId, annotateEnginePreviewResult(result, renderScale, previous));
             changed = true;
           }
         } catch (e) { const error = parseEngineError(e); if (error.nodeId) { const errs = new Map(get().nodeErrors); errs.set(error.nodeId, error); set({ nodeErrors: errs, lastError: error }); } else { set({ lastError: error }); } }
@@ -227,8 +229,10 @@ export const createRenderSlice: StateCreator<
         try {
           await pushSequenceFrames(frame);
           if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
-          const result = await renderViewerForCurrentContext(viewerNodeId, frame, scale);
-          const scaled = result ? await downscaleRenderResult(result, scale) : null;
+          const previous = get().renderResults.get(viewerNodeId);
+          const renderScale = getEffectivePreviewScaleForResult(scale, previous);
+          const result = await renderViewerForCurrentContext(viewerNodeId, frame, renderScale);
+          const scaled = result ? annotateEnginePreviewResult(result, renderScale, previous) : null;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
             const newResults = new Map(get().renderResults);
             newResults.set(viewerNodeId, scaled);

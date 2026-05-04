@@ -214,6 +214,7 @@ export const ScriptNodeEditor: React.FC<{ nodeId: string; typeId: string }> = ({
         [],
         state.kernel,
         state.supportsMask,
+        state.pixelSpaceParams,
       );
       const nextManifestJson = JSON.stringify(manifest);
       await compileScriptNode(nodeId, nextManifestJson);

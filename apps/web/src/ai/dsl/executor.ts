@@ -153,6 +153,7 @@ const gpuDefinitionToInstanceManifest = (
     params: [],
     kernel: definition.code,
     supports_mask: !hasMaskInput,
+    pixel_space_params: existingManifest?.pixel_space_params ?? [],
   };
 };
 

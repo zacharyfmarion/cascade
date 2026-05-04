@@ -13,6 +13,7 @@ export interface ScriptEditorState {
   outputs: ScriptDraftPort[];
   kernel: string;
   supportsMask: boolean;
+  pixelSpaceParams: string[];
   compileStatus: 'idle' | 'compiling' | 'success' | 'error';
   compileError: string | null;
 }
@@ -25,6 +26,7 @@ const DEFAULT_STATE: ScriptEditorState = {
   outputs: [{ id: 'out_0', name: 'image', label: 'Image', ty: 'Image' }],
   kernel: 'return color;',
   supportsMask: true,
+  pixelSpaceParams: [],
   compileStatus: 'idle',
   compileError: null,
 };
@@ -100,6 +102,7 @@ export const createScriptEditorInitialState = (
       outputs: manifest.outputs.map((port, i) => toDraftPort(port, 'out', i)),
       kernel: manifest.kernel,
       supportsMask: manifest.supports_mask,
+      pixelSpaceParams: manifest.pixel_space_params,
       compileStatus: 'success',
       compileError: null,
     };
@@ -117,6 +120,7 @@ export const createScriptEditorInitialState = (
       }, 'out', i)),
       kernel: 'return color;',
       supportsMask: spec.inputs.some((port) => port.name === 'mask' && port.ty === 'Mask'),
+      pixelSpaceParams: [],
       compileStatus: 'idle',
       compileError: null,
     };

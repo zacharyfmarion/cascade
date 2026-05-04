@@ -37,4 +37,28 @@ describe('TauriEngine AI bridge', () => {
     });
     expect(invokeMock).toHaveBeenCalledWith('get_node_execution_state', { nodeId: 'node-1' });
   });
+
+  it('passes previewScale through root viewer renders', async () => {
+    const { TauriEngine } = await import('../tauriEngine');
+    const engine = new TauriEngine();
+    const buf = new ArrayBuffer(13);
+    const view = new DataView(buf);
+    view.setUint8(0, 0);
+    view.setUint32(1, 1, true);
+    view.setUint32(5, 1, true);
+    new Uint8ClampedArray(buf, 9).set([1, 2, 3, 255]);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'render_viewer') return buf;
+      if (command === 'get_last_render_timings') return '{}';
+      return undefined;
+    });
+
+    await engine.renderViewer('viewer-1', 12, 0.25);
+
+    expect(invokeMock).toHaveBeenCalledWith('render_viewer', {
+      viewerNodeId: 'viewer-1',
+      frame: 12,
+      previewScale: 0.25,
+    });
+  });
 });
