@@ -886,12 +886,12 @@ export const NodeCanvas: React.FC = () => {
       // Handle image file drops — create a load_image node and load the file
       const files = event.dataTransfer.files;
       if (files.length > 0) {
-        // Handle .compnode file drops — import custom nodes and place on canvas
-        const compnodeFiles = Array.from(files).filter(f => f.name.endsWith('.compnode'));
-        if (compnodeFiles.length > 0) {
+        // Handle .cnode file drops — import custom nodes and place on canvas
+        const cnodeFiles = Array.from(files).filter(f => f.name.endsWith('.cnode'));
+        if (cnodeFiles.length > 0) {
           const importCustomNodes = useGraphStore.getState().importCustomNodes;
           let offsetIndex = 0;
-          for (const file of compnodeFiles) {
+          for (const file of cnodeFiles) {
             try {
               const text = await file.text();
               const importedIds = await importCustomNodes(text);
@@ -905,7 +905,7 @@ export const NodeCanvas: React.FC = () => {
                 offsetIndex++;
               }
             } catch (e) {
-              console.error('[Drop] compnode import failed:', e);
+              console.error('[Drop] cnode import failed:', e);
               useGraphStore.getState().pushToast('error', 'Import failed', e instanceof Error ? e.message : String(e));
             }
           }

@@ -64,11 +64,14 @@ pub struct GroupInterface {
     pub outputs: Vec<PortSpec>,
 }
 
-/// Portable package format for sharing custom nodes (.compnode files).
+/// Portable package format for sharing custom nodes (.cnode files).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodePackage {
-    /// Format version for forward compatibility.
-    pub version: u32,
+    /// Package format version for migration and forward compatibility.
+    pub format_version: String,
+    /// Stable package identifier used to distinguish shared packages.
+    #[serde(default)]
+    pub package_id: String,
     /// The cascade version that exported this package (informational).
     #[serde(default)]
     pub cascade_version: String,
@@ -92,7 +95,7 @@ pub struct CustomNodeInfo {
     pub description: String,
     /// Number of group definitions in the source package.
     pub node_count: usize,
-    /// Path to the .compnode file on disk (desktop only).
+    /// Path to the .cnode file on disk (desktop only).
     #[serde(default)]
     pub file_path: String,
 }

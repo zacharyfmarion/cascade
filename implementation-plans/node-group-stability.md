@@ -15,7 +15,7 @@ Four concrete issues identified from hands-on testing with a color-replacement g
 | 1 | No obvious UI to rename a group | `GroupNameEditor` exists in Inspector panel only — not discoverable | UX gap |
 | 2 | No color picker (or other default controls) on unconnected group inputs | `derive_input_port()` uses `..Default::default()` — drops `default`, `ui_hint`, `min`, `max`, `step` | Bug (all types) |
 | 3 | Changing slider values on group node doesn't propagate to internal nodes | Internal evaluator caches GroupInputNode output; cache key never changes because injected values bypass `param_revision` | Bug (critical) |
-| 4 | Dragging .compnode onto canvas appears to do nothing | Import likely works but has zero user feedback; no toast, no dialog, no visual indication | UX gap |
+| 4 | Dragging .cnode onto canvas appears to do nothing | Import likely works but has zero user feedback; no toast, no dialog, no visual indication | UX gap |
 
 ---
 
@@ -157,7 +157,7 @@ But `GroupNameEditor` only appears in the **Inspector panel** when a group node 
 ### Current State
 
 The import code IS wired up and should work technically:
-1. **Drag-and-drop**: `NodeCanvas.tsx` `onDrop` handler (line 762) filters `.compnode` files, reads text, calls `importCustomNodes(text)`
+1. **Drag-and-drop**: `NodeCanvas.tsx` `onDrop` handler (line 762) filters `.cnode` files, reads text, calls `importCustomNodes(text)`
 2. **Engine**: `engineWorker.ts` (line 893) does `JSON.parse(json)` then calls `eng.import_custom_nodes(pkg)`
 3. **Store action**: `graphSlice.importCustomNodes()` calls engine, refreshes `nodeSpecs`, logs to console
 
@@ -171,7 +171,7 @@ The import code IS wired up and should work technically:
 ### Proposed UX
 
 **A. Immediate feedback on drag-and-drop import (Web)**
-- Show a visual drop zone indicator when dragging a `.compnode` file over the canvas (CSS overlay like "Drop to import custom node")
+- Show a visual drop zone indicator when dragging a `.cnode` file over the canvas (CSS overlay like "Drop to import custom node")
 - On successful import:
   - Toast: "Imported 'Node Name' — added to Custom Nodes category"
   - Auto-place an instance of the imported node at the drop position (not just register it — actually add it to the canvas)
@@ -179,8 +179,8 @@ The import code IS wired up and should work technically:
   - Toast with structured error: "Import failed: Unknown node type 'blur_special' inside package"
 
 **B. Import button in the node library**
-- Add an "Import .compnode" button at the top or bottom of the node library/add-node panel
-- Opens native file picker for `.compnode` files
+- Add an "Import .cnode" button at the top or bottom of the node library/add-node panel
+- Opens native file picker for `.cnode` files
 - Shows confirmation dialog before importing:
   - Node name(s), category, description
   - Warnings for any missing internal node types
@@ -192,13 +192,13 @@ The import code IS wired up and should work technically:
 
 **D. Desktop: Library folder with auto-loading**
 - On desktop (Tauri), define a custom nodes directory: `~/.config/cascade/custom-nodes/` (or configurable in Settings)
-- On app startup, scan this directory and auto-import all `.compnode` files
+- On app startup, scan this directory and auto-import all `.cnode` files
 - Settings panel: "Custom Node Libraries" section showing:
   - List of installed custom nodes (name, category, source file)
   - "Add folder" to watch additional directories
   - "Remove" to uninstall a custom node
   - "Reveal in Finder/Explorer" for the source file
-- When a `.compnode` file is imported via drag-and-drop or file picker, copy it to the custom nodes directory for persistence
+- When a `.cnode` file is imported via drag-and-drop or file picker, copy it to the custom nodes directory for persistence
 
 **E. Backend validation during import**
 - Schema version check: reject if `NodePackage.version` > supported
@@ -272,7 +272,7 @@ The import code IS wired up and should work technically:
 **E2E tests (Playwright):**
 - [ ] Create group → verify input controls render (color picker, sliders)
 - [ ] Change group input default → verify internal nodes receive new value
-- [ ] Import .compnode → verify toast + node appears in library
+- [ ] Import .cnode → verify toast + node appears in library
 - [ ] Rename group → verify title updates in canvas + breadcrumb
 
 ---
