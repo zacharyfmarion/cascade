@@ -17,6 +17,8 @@ MAIN_BRANCH="main"
 RELEASE_GITHUB_REPO="${RELEASE_GITHUB_REPO:-zacharyfmarion/cascade}"
 RELEASE_REMOTE="${RELEASE_REMOTE:-cascade}"
 HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-zacharyfmarion/homebrew-cascade}"
+LOCAL_MACOS_RELEASE_SCRIPT="scripts/local-macos-release.sh"
+DEFAULT_RELEASE_ENV_FILE=".env.release.local"
 
 error() {
     echo -e "${RED}Error: $1${NC}" >&2
@@ -48,19 +50,24 @@ usage() {
     cat <<EOF
 Usage:
   ./scripts/release.sh prepare <version> [--notes-file <path> | --notes <text> | --notes-stdin] [--yes]
-  ./scripts/release.sh publish <version>
+  ./scripts/release.sh publish <version> [--env-file <path>] [--artifacts-dir <path>]
+                              [--target <triple>] [--arch <name>] [--skip-deps]
+                              [--skip-homebrew] [--skip-local-build]
 
 Commands:
   prepare   Create a release branch from ${RELEASE_REMOTE}/${MAIN_BRANCH}, bump versions,
             update CHANGELOG.md, push the branch, and open a PR to ${MAIN_BRANCH}.
   publish   Find the merged release PR for the version, verify the merged commit,
-            create tag v<version> on that commit, and push the tag.
+            build/sign/notarize local macOS artifacts from that commit, create and
+            push tag v<version>, upload the DMGs, and update Homebrew.
 
 Environment:
   RELEASE_GITHUB_REPO  GitHub repo slug for gh CLI calls (default: ${RELEASE_GITHUB_REPO})
   RELEASE_REMOTE       Git remote used for fetch/push/tag checks (default: ${RELEASE_REMOTE})
   HOMEBREW_TAP_REPO    Homebrew tap repo slug referenced by the release workflow
                        (default: ${HOMEBREW_TAP_REPO})
+  ${DEFAULT_RELEASE_ENV_FILE}  Optional ignored env file loaded by the local macOS
+                       release builder when present.
 EOF
 }
 
@@ -432,6 +439,14 @@ prepare_release() {
 
 publish_release() {
     local version="$1"
+    local env_file="${2:-$DEFAULT_RELEASE_ENV_FILE}"
+    local env_file_explicit="${3:-false}"
+    local artifacts_dir="${4:-}"
+    local target_triple="${5:-}"
+    local arch="${6:-}"
+    local skip_local_build="${7:-false}"
+    local skip_deps="${8:-false}"
+    local skip_homebrew="${9:-false}"
     local tag_name
     local release_branch
     local pr_json
@@ -488,11 +503,67 @@ publish_release() {
     changelog_entry=$(extract_changelog_from_ref "$merge_sha" "$version") || error "No CHANGELOG.md entry found for $version at $merge_sha"
     require_non_empty_text "$changelog_entry" "CHANGELOG entry for $version"
 
+    if [ -z "$artifacts_dir" ]; then
+        artifacts_dir="target/release-artifacts/$tag_name"
+    fi
+
+    if [ "$skip_local_build" != "true" ]; then
+        [ -f "$LOCAL_MACOS_RELEASE_SCRIPT" ] || error "Missing local release builder: $LOCAL_MACOS_RELEASE_SCRIPT"
+
+        local build_args=(
+            "$LOCAL_MACOS_RELEASE_SCRIPT"
+            build
+            "$version"
+            --source-ref "$merge_sha"
+            --output-dir "$artifacts_dir"
+        )
+        local publish_args=(
+            "$LOCAL_MACOS_RELEASE_SCRIPT"
+            publish-artifacts
+            "$version"
+            --source-ref "$merge_sha"
+            --output-dir "$artifacts_dir"
+        )
+
+        if [ "$env_file_explicit" = "true" ] || [ -f "$env_file" ]; then
+            build_args+=(--env-file "$env_file")
+            publish_args+=(--env-file "$env_file")
+        fi
+
+        if [ -n "$target_triple" ]; then
+            build_args+=(--target "$target_triple")
+            publish_args+=(--target "$target_triple")
+        fi
+
+        if [ -n "$arch" ]; then
+            build_args+=(--arch "$arch")
+            publish_args+=(--arch "$arch")
+        fi
+
+        if [ "$skip_deps" = "true" ]; then
+            build_args+=(--skip-deps)
+        fi
+
+        if [ "$skip_homebrew" = "true" ]; then
+            publish_args+=(--skip-homebrew)
+        fi
+
+        info "Building local macOS release artifacts from $merge_sha..."
+        bash "${build_args[@]}"
+    else
+        info "Skipping local macOS artifact build by request"
+    fi
+
     info "Creating annotated tag $tag_name at $merge_sha..."
     git tag -a "$tag_name" "$merge_sha" -m "Release $tag_name"
 
     info "Pushing tag $tag_name to ${RELEASE_REMOTE}..."
     git push "$RELEASE_REMOTE" "refs/tags/$tag_name"
+
+    if [ "$skip_local_build" != "true" ]; then
+        info "Publishing local macOS release artifacts..."
+        bash "${publish_args[@]}"
+    fi
 
     echo ""
     echo -e "${GREEN}═══════════════════════════════════════════${NC}"
@@ -501,12 +572,23 @@ publish_release() {
     echo ""
     echo "Tagged commit: $merge_sha"
     echo "Source PR:     $pr_url"
+    echo "Artifacts:     $artifacts_dir"
     echo ""
-    echo "GitHub Actions will now:"
-    echo "  1. Validate the tagged commit"
-    echo "  2. Build macOS DMGs (ARM + Intel)"
-    echo "  3. Create a GitHub Release from CHANGELOG.md"
-    echo "  4. Update the Homebrew cask automatically"
+    if [ "$skip_local_build" = "true" ]; then
+        echo "Local artifact publishing was skipped. To finish the release manually, run:"
+        echo "  ./scripts/local-macos-release.sh all $version --source-ref $merge_sha --output-dir $artifacts_dir"
+    else
+        echo "Local release publishing completed:"
+        echo "  1. Built, signed, notarized, stapled, and verified the macOS DMG locally"
+        echo "  2. Created or updated the GitHub Release from CHANGELOG.md"
+        if [ "$skip_homebrew" = "true" ]; then
+            echo "  3. Skipped the Homebrew cask update by request"
+        else
+            echo "  3. Updated the Homebrew cask locally"
+        fi
+    fi
+    echo ""
+    echo "GitHub Actions will only validate the pushed tag."
     echo ""
     success "Done"
 }
@@ -518,6 +600,14 @@ main() {
     local inline_notes=""
     local notes_from_stdin="false"
     local auto_confirm="false"
+    local env_file="$DEFAULT_RELEASE_ENV_FILE"
+    local env_file_explicit="false"
+    local artifacts_dir=""
+    local target_triple=""
+    local arch=""
+    local skip_local_build="false"
+    local skip_deps="false"
+    local skip_homebrew="false"
 
     ensure_repo_root
 
@@ -561,6 +651,39 @@ main() {
                 auto_confirm="true"
                 shift
                 ;;
+            --env-file)
+                [ $# -ge 2 ] || error "--env-file requires a path"
+                env_file="$2"
+                env_file_explicit="true"
+                shift 2
+                ;;
+            --artifacts-dir)
+                [ $# -ge 2 ] || error "--artifacts-dir requires a path"
+                artifacts_dir="$2"
+                shift 2
+                ;;
+            --target)
+                [ $# -ge 2 ] || error "--target requires a Rust target triple"
+                target_triple="$2"
+                shift 2
+                ;;
+            --arch)
+                [ $# -ge 2 ] || error "--arch requires an artifact arch suffix"
+                arch="$2"
+                shift 2
+                ;;
+            --skip-local-build)
+                skip_local_build="true"
+                shift
+                ;;
+            --skip-deps)
+                skip_deps="true"
+                shift
+                ;;
+            --skip-homebrew)
+                skip_homebrew="true"
+                shift
+                ;;
             *)
                 error "Unknown option: $1"
                 ;;
@@ -570,6 +693,13 @@ main() {
     case "$command" in
         prepare)
             validate_version "$version"
+            [ "$env_file_explicit" = "false" ] || error "--env-file is only supported for publish"
+            [ -z "$artifacts_dir" ] || error "--artifacts-dir is only supported for publish"
+            [ -z "$target_triple" ] || error "--target is only supported for publish"
+            [ -z "$arch" ] || error "--arch is only supported for publish"
+            [ "$skip_local_build" = "false" ] || error "--skip-local-build is only supported for publish"
+            [ "$skip_deps" = "false" ] || error "--skip-deps is only supported for publish"
+            [ "$skip_homebrew" = "false" ] || error "--skip-homebrew is only supported for publish"
             info "Starting release preparation for Cascade"
             prepare_release "$version" "$notes_file" "$inline_notes" "$notes_from_stdin" "$auto_confirm"
             ;;
@@ -580,7 +710,7 @@ main() {
             [ "$notes_from_stdin" != "true" ] || error "--notes-stdin is only supported for prepare"
             [ "$auto_confirm" = "false" ] || error "--yes is only supported for prepare"
             info "Starting release publish for Cascade"
-            publish_release "$version"
+            publish_release "$version" "$env_file" "$env_file_explicit" "$artifacts_dir" "$target_triple" "$arch" "$skip_local_build" "$skip_deps" "$skip_homebrew"
             ;;
         *)
             usage
