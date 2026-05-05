@@ -93,6 +93,66 @@ require_env() {
     fi
 }
 
+homebrew_cask_url() {
+    local version="$1"
+    local arch="$2"
+
+    echo "https://github.com/${RELEASE_GITHUB_REPO}/releases/download/v${version}/Cascade_${version}_${arch}.dmg"
+}
+
+homebrew_cask_verified_prefix() {
+    local repo_owner="${RELEASE_GITHUB_REPO%%/*}"
+
+    echo "github.com/${repo_owner}/"
+}
+
+write_homebrew_cask() {
+    local version="$1"
+    local sha256="$2"
+    local arch="$3"
+    local path="$4"
+    local cask_url
+    local verified_prefix
+
+    cask_url=$(homebrew_cask_url "$version" "$arch")
+    verified_prefix=$(homebrew_cask_verified_prefix)
+
+    cat > "$path" <<EOF
+cask "cascade" do
+  version "$version"
+  sha256 "$sha256"
+
+  url "$cask_url",
+      verified: "$verified_prefix"
+
+  name "Cascade"
+  desc "Node-based image editor built on a Rust graph engine"
+  homepage "https://github.com/${RELEASE_GITHUB_REPO}"
+
+  app "Cascade.app"
+
+  zap trash: [
+    "~/Library/Application Support/com.cascade.app",
+    "~/Library/Caches/com.cascade.app",
+    "~/Library/Preferences/com.cascade.app.plist",
+  ]
+end
+EOF
+}
+
+verify_public_release_asset() {
+    local version="$1"
+    local arch="$2"
+    local cask_url
+
+    require_command curl
+    cask_url=$(homebrew_cask_url "$version" "$arch")
+
+    if ! curl -fsSIL "$cask_url" >/dev/null; then
+        error "Release asset is not publicly accessible: $cask_url. Homebrew users can only install from a public DMG URL."
+    fi
+}
+
 ensure_macos() {
     [ "$(uname -s)" = "Darwin" ] || error "macOS release artifacts must be built on macOS"
 }
@@ -580,6 +640,7 @@ update_homebrew_cask() {
     require_env HOMEBREW_TAP_TOKEN
     [ -f "$sha_file" ] || error "Missing SHA256 file: $sha_file"
     sha256=$(cat "$sha_file")
+    verify_public_release_asset "$version" "$arch"
 
     tap_dir=$(mktemp -d "${TMPDIR:-/tmp}/cascade-homebrew-tap.XXXXXX")
     cleanup_tap() {
@@ -591,27 +652,7 @@ update_homebrew_cask() {
     git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git" "$tap_dir"
 
     mkdir -p "$tap_dir/Casks"
-    cat > "$tap_dir/Casks/cascade.rb" <<EOF
-cask "cascade" do
-  version "$version"
-  sha256 "$sha256"
-
-  url "https://github.com/zacharyfmarion/cascade/releases/download/v\#{version}/Cascade_\#{version}_aarch64.dmg",
-      verified: "github.com/zacharyfmarion/"
-
-  name "Cascade"
-  desc "Node-based image editor built on a Rust graph engine"
-  homepage "https://github.com/zacharyfmarion/cascade"
-
-  app "Cascade.app"
-
-  zap trash: [
-    "~/Library/Application Support/com.cascade.app",
-    "~/Library/Caches/com.cascade.app",
-    "~/Library/Preferences/com.cascade.app.plist",
-  ]
-end
-EOF
+    write_homebrew_cask "$version" "$sha256" "$arch" "$tap_dir/Casks/cascade.rb"
 
     (
         cd "$tap_dir"
@@ -738,4 +779,6 @@ main() {
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
