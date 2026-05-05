@@ -55,17 +55,9 @@ The web app is the fastest way to evaluate Cascade. No installation required —
 
 ### Desktop (macOS)
 
-Install via Homebrew:
-
-```bash
-brew tap zacharyfmarion/homebrew-cascade
-brew install --cask cascade
-```
-
-Or download the latest signed DMG from [GitHub Releases](https://github.com/zacharyfmarion/cascade/releases):
+Download the latest signed DMG from [GitHub Releases](https://github.com/zacharyfmarion/cascade/releases):
 
 - [Apple Silicon DMG](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_aarch64.dmg)
-- [Intel DMG](https://github.com/zacharyfmarion/cascade/releases/latest/download/Cascade_latest_x64.dmg)
 
 Requires macOS 10.15 (Catalina) or later.
 
