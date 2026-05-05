@@ -11,8 +11,10 @@ const setTauriMode = (enabled: boolean) => {
   const host = globalThis as unknown as Record<string, unknown>;
   if (enabled) {
     host.__TAURI_INTERNALS__ = {};
+    host.isTauri = true;
   } else {
     delete host.__TAURI_INTERNALS__;
+    delete host.isTauri;
   }
 };
 
@@ -54,18 +56,22 @@ describe('menuDefinition', () => {
     const requestOpenProject = vi.fn();
     const requestSaveProject = vi.fn();
     const requestSaveProjectAs = vi.fn();
+    const requestCloseProject = vi.fn();
     useGraphStore.setState({
       requestNewProject,
       requestOpenProject,
       requestSaveProject,
       requestSaveProjectAs,
+      requestCloseProject,
     });
 
+    handleMenuAction('app.quit');
     handleMenuAction('file.new');
     handleMenuAction('file.open');
     handleMenuAction('file.save');
     handleMenuAction('file.saveAs');
 
+    expect(requestCloseProject).toHaveBeenCalledTimes(1);
     expect(requestNewProject).toHaveBeenCalledTimes(1);
     expect(requestOpenProject).toHaveBeenCalledTimes(1);
     expect(requestSaveProject).toHaveBeenCalledTimes(1);
