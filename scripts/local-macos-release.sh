@@ -10,6 +10,13 @@ NC='\033[0m'
 CHANGELOG_FILE="CHANGELOG.md"
 RELEASE_GITHUB_REPO="${RELEASE_GITHUB_REPO:-zacharyfmarion/cascade}"
 HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-zacharyfmarion/homebrew-cascade}"
+CASCADE_RELEASE_TAURI_FEATURES="${CASCADE_RELEASE_TAURI_FEATURES:-custom-protocol,video}"
+CASCADE_RELEASE_TAURI_NO_DEFAULT_FEATURES="${CASCADE_RELEASE_TAURI_NO_DEFAULT_FEATURES:-true}"
+CASCADE_RELEASE_KEYCHAIN_PATH=""
+CASCADE_RELEASE_ORIGINAL_KEYCHAINS=()
+CASCADE_RELEASE_CLEANUP_REPO_ROOT=""
+CASCADE_RELEASE_CLEANUP_BUILD_DIR=""
+CASCADE_RELEASE_CLEANUP_SCRATCH_DIR=""
 
 error() {
     echo -e "${RED}Error: $1${NC}" >&2
@@ -66,6 +73,12 @@ Required environment for Homebrew publishing unless --skip-homebrew:
 Environment:
   RELEASE_GITHUB_REPO      GitHub repo slug (default: ${RELEASE_GITHUB_REPO})
   HOMEBREW_TAP_REPO        Homebrew tap repo slug (default: ${HOMEBREW_TAP_REPO})
+  CASCADE_RELEASE_TAURI_FEATURES
+                            Tauri features for release builds
+                            (default: ${CASCADE_RELEASE_TAURI_FEATURES})
+  CASCADE_RELEASE_TAURI_NO_DEFAULT_FEATURES
+                            Pass --no-default-features to the cargo runner
+                            (default: ${CASCADE_RELEASE_TAURI_NO_DEFAULT_FEATURES})
 EOF
 }
 
@@ -210,6 +223,21 @@ decode_certificate() {
     fi
 }
 
+remember_keychain_list() {
+    CASCADE_RELEASE_ORIGINAL_KEYCHAINS=()
+    while IFS= read -r keychain; do
+        keychain="${keychain#\"}"
+        keychain="${keychain%\"}"
+        [ -n "$keychain" ] && CASCADE_RELEASE_ORIGINAL_KEYCHAINS+=("$keychain")
+    done < <(security list-keychains -d user | sed 's/^[[:space:]]*//')
+}
+
+restore_keychain_list() {
+    if [ "${#CASCADE_RELEASE_ORIGINAL_KEYCHAINS[@]}" -gt 0 ]; then
+        security list-keychains -d user -s "${CASCADE_RELEASE_ORIGINAL_KEYCHAINS[@]}" 2>/dev/null || true
+    fi
+}
+
 import_certificate_if_provided() {
     local scratch_dir="$1"
     local certificate_base64="${APPLE_CERTIFICATE:-${APPLE_CERTIFICATE_BASE64:-}}"
@@ -233,6 +261,7 @@ import_certificate_if_provided() {
     decode_certificate "$encoded_certificate" "$certificate_path"
 
     info "Importing Apple certificate into a temporary keychain..."
+    remember_keychain_list
     security create-keychain -p "$keychain_password" "$CASCADE_RELEASE_KEYCHAIN_PATH"
     security set-keychain-settings -lut 21600 "$CASCADE_RELEASE_KEYCHAIN_PATH"
     security unlock-keychain -p "$keychain_password" "$CASCADE_RELEASE_KEYCHAIN_PATH"
@@ -242,15 +271,40 @@ import_certificate_if_provided() {
         -t cert \
         -f pkcs12 \
         -k "$CASCADE_RELEASE_KEYCHAIN_PATH"
-    security list-keychain -d user -s "$CASCADE_RELEASE_KEYCHAIN_PATH"
+    security list-keychain -d user -s "$CASCADE_RELEASE_KEYCHAIN_PATH" "${CASCADE_RELEASE_ORIGINAL_KEYCHAINS[@]}"
     security set-key-partition-list -S apple-tool:,apple:,codesign: \
         -s -k "$keychain_password" "$CASCADE_RELEASE_KEYCHAIN_PATH"
 }
 
 cleanup_keychain() {
+    restore_keychain_list
     if [ -n "${CASCADE_RELEASE_KEYCHAIN_PATH:-}" ]; then
         security delete-keychain "$CASCADE_RELEASE_KEYCHAIN_PATH" 2>/dev/null || true
+        CASCADE_RELEASE_KEYCHAIN_PATH=""
     fi
+}
+
+build_tauri_app() {
+    local build_dir="$1"
+    local target_triple="$2"
+    local cargo_args=()
+
+    if [ "$CASCADE_RELEASE_TAURI_NO_DEFAULT_FEATURES" = "true" ]; then
+        cargo_args+=(--no-default-features)
+    fi
+
+    if [ -n "$CASCADE_RELEASE_TAURI_FEATURES" ]; then
+        cargo_args+=(--features "$CASCADE_RELEASE_TAURI_FEATURES")
+    fi
+
+    (
+        cd "$build_dir/apps/tauri/src-tauri"
+        if [ "${#cargo_args[@]}" -gt 0 ]; then
+            cargo tauri build --target "$target_triple" --bundles app -- "${cargo_args[@]}"
+        else
+            cargo tauri build --target "$target_triple" --bundles app
+        fi
+    )
 }
 
 create_dmg() {
@@ -391,11 +445,14 @@ build_release_artifacts() {
 
     scratch_dir=$(mktemp -d "${TMPDIR:-/tmp}/cascade-release.XXXXXX")
     build_dir="$scratch_dir/source"
+    CASCADE_RELEASE_CLEANUP_REPO_ROOT="$repo_root"
+    CASCADE_RELEASE_CLEANUP_BUILD_DIR="$build_dir"
+    CASCADE_RELEASE_CLEANUP_SCRATCH_DIR="$scratch_dir"
 
     cleanup_build() {
         cleanup_keychain
-        git -C "$repo_root" worktree remove --force "$build_dir" >/dev/null 2>&1 || true
-        rm -rf "$scratch_dir"
+        git -C "$CASCADE_RELEASE_CLEANUP_REPO_ROOT" worktree remove --force "$CASCADE_RELEASE_CLEANUP_BUILD_DIR" >/dev/null 2>&1 || true
+        rm -rf "$CASCADE_RELEASE_CLEANUP_SCRATCH_DIR"
     }
     trap cleanup_build EXIT
 
@@ -412,7 +469,7 @@ build_release_artifacts() {
     (cd "$build_dir/apps/web" && yarn build:wasm)
 
     info "Building signed Tauri app bundle for $target_triple"
-    (cd "$build_dir/apps/tauri/src-tauri" && cargo tauri build --target "$target_triple" --bundles app)
+    build_tauri_app "$build_dir" "$target_triple"
 
     local app_path="$build_dir/target/$target_triple/release/bundle/macos/Cascade.app"
     local dmg_dir="$build_dir/target/$target_triple/release/bundle/dmg"
