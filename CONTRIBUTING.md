@@ -33,7 +33,7 @@ yarn dev
 
 ## Development Guidelines
 
-- Read the project overview in [README.md](./README.md) and the deeper architecture notes in [ARCHITECTURE.md](./ARCHITECTURE.md) when you need more context
+- Read the project overview in [README.md](./README.md) and the deeper architecture notes in [ARCHITECTURE.md](./docs/architecture/ARCHITECTURE.md) when you need more context
 - Prefer architecturally correct fixes over narrow workarounds
 - Keep color processing in linear space, not sRGB
 - Route frontend state mutations through the store rather than bypassing it

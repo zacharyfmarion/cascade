@@ -138,9 +138,8 @@
 - [x] Inspector shows correct params and description
 
 ### Documentation
-- [x] ARCHITECTURE.md — full 9-section architecture document
-- [x] PROGRESS.md — this file
-- [x] PROGRESS.md — this file
+- [x] docs/architecture/ARCHITECTURE.md — full 9-section architecture document
+- [x] docs/PROGRESS.md — this file
 
 ---
 

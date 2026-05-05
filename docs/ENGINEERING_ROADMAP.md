@@ -2,7 +2,7 @@
 
 Prioritized plan for strengthening Cascade's engineering foundations. Runs alongside the [Product Roadmap](./PRODUCT_ROADMAP.md) — these items make feature work safer, faster, and more sustainable.
 
-Based on the [architecture review of Feb 22 2026](./reviews/architecture-review-2-22-26.md).
+Based on the [architecture review of Feb 22 2026](../reviews/architecture-review-2-22-26.md).
 
 **Last updated:** 2026-03-06
 
@@ -35,7 +35,7 @@ Items that prevent crashes, data loss, or silent corruption.
 
 ### 1.3 Fix WASM bridge + full-stack error handling ✅
 
-See the [error handling plan](./reviews/error-handling-plan.md) for the comprehensive strategy.
+See the [error handling plan](../reviews/error-handling-plan.md) for the comprehensive strategy.
 
 **Phase A — MVP (stop swallowing errors): ✅**
 - [x] Replace all 7 `unwrap_or(JsValue::NULL)` in `cascade-wasm/src/lib.rs` with `.map_err(to_engine_error)?`
@@ -181,7 +181,7 @@ Items that can be done incrementally alongside any other phase.
 
 ## Phase 6: Scale Preparation (future, as needed)
 
-These become necessary when hitting the [escalation triggers](./reviews/architecture-review-2-22-26.md#escalation-triggers) identified in the architecture review. Don't start until one of those triggers fires.
+These become necessary when hitting the [escalation triggers](../reviews/architecture-review-2-22-26.md#escalation-triggers) identified in the architecture review. Don't start until one of those triggers fires.
 
 ### 6.1 Background thread rendering ✅ (Partially complete)
 - [x] Move WASM evaluation to Web Worker with dedicated engine instance
