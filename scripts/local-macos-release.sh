@@ -274,6 +274,19 @@ import_certificate_if_provided() {
     security list-keychain -d user -s "$CASCADE_RELEASE_KEYCHAIN_PATH" "${CASCADE_RELEASE_ORIGINAL_KEYCHAINS[@]}"
     security set-key-partition-list -S apple-tool:,apple:,codesign: \
         -s -k "$keychain_password" "$CASCADE_RELEASE_KEYCHAIN_PATH"
+
+    local imported_identity
+    imported_identity=$(security find-identity -v -p codesigning "$CASCADE_RELEASE_KEYCHAIN_PATH" \
+        | grep -F "$APPLE_SIGNING_IDENTITY" \
+        | awk '{ print $2; exit }')
+    if [ -n "$imported_identity" ]; then
+        APPLE_SIGNING_IDENTITY="$imported_identity"
+        export APPLE_SIGNING_IDENTITY
+    fi
+
+    unset APPLE_CERTIFICATE
+    unset APPLE_CERTIFICATE_BASE64
+    unset APPLE_CERTIFICATE_PASSWORD
 }
 
 cleanup_keychain() {
