@@ -1,37 +1,10 @@
-# Viewer Rendering System - Complete Documentation
+# Viewer Rendering System Documentation
 
-This directory contains comprehensive analysis of how the Cascade viewer rendering system works end-to-end.
+This directory documents how the Cascade viewer rendering system works end-to-end.
 
 ## Documents
 
-### 1. **VIEWER_RENDERING_ANALYSIS.md** (Primary Reference)
-The main technical document. Read this first for complete understanding.
-
-**Covers:**
-- Viewer component rendering flow (Viewer.tsx + ViewerNode.tsx)
-- EngineBridge interface and dual implementations (WASM vs Tauri)
-- What triggers re-renders (param changes, frame navigation, graph edits)
-- How render results are stored and delivered to components
-- Batching, debouncing, and generation tracking optimizations
-- Error handling and display
-- Render result downscaling via canvas bilinear filtering
-
-**Key Sections:**
-1. Viewer Component Rendering Flow
-2. EngineBridge.renderViewer() Implementation
-3. What Triggers Viewer Re-renders? (A-D)
-4. Render Result Storage & Delivery
-5. Render Optimization: Batching & Debouncing
-6. Render Suspension (editTransaction)
-7. Error Handling & Display
-8. Render Result Downscaling
-9. Summary Table
-
-**Read This For:** Architecture overview, how pieces fit together
-
----
-
-### 2. **VIEWER_RENDERING_FLOW_DIAGRAMS.md** (Visual Reference)
+### 1. **VIEWER_RENDERING_FLOW_DIAGRAMS.md** (Visual Reference)
 Sequence diagrams and architecture flowcharts for key scenarios.
 
 **Contains:**
@@ -49,7 +22,7 @@ Sequence diagrams and architecture flowcharts for key scenarios.
 
 ---
 
-### 3. **VIEWER_RENDERING_PATTERNS.md** (Design Deep-Dive)
+### 2. **VIEWER_RENDERING_PATTERNS.md** (Design Deep-Dive)
 Design patterns, implementation details, and critical insights.
 
 **Details:**
@@ -293,7 +266,6 @@ Not directly. Renders are queued in `renderLock` promise chain. The generation c
 
 ## Document Legend
 
-- 📘 **VIEWER_RENDERING_ANALYSIS.md** - Structural overview (read first)
 - 📊 **VIEWER_RENDERING_FLOW_DIAGRAMS.md** - Visual sequences and flows
 - 🎯 **VIEWER_RENDERING_PATTERNS.md** - Design patterns and rationale
 - 📄 **This file** - Quick reference and navigation
