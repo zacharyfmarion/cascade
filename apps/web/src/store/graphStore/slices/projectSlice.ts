@@ -477,7 +477,7 @@ export const createProjectSlice: StateCreator<
   const closeDesktopWindow = async () => {
     if (!isTauri()) return;
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
-    await getCurrentWindow().close();
+    await getCurrentWindow().destroy();
   };
 
   const runPendingAction = async (action: PendingProjectAction) => {

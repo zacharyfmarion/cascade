@@ -35,6 +35,7 @@ export function useShortcuts(): void {
       shortcutDispatcher.register('file.saveAs', () => handleMenuAction('file.saveAs')),
       shortcutDispatcher.register('file.open', () => handleMenuAction('file.open')),
       shortcutDispatcher.register('file.settings', () => handleMenuAction('file.settings')),
+      shortcutDispatcher.register('app.quit', () => handleMenuAction('app.quit')),
       shortcutDispatcher.register('help.shortcuts', () => openShortcuts()),
 
       // Playback

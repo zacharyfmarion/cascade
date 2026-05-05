@@ -23,10 +23,13 @@ const dialogMocks = vi.hoisted(() => ({
 }));
 
 const setTauriMode = (enabled: boolean) => {
+  const host = window as unknown as Record<string, unknown>;
   if (enabled) {
-    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    host.__TAURI_INTERNALS__ = {};
+    host.isTauri = true;
   } else {
-    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    delete host.__TAURI_INTERNALS__;
+    delete host.isTauri;
   }
 };
 
@@ -49,6 +52,7 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     close: dialogMocks.close,
+    destroy: dialogMocks.close,
     onCloseRequested: vi.fn(async () => vi.fn()),
   }),
 }));
@@ -1049,6 +1053,43 @@ describe('graphStore project hydration', () => {
     expect(state.currentProjectPath).toBeNull();
     expect(state.dirty).toBe(false);
     expect(state.projectSessionRevision).toBe(initialSessionRevision + 1);
+  });
+
+  it('requestCloseProject prompts when dirty and cancel keeps the desktop window open', async () => {
+    setTauriMode(true);
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+
+    await useGraphStore.getState().requestCloseProject();
+
+    expect(useGraphStore.getState().unsavedChangesPrompt).toEqual({ kind: 'close' });
+    expect(dialogMocks.close).not.toHaveBeenCalled();
+
+    await useGraphStore.getState().resolveUnsavedChanges('cancel');
+
+    expect(useGraphStore.getState().unsavedChangesPrompt).toBeNull();
+    expect(useGraphStore.getState().dirty).toBe(true);
+    expect(dialogMocks.close).not.toHaveBeenCalled();
+  });
+
+  it('requestCloseProject destroys the desktop window when the project is clean', async () => {
+    setTauriMode(true);
+    useGraphStore.setState({ dirty: false });
+
+    await useGraphStore.getState().requestCloseProject();
+
+    expect(dialogMocks.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('discarding close changes destroys the desktop window', async () => {
+    setTauriMode(true);
+    await useGraphStore.getState().addNode('gaussian_blur', { x: 0, y: 0 });
+
+    await useGraphStore.getState().requestCloseProject();
+    await useGraphStore.getState().resolveUnsavedChanges('discard');
+
+    expect(useGraphStore.getState().unsavedChangesPrompt).toBeNull();
+    expect(useGraphStore.getState().dirty).toBe(false);
+    expect(dialogMocks.close).toHaveBeenCalledTimes(1);
   });
 
   it('desktop Save uses the current project path', async () => {

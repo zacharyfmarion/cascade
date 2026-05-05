@@ -29,6 +29,10 @@ describe('platform runtime helpers', () => {
     expect(getRuntimeSurface({ __TAURI_INTERNALS__: {} })).toBe('desktop');
   });
 
+  it('detects desktop from Tauri runtime flag', () => {
+    expect(getRuntimeSurface({ isTauri: true })).toBe('desktop');
+  });
+
   it('defaults to web when Tauri internals are absent', () => {
     expect(getRuntimeSurface({})).toBe('web');
   });

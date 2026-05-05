@@ -1,5 +1,6 @@
 import type { ShortcutDefinition } from './types';
 import { useGraphStore } from '../store/graphStore';
+import { isDesktopRuntime } from '../platform/runtime';
 
 // Helpers to reduce boilerplate in key definitions
 const key = (k: string): { key: string; mod: false; shift: false; alt: false } => ({
@@ -37,6 +38,7 @@ export const SHORTCUT_REGISTRY: ShortcutDefinition[] = [
   { id: 'file.saveAs',     label: 'Save As',              category: 'General',    keys: [modShift('s')],         context: 'global' },
   { id: 'file.open',       label: 'Open Project',         category: 'General',    keys: [mod('o')],              context: 'global' },
   { id: 'file.settings',   label: 'Settings',             category: 'General',    keys: [mod(',')],              context: 'global' },
+  { id: 'app.quit',        label: 'Quit Cascade',         category: 'General',    keys: [mod('q')],              context: 'global', when: isDesktopRuntime },
   { id: 'help.shortcuts',  label: 'Show Shortcuts',       category: 'General',    keys: [key('?')],              context: 'app' },
   { id: 'ui.toggleAi',     label: 'Toggle AI Assistant',  category: 'General',    keys: [mod('l')],              context: 'global' },
 
