@@ -101,6 +101,7 @@ const EXPECTED_KEYS: string[] = [
   'frameSelectedNodes',
   'getDslShadow',
   'getBatchImageData',
+  'getBatchThumbnail',
   'getImageData',
   'getViewsForDisplay',
   'goToEnd',

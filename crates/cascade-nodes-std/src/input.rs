@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
+use std::io::Cursor;
 
 /// Minimum dimension (pixels) to avoid degenerate downscales.
 const MIN_PREVIEW_EDGE: u32 = 600;
@@ -408,6 +409,9 @@ fn decode_standard_image(bytes: &[u8]) -> Result<Image, CascadeError> {
 const FRAME_CACHE_SIZE: usize = 32;
 const UPLOADED_FRAME_CACHE_SIZE: usize = 8;
 const UPLOADED_FRAME_CACHE_BYTES: usize = 192 * 1024 * 1024;
+const BATCH_FRAME_CACHE_BYTES: usize = 192 * 1024 * 1024;
+const BATCH_THUMBNAIL_CACHE_BYTES: usize = 32 * 1024 * 1024;
+const BATCH_THUMBNAIL_MAX_EDGE_LIMIT: u32 = 512;
 
 pub struct LoadImageSequence {
     directory: Mutex<Option<String>>,
@@ -1135,9 +1139,138 @@ enum BatchEntrySource {
     Path(PathBuf),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BatchFrameCacheKey {
+    frame: u64,
+    preview_bucket: u16,
+}
+
+struct BatchFrameCache {
+    entries: Vec<(BatchFrameCacheKey, Image, usize)>,
+    max_bytes: usize,
+    current_bytes: usize,
+}
+
+impl BatchFrameCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_bytes,
+            current_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, key: BatchFrameCacheKey) -> Option<Image> {
+        let index = self
+            .entries
+            .iter()
+            .position(|(entry_key, _, _)| *entry_key == key)?;
+        let (entry_key, image, bytes) = self.entries.remove(index);
+        let cloned = image.clone();
+        self.entries.push((entry_key, image, bytes));
+        Some(cloned)
+    }
+
+    fn insert(&mut self, key: BatchFrameCacheKey, image: Image) {
+        if self
+            .entries
+            .iter()
+            .any(|(entry_key, _, _)| *entry_key == key)
+        {
+            return;
+        }
+        let bytes = image_byte_size(&image);
+        self.current_bytes = self.current_bytes.saturating_add(bytes);
+        self.entries.push((key, image, bytes));
+        while self.entries.len() > 1 && self.current_bytes > self.max_bytes {
+            let (_, _, evicted_bytes) = self.entries.remove(0);
+            self.current_bytes = self.current_bytes.saturating_sub(evicted_bytes);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.current_bytes = 0;
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[cfg(test)]
+    fn current_bytes(&self) -> usize {
+        self.current_bytes
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BatchThumbnailCacheKey {
+    index: usize,
+    max_edge: u32,
+}
+
+struct BatchThumbnailCache {
+    entries: Vec<(BatchThumbnailCacheKey, Vec<u8>, usize)>,
+    max_bytes: usize,
+    current_bytes: usize,
+}
+
+impl BatchThumbnailCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_bytes,
+            current_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, key: BatchThumbnailCacheKey) -> Option<Vec<u8>> {
+        let index = self
+            .entries
+            .iter()
+            .position(|(entry_key, _, _)| *entry_key == key)?;
+        let (entry_key, bytes, byte_count) = self.entries.remove(index);
+        let cloned = bytes.clone();
+        self.entries.push((entry_key, bytes, byte_count));
+        Some(cloned)
+    }
+
+    fn insert(&mut self, key: BatchThumbnailCacheKey, bytes: Vec<u8>) {
+        if self
+            .entries
+            .iter()
+            .any(|(entry_key, _, _)| *entry_key == key)
+        {
+            return;
+        }
+        let byte_count = bytes.len();
+        self.current_bytes = self.current_bytes.saturating_add(byte_count);
+        self.entries.push((key, bytes, byte_count));
+        while self.entries.len() > 1 && self.current_bytes > self.max_bytes {
+            let (_, _, evicted_bytes) = self.entries.remove(0);
+            self.current_bytes = self.current_bytes.saturating_sub(evicted_bytes);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.current_bytes = 0;
+    }
+}
+
+fn preview_scale_bucket(preview_scale: f32) -> u16 {
+    if !preview_scale.is_finite() || preview_scale <= 0.0 || preview_scale >= 1.0 {
+        1000
+    } else {
+        ((preview_scale * 1000.0).round() as u16).clamp(1, 999)
+    }
+}
+
 pub struct LoadImageBatch {
     entries: Mutex<Vec<BatchEntry>>,
-    frame_cache: Mutex<FrameCache>,
+    frame_cache: Mutex<BatchFrameCache>,
+    thumbnail_cache: Mutex<BatchThumbnailCache>,
 }
 impl Default for LoadImageBatch {
     fn default() -> Self {
@@ -1149,7 +1282,8 @@ impl LoadImageBatch {
     pub fn new() -> Self {
         Self {
             entries: Mutex::new(Vec::new()),
-            frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
+            frame_cache: Mutex::new(BatchFrameCache::new(BATCH_FRAME_CACHE_BYTES)),
+            thumbnail_cache: Mutex::new(BatchThumbnailCache::new(BATCH_THUMBNAIL_CACHE_BYTES)),
         }
     }
     pub fn clear(&self) -> Result<(), CascadeError> {
@@ -1163,6 +1297,11 @@ impl LoadImageBatch {
             .lock()
             .map_err(|_| CascadeError::Other("Batch cache mutex poisoned".to_string()))?;
         cache.clear();
+        let mut thumbnail_cache = self
+            .thumbnail_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
+        thumbnail_cache.clear();
         Ok(())
     }
     pub fn add_image(&self, filename: &str, bytes: &[u8]) -> Result<(), CascadeError> {
@@ -1215,6 +1354,44 @@ impl LoadImageBatch {
         });
         Ok(())
     }
+
+    pub fn set_image_paths(&self, paths: Vec<(String, PathBuf)>) -> Result<(), CascadeError> {
+        let mut next_entries = Vec::with_capacity(paths.len());
+        for (filename, path) in paths {
+            if !path.is_file() {
+                return Err(CascadeError::MissingInput(format!(
+                    "Batch image file not found: {}",
+                    path.display()
+                )));
+            }
+            next_entries.push(BatchEntry {
+                stem: filename_stem(&filename),
+                source: BatchEntrySource::Path(path),
+            });
+        }
+
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
+        *entries = next_entries;
+        drop(entries);
+
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch cache mutex poisoned".to_string()))?;
+        cache.clear();
+        drop(cache);
+
+        let mut thumbnail_cache = self
+            .thumbnail_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
+        thumbnail_cache.clear();
+        Ok(())
+    }
+
     pub fn image_count(&self) -> Result<usize, CascadeError> {
         let entries = self
             .entries
@@ -1250,15 +1427,62 @@ impl LoadImageBatch {
         }
     }
 
-    fn decode_frame(&self, index: usize) -> Result<Image, CascadeError> {
-        // Check cache first
+    pub fn thumbnail_png(&self, index: usize, max_edge: u32) -> Result<Vec<u8>, CascadeError> {
+        let max_edge = max_edge.clamp(1, BATCH_THUMBNAIL_MAX_EDGE_LIMIT);
+        let key = BatchThumbnailCacheKey { index, max_edge };
         {
-            let cache = self
+            let mut cache = self.thumbnail_cache.lock().map_err(|_| {
+                CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string())
+            })?;
+            if let Some(bytes) = cache.get(key) {
+                return Ok(bytes);
+            }
+        }
+
+        let source = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
+            entries
+                .get(index)
+                .ok_or_else(|| CascadeError::MissingInput("Batch index out of range".to_string()))?
+                .source
+                .clone()
+        };
+
+        let decoded = match source {
+            BatchEntrySource::Bytes(bytes) => image::load_from_memory(&bytes)
+                .map_err(|e| CascadeError::ImageDecode(e.to_string()))?,
+            BatchEntrySource::Path(path) => image::open(&path)
+                .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
+        };
+        let thumbnail = decoded.thumbnail(max_edge, max_edge).to_rgba8();
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgba8(thumbnail)
+            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+
+        let mut cache = self
+            .thumbnail_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
+        cache.insert(key, bytes.clone());
+        Ok(bytes)
+    }
+
+    fn decode_frame(&self, index: usize, preview_scale: f32) -> Result<Image, CascadeError> {
+        let key = BatchFrameCacheKey {
+            frame: index as u64,
+            preview_bucket: preview_scale_bucket(preview_scale),
+        };
+        {
+            let mut cache = self
                 .frame_cache
                 .lock()
                 .map_err(|_| CascadeError::Other("Batch cache mutex poisoned".to_string()))?;
-            if let Some(img) = cache.get(index as u64) {
-                return Ok(img.clone());
+            if let Some(img) = cache.get(key) {
+                return Ok(img);
             }
         }
 
@@ -1302,13 +1526,12 @@ impl LoadImageBatch {
                 out[2] = lut[raw[idx + 2] as usize];
                 out[3] = raw[idx + 3] as f32 / 255.0;
             });
-        let image = Image::from_f32_data(width, height, data)?;
-        // Insert into cache
+        let image = preview_downscale(Image::from_f32_data(width, height, data)?, preview_scale)?;
         let mut cache = self
             .frame_cache
             .lock()
             .map_err(|_| CascadeError::Other("Batch cache mutex poisoned".to_string()))?;
-        cache.insert(index as u64, image.clone());
+        cache.insert(key, image.clone());
 
         Ok(image)
     }
@@ -1364,7 +1587,7 @@ impl Node for LoadImageBatch {
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {
         Box::pin(async move {
             let frame = ctx.frame_time.frame as usize;
-            let image = self.decode_frame(frame)?;
+            let image = self.decode_frame(frame, ctx.preview_scale)?;
 
             let stem = {
                 let entries = self
@@ -1400,6 +1623,15 @@ mod tests {
 
     fn png_bytes(rgba: [u8; 4]) -> Vec<u8> {
         let image = ::image::RgbaImage::from_pixel(1, 1, ::image::Rgba(rgba));
+        let mut bytes = Vec::new();
+        ::image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut Cursor::new(&mut bytes), ::image::ImageFormat::Png)
+            .expect("test PNG should encode");
+        bytes
+    }
+
+    fn png_bytes_with_size(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let image = ::image::RgbaImage::from_pixel(width, height, ::image::Rgba(rgba));
         let mut bytes = Vec::new();
         ::image::DynamicImage::ImageRgba8(image)
             .write_to(&mut Cursor::new(&mut bytes), ::image::ImageFormat::Png)
@@ -1558,11 +1790,82 @@ mod tests {
             vec!["lazy".to_string()]
         );
 
-        let image = node.decode_frame(0).expect("path entry should decode");
+        let image = node.decode_frame(0, 1.0).expect("path entry should decode");
         assert_eq!(image.width, 1);
         assert_eq!(image.height, 1);
 
         fs::remove_file(path).expect("test PNG should clean up");
+    }
+
+    #[test]
+    fn load_image_batch_preview_scale_downscales_decoded_frame() {
+        let node = LoadImageBatch::new();
+        let bytes = png_bytes_with_size(1200, 900, [12, 34, 56, 255]);
+        node.add_image("large.png", &bytes)
+            .expect("batch image should register");
+
+        let image = node
+            .decode_frame(0, 0.25)
+            .expect("preview frame should decode");
+
+        assert_eq!((image.width, image.height), (800, 600));
+    }
+
+    #[test]
+    fn batch_frame_cache_evicts_old_entries_by_byte_budget() {
+        let mut cache = BatchFrameCache::new(
+            image_byte_size(&Image::from_f32_data(2, 1, vec![0.0; 8]).expect("image")) * 2,
+        );
+        let first = Image::from_f32_data(2, 1, vec![0.1; 8]).expect("first image");
+        let second = Image::from_f32_data(2, 1, vec![0.2; 8]).expect("second image");
+        let third = Image::from_f32_data(2, 1, vec![0.3; 8]).expect("third image");
+
+        cache.insert(
+            BatchFrameCacheKey {
+                frame: 1,
+                preview_bucket: 1000,
+            },
+            first,
+        );
+        cache.insert(
+            BatchFrameCacheKey {
+                frame: 2,
+                preview_bucket: 1000,
+            },
+            second,
+        );
+        cache.insert(
+            BatchFrameCacheKey {
+                frame: 3,
+                preview_bucket: 1000,
+            },
+            third,
+        );
+
+        assert_eq!(cache.len(), 2);
+        assert!(cache
+            .get(BatchFrameCacheKey {
+                frame: 1,
+                preview_bucket: 1000,
+            })
+            .is_none());
+        assert!(cache.current_bytes() <= cache.max_bytes);
+    }
+
+    #[test]
+    fn load_image_batch_thumbnail_png_respects_max_edge() {
+        let node = LoadImageBatch::new();
+        let bytes = png_bytes_with_size(8, 4, [90, 80, 70, 255]);
+        node.add_image("wide.png", &bytes)
+            .expect("batch image should register");
+
+        let thumbnail = node.thumbnail_png(0, 2).expect("thumbnail should encode");
+        let decoded = ::image::load_from_memory(&thumbnail)
+            .expect("thumbnail should decode")
+            .to_rgba8();
+
+        assert!(decoded.width() <= 2);
+        assert!(decoded.height() <= 2);
     }
 
     #[test]
@@ -1576,7 +1879,7 @@ mod tests {
         fs::remove_file(&path).expect("test PNG should remove");
 
         let error = node
-            .decode_frame(0)
+            .decode_frame(0, 1.0)
             .expect_err("path-backed entry should read from disk lazily");
         assert!(error.to_string().contains("removed.png"));
     }

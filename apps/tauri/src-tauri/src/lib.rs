@@ -156,7 +156,7 @@ fn is_batch_asset_for_node(key: &str, asset_ref: &AssetReference, node_id: &str)
     (key == node_id && asset_ref.asset_type == "image_batch")
         || (key
             .split_once(':')
-            .map_or(false, |(prefix, _)| prefix == node_id)
+            .is_some_and(|(prefix, _)| prefix == node_id)
             && asset_ref.asset_type == "image_batch_frame")
 }
 
@@ -175,7 +175,7 @@ fn make_batch_manifest_asset(
         .iter()
         .filter(|(key, asset_ref)| {
             key.split_once(':')
-                .map_or(false, |(prefix, _)| prefix == node_id)
+                .is_some_and(|(prefix, _)| prefix == node_id)
                 && asset_ref.asset_type == "image_batch_frame"
         })
         .map(|(key, asset_ref)| {
@@ -221,6 +221,60 @@ fn refresh_batch_manifest(
 
 fn remove_batch_assets(node_id: &str, assets: &mut HashMap<String, AssetReference>) {
     assets.retain(|key, asset_ref| !is_batch_asset_for_node(key, asset_ref, node_id));
+}
+
+fn sorted_supported_paths_from_directory(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_file() && is_supported_image_path(&path) {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|path| original_filename(path));
+    Ok(entries)
+}
+
+fn sorted_supported_paths(paths: Vec<String>) -> Vec<PathBuf> {
+    let mut entries = paths
+        .into_iter()
+        .map(|path| PathBuf::from(strip_file_url(&path)))
+        .filter(|path| path.is_file() && is_supported_image_path(path))
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|path| original_filename(path));
+    entries
+}
+
+fn runtime_batch_path_entries(entries: &[PathBuf]) -> Vec<(String, PathBuf)> {
+    entries
+        .iter()
+        .map(|path| (original_filename(path), path.clone()))
+        .collect()
+}
+
+fn set_batch_path_assets(
+    node_id: &str,
+    entries: &[PathBuf],
+    assets: &mut HashMap<String, AssetReference>,
+) -> Result<(), String> {
+    remove_batch_assets(node_id, assets);
+    for (index, path) in entries.iter().enumerate() {
+        let filename = original_filename(path);
+        assets.insert(
+            batch_frame_key(node_id, index),
+            external_asset_ref(
+                "image_batch_frame",
+                path.to_string_lossy().to_string(),
+                filename,
+            ),
+        );
+    }
+    refresh_batch_manifest(node_id, assets)
 }
 
 fn is_asset_uri(path: &str) -> bool {
@@ -491,86 +545,71 @@ fn batch_add_image(
 }
 
 #[tauri::command]
-fn batch_load_directory(
+async fn batch_load_directory(
     state: State<'_, EngineState>,
     node_id: String,
     directory: String,
 ) -> Result<String, String> {
+    let total_start = Instant::now();
+    let state = state.inner().clone();
     let dir = PathBuf::from(strip_file_url(&directory));
-    let mut entries = std::fs::read_dir(&dir)
-        .map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))?
-        .flatten()
-        .filter_map(|entry| {
-            let path = entry.path();
-            if path.is_file() && is_supported_image_path(&path) {
-                Some(path)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by(|a, b| original_filename(a).cmp(&original_filename(b)));
+    let scan_start = Instant::now();
+    let entries =
+        tauri::async_runtime::spawn_blocking(move || sorted_supported_paths_from_directory(&dir))
+            .await
+            .map_err(|e| e.to_string())??;
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] batch_load_directory scan: {:.1}ms ({} files)",
+        scan_start.elapsed().as_secs_f64() * 1000.0,
+        entries.len()
+    );
 
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.engine.batch_clear(&node_id).map_err(|e| e.to_string())?;
-    remove_batch_assets(&node_id, &mut s.project_assets);
-    for (index, path) in entries.iter().enumerate() {
-        let filename = original_filename(path);
-        s.engine
-            .batch_add_image_path(&node_id, &filename, path)
-            .map_err(|e| e.to_string())?;
-        s.project_assets.insert(
-            batch_frame_key(&node_id, index),
-            external_asset_ref(
-                "image_batch_frame",
-                path.to_string_lossy().to_string(),
-                filename,
-            ),
-        );
-    }
-    refresh_batch_manifest(&node_id, &mut s.project_assets)?;
+    s.engine
+        .batch_set_image_paths(&node_id, runtime_batch_path_entries(&entries))
+        .map_err(|e| e.to_string())?;
+    set_batch_path_assets(&node_id, &entries, &mut s.project_assets)?;
     let info = s
         .engine
         .get_batch_info(&node_id)
         .map_err(|e| e.to_string())?;
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] batch_load_directory total: {:.1}ms ({} files)",
+        total_start.elapsed().as_secs_f64() * 1000.0,
+        info.count
+    );
     serde_json::to_string(&info).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn batch_load_paths(
+async fn batch_load_paths(
     state: State<'_, EngineState>,
     node_id: String,
     paths: Vec<String>,
 ) -> Result<String, String> {
-    let mut entries = paths
-        .into_iter()
-        .map(|path| PathBuf::from(strip_file_url(&path)))
-        .filter(|path| path.is_file() && is_supported_image_path(path))
-        .collect::<Vec<_>>();
-    entries.sort_by(|a, b| original_filename(a).cmp(&original_filename(b)));
+    let total_start = Instant::now();
+    let state = state.inner().clone();
+    let entries = tauri::async_runtime::spawn_blocking(move || sorted_supported_paths(paths))
+        .await
+        .map_err(|e| e.to_string())?;
 
     let mut s = state.lock().map_err(|e| e.to_string())?;
-    s.engine.batch_clear(&node_id).map_err(|e| e.to_string())?;
-    remove_batch_assets(&node_id, &mut s.project_assets);
-    for (index, path) in entries.iter().enumerate() {
-        let filename = original_filename(path);
-        s.engine
-            .batch_add_image_path(&node_id, &filename, path)
-            .map_err(|e| e.to_string())?;
-        s.project_assets.insert(
-            batch_frame_key(&node_id, index),
-            external_asset_ref(
-                "image_batch_frame",
-                path.to_string_lossy().to_string(),
-                filename,
-            ),
-        );
-    }
-    refresh_batch_manifest(&node_id, &mut s.project_assets)?;
+    s.engine
+        .batch_set_image_paths(&node_id, runtime_batch_path_entries(&entries))
+        .map_err(|e| e.to_string())?;
+    set_batch_path_assets(&node_id, &entries, &mut s.project_assets)?;
     let info = s
         .engine
         .get_batch_info(&node_id)
         .map_err(|e| e.to_string())?;
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] batch_load_paths total: {:.1}ms ({} files)",
+        total_start.elapsed().as_secs_f64() * 1000.0,
+        info.count
+    );
     serde_json::to_string(&info).map_err(|e| e.to_string())
 }
 
@@ -596,6 +635,32 @@ fn get_batch_image_data(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+async fn get_batch_thumbnail(
+    state: State<'_, EngineState>,
+    node_id: String,
+    index: usize,
+    max_edge: u32,
+) -> Result<Vec<u8>, String> {
+    let start = Instant::now();
+    let state = state.inner().clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.engine
+            .get_batch_thumbnail(&node_id, index, max_edge)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] get_batch_thumbnail: {:.1}ms (index {index}, {} bytes)",
+        start.elapsed().as_secs_f64() * 1000.0,
+        bytes.len()
+    );
+    Ok(bytes)
+}
+
 /// Returns raw RGBA8 pixels prefixed with [width_le32][height_le32].
 /// Frontend receives an ArrayBuffer: first 8 bytes are dimensions, rest is pixel data.
 #[tauri::command]
@@ -605,6 +670,7 @@ fn render_viewer(
     frame: u64,
     preview_scale: Option<f32>,
 ) -> Result<Response, String> {
+    let start = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
     let result = s
         .engine
@@ -613,6 +679,11 @@ fn render_viewer(
 
     let mut buf = Vec::with_capacity(viewer_render_result_size(&result));
     write_viewer_render_result(&mut buf, &result);
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] render_viewer: {:.1}ms ({viewer_node_id}, frame {frame})",
+        start.elapsed().as_secs_f64() * 1000.0
+    );
     Ok(Response::new(buf))
 }
 
@@ -979,7 +1050,7 @@ fn retained_batch_frames<'a>(
         .iter()
         .filter(|(key, asset_ref)| {
             key.split_once(':')
-                .map_or(false, |(prefix, _)| prefix == node_id)
+                .is_some_and(|(prefix, _)| prefix == node_id)
                 && asset_ref.asset_type == "image_batch_frame"
         })
         .map(|(key, asset_ref)| (key.clone(), asset_ref))
@@ -1570,7 +1641,7 @@ fn hydrate_batch_assets(
         let manifest_bytes = read_project_asset_bytes(project_dir, asset_ref, packed_assets)?;
         let manifest: BatchManifest =
             serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
-        engine.batch_clear(node_id).map_err(|e| e.to_string())?;
+        let mut hydrated_frames = Vec::with_capacity(manifest.frames.len());
         for frame in manifest.frames {
             let frame_asset = if !frame.key.is_empty() {
                 asset_map.get(frame.key.as_str()).copied()
@@ -1582,7 +1653,7 @@ fn hydrate_batch_assets(
                     .iter()
                     .filter(|(key, asset_ref)| {
                         key.split_once(':')
-                            .map_or(false, |(prefix, _)| prefix == node_id)
+                            .is_some_and(|(prefix, _)| prefix == node_id)
                             && asset_ref.asset_type == "image_batch_frame"
                     })
                     .map(|(_, asset_ref)| asset_ref)
@@ -1605,14 +1676,37 @@ fn hydrate_batch_assets(
                 && !frame_asset.path.is_empty()
             {
                 let path = resolve_project_path(project_dir, &frame_asset.path);
-                engine
-                    .batch_add_image_path(node_id, &filename, path)
-                    .map_err(|e| e.to_string())?;
+                hydrated_frames.push((filename, Some(path), None));
             } else {
                 let bytes = read_project_asset_bytes(project_dir, frame_asset, packed_assets)?;
-                engine
-                    .batch_add_image(node_id, &filename, &bytes)
-                    .map_err(|e| e.to_string())?;
+                hydrated_frames.push((filename, None, Some(bytes)));
+            }
+        }
+        if hydrated_frames
+            .iter()
+            .all(|(_, path, bytes)| path.is_some() && bytes.is_none())
+        {
+            engine
+                .batch_set_image_paths(
+                    node_id,
+                    hydrated_frames
+                        .into_iter()
+                        .filter_map(|(filename, path, _)| path.map(|path| (filename, path)))
+                        .collect(),
+                )
+                .map_err(|e| e.to_string())?;
+        } else {
+            engine.batch_clear(node_id).map_err(|e| e.to_string())?;
+            for (filename, path, bytes) in hydrated_frames {
+                if let Some(path) = path {
+                    engine
+                        .batch_add_image_path(node_id, &filename, path)
+                        .map_err(|e| e.to_string())?;
+                } else if let Some(bytes) = bytes {
+                    engine
+                        .batch_add_image(node_id, &filename, &bytes)
+                        .map_err(|e| e.to_string())?;
+                }
             }
         }
     }
@@ -2401,6 +2495,7 @@ pub fn run() {
             batch_load_paths,
             get_batch_info,
             get_batch_image_data,
+            get_batch_thumbnail,
             render_viewer,
             render_internal_viewer,
             set_param_and_render,

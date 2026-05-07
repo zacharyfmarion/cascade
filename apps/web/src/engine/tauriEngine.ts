@@ -241,13 +241,23 @@ export class TauriEngine implements EngineBridge {
   }
 
   async batchLoadDirectory(nodeId: string, directory: string): Promise<BatchInfo> {
+    const start = performance.now();
     const json = await invoke<string>('batch_load_directory', { nodeId, directory });
-    return JSON.parse(json) as BatchInfo;
+    const info = JSON.parse(json) as BatchInfo;
+    if (import.meta.env.DEV) {
+      console.debug(`[perf] batchLoadDirectory ${(performance.now() - start).toFixed(1)}ms`, info);
+    }
+    return info;
   }
 
   async batchLoadPaths(nodeId: string, paths: string[]): Promise<BatchInfo> {
+    const start = performance.now();
     const json = await invoke<string>('batch_load_paths', { nodeId, paths });
-    return JSON.parse(json) as BatchInfo;
+    const info = JSON.parse(json) as BatchInfo;
+    if (import.meta.env.DEV) {
+      console.debug(`[perf] batchLoadPaths ${(performance.now() - start).toFixed(1)}ms`, info);
+    }
+    return info;
   }
 
   async getBatchInfo(nodeId: string): Promise<BatchInfo> {
@@ -259,6 +269,20 @@ export class TauriEngine implements EngineBridge {
     try {
       const buf = await invoke<ArrayBuffer>('get_batch_image_data', { nodeId, index });
       if (!buf || buf.byteLength === 0) return null;
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
+  }
+
+  async getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null> {
+    try {
+      const start = performance.now();
+      const buf = await invoke<ArrayBuffer>('get_batch_thumbnail', { nodeId, index, maxEdge });
+      if (!buf || buf.byteLength === 0) return null;
+      if (import.meta.env.DEV) {
+        console.debug(`[perf] getBatchThumbnail ${(performance.now() - start).toFixed(1)}ms`, { nodeId, index, bytes: buf.byteLength });
+      }
       return new Uint8Array(buf);
     } catch {
       return null;

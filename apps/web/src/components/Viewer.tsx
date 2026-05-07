@@ -5,6 +5,7 @@ import { useGraphStore } from '../store/graphStore';
 import { isCompareResult, isPixelResult } from '../store/types';
 import type { ViewerResult } from '../store/types';
 import type { MediaIteratorInfo } from '../store/graphStore/slices/mediaIteratorSlice';
+import { MediaVirtualStrip } from './MediaVirtualStrip';
 import { ViewerToolbar } from './ViewerToolbar';
 
 /* ── Types ──────────────────────────────────────────────────── */
@@ -29,26 +30,9 @@ export interface PixelInfo {
 const FILMSTRIP_ITEM_WIDTH = 82;
 const FILMSTRIP_THUMB_WIDTH = 68;
 const FILMSTRIP_THUMB_HEIGHT = 46;
-const FILMSTRIP_OVERSCAN = 5;
-const FILMSTRIP_THUMBNAIL_SCALE = 0.12;
+const FILMSTRIP_OVERSCAN = 3;
 const FILMSTRIP_BOTTOM_OFFSET = 50;
 const FILMSTRIP_ERROR_BOTTOM_OFFSET = 84;
-
-const viewerResultToDataUrl = (result: ViewerResult | null): string | null => {
-  if (!result || (!isPixelResult(result) && !isCompareResult(result))) return null;
-  const pixels = isCompareResult(result) ? result.afterPixels : result.pixels;
-  if (result.width <= 0 || result.height <= 0 || pixels.length === 0) return null;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = result.width;
-  canvas.height = result.height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-  const imageData = new ImageData(result.width, result.height);
-  imageData.data.set(pixels);
-  ctx.putImageData(imageData, 0, 0);
-  return canvas.toDataURL('image/png');
-};
 
 /* ── Viewer pixel transforms (display-only) ──────────────────── */
 
@@ -116,6 +100,89 @@ function applyViewerTransforms(
 
   return out;
 }
+
+const sampleViewerPixels = (
+  result: ViewerResult,
+  width: number,
+  height: number,
+): Uint8ClampedArray | null => {
+  if (!isPixelResult(result) && !isCompareResult(result)) return null;
+  const pixels = isCompareResult(result) ? result.afterPixels : result.pixels;
+  if (result.width <= 0 || result.height <= 0 || pixels.length === 0) return null;
+
+  const output = new Uint8ClampedArray(width * height * 4);
+  const sourceAspect = result.width / result.height;
+  const targetAspect = width / height;
+  const sampleWidth = sourceAspect > targetAspect
+    ? Math.round(result.height * targetAspect)
+    : result.width;
+  const sampleHeight = sourceAspect > targetAspect
+    ? result.height
+    : Math.round(result.width / targetAspect);
+  const startX = Math.max(0, Math.floor((result.width - sampleWidth) / 2));
+  const startY = Math.max(0, Math.floor((result.height - sampleHeight) / 2));
+
+  for (let y = 0; y < height; y += 1) {
+    const sy = Math.min(
+      result.height - 1,
+      startY + Math.floor((y / height) * sampleHeight),
+    );
+    for (let x = 0; x < width; x += 1) {
+      const sx = Math.min(
+        result.width - 1,
+        startX + Math.floor((x / width) * sampleWidth),
+      );
+      const sourceIndex = (sy * result.width + sx) * 4;
+      const targetIndex = (y * width + x) * 4;
+      output[targetIndex] = pixels[sourceIndex];
+      output[targetIndex + 1] = pixels[sourceIndex + 1];
+      output[targetIndex + 2] = pixels[sourceIndex + 2];
+      output[targetIndex + 3] = pixels[sourceIndex + 3];
+    }
+  }
+
+  return output;
+};
+
+const CurrentResultPreview: React.FC<{
+  result: ViewerResult | undefined;
+  channel: ChannelMode;
+  gain: number;
+  gamma: number;
+}> = ({ result, channel, gain, gamma }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !result) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const sampled = sampleViewerPixels(result, FILMSTRIP_THUMB_WIDTH, FILMSTRIP_THUMB_HEIGHT);
+    if (!sampled) {
+      ctx.clearRect(0, 0, FILMSTRIP_THUMB_WIDTH, FILMSTRIP_THUMB_HEIGHT);
+      return;
+    }
+    const transformed = applyViewerTransforms(sampled, { channel, gain, gamma });
+    canvas.width = FILMSTRIP_THUMB_WIDTH;
+    canvas.height = FILMSTRIP_THUMB_HEIGHT;
+    const imageData = new ImageData(FILMSTRIP_THUMB_WIDTH, FILMSTRIP_THUMB_HEIGHT);
+    imageData.data.set(transformed);
+    ctx.putImageData(imageData, 0, 0);
+  }, [channel, gain, gamma, result]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={FILMSTRIP_THUMB_WIDTH}
+      height={FILMSTRIP_THUMB_HEIGHT}
+      style={{
+        display: 'block',
+        height: '100%',
+        width: '100%',
+      }}
+    />
+  );
+};
 
 /** Renders non-pixel value types (float, int, bool, color, string, none) */
 const ScalarViewer: React.FC<{ result: ViewerResult }> = ({ result }) => {
@@ -245,8 +312,6 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const activeTransportSourceId = useGraphStore(s => s.activeTransportSourceId);
   const mediaIteratorInfoMap = useGraphStore(s => s.mediaIteratorInfoMap);
   const suggestActiveTransportSourceForViewer = useGraphStore(s => s.suggestActiveTransportSourceForViewer);
-  const renderViewerFrame = useGraphStore(s => s.renderViewerFrame);
-  const graphRevision = useGraphStore(s => s.graphRevision);
 
   const fpsIndicatorColor = useMemo(() => {
     if (playbackFps === null) return 'var(--timing-fast)';
@@ -264,8 +329,6 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const [compareSplit, setCompareSplit] = useState(0.5);
   const [isDraggingCompareSplit, setIsDraggingCompareSplit] = useState(false);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
-  const [filmstripViewport, setFilmstripViewport] = useState({ scrollLeft: 0, width: 0 });
-  const [thumbnailCache, setThumbnailCache] = useState<Map<string, string>>(new Map());
   const panelWidth = useSyncExternalStore(
     (onStoreChange) => {
       if (!panelApi) return () => {};
@@ -283,8 +346,6 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const previewScaleRef = useRef(1);
   const dimensionsRef = useRef<{ w: number; h: number } | null>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
-  const filmstripRef = useRef<HTMLDivElement>(null);
-  const thumbnailPendingRef = useRef<Set<string>>(new Set());
 
   /** Compute the scale that fits the image entirely within the container. */
   const computeFitScale = useCallback(() => {
@@ -313,25 +374,33 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   }, [computeFitScale, fitToView]);
 
   const selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds).pop()! : null;
+  const selectedViewerId = useMemo(() => {
+    if (!selectedNodeId) return null;
+    const node = nodes.get(selectedNodeId);
+    return node && (node.typeId === 'viewer' || node.typeId === 'compare_viewer')
+      ? selectedNodeId
+      : null;
+  }, [selectedNodeId, nodes]);
+  const firstViewerId = useMemo(() => {
+    return Array.from(nodes.values()).find(n => n.typeId === 'viewer' || n.typeId === 'compare_viewer')?.id ?? null;
+  }, [nodes]);
 
   useEffect(() => {
-    if (selectedNodeId) {
-      const node = nodes.get(selectedNodeId);
-      if (node && (node.typeId === 'viewer' || node.typeId === 'compare_viewer')) {
-        setActiveViewerId(selectedNodeId);
-        return;
+    let nextViewerId = activeViewerId;
+    if (selectedViewerId) {
+      nextViewerId = selectedViewerId;
+    } else if (activeViewerId) {
+      const activeNode = nodes.get(activeViewerId);
+      if (!activeNode || (activeNode.typeId !== 'viewer' && activeNode.typeId !== 'compare_viewer')) {
+        nextViewerId = firstViewerId;
       }
+    } else {
+      nextViewerId = firstViewerId;
     }
-    if (!activeViewerId) {
-      const viewerNode = Array.from(nodes.values()).find(n => n.typeId === 'viewer' || n.typeId === 'compare_viewer');
-      if (viewerNode) {
-        setActiveViewerId(viewerNode.id);
-      }
-    }
-    if (activeViewerId && !nodes.has(activeViewerId)) {
-      setActiveViewerId(null);
-    }
-  }, [selectedNodeId, nodes, activeViewerId]);
+    if (nextViewerId === activeViewerId) return;
+    const timer = window.setTimeout(() => setActiveViewerId(nextViewerId), 0);
+    return () => window.clearTimeout(timer);
+  }, [activeViewerId, firstViewerId, nodes, selectedViewerId]);
 
   useEffect(() => {
     if (!activeViewerId) return;
@@ -352,24 +421,6 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     ? Math.max(0, Math.min(activeIterator.count - 1, currentFrame - activeIterator.startFrame))
     : 0;
 
-  const visibleFilmstripItems = useMemo(() => {
-    if (!activeIterator || activeIterator.count <= 0) return [];
-    const viewportWidth = filmstripViewport.width || FILMSTRIP_ITEM_WIDTH * 9;
-    const start = Math.max(
-      0,
-      Math.floor(filmstripViewport.scrollLeft / FILMSTRIP_ITEM_WIDTH) - FILMSTRIP_OVERSCAN,
-    );
-    const end = Math.min(
-      activeIterator.count - 1,
-      Math.ceil((filmstripViewport.scrollLeft + viewportWidth) / FILMSTRIP_ITEM_WIDTH) + FILMSTRIP_OVERSCAN,
-    );
-    const items: number[] = [];
-    for (let index = start; index <= end; index += 1) {
-      items.push(index);
-    }
-    return items;
-  }, [activeIterator, filmstripViewport]);
-
   const hasResult = !!activeResult;
   const hasPixels = activeResult ? isPixelResult(activeResult) || isCompareResult(activeResult) : false;
 
@@ -380,101 +431,6 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       h: activeResult.originalHeight ?? activeResult.height,
     };
   }, [activeResult]);
-
-  useEffect(() => {
-    const filmstrip = filmstripRef.current;
-    if (!filmstrip) return;
-    const updateViewport = () => {
-      setFilmstripViewport({
-        scrollLeft: filmstrip.scrollLeft,
-        width: filmstrip.clientWidth,
-      });
-    };
-    updateViewport();
-    filmstrip.addEventListener('scroll', updateViewport, { passive: true });
-    const observer = typeof ResizeObserver !== 'undefined'
-      ? new ResizeObserver(updateViewport)
-      : null;
-    observer?.observe(filmstrip);
-    return () => {
-      filmstrip.removeEventListener('scroll', updateViewport);
-      observer?.disconnect();
-    };
-  }, [activeIterator?.sourceNodeId]);
-
-  useEffect(() => {
-    const filmstrip = filmstripRef.current;
-    if (!filmstrip || !activeIterator) return;
-    const itemLeft = activeItemIndex * FILMSTRIP_ITEM_WIDTH;
-    const itemRight = itemLeft + FILMSTRIP_ITEM_WIDTH;
-    const viewportLeft = filmstrip.scrollLeft;
-    const viewportRight = viewportLeft + filmstrip.clientWidth;
-    if (itemLeft >= viewportLeft && itemRight <= viewportRight) return;
-    filmstrip.scrollLeft = Math.max(
-      0,
-      itemLeft - Math.max(0, filmstrip.clientWidth - FILMSTRIP_ITEM_WIDTH) / 2,
-    );
-  }, [activeItemIndex, activeIterator]);
-
-  useEffect(() => {
-    if (!activeViewerId || !activeIterator || visibleFilmstripItems.length === 0) return;
-    let cancelled = false;
-    const queue = visibleFilmstripItems
-      .map(index => {
-        const frame = activeIterator.startFrame + index;
-        const key = `${activeViewerId}:${activeIterator.sourceNodeId}:${graphRevision}:${frame}`;
-        return { index, frame, key };
-      })
-      .filter(item => !thumbnailCache.has(item.key) && !thumbnailPendingRef.current.has(item.key))
-      .slice(0, 18);
-
-    for (const item of queue) {
-      thumbnailPendingRef.current.add(item.key);
-    }
-
-    const worker = async () => {
-      while (!cancelled && queue.length > 0) {
-        const item = queue.shift();
-        if (!item) break;
-        try {
-          const result = await renderViewerFrame(
-            activeViewerId,
-            item.frame,
-            FILMSTRIP_THUMBNAIL_SCALE,
-          );
-          const url = viewerResultToDataUrl(result);
-          if (!cancelled && url) {
-            setThumbnailCache(prev => {
-              const next = new Map(prev);
-              next.set(item.key, url);
-              while (next.size > 300) {
-                const oldest = next.keys().next().value;
-                if (!oldest) break;
-                next.delete(oldest);
-              }
-              return next;
-            });
-          }
-        } catch {
-          // Thumbnail failures should not replace the main viewer error surface.
-        } finally {
-          thumbnailPendingRef.current.delete(item.key);
-        }
-      }
-    };
-
-    void Promise.all([worker(), worker()]);
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    activeViewerId,
-    activeIterator,
-    graphRevision,
-    renderViewerFrame,
-    thumbnailCache,
-    visibleFilmstripItems,
-  ]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -917,85 +873,77 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
               {activeItemIndex + 1} / {activeIterator.count}
             </span>
           </div>
-          <div
-            ref={filmstripRef}
+          <MediaVirtualStrip
+            ariaLabel="Media frames"
+            count={activeIterator.count}
+            itemSize={FILMSTRIP_ITEM_WIDTH}
+            height={54}
+            overscan={FILMSTRIP_OVERSCAN}
+            activeIndex={activeItemIndex}
+            className="nopan nodrag"
             style={{
-              position: 'relative',
-              height: 54,
-              overflowX: 'auto',
-              overflowY: 'hidden',
               background: 'var(--overlay-label)',
               border: '1px solid var(--border-primary)',
               borderRadius: 4,
             }}
-          >
-            <div
-              style={{
-                position: 'relative',
-                width: activeIterator.count * FILMSTRIP_ITEM_WIDTH,
-                height: '100%',
-              }}
-            >
-              {visibleFilmstripItems.map(index => {
-                const frame = activeIterator.startFrame + index;
-                const key = `${activeViewerId}:${activeIterator.sourceNodeId}:${graphRevision}:${frame}`;
-                const thumbnail = thumbnailCache.get(key);
-                const isActive = frame === currentFrame;
-                const label = activeIterator.itemLabels[index] ?? String(frame);
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => setCurrentFrame(frame)}
-                    title={label}
-                    style={{
-                      position: 'absolute',
-                      left: index * FILMSTRIP_ITEM_WIDTH + 6,
-                      top: 4,
-                      width: FILMSTRIP_THUMB_WIDTH,
-                      height: FILMSTRIP_THUMB_HEIGHT,
-                      padding: 0,
-                      border: isActive
-                        ? '2px solid var(--accent-primary)'
-                        : '1px solid var(--border-primary)',
-                      borderRadius: 4,
-                      background: 'var(--bg-surface)',
-                      color: 'var(--text-secondary)',
-                      overflow: 'hidden',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {thumbnail ? (
-                      <img
-                        src={thumbnail}
-                        alt=""
-                        style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'cover',
-                          display: 'block',
-                        }}
-                      />
-                    ) : (
-                      <span
-                        style={{
-                          display: 'flex',
-                          width: '100%',
-                          height: '100%',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '0.62rem',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        {index + 1}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+            renderItem={(index) => {
+              const frame = activeIterator.startFrame + index;
+              const isActive = frame === currentFrame;
+              const label = activeIterator.itemLabels[index] ?? String(frame);
+              return (
+                <button
+                  key={index}
+                  type="button"
+                  onClick={() => setCurrentFrame(frame)}
+                  title={label}
+                  style={{
+                    position: 'absolute',
+                    left: 6,
+                    top: 4,
+                    width: FILMSTRIP_THUMB_WIDTH,
+                    height: FILMSTRIP_THUMB_HEIGHT,
+                    padding: 0,
+                    border: isActive
+                      ? '2px solid var(--accent-primary)'
+                      : '1px solid var(--border-primary)',
+                    borderRadius: 4,
+                    background: 'var(--bg-surface)',
+                    color: 'var(--text-secondary)',
+                    overflow: 'hidden',
+                    cursor: 'pointer',
+                    lineHeight: 1.1,
+                  }}
+                >
+                  {isActive && activeResult && (isPixelResult(activeResult) || isCompareResult(activeResult)) ? (
+                    <CurrentResultPreview
+                      result={activeResult}
+                      channel={activeChannel}
+                      gain={gain}
+                      gamma={gamma}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        display: 'flex',
+                        width: '100%',
+                        height: '100%',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.62rem',
+                        fontVariantNumeric: 'tabular-nums',
+                        overflow: 'hidden',
+                        padding: 4,
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {label || index + 1}
+                    </span>
+                  )}
+                </button>
+              );
+            }}
+          />
         </div>
       )}
       

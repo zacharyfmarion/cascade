@@ -695,6 +695,10 @@ export function createMockEngine(): EngineBridge & {
       return batchDataStore.get(nodeId)?.[index]?.data ?? null;
     },
 
+    getBatchThumbnail: (nodeId: string, index: number): Uint8Array | null => {
+      return batchDataStore.get(nodeId)?.[index]?.data ?? null;
+    },
+
     renderViewer: (viewerNodeId: string, _frame: number, previewScale = 1): ViewerResult | null => {
       renderCalls.push(viewerNodeId);
       renderScales.push(previewScale);

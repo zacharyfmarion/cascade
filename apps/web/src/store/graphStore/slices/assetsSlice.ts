@@ -69,6 +69,7 @@ export interface AssetsSliceActions {
   loadBatchPaths: (nodeId: string, paths: string[]) => Promise<void>;
   loadBatchDirectory: (nodeId: string, directory: string) => Promise<BatchInfo>;
   getBatchImageData: (nodeId: string, index: number) => Promise<Uint8Array | null>;
+  getBatchThumbnail: (nodeId: string, index: number, maxEdge: number) => Promise<Uint8Array | null>;
 }
 
 export type AssetsSlice = AssetsSliceState & AssetsSliceActions;
@@ -232,7 +233,7 @@ export const createAssetsSlice: StateCreator<
       filenames: sorted.map(file => fileStem(file.name)),
     });
     get().refreshDslShadowFromGraph();
-    get().triggerAllViewers();
+    void get().triggerAffectedViewers([nodeId]);
   },
 
   loadBatchPaths: async (nodeId, paths) => {
@@ -249,7 +250,7 @@ export const createAssetsSlice: StateCreator<
     set({ nodes, dirty: true });
     get().setBatchInfo(nodeId, info);
     get().refreshDslShadowFromGraph();
-    get().triggerAllViewers();
+    void get().triggerAffectedViewers([nodeId]);
   },
 
   loadBatchDirectory: async (nodeId, directory) => {
@@ -265,12 +266,21 @@ export const createAssetsSlice: StateCreator<
     set({ nodes, dirty: true });
     get().setBatchInfo(nodeId, info);
     get().refreshDslShadowFromGraph();
-    get().triggerAllViewers();
+    void get().triggerAffectedViewers([nodeId]);
     return info;
   },
 
   getBatchImageData: async (nodeId, index) => {
     const eng = getEngine();
+    if (!eng.getBatchImageData) return null;
+    return Promise.resolve(eng.getBatchImageData(nodeId, index)) ?? null;
+  },
+
+  getBatchThumbnail: async (nodeId, index, maxEdge) => {
+    const eng = getEngine();
+    if (eng.getBatchThumbnail) {
+      return Promise.resolve(eng.getBatchThumbnail(nodeId, index, maxEdge)) ?? null;
+    }
     if (!eng.getBatchImageData) return null;
     return Promise.resolve(eng.getBatchImageData(nodeId, index)) ?? null;
   },

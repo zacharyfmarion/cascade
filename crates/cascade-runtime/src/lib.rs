@@ -2552,6 +2552,26 @@ impl Engine {
         Ok(())
     }
 
+    pub fn batch_set_image_paths(
+        &mut self,
+        node_id: &str,
+        entries: Vec<(String, std::path::PathBuf)>,
+    ) -> Result<(), CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("Node not found".to_string()))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| CascadeError::Other("Node is not LoadImageBatch".to_string()))?;
+        batch_node.set_image_paths(entries)?;
+        self.evaluator.remove_node_cache(id);
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
     pub fn get_batch_info(&self, export_node_id: &str) -> Result<BatchInfo, CascadeError> {
         let batch_id = self.find_upstream_batch_node(export_node_id)?;
         let batch = self.batch_node(batch_id)?;
@@ -2569,6 +2589,17 @@ impl Engine {
         let id = self.parse_node_id(node_id)?;
         let batch = self.batch_node(id)?;
         batch.image_bytes(index)
+    }
+
+    pub fn get_batch_thumbnail(
+        &self,
+        node_id: &str,
+        index: usize,
+        max_edge: u32,
+    ) -> Result<Vec<u8>, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let batch = self.batch_node(id)?;
+        batch.thumbnail_png(index, max_edge)
     }
 
     pub fn load_palette_data(
@@ -4411,6 +4442,17 @@ mod tests {
         buf
     }
 
+    fn temp_test_path(name: &str) -> std::path::PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test clock should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "cascade-runtime-{stamp}-{}-{name}",
+            std::process::id()
+        ))
+    }
+
     #[test]
     fn test_ai_node_cached_image_feeds_viewer_render() {
         let mut engine = Engine::new();
@@ -5448,6 +5490,50 @@ return pixelated;
         let info = engine.get_batch_info(&export_id).expect("batch info");
         assert_eq!(info.count, 1);
         assert_eq!(info.filenames, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn test_batch_set_image_paths_preserves_order_and_names() {
+        let first = temp_test_path("b.png");
+        let second = temp_test_path("a.png");
+        std::fs::write(&first, tiny_png()).expect("first png should write");
+        std::fs::write(&second, tiny_png()).expect("second png should write");
+
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        engine
+            .batch_set_image_paths(
+                &batch_id,
+                vec![
+                    ("b.png".to_string(), first.clone()),
+                    ("a.png".to_string(), second.clone()),
+                ],
+            )
+            .expect("batch paths should register");
+
+        let info = engine.get_batch_info(&batch_id).expect("batch info");
+        assert_eq!(info.count, 2);
+        assert_eq!(info.filenames, vec!["b".to_string(), "a".to_string()]);
+
+        std::fs::remove_file(first).expect("first png should clean up");
+        std::fs::remove_file(second).expect("second png should clean up");
+    }
+
+    #[test]
+    fn test_batch_thumbnail_returns_png_bytes() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(&batch_id, "thumb.png", &tiny_png())
+            .expect("batch image should register");
+
+        let bytes = engine
+            .get_batch_thumbnail(&batch_id, 0, 32)
+            .expect("thumbnail should render");
+        let image = image::load_from_memory(&bytes).expect("thumbnail should decode");
+
+        assert!(image.width() <= 32);
+        assert!(image.height() <= 32);
     }
 
     #[test]

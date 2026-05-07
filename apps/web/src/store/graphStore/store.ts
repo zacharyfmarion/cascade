@@ -137,6 +137,7 @@ export interface GraphState {
   loadBatchPaths: (nodeId: string, paths: string[]) => Promise<void>;
   loadBatchDirectory: (nodeId: string, directory: string) => Promise<BatchInfo>;
   getBatchImageData: (nodeId: string, index: number) => Promise<Uint8Array | null>;
+  getBatchThumbnail: (nodeId: string, index: number, maxEdge: number) => Promise<Uint8Array | null>;
   renderSequence: (nodeId: string) => Promise<void>;
   renderBatch: (nodeId: string) => Promise<void>;
   renderVideo: (nodeId: string) => Promise<void>;
