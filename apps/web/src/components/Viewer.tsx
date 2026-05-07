@@ -410,6 +410,28 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const activeResult = useMemo(() => {
     return activeViewerId ? renderResults.get(activeViewerId) : undefined;
   }, [renderResults, activeViewerId]);
+  const currentFrameRef = useRef(currentFrame);
+  useEffect(() => {
+    currentFrameRef.current = currentFrame;
+  }, [currentFrame]);
+  const [activeResultFrame, setActiveResultFrame] = useState<{
+    viewerId: string | null;
+    result: ViewerResult | undefined;
+    frame: number;
+  }>({ viewerId: null, result: undefined, frame: currentFrame });
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setActiveResultFrame({
+        viewerId: activeViewerId,
+        result: activeResult,
+        frame: currentFrameRef.current,
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [activeViewerId, activeResult]);
+  const activeResultMatchesFrame = activeResultFrame.viewerId === activeViewerId
+    && activeResultFrame.result === activeResult
+    && activeResultFrame.frame === currentFrame;
 
   const activeIterator: MediaIteratorInfo | null = useMemo(() => {
     return activeTransportSourceId
@@ -446,13 +468,15 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     // dimsChanged check are immune to preview-scale rounding errors.
     const logicalWidth = activeResult.originalWidth ?? activeResult.width;
     const logicalHeight = activeResult.originalHeight ?? activeResult.height;
+    const backingWidth = activeResult.width;
+    const backingHeight = activeResult.height;
     const prevDimensions = dimensionsRef.current;
 
-    // Keep canvas at logical (full-res) dimensions so TransformWrapper
-    // never sees a size change when preview scale varies.
-    if (canvas.width !== logicalWidth || canvas.height !== logicalHeight) {
-      canvas.width = logicalWidth;
-      canvas.height = logicalHeight;
+    // Keep CSS/layout dimensions logical, but keep the backing store at the
+    // preview size so frame navigation does not allocate full-resolution buffers.
+    if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+      canvas.width = backingWidth;
+      canvas.height = backingHeight;
       imageDataRef.current = null;
     }
 
@@ -462,9 +486,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const drawPixels = (targetCanvas: HTMLCanvasElement, pixels: Uint8ClampedArray) => {
       const ctx = targetCanvas.getContext('2d');
       if (!ctx) return;
-      if (targetCanvas.width !== logicalWidth || targetCanvas.height !== logicalHeight) {
-        targetCanvas.width = logicalWidth;
-        targetCanvas.height = logicalHeight;
+      if (targetCanvas.width !== backingWidth || targetCanvas.height !== backingHeight) {
+        targetCanvas.width = backingWidth;
+        targetCanvas.height = backingHeight;
         if (targetCanvas === canvas) imageDataRef.current = null;
       }
 
@@ -474,29 +498,17 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
         gamma,
       });
 
-      if (previewScale < 1) {
-        const offscreen = document.createElement('canvas');
-        offscreen.width = activeResult.width;
-        offscreen.height = activeResult.height;
-        const offCtx = offscreen.getContext('2d');
-        if (offCtx) {
-          const imgData = new ImageData(activeResult.width, activeResult.height);
-          imgData.data.set(transformed);
-          offCtx.putImageData(imgData, 0, 0);
-          ctx.imageSmoothingEnabled = false;
-          ctx.clearRect(0, 0, logicalWidth, logicalHeight);
-          ctx.drawImage(offscreen, 0, 0, logicalWidth, logicalHeight);
-        }
-      } else if (targetCanvas === canvas) {
+      ctx.imageSmoothingEnabled = previewScale >= 1;
+      if (targetCanvas === canvas) {
         let imgData = imageDataRef.current;
-        if (!imgData || imgData.width !== logicalWidth || imgData.height !== logicalHeight) {
-          imgData = new ImageData(logicalWidth, logicalHeight);
+        if (!imgData || imgData.width !== backingWidth || imgData.height !== backingHeight) {
+          imgData = new ImageData(backingWidth, backingHeight);
           imageDataRef.current = imgData;
         }
         imgData.data.set(transformed);
         ctx.putImageData(imgData, 0, 0);
       } else {
-        const imgData = new ImageData(logicalWidth, logicalHeight);
+        const imgData = new ImageData(backingWidth, backingHeight);
         imgData.data.set(transformed);
         ctx.putImageData(imgData, 0, 0);
       }
@@ -588,16 +600,17 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      // Get canvas bounding rect to convert screen → canvas coords
-      // Canvas is always at logical dimensions, so these coords are logical pixels.
+      // Get canvas bounding rect to convert screen coords to logical image pixels.
       const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
+      const logicalWidth = activeResult.originalWidth ?? activeResult.width;
+      const logicalHeight = activeResult.originalHeight ?? activeResult.height;
+      const scaleX = logicalWidth / rect.width;
+      const scaleY = logicalHeight / rect.height;
       const px = Math.floor((e.clientX - rect.left) * scaleX);
       const py = Math.floor((e.clientY - rect.top) * scaleY);
 
       // Check bounds (logical dimensions)
-      if (px < 0 || py < 0 || px >= canvas.width || py >= canvas.height) {
+      if (px < 0 || py < 0 || px >= logicalWidth || py >= logicalHeight) {
         setPixelInfo(null);
         return;
       }
@@ -607,7 +620,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       const bufX = Math.min(Math.floor(px * previewScale), activeResult.width - 1);
       const bufY = Math.min(Math.floor(py * previewScale), activeResult.height - 1);
       const idx = (bufY * activeResult.width + bufX) * 4;
-      const source = isCompareResult(activeResult) && px / canvas.width <= compareSplit ? 'before' : 'after';
+      const source = isCompareResult(activeResult) && px / logicalWidth <= compareSplit ? 'before' : 'after';
       const pixels = isCompareResult(activeResult)
         ? source === 'before' ? activeResult.beforePixels : activeResult.afterPixels
         : activeResult.pixels;
@@ -914,7 +927,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                     lineHeight: 1.1,
                   }}
                 >
-                  {isActive && activeResult && (isPixelResult(activeResult) || isCompareResult(activeResult)) ? (
+                  {isActive && activeResultMatchesFrame && activeResult && (isPixelResult(activeResult) || isCompareResult(activeResult)) ? (
                     <CurrentResultPreview
                       result={activeResult}
                       channel={activeChannel}

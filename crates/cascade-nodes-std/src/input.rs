@@ -381,7 +381,37 @@ impl Node for LoadImage {
 fn decode_standard_image(bytes: &[u8]) -> Result<Image, CascadeError> {
     let decoded =
         image::load_from_memory(bytes).map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
-    let rgba = decoded.to_rgba8();
+    decode_dynamic_image(decoded, 1.0)
+}
+
+fn decode_dynamic_image(
+    decoded: image::DynamicImage,
+    preview_scale: f32,
+) -> Result<Image, CascadeError> {
+    let width = decoded.width();
+    let height = decoded.height();
+    if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+        return Err(CascadeError::ImageTooLarge {
+            width,
+            height,
+            max: MAX_IMAGE_DIM,
+        });
+    }
+
+    // Preview renders are allowed to trade a tiny amount of sampling fidelity for
+    // responsiveness: downsample the decoded u8 raster before the expensive f32
+    // linear conversion, while full-resolution renders still preserve the normal path.
+    let rgba = if let Some((new_w, new_h)) = preview_downscale_size(width, height, preview_scale) {
+        decoded
+            .resize_exact(new_w, new_h, image::imageops::FilterType::Nearest)
+            .to_rgba8()
+    } else {
+        decoded.to_rgba8()
+    };
+    rgba8_to_linear_image(&rgba)
+}
+
+fn rgba8_to_linear_image(rgba: &image::RgbaImage) -> Result<Image, CascadeError> {
     let (width, height) = rgba.dimensions();
     if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
         return Err(CascadeError::ImageTooLarge {
@@ -1504,29 +1534,7 @@ impl LoadImageBatch {
             BatchEntrySource::Path(path) => image::open(&path)
                 .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
         };
-        let rgba = decoded.to_rgba8();
-        let (width, height) = rgba.dimensions();
-        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
-            return Err(CascadeError::ImageTooLarge {
-                width,
-                height,
-                max: MAX_IMAGE_DIM,
-            });
-        }
-        let raw = rgba.as_raw();
-        let lut = srgb_to_linear_lut();
-        let pixel_count = (width as usize) * (height as usize);
-        let mut data = vec![0.0f32; pixel_count * 4];
-        data.par_chunks_exact_mut(4)
-            .enumerate()
-            .for_each(|(i, out)| {
-                let idx = i * 4;
-                out[0] = lut[raw[idx] as usize];
-                out[1] = lut[raw[idx + 1] as usize];
-                out[2] = lut[raw[idx + 2] as usize];
-                out[3] = raw[idx + 3] as f32 / 255.0;
-            });
-        let image = preview_downscale(Image::from_f32_data(width, height, data)?, preview_scale)?;
+        let image = decode_dynamic_image(decoded, preview_scale)?;
         let mut cache = self
             .frame_cache
             .lock()

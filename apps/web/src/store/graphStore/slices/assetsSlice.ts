@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { BatchInfo } from '../../../engine/bridge';
 import type { NodeInstance, ParamValue } from '../../types';
-import { getEngine, markGraphMutation } from '../kernel';
+import { MEDIA_NAV_PREVIEW_SCALE, getEngine, markGraphMutation } from '../kernel';
 import { assetUriFromHash } from '../assetReferences';
 
 const bytesToBase64 = (bytes: Uint8Array): string => {
@@ -233,7 +233,7 @@ export const createAssetsSlice: StateCreator<
       filenames: sorted.map(file => fileStem(file.name)),
     });
     get().refreshDslShadowFromGraph();
-    void get().triggerAffectedViewers([nodeId]);
+    void get().triggerAffectedViewers([nodeId], MEDIA_NAV_PREVIEW_SCALE);
   },
 
   loadBatchPaths: async (nodeId, paths) => {
@@ -250,7 +250,7 @@ export const createAssetsSlice: StateCreator<
     set({ nodes, dirty: true });
     get().setBatchInfo(nodeId, info);
     get().refreshDslShadowFromGraph();
-    void get().triggerAffectedViewers([nodeId]);
+    void get().triggerAffectedViewers([nodeId], MEDIA_NAV_PREVIEW_SCALE);
   },
 
   loadBatchDirectory: async (nodeId, directory) => {
@@ -266,7 +266,7 @@ export const createAssetsSlice: StateCreator<
     set({ nodes, dirty: true });
     get().setBatchInfo(nodeId, info);
     get().refreshDslShadowFromGraph();
-    void get().triggerAffectedViewers([nodeId]);
+    void get().triggerAffectedViewers([nodeId], MEDIA_NAV_PREVIEW_SCALE);
     return info;
   },
 

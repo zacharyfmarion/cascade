@@ -115,6 +115,7 @@ const createScalingCanvas = (width: number, height: number): OffscreenCanvas | H
 };
 
 export const MIN_PREVIEW_DOWNSCALE_EDGE = 600;
+export const MEDIA_NAV_PREVIEW_SCALE = 0.2;
 
 export type PreviewDownscaleSize = {
   width: number;
@@ -211,6 +212,7 @@ export const annotateEnginePreviewResult = (
 export const getEffectivePreviewScaleForResult = (
   requestedScale: number,
   result?: ViewerResult,
+  allowUnknownDimensions = false,
 ): number => {
   if (
     !Number.isFinite(requestedScale)
@@ -220,7 +222,7 @@ export const getEffectivePreviewScaleForResult = (
     return requestedScale;
   }
   if (!result || (!isPixelResult(result) && !isCompareResult(result))) {
-    return 1;
+    return allowUnknownDimensions ? requestedScale : 1;
   }
 
   const originalWidth = result.originalWidth ?? result.width;
@@ -232,13 +234,14 @@ export const getEffectivePreviewScaleForResult = (
 export const getEffectivePreviewScaleForResults = (
   requestedScale: number,
   results: Iterable<ViewerResult>,
+  allowUnknownDimensions = false,
 ): number => {
   let scale: number | null = null;
   for (const result of results) {
     const resultScale = getEffectivePreviewScaleForResult(requestedScale, result);
     scale = scale === null ? resultScale : Math.max(scale, resultScale);
   }
-  return scale ?? getEffectivePreviewScaleForResult(requestedScale);
+  return scale ?? getEffectivePreviewScaleForResult(requestedScale, undefined, allowUnknownDimensions);
 };
 
 export const downscaleRenderResult = async (result: ViewerResult, scale: number): Promise<ViewerResult> => {

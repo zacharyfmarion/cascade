@@ -107,7 +107,7 @@ export interface GraphState {
   loadVideoFile: (nodeId: string, path: string) => Promise<VideoInfo | null>;
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
-  triggerRender: (viewerNodeId: string) => void;
+  triggerRender: (viewerNodeId: string, previewScaleOverride?: number) => void;
   newProject: () => Promise<void>;
   saveProject: () => Promise<boolean>;
   saveProjectAs: () => Promise<boolean>;
@@ -166,8 +166,8 @@ export interface GraphState {
   pushSequenceFrames: (frame: number) => Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
   renderViewerFrame: (viewerNodeId: string, frame: number, previewScale?: number) => Promise<ViewerResult | null>;
-  triggerAllViewers: () => void;
-  triggerAffectedViewers: (changedNodeIds: string[]) => void;
+  triggerAllViewers: (previewScaleOverride?: number) => void;
+  triggerAffectedViewers: (changedNodeIds: string[], previewScaleOverride?: number) => void;
 
   editingStack: EditingContext[];
   enterGroup: (groupNodeId: string) => Promise<void>;

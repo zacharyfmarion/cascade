@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { BatchInfo } from '../../../engine/bridge';
 import type { NodeInstance } from '../../types';
-import { isSequenceInfo } from '../kernel';
+import { MEDIA_NAV_PREVIEW_SCALE, isSequenceInfo } from '../kernel';
 
 export type MediaIteratorKind = 'batch' | 'sequence' | 'video';
 
@@ -194,7 +194,7 @@ export const createMediaIteratorSlice: StateCreator<
           : currentFrame,
       });
       if (active && currentFrame !== get().currentFrame) {
-        get().triggerAllViewers();
+        get().triggerAllViewers(MEDIA_NAV_PREVIEW_SCALE);
       }
     },
 

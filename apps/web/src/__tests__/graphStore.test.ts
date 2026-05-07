@@ -492,6 +492,59 @@ describe('graphStore preview rendering', () => {
       height: 300,
     });
   });
+
+  it('allows explicit preview render overrides before a full-size result exists', async () => {
+    const store = useGraphStore.getState();
+    const viewerId = 'viewer-preview';
+    const engineResult = imageResult(viewerId, 120, 90);
+
+    mockEngine._setRenderResult(engineResult);
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      previewScale: 1,
+      renderResults: new Map(),
+    });
+
+    store.triggerRender(viewerId, 0.2);
+    await flushPromises(3);
+
+    expect(mockEngine._renderScales).toEqual([0.2]);
+    expect(useGraphStore.getState().renderResults.get(viewerId)).toMatchObject({
+      type: 'image',
+      width: 120,
+      height: 90,
+    });
+  });
+
+  it('uses the coalesced preview render path when navigating an active media iterator', async () => {
+    const viewerId = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
+    mockEngine._setRenderResult(imageResult(viewerId, 120, 90));
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      activeTransportSourceId: 'batch1',
+      mediaIteratorInfoMap: new Map([[
+        'batch1',
+        {
+          sourceNodeId: 'batch1',
+          kind: 'batch',
+          label: 'Batch',
+          startFrame: 0,
+          endFrame: 2,
+          count: 3,
+          itemLabels: ['dog', 'mona_lisa', 'portrait'],
+          supportsRandomAccess: true,
+        },
+      ]]),
+      renderResults: new Map(),
+    });
+
+    useGraphStore.getState().setCurrentFrame(1);
+    await flushPromises(3);
+
+    expect(useGraphStore.getState().currentFrame).toBe(1);
+    expect(mockEngine._renderCalls).toEqual([viewerId]);
+    expect(mockEngine._renderScales).toEqual([0.2]);
+  });
 });
 
 describe('graphStore undo/redo', () => {

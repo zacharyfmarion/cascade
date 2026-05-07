@@ -4,8 +4,16 @@ import type { ParamValue } from '../../types';
 import type { SequenceInfo, VideoInfo } from '../../../engine/bridge';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { makeEngineError } from '../../../engine/engineError';
-import { getEngine, isSequenceInfo, kernel, markGraphMutation } from '../kernel';
+import {
+  MEDIA_NAV_PREVIEW_SCALE,
+  getEngine,
+  isSequenceInfo,
+  kernel,
+  markGraphMutation,
+} from '../kernel';
 import { useSettingsStore } from '../../settingsStore';
+
+const PANEL_VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer']);
 
 export interface SequenceVideoSliceState {
   currentFrame: number;
@@ -96,8 +104,16 @@ export const createSequenceVideoSlice: StateCreator<
 
     setCurrentFrame: (frame) => {
       const { start, end } = transportRange();
-      set({ currentFrame: Math.max(start, Math.min(frame, end)) });
-      void get().renderAllViewersAsync();
+      const nextFrame = Math.max(start, Math.min(frame, end));
+      set({ currentFrame: nextFrame });
+
+      const previewScale = get().activeTransportSourceId ? MEDIA_NAV_PREVIEW_SCALE : undefined;
+      const { nodes } = get();
+      for (const [viewerId, node] of nodes) {
+        if (PANEL_VIEWER_NODE_TYPES.has(node.typeId)) {
+          get().triggerRender(viewerId, previewScale);
+        }
+      }
     },
 
     setSequenceDirectory: async (nodeId, directory) => {

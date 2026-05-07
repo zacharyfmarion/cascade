@@ -2,7 +2,13 @@ import type { NodeInstance, NodeSpec, ParamValue } from '../types';
 import type { GraphState } from './store';
 import type { BatchInfo, SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { makeEngineError } from '../../engine/engineError';
-import { extractCustomGroupDefinitions, extractGraphData, getEngine, normalizeParamValue } from './kernel';
+import {
+  MEDIA_NAV_PREVIEW_SCALE,
+  extractCustomGroupDefinitions,
+  extractGraphData,
+  getEngine,
+  normalizeParamValue,
+} from './kernel';
 import type { SerializableGraphData } from './kernel';
 import { syncAllCommitted } from './nodeDraftStore';
 
@@ -238,7 +244,7 @@ export async function hydrateRootGraphFromEngine(
   syncAllCommitted(nodes);
 
   if (options.triggerViewers ?? true) {
-    get().triggerAllViewers();
+    get().triggerAllViewers(get().activeTransportSourceId ? MEDIA_NAV_PREVIEW_SCALE : undefined);
   }
 
   return { graphData, nodeSpecs };

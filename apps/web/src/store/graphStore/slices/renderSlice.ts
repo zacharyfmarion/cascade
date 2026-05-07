@@ -36,9 +36,9 @@ export interface RenderSliceState {
 }
 
 export interface RenderSliceActions {
-  triggerRender: (viewerNodeId: string) => void;
-  triggerAllViewers: () => void;
-  triggerAffectedViewers: (changedNodeIds: string[]) => void | Promise<void>;
+  triggerRender: (viewerNodeId: string, previewScaleOverride?: number) => void;
+  triggerAllViewers: (previewScaleOverride?: number) => void;
+  triggerAffectedViewers: (changedNodeIds: string[], previewScaleOverride?: number) => void | Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
   renderViewerFrame: (viewerNodeId: string, frame: number, previewScale?: number) => Promise<ViewerResult | null>;
   pushSequenceFrames: (frame: number) => Promise<void>;
@@ -103,7 +103,7 @@ export const createRenderSlice: StateCreator<
 
   // -- public slice ---------------------------------------------------------
 
-  const triggerAllViewers = () => {
+  const triggerAllViewers = (previewScaleOverride?: number) => {
     if (kernel.renderSuspendCount > 0) {
       kernel.renderNeededWhileSuspended = true;
       return;
@@ -111,23 +111,23 @@ export const createRenderSlice: StateCreator<
     const { nodes } = get();
     for (const [viewerId, node] of nodes) {
       if (VIEWER_NODE_TYPES.has(node.typeId)) {
-        get().triggerRender(viewerId);
+        get().triggerRender(viewerId, previewScaleOverride);
       }
     }
   };
 
-  const triggerAffectedViewers = async (changedNodeIds: string[]) => {
+  const triggerAffectedViewers = async (changedNodeIds: string[], previewScaleOverride?: number) => {
     if (kernel.renderSuspendCount > 0) {
       kernel.renderNeededWhileSuspended = true;
       return;
     }
     if (get().editingStack.length > 1) {
-      triggerAllViewers();
+      triggerAllViewers(previewScaleOverride);
       return;
     }
     const eng = getEngine();
     if (!eng.getAffectedViewers) {
-      triggerAllViewers();
+      triggerAllViewers(previewScaleOverride);
       return;
     }
     try {
@@ -140,11 +140,11 @@ export const createRenderSlice: StateCreator<
         for (const v of viewers) affectedSet.add(v);
       }
       for (const viewerId of affectedSet) {
-        get().triggerRender(viewerId);
+        get().triggerRender(viewerId, previewScaleOverride);
       }
     } catch (e) {
       console.warn('Selective viewer invalidation failed, falling back to all viewers:', e);
-      triggerAllViewers();
+      triggerAllViewers(previewScaleOverride);
     }
   };
 
@@ -221,9 +221,9 @@ export const createRenderSlice: StateCreator<
     graphRevision: 0,
     lastTransactionOrigin: null,
 
-    triggerRender: (viewerNodeId) => {
+    triggerRender: (viewerNodeId, previewScaleOverride) => {
       const frame = get().currentFrame;
-      const scale = get().previewScale;
+      const scale = previewScaleOverride ?? get().previewScale;
       const generation = nextRenderGeneration(viewerNodeId);
       kernel.renderLock = kernel.renderLock.then(async () => {
         if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
@@ -231,7 +231,11 @@ export const createRenderSlice: StateCreator<
           await pushSequenceFrames(frame);
           if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
           const previous = get().renderResults.get(viewerNodeId);
-          const renderScale = getEffectivePreviewScaleForResult(scale, previous);
+          const renderScale = getEffectivePreviewScaleForResult(
+            scale,
+            previous,
+            previewScaleOverride !== undefined,
+          );
           const result = await renderViewerForCurrentContext(viewerNodeId, frame, renderScale);
           const scaled = result ? annotateEnginePreviewResult(result, renderScale, previous) : null;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
