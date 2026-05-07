@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import {
@@ -9,6 +9,7 @@ import {
 } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { MediaVirtualStrip } from '../MediaVirtualStrip';
+import { useBatchSourceThumbnails } from '../useBatchSourceThumbnails';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { isDesktopRuntime } from '../../platform/runtime';
@@ -55,81 +56,11 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
   const [fileCount, setFileCount] = useState(0);
   const [folderName, setFolderName] = useState('');
   const [visibleThumbnailIndexes, setVisibleThumbnailIndexes] = useState<number[]>([]);
-  const [sourceThumbs, setSourceThumbs] = useState<Map<number, string>>(new Map());
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const sourceThumbsRef = useRef<Map<number, string>>(new Map());
-  const pendingThumbsRef = useRef<Set<number>>(new Set());
-  const thumbnailGenerationRef = useRef(0);
   const directoryParam = data.params.directory;
   const savedDirectory = directoryParam && 'String' in directoryParam ? directoryParam.String : '';
   const visibleFolderName = folderName || savedDirectory.split('/').filter(Boolean).pop() || savedDirectory;
   const visibleCount = iteratorInfo?.count ?? fileCount;
-
-  useEffect(() => {
-    sourceThumbsRef.current = sourceThumbs;
-  }, [sourceThumbs]);
-
-  useEffect(() => {
-    thumbnailGenerationRef.current += 1;
-    setSourceThumbs(prev => {
-      for (const url of prev.values()) URL.revokeObjectURL(url);
-      return new Map();
-    });
-    pendingThumbsRef.current.clear();
-  }, [iteratorInfo?.sourceNodeId, iteratorInfo?.count, visibleFolderName]);
-
-  useEffect(() => {
-    const generation = thumbnailGenerationRef.current;
-    const queue = visibleThumbnailIndexes.filter(index => (
-      !sourceThumbsRef.current.has(index) && !pendingThumbsRef.current.has(index)
-    ));
-    if (queue.length === 0) return;
-    let cancelled = false;
-    for (const index of queue) {
-      pendingThumbsRef.current.add(index);
-    }
-    const worker = async () => {
-      while (!cancelled && queue.length > 0) {
-        const index = queue.shift();
-        if (index === undefined) break;
-        try {
-          const bytes = await getBatchThumbnail(props.id, index, CAROUSEL_THUMBNAIL_MAX_EDGE);
-          if (thumbnailGenerationRef.current !== generation || !bytes) continue;
-          const buffer = bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ) as ArrayBuffer;
-          const url = URL.createObjectURL(new Blob([buffer]));
-          setSourceThumbs(prev => {
-            if (thumbnailGenerationRef.current !== generation) {
-              URL.revokeObjectURL(url);
-              return prev;
-            }
-            if (prev.has(index)) {
-              URL.revokeObjectURL(url);
-              return prev;
-            }
-            const next = new Map(prev);
-            next.set(index, url);
-            while (next.size > MAX_CACHED_SOURCE_THUMBS) {
-              const oldest = next.keys().next().value;
-              if (oldest === undefined) break;
-              const oldUrl = next.get(oldest);
-              if (oldUrl) URL.revokeObjectURL(oldUrl);
-              next.delete(oldest);
-            }
-            return next;
-          });
-        } finally {
-          pendingThumbsRef.current.delete(index);
-        }
-      }
-    };
-    void Promise.all([worker(), worker()]);
-    return () => {
-      cancelled = true;
-    };
-  }, [getBatchThumbnail, props.id, visibleThumbnailIndexes]);
 
   const handleVisibleThumbnailIndexesChange = useCallback((indexes: number[]) => {
     setVisibleThumbnailIndexes(prev => (
@@ -139,10 +70,25 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
     ));
   }, []);
 
-  useEffect(() => () => {
-    thumbnailGenerationRef.current += 1;
-    for (const url of sourceThumbsRef.current.values()) URL.revokeObjectURL(url);
-  }, []);
+  const thumbnailGenerationKey = useMemo(() => {
+    const labels = iteratorInfo?.itemLabels ?? [];
+    return [
+      visibleFolderName,
+      iteratorInfo?.count ?? 0,
+      labels[0] ?? '',
+      labels[labels.length - 1] ?? '',
+    ].join('|');
+  }, [iteratorInfo?.count, iteratorInfo?.itemLabels, visibleFolderName]);
+
+  const sourceThumbs = useBatchSourceThumbnails({
+    sourceNodeId: props.id,
+    visibleIndexes: visibleThumbnailIndexes,
+    maxEdge: CAROUSEL_THUMBNAIL_MAX_EDGE,
+    getThumbnail: getBatchThumbnail,
+    cacheLimit: MAX_CACHED_SOURCE_THUMBS,
+    generationKey: thumbnailGenerationKey,
+    enabled: !!iteratorInfo && iteratorInfo.count > 0,
+  });
 
   const selectBatchIndex = useCallback((index: number) => {
     if (!iteratorInfo) return;

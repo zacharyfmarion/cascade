@@ -679,6 +679,17 @@ describe('graphStore frame and playback controls', () => {
     expect(useGraphStore.getState().currentFrame).toBe(1);
   });
 
+  it('getBatchThumbnail does not fall back to full image data', async () => {
+    const fullImageFallback = vi.fn(() => new Uint8Array([1, 2, 3, 4]));
+    (mockEngine as unknown as { getBatchThumbnail?: unknown }).getBatchThumbnail = undefined;
+    mockEngine.getBatchImageData = fullImageFallback;
+
+    const result = await useGraphStore.getState().getBatchThumbnail('batch1', 0, 96);
+
+    expect(result).toBeNull();
+    expect(fullImageFallback).not.toHaveBeenCalled();
+  });
+
   it('setFps updates fps', () => {
     useGraphStore.getState().setFps(48);
     expect(useGraphStore.getState().fps).toBe(48);

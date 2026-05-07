@@ -94,6 +94,7 @@ interface WorkerAPI {
   batchAddImage(nodeId: string, filename: string, data: Uint8Array): Promise<void>;
   getBatchInfo(exportNodeId: string): Promise<{ count: number; filenames: string[] }>;
   getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null>;
+  getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null>;
 
   renderSequence(nodeId: string): Promise<string>;
   renderVideo(nodeId: string): Promise<string>;
@@ -405,6 +406,10 @@ export class WorkerEngine implements EngineBridge {
 
   getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null> {
     return this.getAPI().getBatchImageData(nodeId, index);
+  }
+
+  getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null> {
+    return this.getAPI().getBatchThumbnail(nodeId, index, maxEdge);
   }
 
   // -----------------------------------------------------------------------

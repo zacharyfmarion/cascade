@@ -192,6 +192,7 @@ const getEngineWithBindings = () => getEngine() as EngineInstance & {
   batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
   get_batch_info: (exportNodeId: string) => { count: number; filenames: Iterable<string> };
   get_batch_image_data?: (nodeId: string, index: number) => Uint8Array;
+  get_batch_thumbnail?: (nodeId: string, index: number, maxEdge: number) => Uint8Array;
   get_ai_node_image_data?: (nodeId: string) => Uint8Array;
   set_ai_node_image_data?: (nodeId: string, data: Uint8Array) => void;
   create_group_from_nodes?: (nodeIds: string[], name: string) => CreateGroupResult;
@@ -737,6 +738,13 @@ const engineAPI = {
     return scheduler.enqueue(() => {
       const fn = getEngineWithBindings().get_batch_image_data;
       return fn ? fn(nodeId, index) : null;
+    });
+  },
+
+  getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null> {
+    return scheduler.enqueue(() => {
+      const fn = getEngineWithBindings().get_batch_thumbnail;
+      return fn ? fn(nodeId, index, maxEdge) : null;
     });
   },
 

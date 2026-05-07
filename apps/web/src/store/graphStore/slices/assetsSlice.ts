@@ -278,10 +278,7 @@ export const createAssetsSlice: StateCreator<
 
   getBatchThumbnail: async (nodeId, index, maxEdge) => {
     const eng = getEngine();
-    if (eng.getBatchThumbnail) {
-      return Promise.resolve(eng.getBatchThumbnail(nodeId, index, maxEdge)) ?? null;
-    }
-    if (!eng.getBatchImageData) return null;
-    return Promise.resolve(eng.getBatchImageData(nodeId, index)) ?? null;
+    if (!eng.getBatchThumbnail) return null;
+    return Promise.resolve(eng.getBatchThumbnail(nodeId, index, maxEdge)) ?? null;
   },
 });

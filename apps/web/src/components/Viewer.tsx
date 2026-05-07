@@ -13,6 +13,7 @@ import {
 import type { ViewerResult } from '../store/types';
 import type { MediaIteratorInfo } from '../store/graphStore/slices/mediaIteratorSlice';
 import { MediaVirtualStrip } from './MediaVirtualStrip';
+import { useBatchSourceThumbnails } from './useBatchSourceThumbnails';
 import { ViewerToolbar } from './ViewerToolbar';
 
 /* ── Types ──────────────────────────────────────────────────── */
@@ -40,6 +41,8 @@ const FILMSTRIP_THUMB_HEIGHT = 46;
 const FILMSTRIP_OVERSCAN = 3;
 const FILMSTRIP_BOTTOM_OFFSET = 50;
 const FILMSTRIP_ERROR_BOTTOM_OFFSET = 84;
+const FILMSTRIP_SOURCE_THUMBNAIL_MAX_EDGE = 96;
+const FILMSTRIP_SOURCE_THUMB_CACHE_LIMIT = 120;
 
 /* ── Viewer pixel transforms (display-only) ──────────────────── */
 
@@ -321,6 +324,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const activeTransportSourceId = useGraphStore(s => s.activeTransportSourceId);
   const mediaIteratorInfoMap = useGraphStore(s => s.mediaIteratorInfoMap);
   const suggestActiveTransportSourceForViewer = useGraphStore(s => s.suggestActiveTransportSourceForViewer);
+  const getBatchThumbnail = useGraphStore(s => s.getBatchThumbnail);
 
   const fpsIndicatorColor = useMemo(() => {
     if (playbackFps === null) return 'var(--timing-fast)';
@@ -338,6 +342,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const [compareSplit, setCompareSplit] = useState(0.5);
   const [isDraggingCompareSplit, setIsDraggingCompareSplit] = useState(false);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
+  const [visibleFilmstripIndexes, setVisibleFilmstripIndexes] = useState<number[]>([]);
   const panelWidth = useSyncExternalStore(
     (onStoreChange) => {
       if (!panelApi) return () => {};
@@ -451,6 +456,36 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const activeItemIndex = activeIterator
     ? Math.max(0, Math.min(activeIterator.count - 1, currentFrame - activeIterator.startFrame))
     : 0;
+
+  const handleVisibleFilmstripIndexesChange = useCallback((indexes: number[]) => {
+    setVisibleFilmstripIndexes(prev => (
+      prev.length === indexes.length && prev.every((value, index) => value === indexes[index])
+        ? prev
+        : indexes
+    ));
+  }, []);
+
+  const batchThumbnailGenerationKey = useMemo(() => {
+    if (!activeIterator || activeIterator.kind !== 'batch') return '';
+    const labels = activeIterator.itemLabels;
+    return [
+      activeIterator.sourceNodeId,
+      activeIterator.label,
+      activeIterator.count,
+      labels[0] ?? '',
+      labels[labels.length - 1] ?? '',
+    ].join('|');
+  }, [activeIterator]);
+
+  const batchSourceThumbnails = useBatchSourceThumbnails({
+    sourceNodeId: activeIterator?.kind === 'batch' ? activeIterator.sourceNodeId : null,
+    visibleIndexes: visibleFilmstripIndexes,
+    maxEdge: FILMSTRIP_SOURCE_THUMBNAIL_MAX_EDGE,
+    getThumbnail: getBatchThumbnail,
+    cacheLimit: FILMSTRIP_SOURCE_THUMB_CACHE_LIMIT,
+    generationKey: batchThumbnailGenerationKey,
+    enabled: activeIterator?.kind === 'batch',
+  });
 
   const activeResult = useMemo(() => {
     if (
@@ -917,6 +952,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
             overscan={FILMSTRIP_OVERSCAN}
             activeIndex={activeItemIndex}
             className="nopan nodrag"
+            onVisibleIndexesChange={handleVisibleFilmstripIndexesChange}
             style={{
               background: 'var(--overlay-label)',
               border: '1px solid var(--border-primary)',
@@ -926,6 +962,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
               const frame = activeIterator.startFrame + index;
               const isActive = frame === currentFrame;
               const label = activeIterator.itemLabels[index] ?? String(frame);
+              const sourceThumbnail = activeIterator.kind === 'batch'
+                ? batchSourceThumbnails.get(index)
+                : undefined;
               return (
                 <button
                   key={index}
@@ -956,6 +995,18 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                       channel={activeChannel}
                       gain={gain}
                       gamma={gamma}
+                    />
+                  ) : sourceThumbnail ? (
+                    <img
+                      src={sourceThumbnail}
+                      alt=""
+                      data-testid="viewer-filmstrip-source-thumbnail"
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block',
+                      }}
                     />
                   ) : (
                     <span

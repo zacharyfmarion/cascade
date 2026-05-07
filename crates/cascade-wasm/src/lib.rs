@@ -1045,6 +1045,26 @@ impl Engine {
         batch_node.image_bytes(index).map_err(to_js_error)
     }
 
+    pub fn get_batch_thumbnail(
+        &self,
+        node_id: &str,
+        index: usize,
+        max_edge: u32,
+    ) -> Result<Vec<u8>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageBatch"))?;
+        batch_node
+            .thumbnail_png(index, max_edge)
+            .map_err(to_js_error)
+    }
+
     pub fn set_sequence_info(
         &mut self,
         node_id: &str,
