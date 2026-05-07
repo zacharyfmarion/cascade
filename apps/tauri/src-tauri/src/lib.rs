@@ -22,6 +22,30 @@ struct AppState {
 
 type EngineState = Arc<Mutex<AppState>>;
 
+const BATCH_ASSET_PREFIX: &str = "batch";
+const SUPPORTED_IMAGE_EXTENSIONS: &[&str] =
+    &["png", "jpg", "jpeg", "exr", "tif", "tiff", "bmp", "webp"];
+
+#[derive(serde::Deserialize)]
+struct BatchManifest {
+    #[serde(default)]
+    frames: Vec<BatchManifestFrame>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct BatchManifestFrame {
+    #[serde(default)]
+    key: String,
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    hash: String,
+    #[serde(default)]
+    uri: String,
+}
+
 fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
     match result {
         ViewerRenderResult::Image(render) => {
@@ -122,6 +146,81 @@ fn embedded_asset_ref(
         uri: format!("asset://sha256/{}", blob.hash),
         data: general_purpose::STANDARD.encode(&blob.bytes),
     }
+}
+
+fn batch_frame_key(node_id: &str, index: usize) -> String {
+    format!("{node_id}:{BATCH_ASSET_PREFIX}:{index:06}")
+}
+
+fn is_batch_asset_for_node(key: &str, asset_ref: &AssetReference, node_id: &str) -> bool {
+    (key == node_id && asset_ref.asset_type == "image_batch")
+        || (key
+            .split_once(':')
+            .map_or(false, |(prefix, _)| prefix == node_id)
+            && asset_ref.asset_type == "image_batch_frame")
+}
+
+fn is_supported_image_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+        .is_some_and(|ext| SUPPORTED_IMAGE_EXTENSIONS.contains(&ext.as_str()))
+}
+
+fn make_batch_manifest_asset(
+    node_id: &str,
+    assets: &HashMap<String, AssetReference>,
+) -> Result<Option<AssetReference>, String> {
+    let mut frames = assets
+        .iter()
+        .filter(|(key, asset_ref)| {
+            key.split_once(':')
+                .map_or(false, |(prefix, _)| prefix == node_id)
+                && asset_ref.asset_type == "image_batch_frame"
+        })
+        .map(|(key, asset_ref)| {
+            (
+                key.clone(),
+                BatchManifestFrame {
+                    key: key.clone(),
+                    filename: asset_ref.original_filename.clone(),
+                    path: asset_ref.path.clone(),
+                    hash: asset_ref.hash.clone(),
+                    uri: asset_ref.uri.clone(),
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    frames.sort_by(|a, b| a.0.cmp(&b.0));
+    if frames.is_empty() {
+        return Ok(None);
+    }
+    let manifest = serde_json::json!({
+        "frames": frames.into_iter().map(|(_, frame)| frame).collect::<Vec<_>>()
+    });
+    let bytes = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
+    let blob =
+        project_package::make_asset_blob(&PathBuf::from(format!("{node_id}.batch.json")), bytes);
+    Ok(Some(embedded_asset_ref(
+        "image_batch",
+        &blob,
+        String::new(),
+    )))
+}
+
+fn refresh_batch_manifest(
+    node_id: &str,
+    assets: &mut HashMap<String, AssetReference>,
+) -> Result<(), String> {
+    assets.remove(node_id);
+    if let Some(manifest) = make_batch_manifest_asset(node_id, assets)? {
+        assets.insert(node_id.to_string(), manifest);
+    }
+    Ok(())
+}
+
+fn remove_batch_assets(node_id: &str, assets: &mut HashMap<String, AssetReference>) {
+    assets.retain(|key, asset_ref| !is_batch_asset_for_node(key, asset_ref, node_id));
 }
 
 fn is_asset_uri(path: &str) -> bool {
@@ -338,6 +437,155 @@ fn get_image_data(state: State<'_, EngineState>, node_id: String) -> Result<Resp
         .get_image_data(&node_id)
         .map_err(|e| e.to_string())?;
     Ok(Response::new(bytes))
+}
+
+#[tauri::command]
+fn batch_clear(state: State<'_, EngineState>, node_id: String) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.batch_clear(&node_id).map_err(|e| e.to_string())?;
+    remove_batch_assets(&node_id, &mut s.project_assets);
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_add_image(
+    state: State<'_, EngineState>,
+    request: tauri::ipc::Request,
+) -> Result<(), String> {
+    let node_id = request
+        .headers()
+        .get("x-node-id")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "Missing x-node-id header".to_string())?
+        .to_string();
+    let filename_header = request
+        .headers()
+        .get("x-filename-b64")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "Missing x-filename-b64 header".to_string())?;
+    let filename = String::from_utf8(
+        general_purpose::STANDARD
+            .decode(filename_header)
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let tauri::ipc::InvokeBody::Raw(data) = request.body() else {
+        return Err("Expected raw body with image data".to_string());
+    };
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .batch_add_image(&node_id, &filename, data)
+        .map_err(|e| e.to_string())?;
+    let info = s
+        .engine
+        .get_batch_info(&node_id)
+        .map_err(|e| e.to_string())?;
+    let frame_index = info.count.saturating_sub(1);
+    let blob = project_package::make_asset_blob(&PathBuf::from(&filename), data.to_vec());
+    s.project_assets.insert(
+        batch_frame_key(&node_id, frame_index),
+        embedded_asset_ref("image_batch_frame", &blob, filename),
+    );
+    refresh_batch_manifest(&node_id, &mut s.project_assets)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn batch_load_directory(
+    state: State<'_, EngineState>,
+    node_id: String,
+    directory: String,
+) -> Result<String, String> {
+    let dir = PathBuf::from(strip_file_url(&directory));
+    let mut entries = std::fs::read_dir(&dir)
+        .map_err(|e| format!("Failed to read directory {}: {e}", dir.display()))?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.is_file() && is_supported_image_path(&path) {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| original_filename(a).cmp(&original_filename(b)));
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.batch_clear(&node_id).map_err(|e| e.to_string())?;
+    remove_batch_assets(&node_id, &mut s.project_assets);
+    for (index, path) in entries.iter().enumerate() {
+        let filename = original_filename(path);
+        let data = std::fs::read(path)
+            .map_err(|e| format!("Failed to read batch image {}: {e}", path.display()))?;
+        s.engine
+            .batch_add_image(&node_id, &filename, &data)
+            .map_err(|e| e.to_string())?;
+        s.project_assets.insert(
+            batch_frame_key(&node_id, index),
+            external_asset_ref(
+                "image_batch_frame",
+                path.to_string_lossy().to_string(),
+                filename,
+            ),
+        );
+    }
+    refresh_batch_manifest(&node_id, &mut s.project_assets)?;
+    let info = s
+        .engine
+        .get_batch_info(&node_id)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn batch_load_paths(
+    state: State<'_, EngineState>,
+    node_id: String,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    let mut entries = paths
+        .into_iter()
+        .map(|path| PathBuf::from(strip_file_url(&path)))
+        .filter(|path| path.is_file() && is_supported_image_path(path))
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| original_filename(a).cmp(&original_filename(b)));
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine.batch_clear(&node_id).map_err(|e| e.to_string())?;
+    remove_batch_assets(&node_id, &mut s.project_assets);
+    for (index, path) in entries.iter().enumerate() {
+        let filename = original_filename(path);
+        let data = std::fs::read(path)
+            .map_err(|e| format!("Failed to read batch image {}: {e}", path.display()))?;
+        s.engine
+            .batch_add_image(&node_id, &filename, &data)
+            .map_err(|e| e.to_string())?;
+        s.project_assets.insert(
+            batch_frame_key(&node_id, index),
+            external_asset_ref(
+                "image_batch_frame",
+                path.to_string_lossy().to_string(),
+                filename,
+            ),
+        );
+    }
+    refresh_batch_manifest(&node_id, &mut s.project_assets)?;
+    let info = s
+        .engine
+        .get_batch_info(&node_id)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_batch_info(state: State<'_, EngineState>, node_id: String) -> Result<String, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let info = s
+        .engine
+        .get_batch_info(&node_id)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&info).map_err(|e| e.to_string())
 }
 
 /// Returns raw RGBA8 pixels prefixed with [width_le32][height_le32].
@@ -571,73 +819,82 @@ fn collect_external_asset_refs(
     retained_bytes: &HashMap<String, Vec<u8>>,
 ) -> Result<(), String> {
     document.assets.clear();
-    for node in &document.graph.nodes {
-        match node.type_id.as_str() {
+    let nodes = document
+        .graph
+        .nodes
+        .iter()
+        .map(|node| (node.id.clone(), node.type_id.clone(), node.params.clone()))
+        .collect::<Vec<_>>();
+    for (node_id, type_id, params) in nodes {
+        match type_id.as_str() {
             "load_image" => {
-                if let Some(path) = param_string(&node.params, "path") {
+                if let Some(path) = param_string(&params, "path") {
                     if is_asset_uri(&path) {
                         if let Some(asset_ref) = embedded_asset_for_node(
                             engine,
-                            &node.id,
+                            &node_id,
                             "image",
                             &path,
                             retained_assets,
                             retained_bytes,
                         )? {
-                            document.assets.insert(node.id.clone(), asset_ref);
+                            document.assets.insert(node_id.clone(), asset_ref);
                         }
                     } else {
                         let resolved = resolve_project_path(project_dir, &path);
                         document.assets.insert(
-                            node.id.clone(),
+                            node_id.clone(),
                             external_asset_ref("image", path, original_filename(&resolved)),
                         );
                     }
                 }
             }
             "load_image_sequence" => {
-                if let Some(directory) = param_string(&node.params, "directory") {
+                if let Some(directory) = param_string(&params, "directory") {
                     if is_asset_uri(&directory) {
                         for (key, asset_ref) in
-                            embedded_sequence_assets(&node.id, retained_assets, retained_bytes)?
+                            embedded_sequence_assets(&node_id, retained_assets, retained_bytes)?
                         {
                             document.assets.insert(key, asset_ref);
                         }
                     } else {
-                        let pattern = param_string(&node.params, "pattern").unwrap_or_default();
+                        let pattern = param_string(&params, "pattern").unwrap_or_default();
                         document.assets.insert(
-                            node.id.clone(),
+                            node_id.clone(),
                             external_asset_ref("image_sequence", directory, pattern),
                         );
                     }
                 }
             }
+            "load_image_batch" => {
+                collect_external_batch_assets(&node_id, document, retained_assets, retained_bytes)?;
+            }
             "load_video" => {
-                if let Some(path) = param_string(&node.params, "file_path") {
+                if let Some(path) = param_string(&params, "file_path") {
                     if is_asset_uri(&path) {
                         if let Some(asset_ref) = embedded_asset_for_node(
                             engine,
-                            &node.id,
+                            &node_id,
                             "video",
                             &path,
                             retained_assets,
                             retained_bytes,
                         )? {
-                            document.assets.insert(node.id.clone(), asset_ref);
+                            document.assets.insert(node_id.clone(), asset_ref);
                         }
                     } else {
                         let resolved = resolve_project_path(project_dir, &path);
                         document.assets.insert(
-                            node.id.clone(),
+                            node_id.clone(),
                             external_asset_ref("video", path, original_filename(&resolved)),
                         );
                     }
                 }
             }
             type_id if type_id.starts_with("ai_") => {
-                if let Some(blob) = cached_ai_result_blob(engine, &node.id)? {
+                if let Some(blob) = cached_ai_result_blob(engine, &node_id)? {
                     document.assets.insert(
-                        node.id.clone(),
+                        node_id.clone(),
                         embedded_asset_ref("ai_result", &blob, String::new()),
                     );
                 }
@@ -688,6 +945,120 @@ fn retained_asset_bytes(
         return Ok(retained_bytes.get(&asset_ref.path).cloned());
     }
     Ok(None)
+}
+
+fn retained_or_external_asset_bytes(
+    asset_ref: &AssetReference,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<Option<Vec<u8>>, String> {
+    if let Some(bytes) = retained_asset_bytes(asset_ref, retained_bytes)? {
+        return Ok(Some(bytes));
+    }
+    if asset_ref.source == "external" && !asset_ref.path.is_empty() {
+        let path = PathBuf::from(strip_file_url(&asset_ref.path));
+        return std::fs::read(&path)
+            .map(Some)
+            .map_err(|e| format!("Failed to read asset {}: {e}", path.display()));
+    }
+    Ok(None)
+}
+
+fn retained_batch_frames<'a>(
+    node_id: &str,
+    retained_assets: &'a HashMap<String, AssetReference>,
+) -> Vec<(String, &'a AssetReference)> {
+    let mut frames = retained_assets
+        .iter()
+        .filter(|(key, asset_ref)| {
+            key.split_once(':')
+                .map_or(false, |(prefix, _)| prefix == node_id)
+                && asset_ref.asset_type == "image_batch_frame"
+        })
+        .map(|(key, asset_ref)| (key.clone(), asset_ref))
+        .collect::<Vec<_>>();
+    frames.sort_by(|a, b| a.0.cmp(&b.0));
+    frames
+}
+
+fn collect_external_batch_assets(
+    node_id: &str,
+    document: &mut CascadeDocument,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    for (key, retained) in retained_batch_frames(node_id, retained_assets) {
+        let asset_ref = if retained.source == "external" {
+            clone_asset_reference(retained)
+        } else if let Some(bytes) = retained_asset_bytes(retained, retained_bytes)? {
+            let fallback = PathBuf::from(
+                retained
+                    .original_filename
+                    .clone()
+                    .if_empty_then(|| format!("{key}.image")),
+            );
+            let blob = project_package::make_asset_blob(&fallback, bytes);
+            embedded_asset_ref(
+                "image_batch_frame",
+                &blob,
+                retained.original_filename.clone(),
+            )
+        } else {
+            continue;
+        };
+        document.assets.insert(key, asset_ref);
+    }
+    if let Some(manifest) = make_batch_manifest_asset(node_id, &document.assets)? {
+        document.assets.insert(node_id.to_string(), manifest);
+    }
+    Ok(())
+}
+
+fn collect_packed_batch_assets(
+    node_id: &str,
+    document: &mut CascadeDocument,
+    package_assets: &mut Vec<AssetBlob>,
+    retained_assets: &HashMap<String, AssetReference>,
+    retained_bytes: &HashMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    let mut manifest = Vec::new();
+    for (key, retained) in retained_batch_frames(node_id, retained_assets) {
+        let Some(bytes) = retained_or_external_asset_bytes(retained, retained_bytes)? else {
+            continue;
+        };
+        let fallback = PathBuf::from(
+            retained
+                .original_filename
+                .clone()
+                .if_empty_then(|| format!("{key}.image")),
+        );
+        let blob = project_package::make_asset_blob(&fallback, bytes);
+        let asset_ref = packed_asset_ref(
+            "image_batch_frame",
+            &blob,
+            retained.original_filename.clone(),
+        );
+        manifest.push(serde_json::json!({
+            "key": key.clone(),
+            "filename": retained.original_filename.clone(),
+            "path": asset_ref.path.clone(),
+            "hash": asset_ref.hash.clone(),
+            "uri": asset_ref.uri.clone(),
+        }));
+        document.assets.insert(key, asset_ref);
+        package_assets.push(blob);
+    }
+    if !manifest.is_empty() {
+        let manifest_bytes = serde_json::to_vec(&serde_json::json!({ "frames": manifest }))
+            .map_err(|e| e.to_string())?;
+        let manifest_path = PathBuf::from(format!("{node_id}.batch.json"));
+        let manifest_blob = project_package::make_asset_blob(&manifest_path, manifest_bytes);
+        document.assets.insert(
+            node_id.to_string(),
+            packed_asset_ref("image_batch", &manifest_blob, String::new()),
+        );
+        package_assets.push(manifest_blob);
+    }
+    Ok(())
 }
 
 fn embedded_asset_for_node(
@@ -1002,6 +1373,15 @@ fn collect_packed_assets(
                 );
                 package_assets.push(manifest_blob);
             }
+            "load_image_batch" => {
+                collect_packed_batch_assets(
+                    &node_id,
+                    document,
+                    package_assets,
+                    retained_assets,
+                    retained_bytes,
+                )?;
+            }
             "load_video" => {
                 if let Some(path) = param_string(&params, "file_path") {
                     if is_asset_uri(&path) {
@@ -1155,6 +1535,7 @@ fn import_project_document(
             packed_assets.as_ref(),
         )?;
     }
+    hydrate_batch_assets(engine, project_dir, &assets, packed_assets.as_ref())?;
 
     let mut exported = engine.export_document();
     exported.dsl = dsl;
@@ -1162,6 +1543,62 @@ fn import_project_document(
     exported.asset_storage = asset_storage;
     project_package::apply_packed_asset_uris(&mut exported);
     serde_json::to_string(&exported).map_err(|e| e.to_string())
+}
+
+fn hydrate_batch_assets(
+    engine: &mut Engine,
+    project_dir: &Path,
+    assets: &[(String, AssetReference)],
+    packed_assets: Option<&std::collections::HashMap<String, Vec<u8>>>,
+) -> Result<(), String> {
+    let asset_map = assets
+        .iter()
+        .map(|(key, asset_ref)| (key.as_str(), asset_ref))
+        .collect::<HashMap<_, _>>();
+    for (node_id, asset_ref) in assets {
+        if asset_ref.asset_type != "image_batch" {
+            continue;
+        }
+        let manifest_bytes = read_project_asset_bytes(project_dir, asset_ref, packed_assets)?;
+        let manifest: BatchManifest =
+            serde_json::from_slice(&manifest_bytes).map_err(|e| e.to_string())?;
+        engine.batch_clear(node_id).map_err(|e| e.to_string())?;
+        for frame in manifest.frames {
+            let frame_asset = if !frame.key.is_empty() {
+                asset_map.get(frame.key.as_str()).copied()
+            } else {
+                None
+            }
+            .or_else(|| {
+                assets
+                    .iter()
+                    .filter(|(key, asset_ref)| {
+                        key.split_once(':')
+                            .map_or(false, |(prefix, _)| prefix == node_id)
+                            && asset_ref.asset_type == "image_batch_frame"
+                    })
+                    .map(|(_, asset_ref)| asset_ref)
+                    .find(|asset_ref| {
+                        (!frame.uri.is_empty() && asset_ref.uri == frame.uri)
+                            || (!frame.hash.is_empty() && asset_ref.hash == frame.hash)
+                            || (!frame.path.is_empty() && asset_ref.path == frame.path)
+                    })
+            });
+            let Some(frame_asset) = frame_asset else {
+                continue;
+            };
+            let bytes = read_project_asset_bytes(project_dir, frame_asset, packed_assets)?;
+            let filename = if !frame.filename.is_empty() {
+                frame.filename
+            } else {
+                frame_asset.original_filename.clone()
+            };
+            engine
+                .batch_add_image(node_id, &filename, &bytes)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 fn clone_asset_reference(asset_ref: &AssetReference) -> AssetReference {
@@ -1442,6 +1879,14 @@ fn render_sequence(state: State<'_, EngineState>, node_id: String) -> Result<Str
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.engine
         .start_render_sequence(&node_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn render_batch(state: State<'_, EngineState>, node_id: String) -> Result<String, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .start_render_batch(&node_id)
         .map_err(|e| e.to_string())
 }
 
@@ -1932,6 +2377,11 @@ pub fn run() {
             load_image_path,
             load_palette_data,
             get_image_data,
+            batch_clear,
+            batch_add_image,
+            batch_load_directory,
+            batch_load_paths,
+            get_batch_info,
             render_viewer,
             render_internal_viewer,
             set_param_and_render,
@@ -1951,6 +2401,7 @@ pub fn run() {
             get_sequence_info,
             load_video_file,
             render_sequence,
+            render_batch,
             render_video,
             cancel_render_job,
             get_job_progress,

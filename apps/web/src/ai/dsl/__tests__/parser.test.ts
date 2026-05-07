@@ -486,6 +486,13 @@ describe('parseDsl', () => {
     expect(node?.params.get('path')).toEqual({ type: 'string', value: '/img/photo.jpg' });
   });
 
+  it('parses load image batch directory params', () => {
+    const result = parseGraph('batch1 = LoadImageBatch(directory: "/Users/test/Pictures/batch")', mockSpecs);
+    const node = result.ast?.nodes.get('batch1');
+    expect(result.errors).toHaveLength(0);
+    expect(node?.params.get('directory')).toEqual({ type: 'string', value: '/Users/test/Pictures/batch' });
+  });
+
   it('parses bool params', () => {
     const result = parseGraph('thresh1 = Threshold(invert: true)', mockSpecs);
     const node = result.ast?.nodes.get('thresh1');

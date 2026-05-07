@@ -1891,7 +1891,7 @@ impl Node for Text {
                 ParamSpec {
                     key: "text".to_string(),
                     label: "Text".to_string(),
-                    ty: ValueType::Float,
+                    ty: ValueType::String,
                     default: ParamDefault::String("Text".to_string()),
                     min: None,
                     max: None,

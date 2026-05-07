@@ -1261,7 +1261,30 @@ impl Node for LoadImageBatch {
                     ..Default::default()
                 },
             ],
-            params: vec![],
+            params: vec![
+                ParamSpec {
+                    key: "directory".to_string(),
+                    label: "Directory".to_string(),
+                    ty: ValueType::String,
+                    default: ParamDefault::String(String::new()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "files".to_string(),
+                    label: "Files".to_string(),
+                    ty: ValueType::String,
+                    default: ParamDefault::String(String::new()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
+                    promotable: true,
+                },
+            ],
         }
     }
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a> {

@@ -3,7 +3,7 @@ import type { NodeProps } from '@xyflow/react';
 import { BaseNode } from './BaseNode';
 import { NodeSlider } from './NodeSlider';
 import { NodeColorPicker } from './NodeColorPicker';
-import { NodeDropdown, NodeCheckbox, NodeNumberInput, NodeTextArea, NodeSection } from './NodePrimitives';
+import { NodeButton, NodeDropdown, NodeCheckbox, NodeNumberInput, NodeTextArea, NodeSection } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
@@ -164,27 +164,10 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
                 Inputs changed — re-run to update
               </div>
             )}
-            <button
-              type="button"
-              className="ai-run-btn"
+            <NodeButton
               disabled={aiStatus === 'running'}
               onClick={() => runAiNode(props.id)}
-              style={{
-                width: '100%',
-                padding: '5px 8px',
-                border: isStale
-                  ? '1px solid var(--status-danger)'
-                  : aiStatus === 'complete'
-                    ? '1px solid var(--status-success)'
-                    : '1px solid transparent',
-                borderRadius: 4,
-                cursor: aiStatus === 'running' ? 'wait' : 'pointer',
-                fontSize: '0.75rem',
-                fontWeight: 500,
-                background: 'var(--accent-primary)',
-                color: 'var(--bg-primary)',
-                opacity: aiStatus === 'running' ? 0.7 : 1,
-              }}
+              fullWidth
             >
               {aiStatus === 'running'
                 ? 'Running…'
@@ -193,7 +176,7 @@ export const ProcessingNode: React.FC<NodeProps> = (props) => {
                   : aiStatus === 'complete'
                     ? 'Re-run'
                     : 'Run'}
-            </button>
+            </NodeButton>
             {aiStatus.startsWith('error:') && (
               <div style={{
                 fontSize: '0.65rem',

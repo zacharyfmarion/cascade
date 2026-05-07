@@ -208,6 +208,81 @@ mod tests {
         }
     }
 
+    fn scalar_default_type(default: &ParamDefault) -> Option<ValueType> {
+        match default {
+            ParamDefault::Float(_) => Some(ValueType::Float),
+            ParamDefault::Int(_) => Some(ValueType::Int),
+            ParamDefault::Bool(_) => Some(ValueType::Bool),
+            ParamDefault::Color(_) => Some(ValueType::Color),
+            ParamDefault::String(_) => Some(ValueType::String),
+            ParamDefault::ColorRamp(_)
+            | ParamDefault::ColorPalette(_)
+            | ParamDefault::CurvePoints(_) => None,
+        }
+    }
+
+    fn is_scalar_value_type(ty: &ValueType) -> bool {
+        matches!(
+            ty,
+            ValueType::Float
+                | ValueType::Int
+                | ValueType::Bool
+                | ValueType::Color
+                | ValueType::String
+        )
+    }
+
+    #[test]
+    fn standard_node_scalar_param_defaults_match_declared_types() {
+        let mut registry = NodeRegistry::new();
+        register_standard_nodes(&mut registry);
+
+        for spec in registry.list_specs() {
+            for param in &spec.params {
+                if matches!(param.ui_hint, UiHint::Dropdown(_)) || !is_scalar_value_type(&param.ty)
+                {
+                    continue;
+                }
+                let Some(expected) = scalar_default_type(&param.default) else {
+                    continue;
+                };
+                assert_eq!(
+                    param.ty, expected,
+                    "{}.{} declares {:?} but has {:?} default",
+                    spec.id, param.key, param.ty, param.default
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn export_image_batch_output_dir_is_string_param() {
+        let spec = ExportImageBatch::new().spec();
+        let output_dir = spec
+            .params
+            .iter()
+            .find(|param| param.key == "output_dir")
+            .expect("ExportImageBatch output_dir param missing");
+
+        assert_eq!(output_dir.ty, ValueType::String);
+        assert!(matches!(&output_dir.default, ParamDefault::String(value) if value.is_empty()));
+    }
+
+    #[test]
+    fn load_image_batch_source_params_are_strings() {
+        let spec = LoadImageBatch::new().spec();
+        for key in ["directory", "files"] {
+            let param = spec
+                .params
+                .iter()
+                .find(|param| param.key == key)
+                .unwrap_or_else(|| panic!("LoadImageBatch {key} param missing"));
+
+            assert_eq!(param.ty, ValueType::String);
+            assert!(matches!(&param.default, ParamDefault::String(value) if value.is_empty()));
+        }
+    }
+
     #[test]
     fn compare_viewer_spec_declares_two_visible_inputs_and_hidden_buffers() {
         let spec = CompareViewer::new().spec();

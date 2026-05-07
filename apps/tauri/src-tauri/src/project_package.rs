@@ -167,7 +167,25 @@ pub fn apply_packed_asset_uris(document: &mut CascadeDocument) -> bool {
                     .iter()
                     .any(|asset_type| asset_type == "image_batch") =>
             {
-                // Batch manifests are not yet represented in native packaging.
+                let uri = document
+                    .assets
+                    .get(&node.id)
+                    .filter(|asset_ref| asset_ref.asset_type == "image_batch")
+                    .map(asset_uri)
+                    .filter(|uri| !uri.is_empty())
+                    .unwrap_or_default();
+                if !uri.is_empty() {
+                    if let Some(cascade_runtime::ParamValue::String(previous)) =
+                        node.params.get("files")
+                    {
+                        replacements.push((previous.clone(), uri.clone()));
+                    }
+                    node.params.insert(
+                        "files".to_string(),
+                        cascade_runtime::ParamValue::String(uri),
+                    );
+                    changed = true;
+                }
             }
             _ => {}
         }

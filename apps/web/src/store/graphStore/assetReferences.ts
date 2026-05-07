@@ -146,6 +146,16 @@ export const applyPackedAssetUrisToDocument = (doc: Record<string, unknown>): bo
         delete params.pattern;
         changed = true;
       }
+    } else if (rawNode.type_id === 'load_image_batch' && packedTypes.has('image_batch')) {
+      const asset = assets[rawNode.id];
+      const uri = asset && assetTypeOf(asset) === 'image_batch' ? assetUriOf(asset) : '';
+      const directory = isRecord(params.directory) && typeof params.directory.String === 'string'
+        ? params.directory.String
+        : '';
+      const files = isRecord(params.files) && typeof params.files.String === 'string'
+        ? params.files.String
+        : '';
+      if (uri && !directory && !files) setStringParam('files', uri);
     }
   }
 

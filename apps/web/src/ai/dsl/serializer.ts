@@ -59,7 +59,9 @@ const formatAssetValue = (typeId: string, paramKey: string, value: string): stri
   if (typeId === 'load_image') return `image(${JSON.stringify(value)})`;
   if (typeId === 'load_image_sequence' && paramKey === 'directory') return `sequence(${JSON.stringify(value)})`;
   if (typeId === 'load_video' && paramKey === 'file_path') return `video(${JSON.stringify(value)})`;
-  if (typeId === 'load_image_batch') return value.startsWith('images(') ? value : `images([${JSON.stringify(value)}])`;
+  if (typeId === 'load_image_batch' && paramKey === 'files') {
+    return value.startsWith('images(') ? value : `images([${JSON.stringify(value)}])`;
+  }
   return null;
 };
 
@@ -137,6 +139,10 @@ const shouldIncludeParam = (
   }
   if (node.typeId === 'load_video' && paramSpec.key === 'file_path') {
     return Boolean(getStringParam(node, 'file_path'));
+  }
+  if (node.typeId === 'load_image_batch') {
+    if (paramSpec.key === 'directory') return Boolean(getStringParam(node, 'directory'));
+    if (paramSpec.key === 'files') return !getStringParam(node, 'directory') && Boolean(getStringParam(node, 'files'));
   }
   return JSON.stringify(paramValue) !== JSON.stringify(paramSpec.default);
 };

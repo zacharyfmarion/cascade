@@ -231,7 +231,7 @@ impl Node for ExportImage {
                 ParamSpec {
                     key: "output_path".to_string(),
                     label: "Output Path".to_string(),
-                    ty: ValueType::Int,
+                    ty: ValueType::String,
                     default: ParamDefault::String(String::new()),
                     min: None,
                     max: None,
@@ -408,7 +408,7 @@ impl Node for ExportVideo {
                 ParamSpec {
                     key: "output_path".to_string(),
                     label: "Output Path".to_string(),
-                    ty: ValueType::Int,
+                    ty: ValueType::String,
                     default: ParamDefault::String(String::new()),
                     min: None,
                     max: None,
@@ -544,7 +544,7 @@ impl Node for ExportImageSequence {
                 ParamSpec {
                     key: "output_dir".to_string(),
                     label: "Output Directory".to_string(),
-                    ty: ValueType::Int,
+                    ty: ValueType::String,
                     default: ParamDefault::String(String::new()),
                     min: None,
                     max: None,
@@ -672,6 +672,17 @@ impl Node for ExportImageBatch {
             }],
             params: vec![
                 ParamSpec {
+                    key: "output_dir".to_string(),
+                    label: "Output Directory".to_string(),
+                    ty: ValueType::String,
+                    default: ParamDefault::String(String::new()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
+                    promotable: true,
+                },
+                ParamSpec {
                     key: "format".to_string(),
                     label: "Format".to_string(),
                     ty: ValueType::Int,
@@ -691,6 +702,17 @@ impl Node for ExportImageBatch {
                     max: Some(100.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "filename_template".to_string(),
+                    label: "Filename Template".to_string(),
+                    ty: ValueType::String,
+                    default: ParamDefault::String("{name}".to_string()),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Hidden,
                     promotable: true,
                 },
             ],

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
+import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, BatchInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo, InternalGraphNode } from '../store/types';
 
 type DocumentEnvelope = {
@@ -12,6 +12,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
 
 const parsePosition = (value: unknown): { x: number; y: number } => {
   if (Array.isArray(value)) {
@@ -219,6 +227,34 @@ export class TauriEngine implements EngineBridge {
     }
   }
 
+  async batchClear(nodeId: string): Promise<void> {
+    await invoke('batch_clear', { nodeId });
+  }
+
+  async batchAddImage(nodeId: string, filename: string, data: Uint8Array): Promise<void> {
+    await invoke('batch_add_image', data, {
+      headers: {
+        'x-node-id': nodeId,
+        'x-filename-b64': bytesToBase64(new TextEncoder().encode(filename)),
+      },
+    });
+  }
+
+  async batchLoadDirectory(nodeId: string, directory: string): Promise<BatchInfo> {
+    const json = await invoke<string>('batch_load_directory', { nodeId, directory });
+    return JSON.parse(json) as BatchInfo;
+  }
+
+  async batchLoadPaths(nodeId: string, paths: string[]): Promise<BatchInfo> {
+    const json = await invoke<string>('batch_load_paths', { nodeId, paths });
+    return JSON.parse(json) as BatchInfo;
+  }
+
+  async getBatchInfo(nodeId: string): Promise<BatchInfo> {
+    const json = await invoke<string>('get_batch_info', { nodeId });
+    return JSON.parse(json) as BatchInfo;
+  }
+
   async getAiNodeImageData(nodeId: string): Promise<Uint8Array | null> {
     try {
       const buf = await invoke<ArrayBuffer>('get_ai_node_image_data', { nodeId });
@@ -345,6 +381,10 @@ export class TauriEngine implements EngineBridge {
 
   async renderSequence(nodeId: string): Promise<string> {
     return invoke<string>('render_sequence', { nodeId });
+  }
+
+  async renderBatch(nodeId: string): Promise<string> {
+    return invoke<string>('render_batch', { nodeId });
   }
 
   async renderVideo(nodeId: string): Promise<string> {

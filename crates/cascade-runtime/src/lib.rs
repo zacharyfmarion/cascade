@@ -32,7 +32,7 @@ use cascade_nodes_std::input::LoadImage as InputLoadImage;
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
     decode_response_image, encode_image_png, register_standard_nodes, ColorPaletteNode,
-    GpuScriptDraftNode, GroupNode, LoadImageSequence, Viewer,
+    GpuScriptDraftNode, GroupNode, LoadImageBatch, LoadImageSequence, Viewer,
 };
 #[cfg(all(feature = "video", target_os = "macos"))]
 use cascade_nodes_std::{srgb_to_linear_lut, LoadVideo};
@@ -245,6 +245,12 @@ pub struct NodeInterfaceChange {
     pub new_spec: NodeSpec,
     pub removed_output_ports: Vec<String>,
     pub pruned_connections: Vec<PrunedConnection>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BatchInfo {
+    pub count: usize,
+    pub filenames: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -2223,6 +2229,52 @@ impl Engine {
         parse_node_id_from_map(&self.uuid_map, id)
     }
 
+    fn batch_node(&self, id: NodeId) -> Result<&LoadImageBatch, CascadeError> {
+        self.nodes
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("Batch node instance not found".to_string()))?
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| CascadeError::Other("Node is not LoadImageBatch".to_string()))
+    }
+
+    fn find_upstream_batch_node(&self, export_node_id: &str) -> Result<NodeId, CascadeError> {
+        let export_id = self.parse_node_id(export_node_id)?;
+        let mut visited = HashSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(export_id);
+        visited.insert(export_id);
+
+        let mut found = Vec::new();
+        while let Some(current) = queue.pop_front() {
+            if self
+                .graph
+                .nodes
+                .get(current)
+                .is_some_and(|instance| instance.type_id == "load_image_batch")
+            {
+                found.push(current);
+                continue;
+            }
+
+            for conn in self.graph.connections_to(current) {
+                if visited.insert(conn.from_node) {
+                    queue.push_back(conn.from_node);
+                }
+            }
+        }
+
+        match found.len() {
+            0 => Err(CascadeError::Other(
+                "No LoadImageBatch node found upstream".to_string(),
+            )),
+            1 => Ok(found[0]),
+            _ => Err(CascadeError::Other(
+                "Multiple LoadImageBatch nodes found upstream (ambiguous)".to_string(),
+            )),
+        }
+    }
+
     pub fn remove_node_internal(&mut self, node_id: NodeId) {
         if let Some(instance) = self.graph.nodes.get(node_id) {
             self.uuid_map.remove(&instance.uuid);
@@ -2440,6 +2492,52 @@ impl Engine {
             .ok_or_else(|| CascadeError::Other("Node is not LoadImage".to_string()))?;
         cascade_nodes_std::input::LoadImage::get_image_bytes(load_node)
             .ok_or_else(|| CascadeError::Other("No image data available".to_string()))
+    }
+
+    pub fn batch_clear(&mut self, node_id: &str) -> Result<(), CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("Node not found".to_string()))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| CascadeError::Other("Node is not LoadImageBatch".to_string()))?;
+        batch_node.clear()?;
+        self.evaluator.remove_node_cache(id);
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
+    pub fn batch_add_image(
+        &mut self,
+        node_id: &str,
+        filename: &str,
+        data: &[u8],
+    ) -> Result<(), CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("Node not found".to_string()))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| CascadeError::Other("Node is not LoadImageBatch".to_string()))?;
+        batch_node.add_image(filename, data)?;
+        self.evaluator.remove_node_cache(id);
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
+    pub fn get_batch_info(&self, export_node_id: &str) -> Result<BatchInfo, CascadeError> {
+        let batch_id = self.find_upstream_batch_node(export_node_id)?;
+        let batch = self.batch_node(batch_id)?;
+        Ok(BatchInfo {
+            count: batch.image_count()?,
+            filenames: batch.filenames()?,
+        })
     }
 
     pub fn load_palette_data(
@@ -3397,6 +3495,198 @@ impl Engine {
         Ok(job_id)
     }
 
+    pub fn start_render_batch(&mut self, node_id: &str) -> Result<String, CascadeError> {
+        if self
+            .active_job
+            .as_ref()
+            .is_some_and(|j| !j.completed.load(Ordering::Acquire))
+        {
+            return Err(CascadeError::Other(
+                "A render job is already running".to_string(),
+            ));
+        }
+
+        let export_id = self.parse_node_id(node_id)?;
+        let instance = self
+            .graph
+            .nodes
+            .get(export_id)
+            .ok_or_else(|| CascadeError::Other("Export node not found".to_string()))?;
+
+        let output_dir = match instance.params.get("output_dir") {
+            Some(ParamValue::String(s)) if !s.is_empty() => s.clone(),
+            _ => return Err(CascadeError::Other("Output directory not set".to_string())),
+        };
+
+        let output_path = Path::new(&output_dir);
+        if !output_path.is_dir() {
+            return Err(CascadeError::Other(format!(
+                "Output directory does not exist: {output_dir}"
+            )));
+        }
+
+        let batch_id = self.find_upstream_batch_node(node_id)?;
+        let batch = self.batch_node(batch_id)?;
+        let filenames = batch.filenames()?;
+        if filenames.is_empty() {
+            return Err(CascadeError::Other("No images in batch".to_string()));
+        }
+
+        let format = match instance.params.get("format") {
+            Some(ParamValue::Int(v)) => *v,
+            _ => 0,
+        };
+        let template = param_string_or(&instance.params, "filename_template", "{name}");
+        let ext = if format == 1 { "jpg" } else { "png" }.to_string();
+
+        let job_id = format!("job_{}", uuid::Uuid::new_v4());
+        let job = Arc::new(RenderJob {
+            id: job_id.clone(),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            current_frame: Arc::new(AtomicU64::new(0)),
+            total_frames: filenames.len() as u64,
+            completed: Arc::new(AtomicBool::new(false)),
+            error: Arc::new(std::sync::Mutex::new(None)),
+        });
+        self.active_job = Some(job.clone());
+
+        let mut render_graph = self.graph.clone();
+        let render_nodes = self.nodes.clone();
+        let render_registry = Arc::clone(&self.registry);
+        let mut render_evaluator = Evaluator::new();
+        let render_cm = Box::new(BuiltinColorManagement::new());
+        let ai_provider = self.ai_provider.clone();
+        let render_project_format = self.project_format.clone();
+        let render_ai_node_cache = self.ai_node_cache.clone();
+
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let cm = render_cm.as_ref();
+                let mut used_names = match fs::read_dir(&output_dir) {
+                    Ok(entries) => entries
+                        .flatten()
+                        .filter_map(|entry| entry.file_name().to_str().map(|name| name.to_string()))
+                        .collect::<HashSet<_>>(),
+                    Err(e) => {
+                        let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                        *err_guard = Some(format!("Failed to read output directory: {e}"));
+                        return;
+                    }
+                };
+                for (index, filename) in filenames.iter().enumerate() {
+                    if job.cancelled.load(Ordering::Relaxed) {
+                        break;
+                    }
+
+                    match pollster::block_on(render_evaluator.evaluate(
+                        &mut render_graph,
+                        &render_registry,
+                        &render_nodes,
+                        export_id,
+                        "display",
+                        FrameTime {
+                            frame: index as u64,
+                        },
+                        cm,
+                        ai_provider.as_deref(),
+                        &render_project_format,
+                        &render_ai_node_cache,
+                        1.0,
+                    )) {
+                        Ok(eval_result) => {
+                            if let Value::Image(image) = eval_result.value {
+                                let rgba8 = Viewer::image_to_rgba8(&image, cm);
+                                let source_stem = Path::new(filename)
+                                    .file_stem()
+                                    .and_then(|stem| stem.to_str())
+                                    .filter(|stem| !stem.is_empty())
+                                    .unwrap_or(filename);
+                                let export_name = batch_output_filename(
+                                    &template,
+                                    source_stem,
+                                    index,
+                                    image.width,
+                                    image.height,
+                                    &ext,
+                                );
+                                let export_name = dedupe_filename(export_name, &mut used_names);
+                                let path = Path::new(&output_dir).join(&export_name);
+
+                                let encode_result = if format == 1 {
+                                    let img = image::RgbaImage::from_raw(
+                                        image.width,
+                                        image.height,
+                                        rgba8,
+                                    )
+                                    .ok_or_else(|| "Failed to create image buffer".to_string());
+                                    match img {
+                                        Ok(img) => {
+                                            let rgb_img =
+                                                image::DynamicImage::ImageRgba8(img).into_rgb8();
+                                            rgb_img.save(&path).map_err(|e| e.to_string())
+                                        }
+                                        Err(e) => Err(e),
+                                    }
+                                } else {
+                                    let img = image::RgbaImage::from_raw(
+                                        image.width,
+                                        image.height,
+                                        rgba8,
+                                    )
+                                    .ok_or_else(|| "Failed to create image buffer".to_string());
+                                    match img {
+                                        Ok(img) => img.save(&path).map_err(|e| e.to_string()),
+                                        Err(e) => Err(e),
+                                    }
+                                };
+
+                                if let Err(e) = encode_result {
+                                    let mut err_guard =
+                                        job.error.lock().unwrap_or_else(|e| e.into_inner());
+                                    *err_guard = Some(format!(
+                                        "Image {} encode/write failed: {e}",
+                                        index + 1
+                                    ));
+                                    return;
+                                }
+                                job.current_frame
+                                    .store((index + 1) as u64, Ordering::Relaxed);
+                            } else {
+                                let mut err_guard =
+                                    job.error.lock().unwrap_or_else(|e| e.into_inner());
+                                *err_guard =
+                                    Some(format!("Image {} output is not an image", index + 1));
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                            *err_guard =
+                                Some(format!("Image {} evaluation failed: {e}", index + 1));
+                            return;
+                        }
+                    }
+                }
+            }));
+
+            if let Err(panic_info) = result {
+                let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+                    format!("Render thread panicked: {s}")
+                } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    format!("Render thread panicked: {s}")
+                } else {
+                    "Render thread panicked with unknown error".to_string()
+                };
+                let mut err_guard = job.error.lock().unwrap_or_else(|e| e.into_inner());
+                *err_guard = Some(msg);
+            }
+
+            job.completed.store(true, Ordering::Release);
+        });
+
+        Ok(job_id)
+    }
+
     #[cfg(all(feature = "video", target_os = "macos"))]
     pub fn start_render_video(&mut self, node_id: &str) -> Result<String, CascadeError> {
         if self
@@ -3933,6 +4223,79 @@ fn format_node_id(graph: &Graph, id: NodeId) -> String {
         .get(id)
         .map(|node| node.uuid.clone())
         .unwrap_or_default()
+}
+
+fn param_string_or(params: &HashMap<String, ParamValue>, key: &str, fallback: &str) -> String {
+    match params.get(key) {
+        Some(ParamValue::String(value)) if !value.is_empty() => value.clone(),
+        _ => fallback.to_string(),
+    }
+}
+
+fn sanitize_filename_stem(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            ch if ch.is_control() => '_',
+            ch => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .trim_matches('.')
+        .to_string();
+    if sanitized.is_empty() {
+        "export".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn batch_output_filename(
+    template: &str,
+    source_name: &str,
+    index: usize,
+    width: u32,
+    height: u32,
+    ext: &str,
+) -> String {
+    let template = if template.trim().is_empty() {
+        "{name}"
+    } else {
+        template
+    };
+    let stem = template
+        .replace("{name}", source_name)
+        .replace("{index}", &index.to_string())
+        .replace("{index1}", &(index + 1).to_string())
+        .replace("{width}", &width.to_string())
+        .replace("{height}", &height.to_string())
+        .replace("{ext}", ext);
+    format!("{}.{}", sanitize_filename_stem(&stem), ext)
+}
+
+fn dedupe_filename(filename: String, used: &mut HashSet<String>) -> String {
+    if used.insert(filename.clone()) {
+        return filename;
+    }
+    let path = Path::new(&filename);
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("export");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let mut suffix = 1usize;
+    loop {
+        let candidate = if ext.is_empty() {
+            format!("{stem}_{suffix}")
+        } else {
+            format!("{stem}_{suffix}.{ext}")
+        };
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
 }
 
 fn parse_node_id_from_map(
@@ -5004,6 +5367,66 @@ return pixelated;
             brighter.pixels[0] > neutral.pixels[0],
             "positive exposure should brighten rendered output"
         );
+    }
+
+    #[test]
+    fn test_batch_export_naming_sanitizes_tokens_and_collisions() {
+        let mut used = HashSet::new();
+        let first = dedupe_filename(
+            batch_output_filename(
+                "{index1}_{name}_{width}x{height}",
+                "a/bad:name",
+                0,
+                12,
+                34,
+                "png",
+            ),
+            &mut used,
+        );
+        let second = dedupe_filename(
+            batch_output_filename(
+                "{index1}_{name}_{width}x{height}",
+                "a/bad:name",
+                0,
+                12,
+                34,
+                "png",
+            ),
+            &mut used,
+        );
+
+        assert_eq!(first, "1_a_bad_name_12x34.png");
+        assert_eq!(second, "1_a_bad_name_12x34_1.png");
+    }
+
+    #[test]
+    fn test_batch_info_discovers_single_upstream_batch() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (export_id, _) = engine.add_node("export_image_batch", 300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(&batch_id, "b.png", &tiny_png())
+            .expect("load batch image");
+        engine
+            .connect(&batch_id, "image", &export_id, "image")
+            .expect("connect batch image");
+        engine
+            .connect(&batch_id, "filename", &export_id, "filename")
+            .expect("connect batch filename");
+
+        let info = engine.get_batch_info(&export_id).expect("batch info");
+        assert_eq!(info.count, 1);
+        assert_eq!(info.filenames, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn test_batch_info_errors_without_upstream_batch() {
+        let mut engine = Engine::new();
+        let (export_id, _) = engine.add_node("export_image_batch", 300.0, 0.0).unwrap();
+        let error = engine
+            .get_batch_info(&export_id)
+            .expect_err("batch info should require upstream LoadImageBatch");
+        assert!(error.to_string().contains("No LoadImageBatch"));
     }
 
     #[test]

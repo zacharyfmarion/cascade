@@ -20,6 +20,59 @@ export interface BatchExportSliceActions {
 
 export type BatchExportSlice = BatchExportSliceState & BatchExportSliceActions;
 
+const stringParamValue = (param: unknown, fallback: string): string => (
+  param && typeof param === 'object' && 'String' in param && typeof (param as { String?: unknown }).String === 'string'
+    ? (param as { String: string }).String
+    : fallback
+);
+
+const sanitizeFilenameStem = (value: string): string => {
+  const sanitized = Array.from(value)
+    .map((ch) => ('\\/:*?"<>|'.includes(ch) || ch.charCodeAt(0) < 32 ? '_' : ch))
+    .join('')
+    .trim()
+    .replace(/^\.+|\.+$/g, '');
+  return sanitized.length > 0 ? sanitized : 'export';
+};
+
+const batchOutputFilename = (
+  template: string,
+  sourceFilename: string,
+  index: number,
+  width: number,
+  height: number,
+  ext: string,
+): string => {
+  const sourceName = sourceFilename.replace(/\.[^.]*$/, '') || sourceFilename;
+  const stem = (template.trim() || '{name}')
+    .replaceAll('{name}', sourceName)
+    .replaceAll('{index}', String(index))
+    .replaceAll('{index1}', String(index + 1))
+    .replaceAll('{width}', String(width))
+    .replaceAll('{height}', String(height))
+    .replaceAll('{ext}', ext);
+  return `${sanitizeFilenameStem(stem)}.${ext}`;
+};
+
+const dedupeFilename = (filename: string, used: Set<string>): string => {
+  if (!used.has(filename)) {
+    used.add(filename);
+    return filename;
+  }
+  const dot = filename.lastIndexOf('.');
+  const stem = dot > 0 ? filename.slice(0, dot) : filename;
+  const ext = dot > 0 ? filename.slice(dot) : '';
+  let suffix = 1;
+  while (true) {
+    const candidate = `${stem}_${suffix}${ext}`;
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      return candidate;
+    }
+    suffix += 1;
+  }
+};
+
 export const createBatchExportSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -129,6 +182,56 @@ export const createBatchExportSlice: StateCreator<
     const formatIdx = node.params['format'] && 'Int' in node.params['format']
       ? node.params['format'].Int : 0;
     const ext = formatIdx === 1 ? 'jpg' : 'png';
+    const filenameTemplate = stringParamValue(node.params['filename_template'], '{name}');
+    if (isTauri() && eng.renderBatch) {
+      const outputDir = stringParamValue(node.params['output_dir'], '');
+      if (!outputDir) {
+        set({ lastError: makeEngineError('Output folder not set') });
+        return;
+      }
+      set({ isRendering: true, renderProgress: null, lastError: null });
+      try {
+        await eng.renderBatch(nodeId);
+      } catch (e) {
+        const error = parseEngineError(e);
+        set({
+          isRendering: false,
+          lastError: error,
+          renderProgress: {
+            job_id: '',
+            current_frame: 0,
+            total_frames: 0,
+            completed: true,
+            error: error.message,
+          },
+        });
+        return;
+      }
+
+      if (!eng.getJobProgress) {
+        set({ isRendering: false });
+        return;
+      }
+
+      const pollInterval = setInterval(async () => {
+        try {
+          const progress = await eng.getJobProgress!();
+          if (!progress) return;
+          set({ renderProgress: progress });
+          if (progress.completed) {
+            clearInterval(pollInterval);
+            set({
+              isRendering: false,
+              lastError: progress.error ? makeEngineError(progress.error) : null,
+            });
+          }
+        } catch (e) {
+          clearInterval(pollInterval);
+          set({ isRendering: false, lastError: parseEngineError(e) });
+        }
+      }, 250);
+      return;
+    }
     if (!eng.getBatchInfo) {
       set({ lastError: makeEngineError('Batch info not supported') });
       return;
@@ -148,7 +251,6 @@ export const createBatchExportSlice: StateCreator<
       return;
     }
 
-    const padding = Math.max(4, String(totalFrames).length);
     kernel.webRenderCancelled = false;
     set({
       isRendering: true,
@@ -166,21 +268,19 @@ export const createBatchExportSlice: StateCreator<
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       let renderedCount = 0;
-      const usedNames = new Map<string, number>();
+      const usedNames = new Set<string>();
 
       for (let frame = 0; frame < totalFrames; frame++) {
         if (kernel.webRenderCancelled) break;
+        const preview = await eng.renderViewer(nodeId, frame);
         const bytes = await eng.exportImage(nodeId, frame);
-        let baseName = filenames[frame]
-          ?? String(frame).padStart(padding, '0');
-        const originalName = baseName;
-        const count = usedNames.get(originalName) ?? 0;
-        if (count > 0) {
-          baseName = `${originalName}_${count}`;
-        }
-        usedNames.set(originalName, count + 1);
-
-        zip.file(`${baseName}.${ext}`, bytes);
+        const width = preview && 'width' in preview ? preview.width : 0;
+        const height = preview && 'height' in preview ? preview.height : 0;
+        const filename = dedupeFilename(
+          batchOutputFilename(filenameTemplate, filenames[frame] ?? String(frame), frame, width, height, ext),
+          usedNames,
+        );
+        zip.file(filename, bytes);
         renderedCount++;
         set({
           renderProgress: {

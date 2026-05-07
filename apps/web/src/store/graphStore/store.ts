@@ -5,7 +5,7 @@ import type {
   Connection, DslShadowDocument, EditingContext, Frame, NodeInstance, NodeSpec, ParamValue, PortSpec,
   SerializableGroupDefinition, TransactionOptions, TransactionOrigin, TransactionResult, ViewerResult,
 } from '../types';
-import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
+import type { JobProgress, SequenceInfo, BatchInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
 import type { NodeInterfaceChange } from '../../engine/bridge';
 import type { EngineError } from '../../engine/engineError';
 import { useSettingsStore } from '../settingsStore';
@@ -130,6 +130,8 @@ export interface GraphState {
   setSequenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   prefetchSequenceFrames: (startFrame: number, count: number) => void;
   loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
+  loadBatchPaths: (nodeId: string, paths: string[]) => Promise<void>;
+  loadBatchDirectory: (nodeId: string, directory: string) => Promise<BatchInfo>;
   renderSequence: (nodeId: string) => Promise<void>;
   renderBatch: (nodeId: string) => Promise<void>;
   renderVideo: (nodeId: string) => Promise<void>;

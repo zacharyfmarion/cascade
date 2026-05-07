@@ -492,6 +492,31 @@ describe('serializeGraph', () => {
     expect(output).toBe(graph(['load1 = LoadVideo(file_path: video("file:///ref.mov"))']));
   });
 
+  it('serializes load image batch directory as a plain string source', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image_batch',
+      params: { directory: { String: '/Users/test/Pictures/batch' } },
+    }));
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe(graph(['load1 = LoadImageBatch(directory: "/Users/test/Pictures/batch")']));
+  });
+
+  it('prefers load image batch directory over cached files when both exist', () => {
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('node-1', makeNodeInstance({
+      id: 'node-1',
+      typeId: 'load_image_batch',
+      params: {
+        directory: { String: '/Users/test/Pictures/batch' },
+        files: { String: 'images(["asset://sha256/aaa"])' },
+      },
+    }));
+    const output = serializeGraph(buildInput(nodes, []));
+    expect(output).toBe(graph(['load1 = LoadImageBatch(directory: "/Users/test/Pictures/batch")']));
+  });
+
   it('serializes single node with non-default param', () => {
     const nodes = new Map<string, NodeInstance>();
     nodes.set(

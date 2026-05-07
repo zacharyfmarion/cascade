@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { ParamValue } from '../../types';
+import type { BatchInfo } from '../../../engine/bridge';
+import type { NodeInstance, ParamValue } from '../../types';
 import { getEngine, markGraphMutation } from '../kernel';
 import { assetUriFromHash } from '../assetReferences';
 
@@ -23,6 +24,34 @@ const hashBytes = async (bytes: Uint8Array): Promise<string> => {
   return bytesToHex(new Uint8Array(digest));
 };
 
+const pathBasename = (path: string): string => (
+  path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path
+);
+
+const batchFilesValue = (paths: string[]): string => (
+  `images([${paths.map(path => JSON.stringify(path)).join(', ')}])`
+);
+
+const setBatchSourceParams = (
+  get: () => GraphState,
+  nodeId: string,
+  params: Record<string, ParamValue | undefined>,
+): Map<string, NodeInstance> => {
+  const newNodes = new Map(get().nodes);
+  const node = newNodes.get(nodeId);
+  if (!node) return newNodes;
+  const nextParams = { ...node.params };
+  if (params.directory) {
+    nextParams.directory = params.directory;
+    delete nextParams.files;
+  } else if (params.files) {
+    nextParams.files = params.files;
+    delete nextParams.directory;
+  }
+  newNodes.set(nodeId, { ...node, params: nextParams });
+  return newNodes;
+};
+
 export type AssetsSliceState = object;
 
 export interface AssetsSliceActions {
@@ -31,6 +60,8 @@ export interface AssetsSliceActions {
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
   loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
+  loadBatchPaths: (nodeId: string, paths: string[]) => Promise<void>;
+  loadBatchDirectory: (nodeId: string, directory: string) => Promise<BatchInfo>;
 }
 
 export type AssetsSlice = AssetsSliceState & AssetsSliceActions;
@@ -145,14 +176,83 @@ export const createAssetsSlice: StateCreator<
     if (!eng.batchClear || !eng.batchAddImage) return;
     await eng.batchClear(nodeId);
     const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
-    for (const file of sorted) {
+    const projectAssets = Object.fromEntries(
+      Object.entries(get().projectAssets).filter(([key, asset]) => (
+        !(key === nodeId && (asset.type ?? asset.asset_type) === 'image_batch')
+        && !(key.startsWith(`${nodeId}:`) && (asset.type ?? asset.asset_type) === 'image_batch_frame')
+      )),
+    );
+    const manifestFrames: Array<{ key: string; filename: string; hash: string; uri: string }> = [];
+    for (const [index, file] of sorted.entries()) {
       const buffer = await file.arrayBuffer();
-      const data = new Uint8Array(buffer);
-      await eng.batchAddImage(nodeId, file.name, data);
+      const assetBytes = new Uint8Array(buffer);
+      const engineBytes = new Uint8Array(assetBytes);
+      await eng.batchAddImage(nodeId, file.name, engineBytes);
+      const hash = await hashBytes(assetBytes);
+      const uri = assetUriFromHash(hash);
+      const key = `${nodeId}:batch:${String(index).padStart(6, '0')}`;
+      projectAssets[key] = {
+        type: 'image_batch_frame',
+        source: 'embedded',
+        uri,
+        hash,
+        data: bytesToBase64(assetBytes),
+        original_filename: file.name,
+      };
+      manifestFrames.push({ key, filename: file.name, hash, uri });
     }
+    if (manifestFrames.length > 0) {
+      const manifestBytes = new TextEncoder().encode(JSON.stringify({ frames: manifestFrames }));
+      const hash = await hashBytes(manifestBytes);
+      projectAssets[nodeId] = {
+        type: 'image_batch',
+        source: 'embedded',
+        uri: assetUriFromHash(hash),
+        hash,
+        data: bytesToBase64(manifestBytes),
+        original_filename: '',
+      };
+    }
+    const nodes = manifestFrames.length > 0
+      ? setBatchSourceParams(get, nodeId, {
+          files: { String: batchFilesValue(manifestFrames.map(frame => frame.uri)) } as ParamValue,
+        })
+      : new Map(get().nodes);
     markGraphMutation(set, 'ui');
-    set({ dirty: true });
+    set({ nodes, projectAssets, dirty: true });
     get().refreshDslShadowFromGraph();
     get().triggerAllViewers();
+  },
+
+  loadBatchPaths: async (nodeId, paths) => {
+    const eng = getEngine();
+    if (!eng.batchLoadPaths) {
+      throw new Error('Current engine does not support loading batch image paths');
+    }
+    await eng.batchLoadPaths(nodeId, paths);
+    const sorted = [...paths].sort((a, b) => pathBasename(a).localeCompare(pathBasename(b)));
+    const nodes = setBatchSourceParams(get, nodeId, {
+      files: { String: batchFilesValue(sorted) } as ParamValue,
+    });
+    markGraphMutation(set, 'ui');
+    set({ nodes, dirty: true });
+    get().refreshDslShadowFromGraph();
+    get().triggerAllViewers();
+  },
+
+  loadBatchDirectory: async (nodeId, directory) => {
+    const eng = getEngine();
+    if (!eng.batchLoadDirectory) {
+      throw new Error('Current engine does not support batch folder loading');
+    }
+    const info = await eng.batchLoadDirectory(nodeId, directory);
+    const nodes = setBatchSourceParams(get, nodeId, {
+      directory: { String: directory } as ParamValue,
+    });
+    markGraphMutation(set, 'ui');
+    set({ nodes, dirty: true });
+    get().refreshDslShadowFromGraph();
+    get().triggerAllViewers();
+    return info;
   },
 });

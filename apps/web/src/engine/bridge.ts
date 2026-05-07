@@ -27,6 +27,11 @@ export interface SequenceInfo {
   last_frame: number;
 }
 
+export interface BatchInfo {
+  count: number;
+  filenames: string[];
+}
+
 export interface VideoInfo {
   width: number;
   height: number;
@@ -116,6 +121,7 @@ export interface EngineBridge {
   exportImage(nodeId: string, frame: number): Promise<Uint8Array>;
   exportImageToPath?(nodeId: string, frame: number, path: string): Promise<void>;
   renderSequence?(nodeId: string): Promise<string>;
+  renderBatch?(nodeId: string): Promise<string>;
   renderVideo?(nodeId: string): Promise<string>;
   cancelJob?(): Promise<void>;
   getJobProgress?(): Promise<JobProgress | null>;
@@ -130,7 +136,9 @@ export interface EngineBridge {
   setSequenceInfo?(nodeId: string, info: SequenceInfo): Promise<void> | void;
   batchClear?(nodeId: string): Promise<void> | void;
   batchAddImage?(nodeId: string, filename: string, data: Uint8Array): Promise<void> | void;
-  getBatchInfo?(exportNodeId: string): Promise<{ count: number; filenames: string[] }> | { count: number; filenames: string[] };
+  batchLoadDirectory?(nodeId: string, directory: string): Promise<BatchInfo> | BatchInfo;
+  batchLoadPaths?(nodeId: string, paths: string[]): Promise<BatchInfo> | BatchInfo;
+  getBatchInfo?(exportNodeId: string): Promise<BatchInfo> | BatchInfo;
   createGroupFromNodes?(nodeIds: string[], name: string): Promise<CreateGroupResult>;
   ungroupNode?(groupNodeId: string): Promise<UngroupResult>;
   getGroupInternalGraph?(groupNodeId: string): Promise<GroupInternalGraph>;

@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
-import type { Frame } from '../../types';
+import type { Frame, NodeInstance } from '../../types';
 import { parseEngineError } from '../../../engine/engineError';
 import { makeEngineError } from '../../../engine/engineError';
 import { createDocumentEnvelope, extractFrames, extractGraphData, getEngine, isTauri, kernel } from '../kernel';
@@ -10,7 +10,7 @@ import { syncAllCommitted } from '../nodeDraftStore';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { dslShadowMatchesGraph, graphSemanticHash, hydrateDslShadowMetadata, serializeDslShadowMetadata } from '../../../ai/dsl/shadow';
 import { createBundledProjectBlob, readCascadeProjectFile } from '../projectPackage';
-import { collectProjectAssets, hasAssetBackedNodes, type ProjectAssetRecord, type ProjectAssetStorage } from '../assetReferences';
+import { assetTypeOf, collectProjectAssets, hasAssetBackedNodes, type ProjectAssetRecord, type ProjectAssetStorage } from '../assetReferences';
 import { getExampleById, missingRequiredNodeTypes } from '../../../examples/catalog';
 
 export type PendingProjectAction =
@@ -21,6 +21,98 @@ export type PendingProjectAction =
 
 export type UnsavedChangesChoice = 'save' | 'discard' | 'cancel';
 export type AssetStoragePromptAction = 'save' | 'saveAs';
+
+const base64ToBytes = (base64: string): Uint8Array => {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+};
+
+const hydrateBatchAssetsFromProject = async (data: Record<string, unknown>): Promise<void> => {
+  const eng = getEngine();
+  if (!eng.batchClear || !eng.batchAddImage) return;
+  const assets = collectProjectAssets(data.assets);
+  for (const [nodeId, manifestAsset] of Object.entries(assets)) {
+    if (assetTypeOf(manifestAsset) !== 'image_batch' || typeof manifestAsset.data !== 'string') {
+      continue;
+    }
+    const manifestBytes = base64ToBytes(manifestAsset.data);
+    const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as {
+      frames?: Array<{ key?: string; filename?: string; hash?: string; uri?: string; path?: string }>;
+    };
+    await Promise.resolve(eng.batchClear(nodeId));
+    for (const frame of manifest.frames ?? []) {
+      const frameAsset = (frame.key ? assets[frame.key] : undefined)
+        ?? Object.values(assets).find(asset => (
+          assetTypeOf(asset) === 'image_batch_frame'
+          && ((frame.uri && asset.uri === frame.uri)
+            || (frame.hash && asset.hash === frame.hash)
+            || (frame.path && asset.path === frame.path))
+        ));
+      if (!frameAsset || typeof frameAsset.data !== 'string') continue;
+      const filename = frame.filename || frameAsset.original_filename || 'image';
+      await Promise.resolve(eng.batchAddImage(nodeId, filename, base64ToBytes(frameAsset.data)));
+    }
+  }
+};
+
+const parentDirectory = (path: string): string => {
+  const normalized = path.replace(/\\/g, '/');
+  const index = normalized.lastIndexOf('/');
+  return index > 0 ? normalized.slice(0, index) : '';
+};
+
+const inferBatchDirectoryFromAssets = (
+  nodeId: string,
+  assets: Record<string, ProjectAssetRecord>,
+): string => {
+  const manifestAsset = assets[nodeId];
+  if (assetTypeOf(manifestAsset ?? {}) !== 'image_batch' || typeof manifestAsset?.data !== 'string') {
+    return '';
+  }
+  const manifestBytes = base64ToBytes(manifestAsset.data);
+  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as {
+    frames?: Array<{ key?: string; path?: string }>;
+  };
+  const directories = (manifest.frames ?? [])
+    .map(frame => {
+      const frameAsset = frame.key ? assets[frame.key] : undefined;
+      return parentDirectory(frame.path || frameAsset?.path || '');
+    })
+    .filter(Boolean);
+  if (directories.length === 0) return '';
+  const first = directories[0];
+  return directories.every(directory => directory === first) ? first : '';
+};
+
+const applyBatchSourceParamsFromAssets = (
+  nodes: Map<string, NodeInstance>,
+  assets: Record<string, ProjectAssetRecord>,
+): Map<string, NodeInstance> => {
+  let changed = false;
+  const nextNodes = new Map(nodes);
+  for (const [nodeId, node] of nextNodes) {
+    if (node.typeId !== 'load_image_batch') continue;
+    const hasSource =
+      (node.params.directory && 'String' in node.params.directory && node.params.directory.String)
+      || (node.params.files && 'String' in node.params.files && node.params.files.String);
+    if (hasSource) continue;
+    const directory = inferBatchDirectoryFromAssets(nodeId, assets);
+    if (!directory) continue;
+    nextNodes.set(nodeId, {
+      ...node,
+      params: {
+        ...node.params,
+        directory: { String: directory },
+      },
+    });
+    changed = true;
+  }
+  return changed ? nextNodes : nodes;
+};
 
 export interface ProjectSliceState {
   dirty: boolean;
@@ -392,9 +484,13 @@ export const createProjectSlice: StateCreator<
     } else {
       await eng.importGraph(graphData);
     }
+    await hydrateBatchAssetsFromProject(data);
 
     resetProjectRuntimeState(frameMapFromProjectData(data));
     await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
+    set({
+      nodes: applyBatchSourceParamsFromAssets(get().nodes, collectProjectAssets(data.assets)),
+    });
     await loadProjectData(data, { name: displayName ?? projectNameFromFile(file), path: null }, { resetRuntime: false });
   };
 
@@ -443,9 +539,13 @@ export const createProjectSlice: StateCreator<
     }
     await clearWorkerSequenceFiles();
     const loaded = await eng.loadProject(path);
-    resetProjectRuntimeState(frameMapFromProjectData((loaded as Record<string, unknown>) ?? {}));
+    const loadedData = (loaded as Record<string, unknown>) ?? {};
+    resetProjectRuntimeState(frameMapFromProjectData(loadedData));
     await hydrateRootGraphFromEngine(set, get, { resetFrames: false });
-    await loadProjectData((loaded as Record<string, unknown>) ?? {}, {
+    set({
+      nodes: applyBatchSourceParamsFromAssets(get().nodes, collectProjectAssets(loadedData.assets)),
+    });
+    await loadProjectData(loadedData, {
       name: projectNameFromPath(path),
       path,
     }, { resetRuntime: false });
