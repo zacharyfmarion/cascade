@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { readPngDimensions } from './mediaThumbnailSizing';
 
 export type BatchThumbnailLoader = (
   sourceNodeId: string,
@@ -17,6 +18,12 @@ interface UseBatchSourceThumbnailsOptions {
   generationKey?: string | number;
 }
 
+export interface BatchSourceThumbnail {
+  url: string;
+  width: number;
+  height: number;
+}
+
 const DEFAULT_CACHE_LIMIT = 120;
 const DEFAULT_CONCURRENCY = 2;
 
@@ -24,10 +31,44 @@ const uniqueIndexes = (indexes: number[]): number[] => (
   Array.from(new Set(indexes.filter(index => Number.isInteger(index) && index >= 0)))
 );
 
-const bytesToBlobUrl = (bytes: Uint8Array): string => {
+const decodeImageDimensions = async (blob: Blob, url: string): Promise<{ width: number; height: number }> => {
+  if ('createImageBitmap' in globalThis) {
+    const bitmap = await createImageBitmap(blob);
+    const dimensions = { width: bitmap.width, height: bitmap.height };
+    bitmap.close();
+    return dimensions;
+  }
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => reject(new Error('Failed to decode thumbnail dimensions'));
+    image.src = url;
+  });
+};
+
+const bytesToThumbnail = async (bytes: Uint8Array): Promise<BatchSourceThumbnail> => {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
-  return URL.createObjectURL(new Blob([copy.buffer], { type: 'image/png' }));
+  const dimensionsFromPng = readPngDimensions(copy);
+  const blob = new Blob([copy.buffer], { type: 'image/png' });
+  const url = URL.createObjectURL(blob);
+
+  try {
+    const dimensions = dimensionsFromPng ?? await decodeImageDimensions(blob, url);
+    return {
+      url,
+      width: dimensions.width,
+      height: dimensions.height,
+    };
+  } catch (err) {
+    URL.revokeObjectURL(url);
+    throw err;
+  }
+};
+
+const revokeThumbnail = (thumbnail: BatchSourceThumbnail) => {
+  URL.revokeObjectURL(thumbnail.url);
 };
 
 export const useBatchSourceThumbnails = ({
@@ -39,9 +80,9 @@ export const useBatchSourceThumbnails = ({
   concurrency = DEFAULT_CONCURRENCY,
   enabled = true,
   generationKey = '',
-}: UseBatchSourceThumbnailsOptions): Map<number, string> => {
-  const [thumbnails, setThumbnails] = useState<Map<number, string>>(new Map());
-  const thumbnailsRef = useRef<Map<number, string>>(new Map());
+}: UseBatchSourceThumbnailsOptions): Map<number, BatchSourceThumbnail> => {
+  const [thumbnails, setThumbnails] = useState<Map<number, BatchSourceThumbnail>>(new Map());
+  const thumbnailsRef = useRef<Map<number, BatchSourceThumbnail>>(new Map());
   const pendingRef = useRef<Set<number>>(new Set());
   const generationRef = useRef(0);
   const visibleIndexesRef = useRef<number[]>([]);
@@ -63,14 +104,14 @@ export const useBatchSourceThumbnails = ({
     generationRef.current += 1;
     pendingRef.current.clear();
     setThumbnails(prev => {
-      for (const url of prev.values()) URL.revokeObjectURL(url);
+      for (const thumbnail of prev.values()) revokeThumbnail(thumbnail);
       return new Map();
     });
   }, [enabled, sourceNodeId, maxEdge, generationKey]);
 
   useEffect(() => () => {
     generationRef.current += 1;
-    for (const url of thumbnailsRef.current.values()) URL.revokeObjectURL(url);
+    for (const thumbnail of thumbnailsRef.current.values()) revokeThumbnail(thumbnail);
     pendingRef.current.clear();
   }, []);
 
@@ -93,26 +134,26 @@ export const useBatchSourceThumbnails = ({
         try {
           const bytes = await getThumbnail(sourceNodeId, index, maxEdge);
           if (cancelled || generationRef.current !== generation || !bytes) continue;
-          const url = bytesToBlobUrl(bytes);
+          const thumbnail = await bytesToThumbnail(bytes);
           setThumbnails(prev => {
             if (generationRef.current !== generation) {
-              URL.revokeObjectURL(url);
+              revokeThumbnail(thumbnail);
               return prev;
             }
             if (prev.has(index)) {
-              URL.revokeObjectURL(url);
+              revokeThumbnail(thumbnail);
               return prev;
             }
 
             const next = new Map(prev);
-            next.set(index, url);
+            next.set(index, thumbnail);
             const protectedIndexes = new Set(visibleIndexesRef.current);
             while (next.size > cacheLimit) {
               const evictIndex = [...next.keys()].find(key => !protectedIndexes.has(key))
                 ?? next.keys().next().value;
               if (evictIndex === undefined) break;
-              const evictUrl = next.get(evictIndex);
-              if (evictUrl) URL.revokeObjectURL(evictUrl);
+              const evictThumbnail = next.get(evictIndex);
+              if (evictThumbnail) revokeThumbnail(evictThumbnail);
               next.delete(evictIndex);
             }
             return next;

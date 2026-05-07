@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from 'react';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
@@ -13,6 +13,7 @@ import {
 import type { ViewerResult } from '../store/types';
 import type { MediaIteratorInfo } from '../store/graphStore/slices/mediaIteratorSlice';
 import { MediaVirtualStrip } from './MediaVirtualStrip';
+import { aspectThumbnailSize, containRect } from './mediaThumbnailSizing';
 import { useBatchSourceThumbnails } from './useBatchSourceThumbnails';
 import { ViewerToolbar } from './ViewerToolbar';
 
@@ -35,14 +36,47 @@ export interface PixelInfo {
   source?: 'before' | 'after';
 }
 
-const FILMSTRIP_ITEM_WIDTH = 82;
-const FILMSTRIP_THUMB_WIDTH = 68;
 const FILMSTRIP_THUMB_HEIGHT = 46;
+const FILMSTRIP_FALLBACK_THUMB_WIDTH = 68;
+const FILMSTRIP_ITEM_GUTTER = 12;
+const FILMSTRIP_FALLBACK_ITEM_WIDTH = FILMSTRIP_FALLBACK_THUMB_WIDTH + FILMSTRIP_ITEM_GUTTER;
 const FILMSTRIP_OVERSCAN = 3;
 const FILMSTRIP_BOTTOM_OFFSET = 50;
 const FILMSTRIP_ERROR_BOTTOM_OFFSET = 84;
 const FILMSTRIP_SOURCE_THUMBNAIL_MAX_EDGE = 96;
 const FILMSTRIP_SOURCE_THUMB_CACHE_LIMIT = 120;
+const PROCESSED_THUMB_CACHE_LIMIT = 120;
+
+interface ProcessedThumbnail {
+  pixels: Uint8ClampedArray;
+  width: number;
+  height: number;
+}
+
+type ProcessedThumbnailCacheAction =
+  | { type: 'clear' }
+  | { type: 'put'; key: string; thumbnail: ProcessedThumbnail };
+
+const processedThumbnailCacheReducer = (
+  state: Map<string, ProcessedThumbnail>,
+  action: ProcessedThumbnailCacheAction,
+): Map<string, ProcessedThumbnail> => {
+  switch (action.type) {
+    case 'clear':
+      return state.size === 0 ? state : new Map();
+    case 'put': {
+      const next = new Map(state);
+      next.delete(action.key);
+      next.set(action.key, action.thumbnail);
+      while (next.size > PROCESSED_THUMB_CACHE_LIMIT) {
+        const oldestKey = next.keys().next().value;
+        if (oldestKey === undefined) break;
+        next.delete(oldestKey);
+      }
+      return next;
+    }
+  }
+};
 
 /* ── Viewer pixel transforms (display-only) ──────────────────── */
 
@@ -111,41 +145,38 @@ function applyViewerTransforms(
   return out;
 }
 
-const sampleViewerPixels = (
+const filmstripThumbnailSize = (sourceWidth: number, sourceHeight: number) => (
+  aspectThumbnailSize(sourceWidth, sourceHeight, FILMSTRIP_THUMB_HEIGHT)
+);
+
+const sampleViewerPixelsContain = (
   result: ViewerResult,
   width: number,
   height: number,
 ): Uint8ClampedArray | null => {
   if (!isPixelResult(result) && !isCompareResult(result)) return null;
   const pixels = isCompareResult(result) ? result.afterPixels : result.pixels;
-  const sourceWidth = getViewerBufferWidth(result);
-  const sourceHeight = getViewerBufferHeight(result);
-  if (sourceWidth <= 0 || sourceHeight <= 0 || pixels.length === 0) return null;
+  const bufferWidth = getViewerBufferWidth(result);
+  const bufferHeight = getViewerBufferHeight(result);
+  const displayWidth = getViewerDisplayWidth(result);
+  const displayHeight = getViewerDisplayHeight(result);
+  if (bufferWidth <= 0 || bufferHeight <= 0 || displayWidth <= 0 || displayHeight <= 0 || pixels.length === 0) return null;
 
   const output = new Uint8ClampedArray(width * height * 4);
-  const sourceAspect = sourceWidth / sourceHeight;
-  const targetAspect = width / height;
-  const sampleWidth = sourceAspect > targetAspect
-    ? Math.round(sourceHeight * targetAspect)
-    : sourceWidth;
-  const sampleHeight = sourceAspect > targetAspect
-    ? sourceHeight
-    : Math.round(sourceWidth / targetAspect);
-  const startX = Math.max(0, Math.floor((sourceWidth - sampleWidth) / 2));
-  const startY = Math.max(0, Math.floor((sourceHeight - sampleHeight) / 2));
+  const rect = containRect(displayWidth, displayHeight, width, height);
 
-  for (let y = 0; y < height; y += 1) {
+  for (let y = 0; y < rect.height; y += 1) {
     const sy = Math.min(
-      sourceHeight - 1,
-      startY + Math.floor((y / height) * sampleHeight),
+      bufferHeight - 1,
+      Math.floor(((y + 0.5) / rect.height) * bufferHeight),
     );
-    for (let x = 0; x < width; x += 1) {
+    for (let x = 0; x < rect.width; x += 1) {
       const sx = Math.min(
-        sourceWidth - 1,
-        startX + Math.floor((x / width) * sampleWidth),
+        bufferWidth - 1,
+        Math.floor(((x + 0.5) / rect.width) * bufferWidth),
       );
-      const sourceIndex = (sy * sourceWidth + sx) * 4;
-      const targetIndex = (y * width + x) * 4;
+      const sourceIndex = (sy * bufferWidth + sx) * 4;
+      const targetIndex = ((rect.y + y) * width + rect.x + x) * 4;
       output[targetIndex] = pixels[sourceIndex];
       output[targetIndex + 1] = pixels[sourceIndex + 1];
       output[targetIndex + 2] = pixels[sourceIndex + 2];
@@ -156,37 +187,50 @@ const sampleViewerPixels = (
   return output;
 };
 
-const CurrentResultPreview: React.FC<{
-  result: ViewerResult | undefined;
+const createProcessedThumbnail = (result: ViewerResult | undefined): ProcessedThumbnail | null => {
+  if (!result || (!isPixelResult(result) && !isCompareResult(result))) return null;
+  const displayWidth = getViewerDisplayWidth(result);
+  const displayHeight = getViewerDisplayHeight(result);
+  const size = filmstripThumbnailSize(displayWidth, displayHeight);
+  const pixels = sampleViewerPixelsContain(result, size.width, size.height);
+  return pixels ? { pixels, width: size.width, height: size.height } : null;
+};
+
+const processedThumbnailCacheKey = (
+  viewerId: string,
+  frame: number,
+  sourceNodeId: string,
+  graphRevision: number,
+) => `${viewerId}|${sourceNodeId}|${frame}|${graphRevision}`;
+
+const ProcessedThumbnailCanvas: React.FC<{
+  thumbnail: ProcessedThumbnail | null | undefined;
   channel: ChannelMode;
   gain: number;
   gamma: number;
-}> = ({ result, channel, gain, gamma }) => {
+  testId?: string;
+}> = ({ thumbnail, channel, gain, gamma, testId }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !result) return;
+    if (!canvas || !thumbnail) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const sampled = sampleViewerPixels(result, FILMSTRIP_THUMB_WIDTH, FILMSTRIP_THUMB_HEIGHT);
-    if (!sampled) {
-      ctx.clearRect(0, 0, FILMSTRIP_THUMB_WIDTH, FILMSTRIP_THUMB_HEIGHT);
-      return;
-    }
-    const transformed = applyViewerTransforms(sampled, { channel, gain, gamma });
-    canvas.width = FILMSTRIP_THUMB_WIDTH;
-    canvas.height = FILMSTRIP_THUMB_HEIGHT;
-    const imageData = new ImageData(FILMSTRIP_THUMB_WIDTH, FILMSTRIP_THUMB_HEIGHT);
+    const transformed = applyViewerTransforms(thumbnail.pixels, { channel, gain, gamma });
+    canvas.width = thumbnail.width;
+    canvas.height = thumbnail.height;
+    const imageData = new ImageData(thumbnail.width, thumbnail.height);
     imageData.data.set(transformed);
     ctx.putImageData(imageData, 0, 0);
-  }, [channel, gain, gamma, result]);
+  }, [channel, gain, gamma, thumbnail]);
 
   return (
     <canvas
       ref={canvasRef}
-      width={FILMSTRIP_THUMB_WIDTH}
+      width={thumbnail?.width ?? FILMSTRIP_FALLBACK_THUMB_WIDTH}
       height={FILMSTRIP_THUMB_HEIGHT}
+      data-testid={testId}
       style={{
         display: 'block',
         height: '100%',
@@ -325,6 +369,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const mediaIteratorInfoMap = useGraphStore(s => s.mediaIteratorInfoMap);
   const suggestActiveTransportSourceForViewer = useGraphStore(s => s.suggestActiveTransportSourceForViewer);
   const getBatchThumbnail = useGraphStore(s => s.getBatchThumbnail);
+  const graphRevision = useGraphStore(s => s.graphRevision);
 
   const fpsIndicatorColor = useMemo(() => {
     if (playbackFps === null) return 'var(--timing-fast)';
@@ -343,6 +388,10 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const [isDraggingCompareSplit, setIsDraggingCompareSplit] = useState(false);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
   const [visibleFilmstripIndexes, setVisibleFilmstripIndexes] = useState<number[]>([]);
+  const [processedThumbnailCache, dispatchProcessedThumbnailCache] = useReducer(
+    processedThumbnailCacheReducer,
+    new Map<string, ProcessedThumbnail>(),
+  );
   const panelWidth = useSyncExternalStore(
     (onStoreChange) => {
       if (!panelApi) return () => {};
@@ -498,6 +547,101 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     }
     return rawActiveResult;
   }, [activeIterator, currentFrame, rawActiveResult]);
+
+  const activeProcessedThumbnail = useMemo(
+    () => createProcessedThumbnail(activeResultMatchesFrame ? activeResult : undefined),
+    [activeResult, activeResultMatchesFrame],
+  );
+
+  useEffect(() => {
+    dispatchProcessedThumbnailCache({ type: 'clear' });
+  }, [activeViewerId, activeTransportSourceId, graphRevision]);
+
+  useEffect(() => {
+    if (
+      !activeViewerId
+      || !activeIterator
+      || activeIterator.kind !== 'batch'
+      || !activeProcessedThumbnail
+      || !activeResultMatchesFrame
+    ) return;
+
+    const key = processedThumbnailCacheKey(
+      activeViewerId,
+      currentFrame,
+      activeIterator.sourceNodeId,
+      graphRevision,
+    );
+    dispatchProcessedThumbnailCache({ type: 'put', key, thumbnail: activeProcessedThumbnail });
+  }, [
+    activeIterator,
+    activeProcessedThumbnail,
+    activeResultMatchesFrame,
+    activeViewerId,
+    currentFrame,
+    graphRevision,
+  ]);
+
+  const getProcessedThumbnailForFrame = useCallback((frame: number): ProcessedThumbnail | undefined => {
+    if (!activeViewerId || !activeIterator || activeIterator.kind !== 'batch') return undefined;
+    if (frame === currentFrame && activeResultMatchesFrame && activeProcessedThumbnail) {
+      return activeProcessedThumbnail;
+    }
+    return processedThumbnailCache.get(processedThumbnailCacheKey(
+      activeViewerId,
+      frame,
+      activeIterator.sourceNodeId,
+      graphRevision,
+    ));
+  }, [
+    activeIterator,
+    activeProcessedThumbnail,
+    activeResultMatchesFrame,
+    activeViewerId,
+    currentFrame,
+    graphRevision,
+    processedThumbnailCache,
+  ]);
+
+  const getFilmstripThumbnailWidth = useCallback((index: number): number => {
+    if (!activeIterator) return FILMSTRIP_FALLBACK_THUMB_WIDTH;
+    const frame = activeIterator.startFrame + index;
+    const processedThumbnail = getProcessedThumbnailForFrame(frame);
+    if (processedThumbnail) return processedThumbnail.width;
+
+    const sourceThumbnail = activeIterator.kind === 'batch'
+      ? batchSourceThumbnails.get(index)
+      : undefined;
+    if (sourceThumbnail) {
+      return filmstripThumbnailSize(sourceThumbnail.width, sourceThumbnail.height).width;
+    }
+    return FILMSTRIP_FALLBACK_THUMB_WIDTH;
+  }, [activeIterator, batchSourceThumbnails, getProcessedThumbnailForFrame]);
+
+  const getFilmstripItemSize = useCallback(
+    (index: number) => getFilmstripThumbnailWidth(index) + FILMSTRIP_ITEM_GUTTER,
+    [getFilmstripThumbnailWidth],
+  );
+
+  const filmstripItemSizeVersion = useMemo(() => (
+    [
+      activeIterator?.sourceNodeId ?? '',
+      currentFrame,
+      graphRevision,
+      activeProcessedThumbnail?.width ?? '',
+      processedThumbnailCache.size,
+      [...batchSourceThumbnails.entries()]
+        .map(([index, thumbnail]) => `${index}:${thumbnail.width}x${thumbnail.height}`)
+        .join(','),
+    ].join('|')
+  ), [
+    activeIterator?.sourceNodeId,
+    activeProcessedThumbnail?.width,
+    batchSourceThumbnails,
+    currentFrame,
+    graphRevision,
+    processedThumbnailCache.size,
+  ]);
 
   const hasResult = !!activeResult;
   const hasPixels = activeResult ? isPixelResult(activeResult) || isCompareResult(activeResult) : false;
@@ -947,7 +1091,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
           <MediaVirtualStrip
             ariaLabel="Media frames"
             count={activeIterator.count}
-            itemSize={FILMSTRIP_ITEM_WIDTH}
+            itemSize={FILMSTRIP_FALLBACK_ITEM_WIDTH}
+            estimateItemSize={getFilmstripItemSize}
+            itemSizeVersion={filmstripItemSizeVersion}
             height={54}
             overscan={FILMSTRIP_OVERSCAN}
             activeIndex={activeItemIndex}
@@ -962,9 +1108,15 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
               const frame = activeIterator.startFrame + index;
               const isActive = frame === currentFrame;
               const label = activeIterator.itemLabels[index] ?? String(frame);
+              const processedThumbnail = getProcessedThumbnailForFrame(frame);
               const sourceThumbnail = activeIterator.kind === 'batch'
                 ? batchSourceThumbnails.get(index)
                 : undefined;
+              const thumbnailWidth = processedThumbnail
+                ? processedThumbnail.width
+                : sourceThumbnail
+                  ? filmstripThumbnailSize(sourceThumbnail.width, sourceThumbnail.height).width
+                  : FILMSTRIP_FALLBACK_THUMB_WIDTH;
               return (
                 <button
                   key={index}
@@ -975,7 +1127,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                     position: 'absolute',
                     left: 6,
                     top: 4,
-                    width: FILMSTRIP_THUMB_WIDTH,
+                    width: thumbnailWidth,
                     height: FILMSTRIP_THUMB_HEIGHT,
                     padding: 0,
                     border: isActive
@@ -989,22 +1141,23 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                     lineHeight: 1.1,
                   }}
                 >
-                  {isActive && activeResultMatchesFrame && activeResult && (isPixelResult(activeResult) || isCompareResult(activeResult)) ? (
-                    <CurrentResultPreview
-                      result={activeResult}
+                  {processedThumbnail ? (
+                    <ProcessedThumbnailCanvas
+                      thumbnail={processedThumbnail}
                       channel={activeChannel}
                       gain={gain}
                       gamma={gamma}
+                      testId="viewer-filmstrip-processed-thumbnail"
                     />
                   ) : sourceThumbnail ? (
                     <img
-                      src={sourceThumbnail}
+                      src={sourceThumbnail.url}
                       alt=""
                       data-testid="viewer-filmstrip-source-thumbnail"
                       style={{
                         width: '100%',
                         height: '100%',
-                        objectFit: 'cover',
+                        objectFit: 'contain',
                         display: 'block',
                       }}
                     />

@@ -7,7 +7,20 @@ import {
   useBatchSourceThumbnails,
 } from '../useBatchSourceThumbnails';
 
-const bytesFor = (index: number) => new Uint8Array([index, 1, 2, 3]);
+const bytesFor = (index: number, width = 40 + index, height = 30 + index) => {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  bytes.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+  bytes[16] = (width >>> 24) & 0xff;
+  bytes[17] = (width >>> 16) & 0xff;
+  bytes[18] = (width >>> 8) & 0xff;
+  bytes[19] = width & 0xff;
+  bytes[20] = (height >>> 24) & 0xff;
+  bytes[21] = (height >>> 16) & 0xff;
+  bytes[22] = (height >>> 8) & 0xff;
+  bytes[23] = height & 0xff;
+  return bytes;
+};
 
 const createDeferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -44,9 +57,9 @@ const Probe: React.FC<{
 
   return (
     <div>
-      {[...thumbnails.entries()].map(([index, url]) => (
+      {[...thumbnails.entries()].map(([index, thumbnail]) => (
         <span key={index} data-testid={`thumb-${index}`}>
-          {url}
+          {thumbnail.url}:{thumbnail.width}x{thumbnail.height}
         </span>
       ))}
     </div>
@@ -85,6 +98,8 @@ describe('useBatchSourceThumbnails', () => {
 
     await waitFor(() => expect(screen.getByTestId('thumb-0')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('thumb-1')).toBeTruthy());
+    expect(screen.getByTestId('thumb-0').textContent).toContain('40x30');
+    expect(screen.getByTestId('thumb-1').textContent).toContain('41x31');
     expect(loader.mock.calls.map(call => call[1])).toEqual([0, 1]);
 
     rerender(<Probe visibleIndexes={[1, 2]} loader={loader} />);

@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connection, NodeInstance, ViewerResult } from '../../store/types';
 import { useGraphStore } from '../../store/graphStore';
 import { Viewer } from '../Viewer';
+
+const mediaStripState = vi.hoisted(() => ({
+  estimateItemSize: undefined as undefined | ((index: number) => number),
+}));
 
 vi.mock('react-zoom-pan-pinch', async () => {
   const ReactModule = await import('react');
@@ -29,13 +33,16 @@ vi.mock('../MediaVirtualStrip', async () => {
   return {
     MediaVirtualStrip: ({
       count,
+      estimateItemSize,
       onVisibleIndexesChange,
       renderItem,
     }: {
       count: number;
+      estimateItemSize?: (index: number) => number;
       onVisibleIndexesChange?: (indexes: number[]) => void;
       renderItem: (index: number) => React.ReactNode;
     }) => {
+      mediaStripState.estimateItemSize = estimateItemSize;
       const indexes = Array.from({ length: Math.min(count, 3) }, (_, index) => index);
       ReactModule.useEffect(() => {
         onVisibleIndexesChange?.(indexes);
@@ -45,19 +52,40 @@ vi.mock('../MediaVirtualStrip', async () => {
   };
 });
 
-const imageResult = (nodeId: string, frame: number): ViewerResult => ({
+const pngBytes = (width: number, height: number) => {
+  const bytes = new Uint8Array(24);
+  bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  bytes.set([0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52], 8);
+  bytes[16] = (width >>> 24) & 0xff;
+  bytes[17] = (width >>> 16) & 0xff;
+  bytes[18] = (width >>> 8) & 0xff;
+  bytes[19] = width & 0xff;
+  bytes[20] = (height >>> 24) & 0xff;
+  bytes[21] = (height >>> 16) & 0xff;
+  bytes[22] = (height >>> 8) & 0xff;
+  bytes[23] = height & 0xff;
+  return bytes;
+};
+
+const imageResult = (
+  nodeId: string,
+  frame: number,
+  width = 1,
+  height = 1,
+  pixels = new Uint8ClampedArray([255, 0, 0, 255]),
+): ViewerResult => ({
   type: 'image',
   nodeId,
-  width: 1,
-  height: 1,
-  originalWidth: 1,
-  originalHeight: 1,
-  bufferWidth: 1,
-  bufferHeight: 1,
-  displayWidth: 1,
-  displayHeight: 1,
+  width,
+  height,
+  originalWidth: width,
+  originalHeight: height,
+  bufferWidth: width,
+  bufferHeight: height,
+  displayWidth: width,
+  displayHeight: height,
   frame,
-  pixels: new Uint8ClampedArray([255, 0, 0, 255]),
+  pixels,
 });
 
 const batchNode: NodeInstance = {
@@ -88,7 +116,7 @@ const connections: Connection[] = [{
 
 const setupViewerState = () => {
   const getBatchThumbnail = vi.fn(async (_nodeId: string, index: number) => (
-    new Uint8Array([index, 1, 2, 3])
+    index === 0 ? pngBytes(120, 80) : index === 1 ? pngBytes(40, 120) : pngBytes(90, 90)
   ));
   const triggerRender = vi.fn();
   useGraphStore.setState({
@@ -100,6 +128,7 @@ const setupViewerState = () => {
     selectedNodeIds: new Set([viewerNode.id]),
     renderResults: new Map([[viewerNode.id, imageResult(viewerNode.id, 0)]]),
     currentFrame: 0,
+    graphRevision: 0,
     activeTransportSourceId: batchNode.id,
     mediaIteratorInfoMap: new Map([[
       batchNode.id,
@@ -126,6 +155,7 @@ describe('Viewer batch filmstrip thumbnails', () => {
   let revokeObjectURL: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    mediaStripState.estimateItemSize = undefined;
     createObjectURL = vi.fn((() => {
       let counter = 0;
       return () => `blob:viewer-thumb-${counter++}`;
@@ -178,6 +208,7 @@ describe('Viewer batch filmstrip thumbnails', () => {
     expect(getBatchThumbnail.mock.calls.map(call => call[1])).toEqual([0, 1, 2]);
     expect(triggerRender).not.toHaveBeenCalled();
     expect(screen.getByTestId('mock-media-strip').querySelectorAll('button')).toHaveLength(3);
+    await waitFor(() => expect(mediaStripState.estimateItemSize?.(0)).not.toBe(mediaStripState.estimateItemSize?.(1)));
   });
 
   it('keeps filmstrip thumbnail clicks wired to the active frame', async () => {
@@ -189,5 +220,44 @@ describe('Viewer batch filmstrip thumbnails', () => {
     fireEvent.click(screen.getByTitle('mona_lisa'));
 
     expect(useGraphStore.getState().currentFrame).toBe(1);
+  });
+
+  it('keeps processed thumbnails for visited frames and prefers them over source thumbnails', async () => {
+    setupViewerState();
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(within(screen.getByTitle('dog')).getByTestId('viewer-filmstrip-processed-thumbnail')).toBeTruthy());
+
+    act(() => {
+      useGraphStore.setState({
+        currentFrame: 1,
+        renderResults: new Map([[viewerNode.id, imageResult(viewerNode.id, 1)]]),
+      });
+    });
+
+    await waitFor(() => expect(within(screen.getByTitle('mona_lisa')).getByTestId('viewer-filmstrip-processed-thumbnail')).toBeTruthy());
+    expect(within(screen.getByTitle('dog')).getByTestId('viewer-filmstrip-processed-thumbnail')).toBeTruthy();
+    expect(within(screen.getByTitle('dog')).queryByTestId('viewer-filmstrip-source-thumbnail')).toBeNull();
+  });
+
+  it('invalidates processed thumbnails when the graph revision changes', async () => {
+    setupViewerState();
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(within(screen.getByTitle('dog')).getByTestId('viewer-filmstrip-processed-thumbnail')).toBeTruthy());
+
+    act(() => {
+      useGraphStore.setState({
+        currentFrame: 1,
+        graphRevision: 1,
+        renderResults: new Map([[viewerNode.id, imageResult(viewerNode.id, 1)]]),
+      });
+    });
+
+    await waitFor(() => expect(within(screen.getByTitle('mona_lisa')).getByTestId('viewer-filmstrip-processed-thumbnail')).toBeTruthy());
+    await waitFor(() => expect(within(screen.getByTitle('dog')).queryByTestId('viewer-filmstrip-processed-thumbnail')).toBeNull());
+    expect(within(screen.getByTitle('dog')).getByTestId('viewer-filmstrip-source-thumbnail')).toBeTruthy();
   });
 });

@@ -9,6 +9,7 @@ import {
 } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { MediaVirtualStrip } from '../MediaVirtualStrip';
+import { aspectThumbnailSize } from '../mediaThumbnailSizing';
 import { useBatchSourceThumbnails } from '../useBatchSourceThumbnails';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
@@ -21,8 +22,10 @@ type NodeData = {
 };
 
 const IMAGE_ACCEPT = '.png,.jpg,.jpeg,.exr,.tif,.tiff,.bmp,.webp';
-const CAROUSEL_ITEM_SIZE = 52;
 const CAROUSEL_THUMB_SIZE = 44;
+const CAROUSEL_FALLBACK_THUMB_WIDTH = 44;
+const CAROUSEL_ITEM_GUTTER = 8;
+const CAROUSEL_FALLBACK_ITEM_SIZE = CAROUSEL_FALLBACK_THUMB_WIDTH + CAROUSEL_ITEM_GUTTER;
 const CAROUSEL_OVERSCAN = 3;
 const CAROUSEL_THUMBNAIL_MAX_EDGE = 128;
 const MAX_CACHED_SOURCE_THUMBS = 80;
@@ -89,6 +92,23 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
     generationKey: thumbnailGenerationKey,
     enabled: !!iteratorInfo && iteratorInfo.count > 0,
   });
+
+  const getCarouselThumbnailWidth = useCallback((index: number): number => {
+    const thumbnail = sourceThumbs.get(index);
+    if (!thumbnail) return CAROUSEL_FALLBACK_THUMB_WIDTH;
+    return aspectThumbnailSize(thumbnail.width, thumbnail.height, CAROUSEL_THUMB_SIZE).width;
+  }, [sourceThumbs]);
+
+  const getCarouselItemSize = useCallback(
+    (index: number) => getCarouselThumbnailWidth(index) + CAROUSEL_ITEM_GUTTER,
+    [getCarouselThumbnailWidth],
+  );
+
+  const carouselItemSizeVersion = useMemo(() => (
+    [...sourceThumbs.entries()]
+      .map(([index, thumbnail]) => `${index}:${thumbnail.width}x${thumbnail.height}`)
+      .join(',')
+  ), [sourceThumbs]);
 
   const selectBatchIndex = useCallback((index: number) => {
     if (!iteratorInfo) return;
@@ -206,7 +226,9 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
             <MediaVirtualStrip
               ariaLabel="Batch source images"
               count={iteratorInfo.count}
-              itemSize={CAROUSEL_ITEM_SIZE}
+              itemSize={CAROUSEL_FALLBACK_ITEM_SIZE}
+              estimateItemSize={getCarouselItemSize}
+              itemSizeVersion={carouselItemSizeVersion}
               height={CAROUSEL_THUMB_SIZE + 10}
               overscan={CAROUSEL_OVERSCAN}
               activeIndex={isActiveTransport ? currentBatchIndex : undefined}
@@ -218,6 +240,9 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
               renderItem={(index) => {
                 const thumbnail = sourceThumbs.get(index);
                 const active = isActiveTransport && index === currentBatchIndex;
+                const thumbnailWidth = thumbnail
+                  ? aspectThumbnailSize(thumbnail.width, thumbnail.height, CAROUSEL_THUMB_SIZE).width
+                  : CAROUSEL_FALLBACK_THUMB_WIDTH;
                 return (
                   <button
                     key={index}
@@ -229,7 +254,7 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
                       position: 'absolute',
                       left: 4,
                       top: 2,
-                      width: CAROUSEL_THUMB_SIZE,
+                      width: thumbnailWidth,
                       height: CAROUSEL_THUMB_SIZE,
                       padding: 0,
                       borderRadius: 4,
@@ -248,12 +273,12 @@ export const LoadImageBatchNode: React.FC<NodeProps> = (props) => {
                   >
                     {thumbnail ? (
                       <img
-                        src={thumbnail}
+                        src={thumbnail.url}
                         alt=""
                         style={{
                           width: '100%',
                           height: '100%',
-                          objectFit: 'cover',
+                          objectFit: 'contain',
                           display: 'block',
                         }}
                       />

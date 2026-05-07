@@ -4,6 +4,8 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 interface MediaVirtualStripProps {
   count: number;
   itemSize: number;
+  estimateItemSize?: (index: number) => number;
+  itemSizeVersion?: string | number;
   height: number;
   overscan?: number;
   activeIndex?: number;
@@ -17,6 +19,8 @@ interface MediaVirtualStripProps {
 export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
   count,
   itemSize,
+  estimateItemSize,
+  itemSizeVersion = '',
   height,
   overscan = 3,
   activeIndex,
@@ -32,12 +36,16 @@ export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
   const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => itemSize,
+    estimateSize: estimateItemSize ?? (() => itemSize),
     horizontal: true,
     overscan,
     getItemKey: index => index,
     useFlushSync: false,
   });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [estimateItemSize, itemSize, itemSizeVersion, virtualizer]);
 
   useEffect(() => {
     if (activeIndex === undefined || activeIndex < 0 || activeIndex >= count) return;
