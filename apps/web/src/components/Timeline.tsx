@@ -12,11 +12,13 @@ import {
 import { IconButton } from './ui/IconButton';
 
 export const Timeline: React.FC = () => {
-  const hasSequenceNodes = useGraphStore((s) => s.hasSequenceNodes);
+  const activeTransportSourceId = useGraphStore((s) => s.activeTransportSourceId);
+  const mediaIteratorInfoMap = useGraphStore((s) => s.mediaIteratorInfoMap);
   const currentFrame = useGraphStore((s) => s.currentFrame);
   const setCurrentFrame = useGraphStore((s) => s.setCurrentFrame);
-  const sequenceLength = useGraphStore((s) => s.sequenceLength);
-  const sequenceStart = useGraphStore((s) => s.sequenceStart);
+  const activeIterator = activeTransportSourceId
+    ? mediaIteratorInfoMap.get(activeTransportSourceId) ?? null
+    : null;
   const isPlaying = useGraphStore((s) => s.isPlaying);
   const fps = useGraphStore((s) => s.fps);
   const loopPlayback = useGraphStore((s) => s.loopPlayback);
@@ -42,14 +44,14 @@ export const Timeline: React.FC = () => {
       const clampedX = Math.max(0, Math.min(x, width));
       const percentage = clampedX / width;
 
-      const min = sequenceStart;
-      const max = sequenceLength || 100;
+      const min = activeIterator?.startFrame ?? 0;
+      const max = activeIterator?.endFrame ?? 100;
       const range = max - min;
       const frame = Math.round(min + percentage * range);
 
       setCurrentFrame(frame);
     },
-    [sequenceStart, sequenceLength, setCurrentFrame]
+    [activeIterator, setCurrentFrame]
   );
 
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -80,7 +82,7 @@ export const Timeline: React.FC = () => {
     };
   }, [isDragging, calculateFrame]);
 
-  if (!hasSequenceNodes) {
+  if (!activeIterator) {
     return (
       <div
         className="timeline"
@@ -93,8 +95,9 @@ export const Timeline: React.FC = () => {
     );
   }
 
-  const min = sequenceStart;
-  const max = sequenceLength || 100;
+  const min = activeIterator.startFrame;
+  const max = activeIterator.endFrame;
+  const currentIndex = currentFrame - min;
   const progress =
     max > min ? Math.max(0, Math.min(1, (currentFrame - min) / (max - min))) : 0;
 
@@ -228,6 +231,21 @@ export const Timeline: React.FC = () => {
           <span style={{ color: 'var(--text-primary)' }}>{currentFrame}</span>
           <span style={{ color: 'var(--text-muted)', margin: '0 2px' }}>/</span>
           <span>{max}</span>
+        </div>
+
+        <div
+          style={{
+            minWidth: '120px',
+            maxWidth: '180px',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={activeIterator.label}
+        >
+          {activeIterator.kind === 'batch'
+            ? `${currentIndex + 1}/${activeIterator.count}`
+            : activeIterator.label}
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>

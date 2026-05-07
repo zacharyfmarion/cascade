@@ -179,6 +179,9 @@ export const createProjectSlice: StateCreator<
       sequenceLength: 0,
       sequenceStart: 0,
       sequenceInfoMap: new Map(),
+      batchInfoMap: new Map(),
+      mediaIteratorInfoMap: new Map(),
+      activeTransportSourceId: null,
       canUndo: false,
       canRedo: false,
       currentFrame: 0,
@@ -491,6 +494,7 @@ export const createProjectSlice: StateCreator<
     set({
       nodes: applyBatchSourceParamsFromAssets(get().nodes, collectProjectAssets(data.assets)),
     });
+    get().recomputeMediaIteratorState();
     await loadProjectData(data, { name: displayName ?? projectNameFromFile(file), path: null }, { resetRuntime: false });
   };
 
@@ -545,6 +549,7 @@ export const createProjectSlice: StateCreator<
     set({
       nodes: applyBatchSourceParamsFromAssets(get().nodes, collectProjectAssets(loadedData.assets)),
     });
+    get().recomputeMediaIteratorState();
     await loadProjectData(loadedData, {
       name: projectNameFromPath(path),
       path,
@@ -634,6 +639,9 @@ export const createProjectSlice: StateCreator<
         lastError: null,
         hasSequenceNodes: false,
         sequenceInfoMap: new Map(),
+        batchInfoMap: new Map(),
+        mediaIteratorInfoMap: new Map(),
+        activeTransportSourceId: null,
         canUndo: false,
         canRedo: false,
         currentFrame: 0,

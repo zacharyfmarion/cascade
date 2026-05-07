@@ -2531,6 +2531,27 @@ impl Engine {
         Ok(())
     }
 
+    pub fn batch_add_image_path(
+        &mut self,
+        node_id: &str,
+        filename: &str,
+        path: impl Into<std::path::PathBuf>,
+    ) -> Result<(), CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| CascadeError::Other("Node not found".to_string()))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| CascadeError::Other("Node is not LoadImageBatch".to_string()))?;
+        batch_node.add_image_path(filename, path)?;
+        self.evaluator.remove_node_cache(id);
+        self.graph.mark_dirty(id);
+        Ok(())
+    }
+
     pub fn get_batch_info(&self, export_node_id: &str) -> Result<BatchInfo, CascadeError> {
         let batch_id = self.find_upstream_batch_node(export_node_id)?;
         let batch = self.batch_node(batch_id)?;
@@ -2538,6 +2559,16 @@ impl Engine {
             count: batch.image_count()?,
             filenames: batch.filenames()?,
         })
+    }
+
+    pub fn get_batch_image_data(
+        &self,
+        node_id: &str,
+        index: usize,
+    ) -> Result<Vec<u8>, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let batch = self.batch_node(id)?;
+        batch.image_bytes(index)
     }
 
     pub fn load_palette_data(

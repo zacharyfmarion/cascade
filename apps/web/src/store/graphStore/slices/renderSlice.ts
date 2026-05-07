@@ -40,6 +40,7 @@ export interface RenderSliceActions {
   triggerAllViewers: () => void;
   triggerAffectedViewers: (changedNodeIds: string[]) => void | Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
+  renderViewerFrame: (viewerNodeId: string, frame: number, previewScale?: number) => Promise<ViewerResult | null>;
   pushSequenceFrames: (frame: number) => Promise<void>;
   prefetchSequenceFrames: (startFrame: number, count: number) => void;
   flushRender: () => Promise<Map<string, EngineError>>;
@@ -259,6 +260,17 @@ export const createRenderSlice: StateCreator<
     pushSequenceFrames,
     prefetchSequenceFrames,
     renderAllViewersAsync,
+
+    renderViewerFrame: async (viewerNodeId, frame, previewScale = 1) => {
+      let rendered: ViewerResult | null = null;
+      const renderJob = kernel.renderLock.then(async () => {
+        await pushSequenceFrames(frame);
+        rendered = await renderViewerForCurrentContext(viewerNodeId, frame, previewScale);
+      });
+      kernel.renderLock = renderJob.catch(() => undefined);
+      await renderJob;
+      return rendered;
+    },
 
     flushRender: async () => {
       if (kernel.renderNeededWhileSuspended) {

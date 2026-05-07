@@ -516,10 +516,8 @@ fn batch_load_directory(
     remove_batch_assets(&node_id, &mut s.project_assets);
     for (index, path) in entries.iter().enumerate() {
         let filename = original_filename(path);
-        let data = std::fs::read(path)
-            .map_err(|e| format!("Failed to read batch image {}: {e}", path.display()))?;
         s.engine
-            .batch_add_image(&node_id, &filename, &data)
+            .batch_add_image_path(&node_id, &filename, path)
             .map_err(|e| e.to_string())?;
         s.project_assets.insert(
             batch_frame_key(&node_id, index),
@@ -556,10 +554,8 @@ fn batch_load_paths(
     remove_batch_assets(&node_id, &mut s.project_assets);
     for (index, path) in entries.iter().enumerate() {
         let filename = original_filename(path);
-        let data = std::fs::read(path)
-            .map_err(|e| format!("Failed to read batch image {}: {e}", path.display()))?;
         s.engine
-            .batch_add_image(&node_id, &filename, &data)
+            .batch_add_image_path(&node_id, &filename, path)
             .map_err(|e| e.to_string())?;
         s.project_assets.insert(
             batch_frame_key(&node_id, index),
@@ -586,6 +582,18 @@ fn get_batch_info(state: State<'_, EngineState>, node_id: String) -> Result<Stri
         .get_batch_info(&node_id)
         .map_err(|e| e.to_string())?;
     serde_json::to_string(&info).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_batch_image_data(
+    state: State<'_, EngineState>,
+    node_id: String,
+    index: usize,
+) -> Result<Vec<u8>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    s.engine
+        .get_batch_image_data(&node_id, index)
+        .map_err(|e| e.to_string())
 }
 
 /// Returns raw RGBA8 pixels prefixed with [width_le32][height_le32].
@@ -1587,15 +1595,25 @@ fn hydrate_batch_assets(
             let Some(frame_asset) = frame_asset else {
                 continue;
             };
-            let bytes = read_project_asset_bytes(project_dir, frame_asset, packed_assets)?;
             let filename = if !frame.filename.is_empty() {
                 frame.filename
             } else {
                 frame_asset.original_filename.clone()
             };
-            engine
-                .batch_add_image(node_id, &filename, &bytes)
-                .map_err(|e| e.to_string())?;
+            if frame_asset.source == "external"
+                && frame_asset.data.is_empty()
+                && !frame_asset.path.is_empty()
+            {
+                let path = resolve_project_path(project_dir, &frame_asset.path);
+                engine
+                    .batch_add_image_path(node_id, &filename, path)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                let bytes = read_project_asset_bytes(project_dir, frame_asset, packed_assets)?;
+                engine
+                    .batch_add_image(node_id, &filename, &bytes)
+                    .map_err(|e| e.to_string())?;
+            }
         }
     }
     Ok(())
@@ -2382,6 +2400,7 @@ pub fn run() {
             batch_load_directory,
             batch_load_paths,
             get_batch_info,
+            get_batch_image_data,
             render_viewer,
             render_internal_viewer,
             set_param_and_render,

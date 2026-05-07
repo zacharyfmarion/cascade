@@ -255,6 +255,16 @@ export class TauriEngine implements EngineBridge {
     return JSON.parse(json) as BatchInfo;
   }
 
+  async getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null> {
+    try {
+      const buf = await invoke<ArrayBuffer>('get_batch_image_data', { nodeId, index });
+      if (!buf || buf.byteLength === 0) return null;
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
+  }
+
   async getAiNodeImageData(nodeId: string): Promise<Uint8Array | null> {
     try {
       const buf = await invoke<ArrayBuffer>('get_ai_node_image_data', { nodeId });

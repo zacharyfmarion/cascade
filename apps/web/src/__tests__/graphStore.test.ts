@@ -91,6 +91,9 @@ const createInitialState = () => ({
   sequenceLength: 0,
   sequenceStart: 0,
   sequenceInfoMap: new Map(),
+  batchInfoMap: new Map(),
+  mediaIteratorInfoMap: new Map(),
+  activeTransportSourceId: null,
   isPlaying: false,
   fps: useSettingsStore.getState().defaultFps,
   loopPlayback: useSettingsStore.getState().loopPlayback,
@@ -226,6 +229,7 @@ describe('graphStore node CRUD', () => {
         [id, { frame_count: 10, first_frame: 1, last_frame: 10 }],
       ]),
     });
+    useGraphStore.getState().recomputeMediaIteratorState();
     expect(useGraphStore.getState().hasSequenceNodes).toBe(true);
     await useGraphStore.getState().removeNode(id);
     const state = useGraphStore.getState();
@@ -584,6 +588,36 @@ describe('graphStore frame and playback controls', () => {
     useGraphStore.setState({ sequenceLength: 0, currentFrame: 1 });
     useGraphStore.getState().goToEnd();
     expect(useGraphStore.getState().currentFrame).toBe(999);
+  });
+
+  it('setBatchInfo registers a batch media iterator and active transport range', async () => {
+    const batchId = await useGraphStore.getState().addNode('load_image_batch', { x: 0, y: 0 });
+    useGraphStore.getState().setBatchInfo(batchId, {
+      count: 3,
+      filenames: ['a', 'b', 'c'],
+    });
+
+    const state = useGraphStore.getState();
+    expect(state.activeTransportSourceId).toBe(batchId);
+    expect(state.mediaIteratorInfoMap.get(batchId)).toMatchObject({
+      kind: 'batch',
+      startFrame: 0,
+      endFrame: 2,
+      count: 3,
+      itemLabels: ['a', 'b', 'c'],
+    });
+    expect(state.sequenceLength).toBe(2);
+  });
+
+  it('setCurrentFrame clamps to the active media iterator', async () => {
+    const batchId = await useGraphStore.getState().addNode('load_image_batch', { x: 0, y: 0 });
+    useGraphStore.getState().setBatchInfo(batchId, {
+      count: 2,
+      filenames: ['a', 'b'],
+    });
+
+    useGraphStore.getState().setCurrentFrame(42);
+    expect(useGraphStore.getState().currentFrame).toBe(1);
   });
 
   it('setFps updates fps', () => {

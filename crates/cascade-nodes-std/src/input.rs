@@ -40,6 +40,7 @@ fn preview_downscale(image: Image, scale: f32) -> Result<Image, CascadeError> {
     };
     resize_nearest(&image, new_w, new_h)
 }
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 /// Metadata about a loaded image sequence (frame count, range).
@@ -496,6 +497,14 @@ impl SeqFrameCache {
 
 fn image_byte_size(image: &Image) -> usize {
     image.data.len() * std::mem::size_of::<f32>()
+}
+
+fn filename_stem(filename: &str) -> String {
+    Path::new(filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(filename)
+        .to_string()
 }
 
 /// Simple single-image-per-frame cache used by LoadVideo and LoadImageBatch.
@@ -1114,8 +1123,20 @@ pub fn srgb_to_linear_lut() -> &'static [f32; 256] {
     })
 }
 
+#[derive(Clone)]
+struct BatchEntry {
+    stem: String,
+    source: BatchEntrySource,
+}
+
+#[derive(Clone)]
+enum BatchEntrySource {
+    Bytes(Vec<u8>),
+    Path(PathBuf),
+}
+
 pub struct LoadImageBatch {
-    entries: Mutex<Vec<(String, Vec<u8>)>>,
+    entries: Mutex<Vec<BatchEntry>>,
     frame_cache: Mutex<FrameCache>,
 }
 impl Default for LoadImageBatch {
@@ -1145,7 +1166,7 @@ impl LoadImageBatch {
         Ok(())
     }
     pub fn add_image(&self, filename: &str, bytes: &[u8]) -> Result<(), CascadeError> {
-        // Validate that the bytes are a decodable image without full decode
+        // Validate embedded bytes without a full pixel decode.
         let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
             .with_guessed_format()
             .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
@@ -1159,16 +1180,39 @@ impl LoadImageBatch {
                 max: MAX_IMAGE_DIM,
             });
         }
-        let stem = std::path::Path::new(filename)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or(filename)
-            .to_string();
+        let stem = filename_stem(filename);
         let mut entries = self
             .entries
             .lock()
             .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
-        entries.push((stem, bytes.to_vec()));
+        entries.push(BatchEntry {
+            stem,
+            source: BatchEntrySource::Bytes(bytes.to_vec()),
+        });
+        Ok(())
+    }
+
+    pub fn add_image_path(
+        &self,
+        filename: &str,
+        path: impl Into<PathBuf>,
+    ) -> Result<(), CascadeError> {
+        let path = path.into();
+        if !path.is_file() {
+            return Err(CascadeError::MissingInput(format!(
+                "Batch image file not found: {}",
+                path.display()
+            )));
+        }
+        let stem = filename_stem(filename);
+        let mut entries = self
+            .entries
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
+        entries.push(BatchEntry {
+            stem,
+            source: BatchEntrySource::Path(path),
+        });
         Ok(())
     }
     pub fn image_count(&self) -> Result<usize, CascadeError> {
@@ -1184,7 +1228,26 @@ impl LoadImageBatch {
             .entries
             .lock()
             .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
-        Ok(entries.iter().map(|(stem, _)| stem.clone()).collect())
+        Ok(entries.iter().map(|entry| entry.stem.clone()).collect())
+    }
+
+    pub fn image_bytes(&self, index: usize) -> Result<Vec<u8>, CascadeError> {
+        let source = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
+            entries
+                .get(index)
+                .ok_or_else(|| CascadeError::MissingInput("Batch index out of range".to_string()))?
+                .source
+                .clone()
+        };
+        match source {
+            BatchEntrySource::Bytes(bytes) => Ok(bytes),
+            BatchEntrySource::Path(path) => std::fs::read(&path)
+                .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display()))),
+        }
     }
 
     fn decode_frame(&self, index: usize) -> Result<Image, CascadeError> {
@@ -1199,22 +1262,33 @@ impl LoadImageBatch {
             }
         }
 
-        // Cache miss - decode from raw bytes
-        let bytes = {
+        let source = {
             let entries = self
                 .entries
                 .lock()
                 .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
-            let (_, raw) = entries.get(index).ok_or_else(|| {
-                CascadeError::MissingInput("Batch index out of range".to_string())
-            })?;
-            raw.clone()
+            entries
+                .get(index)
+                .ok_or_else(|| CascadeError::MissingInput("Batch index out of range".to_string()))?
+                .source
+                .clone()
         };
 
-        let decoded = image::load_from_memory(&bytes)
-            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+        let decoded = match source {
+            BatchEntrySource::Bytes(bytes) => image::load_from_memory(&bytes)
+                .map_err(|e| CascadeError::ImageDecode(e.to_string()))?,
+            BatchEntrySource::Path(path) => image::open(&path)
+                .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
+        };
         let rgba = decoded.to_rgba8();
         let (width, height) = rgba.dimensions();
+        if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
+            return Err(CascadeError::ImageTooLarge {
+                width,
+                height,
+                max: MAX_IMAGE_DIM,
+            });
+        }
         let raw = rgba.as_raw();
         let lut = srgb_to_linear_lut();
         let pixel_count = (width as usize) * (height as usize);
@@ -1297,10 +1371,10 @@ impl Node for LoadImageBatch {
                     .entries
                     .lock()
                     .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
-                let (stem, _) = entries.get(frame).ok_or_else(|| {
+                let entry = entries.get(frame).ok_or_else(|| {
                     CascadeError::MissingInput("Batch index out of range".to_string())
                 })?;
-                stem.clone()
+                entry.stem.clone()
             };
             let mut outputs = HashMap::new();
             outputs.insert("image".to_string(), Value::Image(image));
@@ -1320,7 +1394,9 @@ impl Node for LoadImageBatch {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::fs;
     use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn png_bytes(rgba: [u8; 4]) -> Vec<u8> {
         let image = ::image::RgbaImage::from_pixel(1, 1, ::image::Rgba(rgba));
@@ -1335,6 +1411,17 @@ mod tests {
         let data = vec![value; width as usize * height as usize * 4];
         let image = Image::from_f32_data(width, height, data).expect("test image should build");
         HashMap::from([("image".to_string(), image)])
+    }
+
+    fn temp_png_path(name: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("test clock should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "cascade-load-image-batch-{stamp}-{}-{name}",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -1454,5 +1541,43 @@ mod tests {
         assert!(cache.get(1).is_none());
         assert!(cache.get(2).is_some());
         assert!(cache.get(3).is_some());
+    }
+
+    #[test]
+    fn load_image_batch_decodes_path_backed_entries_lazily() {
+        let path = temp_png_path("lazy.png");
+        fs::write(&path, png_bytes([12, 34, 56, 255])).expect("test PNG should write");
+
+        let node = LoadImageBatch::new();
+        node.add_image_path("lazy.png", &path)
+            .expect("path entry should register");
+
+        assert_eq!(node.image_count().expect("count"), 1);
+        assert_eq!(
+            node.filenames().expect("filenames"),
+            vec!["lazy".to_string()]
+        );
+
+        let image = node.decode_frame(0).expect("path entry should decode");
+        assert_eq!(image.width, 1);
+        assert_eq!(image.height, 1);
+
+        fs::remove_file(path).expect("test PNG should clean up");
+    }
+
+    #[test]
+    fn load_image_batch_path_entries_do_not_copy_file_bytes_on_add() {
+        let path = temp_png_path("removed.png");
+        fs::write(&path, png_bytes([255, 0, 0, 255])).expect("test PNG should write");
+
+        let node = LoadImageBatch::new();
+        node.add_image_path("removed.png", &path)
+            .expect("path entry should register before file removal");
+        fs::remove_file(&path).expect("test PNG should remove");
+
+        let error = node
+            .decode_frame(0)
+            .expect_err("path-backed entry should read from disk lazily");
+        assert!(error.to_string().contains("removed.png"));
     }
 }

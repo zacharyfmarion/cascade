@@ -139,6 +139,7 @@ export interface EngineBridge {
   batchLoadDirectory?(nodeId: string, directory: string): Promise<BatchInfo> | BatchInfo;
   batchLoadPaths?(nodeId: string, paths: string[]): Promise<BatchInfo> | BatchInfo;
   getBatchInfo?(exportNodeId: string): Promise<BatchInfo> | BatchInfo;
+  getBatchImageData?(nodeId: string, index: number): Promise<Uint8Array | null> | Uint8Array | null;
   createGroupFromNodes?(nodeIds: string[], name: string): Promise<CreateGroupResult>;
   ungroupNode?(groupNodeId: string): Promise<UngroupResult>;
   getGroupInternalGraph?(groupNodeId: string): Promise<GroupInternalGraph>;

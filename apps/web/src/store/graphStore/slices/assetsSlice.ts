@@ -28,6 +28,12 @@ const pathBasename = (path: string): string => (
   path.replace(/\\/g, '/').split('/').filter(Boolean).pop() ?? path
 );
 
+const fileStem = (name: string): string => {
+  const base = pathBasename(name);
+  const index = base.lastIndexOf('.');
+  return index > 0 ? base.slice(0, index) : base;
+};
+
 const batchFilesValue = (paths: string[]): string => (
   `images([${paths.map(path => JSON.stringify(path)).join(', ')}])`
 );
@@ -62,6 +68,7 @@ export interface AssetsSliceActions {
   loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
   loadBatchPaths: (nodeId: string, paths: string[]) => Promise<void>;
   loadBatchDirectory: (nodeId: string, directory: string) => Promise<BatchInfo>;
+  getBatchImageData: (nodeId: string, index: number) => Promise<Uint8Array | null>;
 }
 
 export type AssetsSlice = AssetsSliceState & AssetsSliceActions;
@@ -220,6 +227,10 @@ export const createAssetsSlice: StateCreator<
       : new Map(get().nodes);
     markGraphMutation(set, 'ui');
     set({ nodes, projectAssets, dirty: true });
+    get().setBatchInfo(nodeId, {
+      count: sorted.length,
+      filenames: sorted.map(file => fileStem(file.name)),
+    });
     get().refreshDslShadowFromGraph();
     get().triggerAllViewers();
   },
@@ -229,13 +240,14 @@ export const createAssetsSlice: StateCreator<
     if (!eng.batchLoadPaths) {
       throw new Error('Current engine does not support loading batch image paths');
     }
-    await eng.batchLoadPaths(nodeId, paths);
+    const info = await eng.batchLoadPaths(nodeId, paths);
     const sorted = [...paths].sort((a, b) => pathBasename(a).localeCompare(pathBasename(b)));
     const nodes = setBatchSourceParams(get, nodeId, {
       files: { String: batchFilesValue(sorted) } as ParamValue,
     });
     markGraphMutation(set, 'ui');
     set({ nodes, dirty: true });
+    get().setBatchInfo(nodeId, info);
     get().refreshDslShadowFromGraph();
     get().triggerAllViewers();
   },
@@ -251,8 +263,15 @@ export const createAssetsSlice: StateCreator<
     });
     markGraphMutation(set, 'ui');
     set({ nodes, dirty: true });
+    get().setBatchInfo(nodeId, info);
     get().refreshDslShadowFromGraph();
     get().triggerAllViewers();
     return info;
+  },
+
+  getBatchImageData: async (nodeId, index) => {
+    const eng = getEngine();
+    if (!eng.getBatchImageData) return null;
+    return Promise.resolve(eng.getBatchImageData(nodeId, index)) ?? null;
   },
 });

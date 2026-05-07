@@ -314,6 +314,7 @@ export function createMockEngine(): EngineBridge & {
   const nodes = new Map<string, { typeId: string; params: Record<string, ParamValue> }>();
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
+  const batchDataStore = new Map<string, Array<{ filename: string; data: Uint8Array }>>();
   const groupGraphs = new Map<string, GroupInternalGraph>();
   const groupDefinitions: SerializableGroupDefinition[] = [];
   const extraSpecs: NodeSpec[] = [];
@@ -670,6 +671,28 @@ export function createMockEngine(): EngineBridge & {
 
     getImageData: (nodeId: string): Uint8Array | null => {
       return imageDataStore.get(nodeId) ?? null;
+    },
+
+    batchClear: (nodeId: string): void => {
+      batchDataStore.delete(nodeId);
+    },
+
+    batchAddImage: (nodeId: string, filename: string, data: Uint8Array): void => {
+      const entries = batchDataStore.get(nodeId) ?? [];
+      entries.push({ filename, data });
+      batchDataStore.set(nodeId, entries);
+    },
+
+    getBatchInfo: (nodeId: string) => {
+      const entries = batchDataStore.get(nodeId) ?? [];
+      return {
+        count: entries.length,
+        filenames: entries.map(entry => entry.filename.replace(/\.[^.]+$/, '')),
+      };
+    },
+
+    getBatchImageData: (nodeId: string, index: number): Uint8Array | null => {
+      return batchDataStore.get(nodeId)?.[index]?.data ?? null;
     },
 
     renderViewer: (viewerNodeId: string, _frame: number, previewScale = 1): ViewerResult | null => {

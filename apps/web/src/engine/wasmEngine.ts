@@ -169,6 +169,7 @@ export class WasmEngine implements EngineBridge {
     batch_clear: (nodeId: string) => void;
     batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
     get_batch_info: (exportNodeId: string) => { count: number; filenames: Iterable<string> };
+    get_batch_image_data?: (nodeId: string, index: number) => Uint8Array;
     get_ai_node_image_data?: (nodeId: string) => Uint8Array;
     set_ai_node_image_data?: (nodeId: string, data: Uint8Array) => void;
     create_group_from_nodes?: (nodeIds: string[], name: string) => CreateGroupResult;
@@ -205,6 +206,7 @@ export class WasmEngine implements EngineBridge {
       batch_clear: (nodeId: string) => void;
       batch_add_image: (nodeId: string, filename: string, data: Uint8Array) => void;
       get_batch_info: (exportNodeId: string) => { count: number; filenames: Iterable<string> };
+      get_batch_image_data?: (nodeId: string, index: number) => Uint8Array;
       get_ai_node_image_data?: (nodeId: string) => Uint8Array;
       set_ai_node_image_data?: (nodeId: string, data: Uint8Array) => void;
       create_group_from_nodes?: (nodeIds: string[], name: string) => CreateGroupResult;
@@ -356,6 +358,13 @@ export class WasmEngine implements EngineBridge {
       const count = result.count;
       const filenames = Array.from(result.filenames, name => String(name));
       return { count, filenames };
+    });
+  }
+
+  getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null> {
+    return this.scheduler.enqueue(() => {
+      const fn = this.getEngineWithBindings().get_batch_image_data;
+      return fn ? fn(nodeId, index) : null;
     });
   }
 

@@ -4,6 +4,7 @@ import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
 import { isCompareResult, isPixelResult } from '../store/types';
 import type { ViewerResult } from '../store/types';
+import type { MediaIteratorInfo } from '../store/graphStore/slices/mediaIteratorSlice';
 import { ViewerToolbar } from './ViewerToolbar';
 
 /* ── Types ──────────────────────────────────────────────────── */
@@ -24,6 +25,28 @@ export interface PixelInfo {
   a: number;
   source?: 'before' | 'after';
 }
+
+const FILMSTRIP_ITEM_WIDTH = 82;
+const FILMSTRIP_THUMB_WIDTH = 68;
+const FILMSTRIP_THUMB_HEIGHT = 46;
+const FILMSTRIP_OVERSCAN = 5;
+const FILMSTRIP_THUMBNAIL_SCALE = 0.12;
+
+const viewerResultToDataUrl = (result: ViewerResult | null): string | null => {
+  if (!result || (!isPixelResult(result) && !isCompareResult(result))) return null;
+  const pixels = isCompareResult(result) ? result.afterPixels : result.pixels;
+  if (result.width <= 0 || result.height <= 0 || pixels.length === 0) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = result.width;
+  canvas.height = result.height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  const imageData = new ImageData(result.width, result.height);
+  imageData.data.set(pixels);
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL('image/png');
+};
 
 /* ── Viewer pixel transforms (display-only) ──────────────────── */
 
@@ -209,11 +232,19 @@ interface ViewerProps {
 export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const selectedNodeIds = useGraphStore(s => s.selectedNodeIds);
   const nodes = useGraphStore(s => s.nodes);
+  const connections = useGraphStore(s => s.connections);
   const renderResults = useGraphStore(s => s.renderResults);
   const lastError = useGraphStore(s => s.lastError);
   const playbackFps = useGraphStore(s => s.playbackFps);
   const targetFps = useGraphStore(s => s.fps);
   const isEditingGroup = useGraphStore(s => s.editingStack.length > 1);
+  const currentFrame = useGraphStore(s => s.currentFrame);
+  const setCurrentFrame = useGraphStore(s => s.setCurrentFrame);
+  const activeTransportSourceId = useGraphStore(s => s.activeTransportSourceId);
+  const mediaIteratorInfoMap = useGraphStore(s => s.mediaIteratorInfoMap);
+  const suggestActiveTransportSourceForViewer = useGraphStore(s => s.suggestActiveTransportSourceForViewer);
+  const renderViewerFrame = useGraphStore(s => s.renderViewerFrame);
+  const graphRevision = useGraphStore(s => s.graphRevision);
 
   const fpsIndicatorColor = useMemo(() => {
     if (playbackFps === null) return 'var(--timing-fast)';
@@ -231,6 +262,8 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const [compareSplit, setCompareSplit] = useState(0.5);
   const [isDraggingCompareSplit, setIsDraggingCompareSplit] = useState(false);
   const [pixelInfo, setPixelInfo] = useState<PixelInfo | null>(null);
+  const [filmstripViewport, setFilmstripViewport] = useState({ scrollLeft: 0, width: 0 });
+  const [thumbnailCache, setThumbnailCache] = useState<Map<string, string>>(new Map());
   const panelWidth = useSyncExternalStore(
     (onStoreChange) => {
       if (!panelApi) return () => {};
@@ -248,6 +281,8 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const previewScaleRef = useRef(1);
   const dimensionsRef = useRef<{ w: number; h: number } | null>(null);
   const transformRef = useRef<ReactZoomPanPinchRef>(null);
+  const filmstripRef = useRef<HTMLDivElement>(null);
+  const thumbnailPendingRef = useRef<Set<string>>(new Set());
 
   /** Compute the scale that fits the image entirely within the container. */
   const computeFitScale = useCallback(() => {
@@ -278,7 +313,6 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   const selectedNodeId = selectedNodeIds.size > 0 ? Array.from(selectedNodeIds).pop()! : null;
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- Syncs selected viewer state with external store updates. */
     if (selectedNodeId) {
       const node = nodes.get(selectedNodeId);
       if (node && (node.typeId === 'viewer' || node.typeId === 'compare_viewer')) {
@@ -295,12 +329,44 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     if (activeViewerId && !nodes.has(activeViewerId)) {
       setActiveViewerId(null);
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [selectedNodeId, nodes, activeViewerId]);
+
+  useEffect(() => {
+    if (!activeViewerId) return;
+    suggestActiveTransportSourceForViewer(activeViewerId);
+  }, [activeViewerId, connections, suggestActiveTransportSourceForViewer]);
 
   const activeResult = useMemo(() => {
     return activeViewerId ? renderResults.get(activeViewerId) : undefined;
   }, [renderResults, activeViewerId]);
+
+  const activeIterator: MediaIteratorInfo | null = useMemo(() => {
+    return activeTransportSourceId
+      ? mediaIteratorInfoMap.get(activeTransportSourceId) ?? null
+      : null;
+  }, [activeTransportSourceId, mediaIteratorInfoMap]);
+
+  const activeItemIndex = activeIterator
+    ? Math.max(0, Math.min(activeIterator.count - 1, currentFrame - activeIterator.startFrame))
+    : 0;
+
+  const visibleFilmstripItems = useMemo(() => {
+    if (!activeIterator || activeIterator.count <= 0) return [];
+    const viewportWidth = filmstripViewport.width || FILMSTRIP_ITEM_WIDTH * 9;
+    const start = Math.max(
+      0,
+      Math.floor(filmstripViewport.scrollLeft / FILMSTRIP_ITEM_WIDTH) - FILMSTRIP_OVERSCAN,
+    );
+    const end = Math.min(
+      activeIterator.count - 1,
+      Math.ceil((filmstripViewport.scrollLeft + viewportWidth) / FILMSTRIP_ITEM_WIDTH) + FILMSTRIP_OVERSCAN,
+    );
+    const items: number[] = [];
+    for (let index = start; index <= end; index += 1) {
+      items.push(index);
+    }
+    return items;
+  }, [activeIterator, filmstripViewport]);
 
   const hasResult = !!activeResult;
   const hasPixels = activeResult ? isPixelResult(activeResult) || isCompareResult(activeResult) : false;
@@ -312,6 +378,101 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       h: activeResult.originalHeight ?? activeResult.height,
     };
   }, [activeResult]);
+
+  useEffect(() => {
+    const filmstrip = filmstripRef.current;
+    if (!filmstrip) return;
+    const updateViewport = () => {
+      setFilmstripViewport({
+        scrollLeft: filmstrip.scrollLeft,
+        width: filmstrip.clientWidth,
+      });
+    };
+    updateViewport();
+    filmstrip.addEventListener('scroll', updateViewport, { passive: true });
+    const observer = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(updateViewport)
+      : null;
+    observer?.observe(filmstrip);
+    return () => {
+      filmstrip.removeEventListener('scroll', updateViewport);
+      observer?.disconnect();
+    };
+  }, [activeIterator?.sourceNodeId]);
+
+  useEffect(() => {
+    const filmstrip = filmstripRef.current;
+    if (!filmstrip || !activeIterator) return;
+    const itemLeft = activeItemIndex * FILMSTRIP_ITEM_WIDTH;
+    const itemRight = itemLeft + FILMSTRIP_ITEM_WIDTH;
+    const viewportLeft = filmstrip.scrollLeft;
+    const viewportRight = viewportLeft + filmstrip.clientWidth;
+    if (itemLeft >= viewportLeft && itemRight <= viewportRight) return;
+    filmstrip.scrollLeft = Math.max(
+      0,
+      itemLeft - Math.max(0, filmstrip.clientWidth - FILMSTRIP_ITEM_WIDTH) / 2,
+    );
+  }, [activeItemIndex, activeIterator]);
+
+  useEffect(() => {
+    if (!activeViewerId || !activeIterator || visibleFilmstripItems.length === 0) return;
+    let cancelled = false;
+    const queue = visibleFilmstripItems
+      .map(index => {
+        const frame = activeIterator.startFrame + index;
+        const key = `${activeViewerId}:${activeIterator.sourceNodeId}:${graphRevision}:${frame}`;
+        return { index, frame, key };
+      })
+      .filter(item => !thumbnailCache.has(item.key) && !thumbnailPendingRef.current.has(item.key))
+      .slice(0, 18);
+
+    for (const item of queue) {
+      thumbnailPendingRef.current.add(item.key);
+    }
+
+    const worker = async () => {
+      while (!cancelled && queue.length > 0) {
+        const item = queue.shift();
+        if (!item) break;
+        try {
+          const result = await renderViewerFrame(
+            activeViewerId,
+            item.frame,
+            FILMSTRIP_THUMBNAIL_SCALE,
+          );
+          const url = viewerResultToDataUrl(result);
+          if (!cancelled && url) {
+            setThumbnailCache(prev => {
+              const next = new Map(prev);
+              next.set(item.key, url);
+              while (next.size > 300) {
+                const oldest = next.keys().next().value;
+                if (!oldest) break;
+                next.delete(oldest);
+              }
+              return next;
+            });
+          }
+        } catch {
+          // Thumbnail failures should not replace the main viewer error surface.
+        } finally {
+          thumbnailPendingRef.current.delete(item.key);
+        }
+      }
+    };
+
+    void Promise.all([worker(), worker()]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeViewerId,
+    activeIterator,
+    graphRevision,
+    renderViewerFrame,
+    thumbnailCache,
+    visibleFilmstripItems,
+  ]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -414,6 +575,16 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Channel isolation shortcuts (no modifier keys)
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (activeIterator && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+          e.preventDefault();
+          const direction = e.key === 'ArrowRight' ? 1 : -1;
+          setCurrentFrame(Math.max(
+            activeIterator.startFrame,
+            Math.min(currentFrame + direction, activeIterator.endFrame),
+          ));
+          return;
+        }
+
         const key = e.key.toLowerCase();
         if (key === 'r' || key === 'g' || key === 'b' || key === 'a') {
           e.preventDefault();
@@ -449,7 +620,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     
     container.addEventListener('keydown', handleKeyDown);
     return () => container.removeEventListener('keydown', handleKeyDown);
-  }, [fitToView]);
+  }, [activeIterator, currentFrame, fitToView, setCurrentFrame]);
 
   // Pixel inspector: track mouse over canvas
   const handleCanvasMouseMove = useCallback(
@@ -696,6 +867,133 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
               {Math.round(playbackFps)} fps
             </div>
           )}
+        </div>
+      )}
+
+      {activeIterator && activeIterator.count > 1 && activeViewerId && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 10,
+            right: 10,
+            bottom: lastError ? 36 : 8,
+            height: 72,
+            zIndex: 12,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            pointerEvents: 'auto',
+          }}
+          onPointerDown={e => e.stopPropagation()}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              color: 'var(--text-secondary)',
+              background: 'var(--overlay-label)',
+              border: '1px solid var(--border-primary)',
+              borderRadius: 4,
+              padding: '2px 6px',
+              fontSize: '0.65rem',
+              lineHeight: 1.2,
+              maxWidth: '100%',
+            }}
+          >
+            <span
+              style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={activeIterator.label}
+            >
+              {activeIterator.label}
+            </span>
+            <span style={{ fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+              {activeItemIndex + 1} / {activeIterator.count}
+            </span>
+          </div>
+          <div
+            ref={filmstripRef}
+            style={{
+              position: 'relative',
+              height: 54,
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              background: 'var(--overlay-label)',
+              border: '1px solid var(--border-primary)',
+              borderRadius: 4,
+            }}
+          >
+            <div
+              style={{
+                position: 'relative',
+                width: activeIterator.count * FILMSTRIP_ITEM_WIDTH,
+                height: '100%',
+              }}
+            >
+              {visibleFilmstripItems.map(index => {
+                const frame = activeIterator.startFrame + index;
+                const key = `${activeViewerId}:${activeIterator.sourceNodeId}:${graphRevision}:${frame}`;
+                const thumbnail = thumbnailCache.get(key);
+                const isActive = frame === currentFrame;
+                const label = activeIterator.itemLabels[index] ?? String(frame);
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => setCurrentFrame(frame)}
+                    title={label}
+                    style={{
+                      position: 'absolute',
+                      left: index * FILMSTRIP_ITEM_WIDTH + 6,
+                      top: 4,
+                      width: FILMSTRIP_THUMB_WIDTH,
+                      height: FILMSTRIP_THUMB_HEIGHT,
+                      padding: 0,
+                      border: isActive
+                        ? '2px solid var(--accent-primary)'
+                        : '1px solid var(--border-primary)',
+                      borderRadius: 4,
+                      background: 'var(--bg-surface)',
+                      color: 'var(--text-secondary)',
+                      overflow: 'hidden',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {thumbnail ? (
+                      <img
+                        src={thumbnail}
+                        alt=""
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          display: 'block',
+                        }}
+                      />
+                    ) : (
+                      <span
+                        style={{
+                          display: 'flex',
+                          width: '100%',
+                          height: '100%',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '0.62rem',
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
+                      >
+                        {index + 1}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
       
