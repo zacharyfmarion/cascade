@@ -11,7 +11,12 @@ import type {
   SerializableGroupDefinition,
   TransactionOrigin,
 } from '../types';
-import { isCompareResult, isPixelResult } from '../types';
+import {
+  getViewerDisplayHeight,
+  getViewerDisplayWidth,
+  isCompareResult,
+  isPixelResult,
+} from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { isDesktopRuntime } from '../../platform/runtime';
 import { useSettingsStore } from '../settingsStore';
@@ -187,18 +192,29 @@ export const annotateEnginePreviewResult = (
   }
   const resultOriginalWidth = result.originalWidth;
   const resultOriginalHeight = result.originalHeight;
+  const resultDisplayWidth = getViewerDisplayWidth(result);
+  const resultDisplayHeight = getViewerDisplayHeight(result);
   if (
-    typeof resultOriginalWidth === 'number'
-    && typeof resultOriginalHeight === 'number'
-    && (resultOriginalWidth !== result.width || resultOriginalHeight !== result.height)
+    resultDisplayWidth > 0
+    && resultDisplayHeight > 0
+    && (resultDisplayWidth !== result.width || resultDisplayHeight !== result.height)
   ) {
     const previewScale = getPreviewScaleFromDimensions(
       result.width,
       result.height,
-      resultOriginalWidth,
-      resultOriginalHeight,
+      resultDisplayWidth,
+      resultDisplayHeight,
     );
-    return previewScale < 1 ? { ...result, previewScale } : result;
+    return previewScale < 1 ? {
+      ...result,
+      previewScale,
+      originalWidth: resultOriginalWidth ?? resultDisplayWidth,
+      originalHeight: resultOriginalHeight ?? resultDisplayHeight,
+      displayWidth: resultDisplayWidth,
+      displayHeight: resultDisplayHeight,
+      bufferWidth: result.width,
+      bufferHeight: result.height,
+    } : result;
   }
   if (!previous || (!isPixelResult(previous) && !isCompareResult(previous))) {
     return result;
@@ -221,6 +237,10 @@ export const annotateEnginePreviewResult = (
     previewScale,
     originalWidth,
     originalHeight,
+    displayWidth: originalWidth,
+    displayHeight: originalHeight,
+    bufferWidth: result.width,
+    bufferHeight: result.height,
   };
 };
 
@@ -240,8 +260,8 @@ export const getEffectivePreviewScaleForResult = (
     return allowUnknownDimensions ? requestedScale : 1;
   }
 
-  const originalWidth = result.originalWidth ?? result.width;
-  const originalHeight = result.originalHeight ?? result.height;
+  const originalWidth = getViewerDisplayWidth(result);
+  const originalHeight = getViewerDisplayHeight(result);
   const targetSize = getPreviewDownscaleSize(originalWidth, originalHeight, requestedScale);
   return targetSize?.scale ?? 1;
 };
@@ -303,6 +323,10 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
       previewScale: targetSize.scale,
       originalWidth: result.originalWidth ?? result.width,
       originalHeight: result.originalHeight ?? result.height,
+      displayWidth: getViewerDisplayWidth(result),
+      displayHeight: getViewerDisplayHeight(result),
+      bufferWidth: targetSize.width,
+      bufferHeight: targetSize.height,
     };
   }
 
@@ -314,6 +338,10 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
     previewScale: targetSize.scale,
     originalWidth: result.originalWidth ?? result.width,
     originalHeight: result.originalHeight ?? result.height,
+    displayWidth: getViewerDisplayWidth(result),
+    displayHeight: getViewerDisplayHeight(result),
+    bufferWidth: targetSize.width,
+    bufferHeight: targetSize.height,
   };
 };
 

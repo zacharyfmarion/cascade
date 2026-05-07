@@ -436,6 +436,7 @@ describe('graphStore preview rendering', () => {
       type: 'image',
       width: 1024,
       height: 768,
+      frame: 0,
       previewScale: 0.25,
       originalWidth: 4096,
       originalHeight: 3072,
@@ -464,6 +465,7 @@ describe('graphStore preview rendering', () => {
       type: 'image',
       width: 800,
       height: 600,
+      frame: 0,
       previewScale: 600 / 900,
       originalWidth: 1200,
       originalHeight: 900,
@@ -513,6 +515,7 @@ describe('graphStore preview rendering', () => {
       type: 'image',
       width: 120,
       height: 90,
+      frame: 0,
     });
   });
 
@@ -544,6 +547,9 @@ describe('graphStore preview rendering', () => {
     expect(useGraphStore.getState().currentFrame).toBe(1);
     expect(mockEngine._renderCalls).toEqual([viewerId]);
     expect(mockEngine._renderScales).toEqual([0.2]);
+    expect(useGraphStore.getState().renderResults.get(viewerId)).toMatchObject({
+      frame: 1,
+    });
   });
 });
 

@@ -78,9 +78,9 @@ const decodeBinaryViewerResult = (
   offset += 4;
   const height = view.getUint32(offset, true);
   offset += 4;
-  const originalWidth = view.getUint32(offset, true);
+  const displayWidth = view.getUint32(offset, true);
   offset += 4;
-  const originalHeight = view.getUint32(offset, true);
+  const displayHeight = view.getUint32(offset, true);
   offset += 4;
   const pixelLen = width * height * 4;
 
@@ -88,7 +88,22 @@ const decodeBinaryViewerResult = (
     if (buf.byteLength < offset + pixelLen) return { result: null, offset };
     const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
     offset += pixelLen;
-    return { result: { type: 'image', nodeId, width, height, originalWidth, originalHeight, pixels }, offset };
+    return {
+      result: {
+        type: 'image',
+        nodeId,
+        width,
+        height,
+        bufferWidth: width,
+        bufferHeight: height,
+        displayWidth,
+        displayHeight,
+        originalWidth: displayWidth,
+        originalHeight: displayHeight,
+        pixels,
+      },
+      offset,
+    };
   }
 
   if (kind === 1) {
@@ -97,7 +112,23 @@ const decodeBinaryViewerResult = (
     offset += pixelLen;
     const afterPixels = new Uint8ClampedArray(buf, offset, pixelLen);
     offset += pixelLen;
-    return { result: { type: 'compare', nodeId, width, height, originalWidth, originalHeight, beforePixels, afterPixels }, offset };
+    return {
+      result: {
+        type: 'compare',
+        nodeId,
+        width,
+        height,
+        bufferWidth: width,
+        bufferHeight: height,
+        displayWidth,
+        displayHeight,
+        originalWidth: displayWidth,
+        originalHeight: displayHeight,
+        beforePixels,
+        afterPixels,
+      },
+      offset,
+    };
   }
 
   return { result: null, offset };

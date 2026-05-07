@@ -1998,9 +1998,10 @@ impl Engine {
                 self.ai_node_cache.insert(nid, outputs);
                 let cache_key = self
                     .evaluator
-                    .compute_node_cache_key(
+                    .compute_node_cache_key_with_instances(
                         &self.graph,
                         &self.registry,
+                        &self.nodes,
                         nid,
                         FrameTime { frame: 0 },
                         &self.project_format,
@@ -2042,9 +2043,10 @@ impl Engine {
                         if s.last_run_cache_key.is_none() {
                             false
                         } else {
-                            match self.evaluator.compute_node_cache_key(
+                            match self.evaluator.compute_node_cache_key_with_instances(
                                 &self.graph,
                                 &self.registry,
+                                &self.nodes,
                                 nid,
                                 FrameTime { frame: 0 },
                                 &self.project_format,
@@ -3706,6 +3708,10 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"type".into(), &value_type.into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
                 js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"bufferWidth".into(), &(width).into())?;
+                js_sys::Reflect::set(&obj, &"bufferHeight".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"displayWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"displayHeight".into(), &(original_height).into())?;
                 js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
                 js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
                 // Use Uint8ClampedArray for zero-copy pixel transfer
@@ -3725,6 +3731,10 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"type".into(), &"compare".into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
                 js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"bufferWidth".into(), &(width).into())?;
+                js_sys::Reflect::set(&obj, &"bufferHeight".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"displayWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"displayHeight".into(), &(original_height).into())?;
                 js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
                 js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
                 let before = js_sys::Uint8ClampedArray::from(before_pixels.as_slice());

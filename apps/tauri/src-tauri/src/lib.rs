@@ -666,7 +666,7 @@ async fn get_batch_thumbnail(
 }
 
 /// Returns raw RGBA8 pixels prefixed with
-/// [width_le32][height_le32][original_width_le32][original_height_le32].
+/// [buffer_width_le32][buffer_height_le32][display_width_le32][display_height_le32].
 #[tauri::command]
 fn render_viewer(
     state: State<'_, EngineState>,
@@ -719,8 +719,8 @@ fn render_internal_viewer(
 /// Response binary format:
 /// [u32 viewer_count LE]
 /// For each viewer: [u32 id_len LE][utf8 id bytes][u8 kind][payload]
-/// kind 0 payload: [u32 width LE][u32 height LE][u32 original_width LE][u32 original_height LE][RGBA8 pixels]
-/// kind 1 payload: [u32 width LE][u32 height LE][u32 original_width LE][u32 original_height LE][before RGBA8 pixels][after RGBA8 pixels]
+/// kind 0 payload: [u32 buffer_width LE][u32 buffer_height LE][u32 display_width LE][u32 display_height LE][RGBA8 pixels]
+/// kind 1 payload: [u32 buffer_width LE][u32 buffer_height LE][u32 display_width LE][u32 display_height LE][before RGBA8 pixels][after RGBA8 pixels]
 #[tauri::command]
 fn set_param_and_render(
     state: State<'_, EngineState>,

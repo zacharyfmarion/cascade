@@ -2003,9 +2003,10 @@ impl Engine {
         state.active_run_id = None;
         state.last_run_cache_key = self
             .evaluator
-            .compute_node_cache_key(
+            .compute_node_cache_key_with_instances(
                 &self.graph,
                 &self.registry,
+                &self.nodes,
                 id,
                 FrameTime { frame: 0 },
                 &self.project_format,
@@ -2036,9 +2037,10 @@ impl Engine {
         ))?;
         let cache_key = self
             .evaluator
-            .compute_node_cache_key(
+            .compute_node_cache_key_with_instances(
                 &self.graph,
                 &self.registry,
+                &self.nodes,
                 id,
                 FrameTime { frame: 0 },
                 &self.project_format,
@@ -2189,9 +2191,10 @@ impl Engine {
         let is_stale = match state {
             Some(state) if state.last_run_cache_key.is_some() => self
                 .evaluator
-                .compute_node_cache_key(
+                .compute_node_cache_key_with_instances(
                     &self.graph,
                     &self.registry,
+                    &self.nodes,
                     id,
                     FrameTime { frame: 0 },
                     &self.project_format,
@@ -4442,11 +4445,15 @@ mod tests {
     }
 
     fn tiny_png() -> Vec<u8> {
-        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 0, 255]));
+        png_with_size(1, 1, [255, 0, 0, 255])
+    }
+
+    fn png_with_size(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(width, height, image::Rgba(color));
         let mut buf = Vec::new();
         let mut cursor = std::io::Cursor::new(&mut buf);
         img.write_to(&mut cursor, image::ImageFormat::Png)
-            .expect("tiny png encodes");
+            .expect("test png encodes");
         buf
     }
 
@@ -5542,6 +5549,492 @@ return pixelated;
 
         assert!(image.width() <= 32);
         assert!(image.height() <= 32);
+    }
+
+    fn mixed_batch_sizes() -> Vec<(u32, u32)> {
+        vec![
+            (1208, 2624),
+            (3200, 2126),
+            (2048, 2048),
+            (746, 442),
+            (546, 472),
+        ]
+    }
+
+    fn mixed_size_batch_viewer() -> (Engine, String) {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        for (index, (width, height)) in mixed_batch_sizes().into_iter().enumerate() {
+            engine
+                .batch_add_image(
+                    &batch_id,
+                    &format!("{index:03}_{width}x{height}.png"),
+                    &png_with_size(width, height, [index as u8, 64, 128, 255]),
+                )
+                .expect("batch image should register");
+        }
+        engine
+            .connect(&batch_id, "image", &viewer_id, "value")
+            .expect("batch should connect to viewer");
+        (engine, viewer_id)
+    }
+
+    fn supported_asset_entries(dir: &Path) -> Vec<(String, PathBuf)> {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("asset directory should be readable")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file())
+            .filter(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| {
+                        matches!(
+                            ext.to_ascii_lowercase().as_str(),
+                            "png" | "jpg" | "jpeg" | "exr" | "tif" | "tiff" | "bmp" | "webp"
+                        )
+                    })
+                    .unwrap_or(false)
+            })
+            .filter_map(|path| {
+                let filename = path.file_name()?.to_str()?.to_string();
+                Some((filename, path))
+            })
+            .collect();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        entries
+    }
+
+    fn path_backed_batch_viewer(
+        entries: &[(String, PathBuf)],
+        processor_type: Option<&str>,
+    ) -> Result<(Engine, String), CascadeError> {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0)?;
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0)?;
+        engine.batch_set_image_paths(&batch_id, entries.to_vec())?;
+        if let Some(processor_type) = processor_type {
+            let (processor_id, _) = engine.add_node(processor_type, 0.0, 0.0)?;
+            engine.connect(&batch_id, "image", &processor_id, "image")?;
+            engine.connect(&processor_id, "image", &viewer_id, "value")?;
+        } else {
+            engine.connect(&batch_id, "image", &viewer_id, "value")?;
+        }
+        Ok((engine, viewer_id))
+    }
+
+    fn render_logical_dimensions(
+        engine: &mut Engine,
+        viewer_id: &str,
+        count: usize,
+    ) -> Result<Vec<(u32, u32)>, CascadeError> {
+        (0..count)
+            .map(|frame| {
+                engine
+                    .render_viewer(viewer_id, frame as u64)
+                    .map(|result| (result.original_width, result.original_height))
+            })
+            .collect()
+    }
+
+    fn assert_contains_expected_asset_dimensions(label: &str, dimensions: &[(u32, u32)]) {
+        for expected in mixed_batch_sizes() {
+            assert!(
+                dimensions.contains(&expected),
+                "{label} should include {expected:?}; got {dimensions:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_env_mixed_size_assets_acceptance_matrix() {
+        let Ok(asset_dir) = std::env::var("CASCADE_MIXED_ASSETS_DIR") else {
+            println!("CASCADE_MIXED_ASSETS_DIR not set, skipping local mixed-size assets test");
+            return;
+        };
+        let entries = supported_asset_entries(Path::new(&asset_dir));
+        assert!(
+            entries.len() >= mixed_batch_sizes().len(),
+            "expected at least {} supported images in {asset_dir}, got {}",
+            mixed_batch_sizes().len(),
+            entries.len()
+        );
+
+        let (mut direct_engine, direct_viewer) =
+            path_backed_batch_viewer(&entries, None).expect("direct path-backed batch graph");
+        let direct_dimensions =
+            render_logical_dimensions(&mut direct_engine, &direct_viewer, entries.len())
+                .expect("direct batch dimensions should render");
+        assert_contains_expected_asset_dimensions("direct batch", &direct_dimensions);
+
+        let (mut blur_engine, blur_viewer) =
+            path_backed_batch_viewer(&entries, Some("gaussian_blur"))
+                .expect("gaussian blur path-backed batch graph");
+        let blur_dimensions =
+            render_logical_dimensions(&mut blur_engine, &blur_viewer, entries.len())
+                .expect("blurred batch dimensions should render");
+        assert_contains_expected_asset_dimensions("gaussian blur batch", &blur_dimensions);
+
+        match path_backed_batch_viewer(&entries, Some("pixelate")) {
+            Ok((mut pixelate_engine, pixelate_viewer)) => {
+                let pixelate_dimensions = render_logical_dimensions(
+                    &mut pixelate_engine,
+                    &pixelate_viewer,
+                    entries.len(),
+                )
+                .expect("pixelate batch dimensions should render");
+                assert_contains_expected_asset_dimensions("pixelate batch", &pixelate_dimensions);
+            }
+            Err(err) => {
+                println!("GPU pixelate unavailable, skipping pixelate local acceptance: {err}");
+            }
+        }
+
+        let output_dir = temp_test_path("env_mixed_batch_export");
+        std::fs::create_dir_all(&output_dir).expect("output directory should create");
+        let mut export_engine = Engine::new();
+        let (batch_id, _) = export_engine
+            .add_node("load_image_batch", -300.0, 0.0)
+            .expect("batch node");
+        let (export_id, _) = export_engine
+            .add_node("export_image_batch", 300.0, 0.0)
+            .expect("export node");
+        export_engine
+            .batch_set_image_paths(&batch_id, entries)
+            .expect("batch paths should register");
+        export_engine
+            .connect(&batch_id, "image", &export_id, "image")
+            .expect("batch image should connect to export");
+        export_engine
+            .connect(&batch_id, "filename", &export_id, "filename")
+            .expect("batch filename should connect to export");
+        export_engine
+            .set_param(
+                &export_id,
+                "output_dir",
+                ParamValue::String(output_dir.to_string_lossy().to_string()),
+            )
+            .expect("output dir should set");
+        export_engine
+            .set_param(
+                &export_id,
+                "filename_template",
+                ParamValue::String("{index1}_{name}".to_string()),
+            )
+            .expect("filename template should set");
+
+        export_engine
+            .start_render_batch(&export_id)
+            .expect("batch export should start");
+        for _ in 0..3000 {
+            if export_engine
+                .get_job_progress()
+                .is_some_and(|progress| progress.completed)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let progress = export_engine.get_job_progress().expect("job progress");
+        assert_eq!(progress.error, None);
+        assert!(
+            progress.completed,
+            "batch export should complete: {progress:?}"
+        );
+
+        let export_dimensions: Vec<_> = std::fs::read_dir(&output_dir)
+            .expect("export directory should read")
+            .filter_map(Result::ok)
+            .filter_map(|entry| image::open(entry.path()).ok())
+            .map(|image| (image.width(), image.height()))
+            .collect();
+        assert_contains_expected_asset_dimensions("exported batch", &export_dimensions);
+
+        std::fs::remove_dir_all(output_dir).expect("output directory should clean up");
+    }
+
+    #[test]
+    fn test_mixed_size_batch_direct_render_uses_each_frame_dimensions() {
+        let (mut engine, viewer_id) = mixed_size_batch_viewer();
+
+        for (frame, (width, height)) in mixed_batch_sizes().into_iter().enumerate() {
+            let result = engine
+                .render_viewer(&viewer_id, frame as u64)
+                .expect("batch frame should render");
+            assert_eq!((result.width, result.height), (width, height));
+            assert_eq!(
+                (result.original_width, result.original_height),
+                (width, height)
+            );
+        }
+    }
+
+    #[test]
+    fn test_mixed_size_batch_preview_keeps_display_dimensions_separate_from_buffer() {
+        let (mut engine, viewer_id) = mixed_size_batch_viewer();
+        let result = engine
+            .render_viewer_scaled(&viewer_id, 1, 0.25)
+            .expect("preview batch frame should render");
+
+        assert!(
+            result.width < 3200 && result.height < 2126,
+            "preview buffer should be smaller than full resolution, got {}x{}",
+            result.width,
+            result.height
+        );
+        assert_eq!(
+            (result.original_width, result.original_height),
+            (3200, 2126)
+        );
+    }
+
+    #[test]
+    fn test_mixed_size_batch_cpu_dimension_preserving_nodes_keep_frame_domains() {
+        for node_type in [
+            "gaussian_blur",
+            "sharpen",
+            "color_convert",
+            "curves",
+            "matte_expand",
+        ] {
+            let mut engine = Engine::new();
+            let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+            let (node_id, _) = engine.add_node(node_type, 0.0, 0.0).unwrap();
+            let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+
+            for (index, (width, height)) in mixed_batch_sizes().into_iter().enumerate() {
+                engine
+                    .batch_add_image(
+                        &batch_id,
+                        &format!("{index:03}_{width}x{height}.png"),
+                        &png_with_size(width, height, [index as u8, 96, 160, 255]),
+                    )
+                    .expect("batch image should register");
+            }
+            engine
+                .connect(&batch_id, "image", &node_id, "image")
+                .expect("batch should connect to processor");
+            engine
+                .connect(&node_id, "image", &viewer_id, "value")
+                .expect("processor should connect to viewer");
+
+            for (frame, (width, height)) in mixed_batch_sizes().into_iter().enumerate() {
+                let result = engine
+                    .render_viewer(&viewer_id, frame as u64)
+                    .unwrap_or_else(|e| panic!("{node_type} frame {frame} should render: {e}"));
+                assert_eq!(
+                    (result.original_width, result.original_height),
+                    (width, height),
+                    "{node_type} should preserve logical frame dimensions"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_mixed_size_batch_geometry_node_intentionally_changes_dimensions() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (resize_id, _) = engine.add_node("resize", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        for (index, (width, height)) in mixed_batch_sizes().into_iter().enumerate() {
+            engine
+                .batch_add_image(
+                    &batch_id,
+                    &format!("{index:03}_{width}x{height}.png"),
+                    &png_with_size(width, height, [index as u8, 128, 192, 255]),
+                )
+                .expect("batch image should register");
+        }
+        engine
+            .set_param(&resize_id, "width", ParamValue::Int(32))
+            .expect("resize width should set");
+        engine
+            .set_param(&resize_id, "height", ParamValue::Int(16))
+            .expect("resize height should set");
+        engine
+            .connect(&batch_id, "image", &resize_id, "image")
+            .expect("batch should connect to resize");
+        engine
+            .connect(&resize_id, "image", &viewer_id, "value")
+            .expect("resize should connect to viewer");
+
+        for frame in 0..mixed_batch_sizes().len() {
+            let result = engine
+                .render_viewer(&viewer_id, frame as u64)
+                .expect("resized batch frame should render");
+            assert_eq!((result.width, result.height), (32, 16));
+            assert_eq!((result.original_width, result.original_height), (32, 16));
+        }
+    }
+
+    #[test]
+    fn test_batch_source_reload_invalidates_stale_downstream_dimensions() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(
+                &batch_id,
+                "old.png",
+                &png_with_size(32, 16, [255, 0, 0, 255]),
+            )
+            .expect("old image should register");
+        engine
+            .connect(&batch_id, "image", &viewer_id, "value")
+            .expect("batch should connect to viewer");
+
+        let old = engine.render_viewer(&viewer_id, 0).expect("old render");
+        assert_eq!((old.original_width, old.original_height), (32, 16));
+
+        engine.batch_clear(&batch_id).expect("batch should clear");
+        engine
+            .batch_add_image(
+                &batch_id,
+                "new.png",
+                &png_with_size(64, 48, [0, 255, 0, 255]),
+            )
+            .expect("new image should register");
+
+        let new = engine.render_viewer(&viewer_id, 0).expect("new render");
+        assert_eq!((new.original_width, new.original_height), (64, 48));
+    }
+
+    #[test]
+    fn test_batch_corrupt_frame_does_not_poison_later_valid_frame() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(
+                &batch_id,
+                "valid0.png",
+                &png_with_size(10, 12, [1, 2, 3, 255]),
+            )
+            .expect("first valid image should register");
+        engine
+            .batch_add_image(&batch_id, "corrupt.png", b"not an image")
+            .expect_err("corrupt image should fail registration");
+        engine
+            .batch_add_image(
+                &batch_id,
+                "valid1.png",
+                &png_with_size(14, 16, [4, 5, 6, 255]),
+            )
+            .expect("second valid image should register");
+        engine
+            .connect(&batch_id, "image", &viewer_id, "value")
+            .expect("batch should connect to viewer");
+
+        let first = engine.render_viewer(&viewer_id, 0).expect("first frame");
+        let second = engine.render_viewer(&viewer_id, 1).expect("second frame");
+        assert_eq!((first.original_width, first.original_height), (10, 12));
+        assert_eq!((second.original_width, second.original_height), (14, 16));
+    }
+
+    #[test]
+    fn test_batch_deleted_path_frame_does_not_poison_later_valid_frame() {
+        let missing = temp_test_path("missing.png");
+        let valid = temp_test_path("valid.png");
+        std::fs::write(&missing, png_with_size(10, 12, [1, 2, 3, 255]))
+            .expect("missing png should write before deletion");
+        std::fs::write(&valid, png_with_size(14, 16, [4, 5, 6, 255]))
+            .expect("valid png should write");
+
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        engine
+            .batch_set_image_paths(
+                &batch_id,
+                vec![
+                    ("missing.png".to_string(), missing.clone()),
+                    ("valid.png".to_string(), valid.clone()),
+                ],
+            )
+            .expect("batch paths should register");
+        std::fs::remove_file(&missing).expect("missing frame should delete");
+        engine
+            .connect(&batch_id, "image", &viewer_id, "value")
+            .expect("batch should connect to viewer");
+
+        let missing_error = engine
+            .render_viewer(&viewer_id, 0)
+            .expect_err("deleted frame should return a structured render error");
+        assert!(missing_error.to_string().contains("missing.png"));
+
+        let valid_result = engine
+            .render_viewer(&viewer_id, 1)
+            .expect("valid frame after deleted frame should still render");
+        assert_eq!(
+            (valid_result.original_width, valid_result.original_height),
+            (14, 16)
+        );
+
+        std::fs::remove_file(valid).expect("valid png should clean up");
+    }
+
+    #[test]
+    fn test_batch_export_writes_each_frame_dimensions() {
+        let out_dir = temp_test_path("mixed_batch_export");
+        std::fs::create_dir_all(&out_dir).expect("output directory should create");
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (export_id, _) = engine.add_node("export_image_batch", 300.0, 0.0).unwrap();
+        for (index, (width, height)) in [(37, 23), (41, 29)].into_iter().enumerate() {
+            engine
+                .batch_add_image(
+                    &batch_id,
+                    &format!("frame{index}.png"),
+                    &png_with_size(width, height, [index as u8, 10, 20, 255]),
+                )
+                .expect("batch image should register");
+        }
+        engine
+            .connect(&batch_id, "image", &export_id, "image")
+            .expect("batch should connect to export image");
+        engine
+            .connect(&batch_id, "filename", &export_id, "filename")
+            .expect("batch filename should connect to export filename");
+        engine
+            .set_param(
+                &export_id,
+                "output_dir",
+                ParamValue::String(out_dir.to_string_lossy().to_string()),
+            )
+            .expect("output directory should set");
+        engine
+            .set_param(
+                &export_id,
+                "filename_template",
+                ParamValue::String("{index1}_{name}".to_string()),
+            )
+            .expect("filename template should set");
+
+        engine
+            .start_render_batch(&export_id)
+            .expect("batch render should start");
+        for _ in 0..100 {
+            if engine
+                .get_job_progress()
+                .is_some_and(|progress| progress.completed)
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let progress = engine.get_job_progress().expect("job progress");
+        assert!(progress.completed, "batch export should complete");
+        assert_eq!(progress.error, None);
+
+        let first = image::open(out_dir.join("1_frame0.png")).expect("first export should decode");
+        let second =
+            image::open(out_dir.join("2_frame1.png")).expect("second export should decode");
+        assert_eq!((first.width(), first.height()), (37, 23));
+        assert_eq!((second.width(), second.height()), (41, 29));
+
+        std::fs::remove_dir_all(out_dir).expect("output directory should clean up");
     }
 
     #[test]

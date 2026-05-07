@@ -51,11 +51,21 @@ export function decodeViewerResult(
       if (!pixels) {
         return null;
       }
+      const displayWidth = typeof raw.displayWidth === 'number'
+        ? raw.displayWidth
+        : typeof raw.originalWidth === 'number' ? raw.originalWidth : raw.width as number;
+      const displayHeight = typeof raw.displayHeight === 'number'
+        ? raw.displayHeight
+        : typeof raw.originalHeight === 'number' ? raw.originalHeight : raw.height as number;
       return {
         type,
         nodeId,
         width: raw.width as number,
         height: raw.height as number,
+        bufferWidth: typeof raw.bufferWidth === 'number' ? raw.bufferWidth : raw.width as number,
+        bufferHeight: typeof raw.bufferHeight === 'number' ? raw.bufferHeight : raw.height as number,
+        displayWidth,
+        displayHeight,
         originalWidth: typeof raw.originalWidth === 'number' ? raw.originalWidth : undefined,
         originalHeight: typeof raw.originalHeight === 'number' ? raw.originalHeight : undefined,
         pixels,
@@ -67,11 +77,21 @@ export function decodeViewerResult(
       if (!beforePixels || !afterPixels) {
         return null;
       }
+      const displayWidth = typeof raw.displayWidth === 'number'
+        ? raw.displayWidth
+        : typeof raw.originalWidth === 'number' ? raw.originalWidth : raw.width as number;
+      const displayHeight = typeof raw.displayHeight === 'number'
+        ? raw.displayHeight
+        : typeof raw.originalHeight === 'number' ? raw.originalHeight : raw.height as number;
       return {
         type: 'compare',
         nodeId,
         width: raw.width as number,
         height: raw.height as number,
+        bufferWidth: typeof raw.bufferWidth === 'number' ? raw.bufferWidth : raw.width as number,
+        bufferHeight: typeof raw.bufferHeight === 'number' ? raw.bufferHeight : raw.height as number,
+        displayWidth,
+        displayHeight,
         originalWidth: typeof raw.originalWidth === 'number' ? raw.originalWidth : undefined,
         originalHeight: typeof raw.originalHeight === 'number' ? raw.originalHeight : undefined,
         beforePixels,

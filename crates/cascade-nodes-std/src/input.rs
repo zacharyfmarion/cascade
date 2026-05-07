@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Minimum dimension (pixels) to avoid degenerate downscales.
 const MIN_PREVIEW_EDGE: u32 = 600;
@@ -62,6 +63,7 @@ pub struct LoadImage {
     parsed: Mutex<ParsedImage>,
     original_bytes: Mutex<Option<Arc<Vec<u8>>>>,
     decode_cache: Mutex<HashMap<String, Arc<Image>>>,
+    source_revision: AtomicU64,
 }
 
 /// What kind of image data is loaded.
@@ -87,7 +89,12 @@ impl LoadImage {
             parsed: Mutex::new(ParsedImage::Empty),
             original_bytes: Mutex::new(None),
             decode_cache: Mutex::new(HashMap::new()),
+            source_revision: AtomicU64::new(0),
         }
+    }
+
+    fn bump_source_revision(&self) {
+        self.source_revision.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Load image data. Detects EXR via magic bytes; otherwise decodes as
@@ -202,6 +209,7 @@ impl LoadImage {
             .filter(|p| !new_ports.contains(p))
             .collect();
 
+        self.bump_source_revision();
         Ok(removed)
     }
 
@@ -373,6 +381,10 @@ impl Node for LoadImage {
         })
     }
 
+    fn cache_revision(&self) -> u64 {
+        self.source_revision.load(Ordering::Relaxed)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -462,6 +474,7 @@ pub struct LoadImageSequence {
     frame_cache: Mutex<SeqFrameCache>,
     /// EXR metadata from the first frame (sets the interface for all frames)
     exr_metadata: Mutex<Option<ExrMetadata>>,
+    source_revision: AtomicU64,
 }
 
 /// Cache that stores per-frame, per-port images for sequences.
@@ -603,7 +616,12 @@ impl LoadImageSequence {
             directory: Mutex::new(None),
             frame_cache: Mutex::new(SeqFrameCache::new(FRAME_CACHE_SIZE)),
             exr_metadata: Mutex::new(None),
+            source_revision: AtomicU64::new(0),
         }
+    }
+
+    fn bump_source_revision(&self) {
+        self.source_revision.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn set_info(&self, _info: SequenceInfo) -> Result<(), CascadeError> {
@@ -612,6 +630,7 @@ impl LoadImageSequence {
             .lock()
             .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
         cache.clear();
+        self.bump_source_revision();
         Ok(())
     }
 
@@ -683,6 +702,7 @@ impl LoadImageSequence {
             .into_iter()
             .filter(|p| !new_ports.contains(p))
             .collect();
+        self.bump_source_revision();
         Ok(removed)
     }
 
@@ -702,7 +722,9 @@ impl LoadImageSequence {
         drop(cache);
 
         let detected = detect_sequence_pattern(dir);
-        self.get_sequence_info(&detected)
+        let info = self.get_sequence_info(&detected)?;
+        self.bump_source_revision();
+        Ok(info)
     }
 
     pub fn get_sequence_info(&self, pattern: &str) -> Result<SequenceInfo, CascadeError> {
@@ -934,6 +956,10 @@ impl Node for LoadImageSequence {
         })
     }
 
+    fn cache_revision(&self) -> u64 {
+        self.source_revision.load(Ordering::Relaxed)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -1039,6 +1065,7 @@ type FrameLoader = Box<dyn Fn(u64) -> Result<Image, CascadeError> + Send>;
 pub struct LoadVideo {
     frame_cache: Mutex<FrameCache>,
     frame_loader: Mutex<Option<FrameLoader>>,
+    source_revision: AtomicU64,
 }
 
 impl Default for LoadVideo {
@@ -1052,7 +1079,12 @@ impl LoadVideo {
         Self {
             frame_cache: Mutex::new(FrameCache::new(FRAME_CACHE_SIZE)),
             frame_loader: Mutex::new(None),
+            source_revision: AtomicU64::new(0),
         }
+    }
+
+    fn bump_source_revision(&self) {
+        self.source_revision.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Set a closure that decodes a single frame on demand.
@@ -1071,6 +1103,7 @@ impl LoadVideo {
             .map_err(|_| CascadeError::Other("Cache mutex poisoned".to_string()))?;
         cache.clear();
 
+        self.bump_source_revision();
         Ok(())
     }
 }
@@ -1143,6 +1176,10 @@ impl Node for LoadVideo {
             outputs.insert("image".to_string(), Value::Image(image));
             Ok(outputs)
         })
+    }
+
+    fn cache_revision(&self) -> u64 {
+        self.source_revision.load(Ordering::Relaxed)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -1315,6 +1352,7 @@ pub struct LoadImageBatch {
     entries: Mutex<Vec<BatchEntry>>,
     frame_cache: Mutex<BatchFrameCache>,
     thumbnail_cache: Mutex<BatchThumbnailCache>,
+    source_revision: AtomicU64,
 }
 impl Default for LoadImageBatch {
     fn default() -> Self {
@@ -1328,8 +1366,14 @@ impl LoadImageBatch {
             entries: Mutex::new(Vec::new()),
             frame_cache: Mutex::new(BatchFrameCache::new(BATCH_FRAME_CACHE_BYTES)),
             thumbnail_cache: Mutex::new(BatchThumbnailCache::new(BATCH_THUMBNAIL_CACHE_BYTES)),
+            source_revision: AtomicU64::new(0),
         }
     }
+
+    fn bump_source_revision(&self) {
+        self.source_revision.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn clear(&self) -> Result<(), CascadeError> {
         let mut entries = self
             .entries
@@ -1346,6 +1390,7 @@ impl LoadImageBatch {
             .lock()
             .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
         thumbnail_cache.clear();
+        self.bump_source_revision();
         Ok(())
     }
     pub fn add_image(&self, filename: &str, bytes: &[u8]) -> Result<(), CascadeError> {
@@ -1372,6 +1417,19 @@ impl LoadImageBatch {
             stem,
             source: BatchEntrySource::Bytes(bytes.to_vec()),
         });
+        drop(entries);
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch cache mutex poisoned".to_string()))?;
+        cache.clear();
+        drop(cache);
+        let mut thumbnail_cache = self
+            .thumbnail_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
+        thumbnail_cache.clear();
+        self.bump_source_revision();
         Ok(())
     }
 
@@ -1396,6 +1454,19 @@ impl LoadImageBatch {
             stem,
             source: BatchEntrySource::Path(path),
         });
+        drop(entries);
+        let mut cache = self
+            .frame_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch cache mutex poisoned".to_string()))?;
+        cache.clear();
+        drop(cache);
+        let mut thumbnail_cache = self
+            .thumbnail_cache
+            .lock()
+            .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
+        thumbnail_cache.clear();
+        self.bump_source_revision();
         Ok(())
     }
 
@@ -1433,6 +1504,7 @@ impl LoadImageBatch {
             .lock()
             .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
         thumbnail_cache.clear();
+        self.bump_source_revision();
         Ok(())
     }
 
@@ -1627,6 +1699,11 @@ impl Node for LoadImageBatch {
             Ok(outputs)
         })
     }
+
+    fn cache_revision(&self) -> u64 {
+        self.source_revision.load(Ordering::Relaxed)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

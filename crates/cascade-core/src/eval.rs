@@ -99,6 +99,7 @@ pub struct Evaluator {
 pub struct CacheKey {
     pub frame_time: FrameTime,
     pub param_revision: u64,
+    pub source_revision: u64,
     pub upstream_hash: u64,
     pub project_format_hash: u64,
     pub preview_scale_q: u16,
@@ -218,6 +219,9 @@ impl Evaluator {
                 let spec = registry
                     .get_spec(&instance.type_id)
                     .ok_or_else(|| CascadeError::InvalidConnection(instance.type_id.clone()))?;
+                let node = node_instances
+                    .get(&node_id)
+                    .ok_or(CascadeError::NodeNotFound(node_id))?;
 
                 let upstream_hash =
                     self.compute_upstream_hash(&cache, graph, node_id, spec, frame_time)?;
@@ -229,6 +233,7 @@ impl Evaluator {
                 let key = CacheKey {
                     frame_time,
                     param_revision: instance.param_revision,
+                    source_revision: node.cache_revision(),
                     upstream_hash,
                     project_format_hash: pf_hash,
                     preview_scale_q: (preview_scale * 1024.0).round() as u16,
@@ -255,10 +260,6 @@ impl Evaluator {
                     continue;
                 }
                 self.miss_count += 1;
-
-                let node = node_instances
-                    .get(&node_id)
-                    .ok_or(CascadeError::NodeNotFound(node_id))?;
 
                 let mut inputs = HashMap::new();
                 for input in spec.all_inputs().iter() {
@@ -557,6 +558,9 @@ impl Evaluator {
                 let spec = registry
                     .get_spec(&instance.type_id)
                     .ok_or_else(|| CascadeError::InvalidConnection(instance.type_id.clone()))?;
+                let node = node_instances
+                    .get(&node_id)
+                    .ok_or(CascadeError::NodeNotFound(node_id))?;
 
                 let upstream_hash =
                     self.compute_upstream_hash(&cache, graph, node_id, spec, frame_time)?;
@@ -568,6 +572,7 @@ impl Evaluator {
                 let key = CacheKey {
                     frame_time,
                     param_revision: instance.param_revision,
+                    source_revision: node.cache_revision(),
                     upstream_hash,
                     project_format_hash: pf_hash,
                     preview_scale_q: (preview_scale * 1024.0).round() as u16,
@@ -593,10 +598,6 @@ impl Evaluator {
                     continue;
                 }
                 self.miss_count += 1;
-
-                let node = node_instances
-                    .get(&node_id)
-                    .ok_or(CascadeError::NodeNotFound(node_id))?;
 
                 let mut inputs = HashMap::new();
                 for input in spec.all_inputs().iter() {
@@ -768,6 +769,54 @@ impl Evaluator {
         project_format: &Format,
         preview_scale: f32,
     ) -> Result<CacheKey, CascadeError> {
+        self.compute_node_cache_key_with_source_revision(
+            graph,
+            registry,
+            node_id,
+            frame_time,
+            project_format,
+            preview_scale,
+            0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn compute_node_cache_key_with_instances(
+        &self,
+        graph: &Graph,
+        registry: &NodeRegistry,
+        node_instances: &HashMap<NodeId, Arc<dyn Node>>,
+        node_id: NodeId,
+        frame_time: FrameTime,
+        project_format: &Format,
+        preview_scale: f32,
+    ) -> Result<CacheKey, CascadeError> {
+        let source_revision = node_instances
+            .get(&node_id)
+            .ok_or(CascadeError::NodeNotFound(node_id))?
+            .cache_revision();
+        self.compute_node_cache_key_with_source_revision(
+            graph,
+            registry,
+            node_id,
+            frame_time,
+            project_format,
+            preview_scale,
+            source_revision,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn compute_node_cache_key_with_source_revision(
+        &self,
+        graph: &Graph,
+        registry: &NodeRegistry,
+        node_id: NodeId,
+        frame_time: FrameTime,
+        project_format: &Format,
+        preview_scale: f32,
+        source_revision: u64,
+    ) -> Result<CacheKey, CascadeError> {
         let instance = graph
             .nodes
             .get(node_id)
@@ -785,6 +834,7 @@ impl Evaluator {
         Ok(CacheKey {
             frame_time,
             param_revision: instance.param_revision,
+            source_revision,
             upstream_hash,
             project_format_hash: pf_hash,
             preview_scale_q: (preview_scale * 1024.0).round() as u16,
@@ -910,6 +960,9 @@ fn eval_node_output_at(
     let spec = registry
         .get_spec(&instance.type_id)
         .ok_or_else(|| CascadeError::InvalidConnection(instance.type_id.clone()))?;
+    let node = node_instances
+        .get(&node_id)
+        .ok_or(CascadeError::NodeNotFound(node_id))?;
 
     let mut inputs = HashMap::new();
     for input in spec.all_inputs().iter() {
@@ -971,6 +1024,7 @@ fn eval_node_output_at(
     let key = CacheKey {
         frame_time,
         param_revision: instance.param_revision,
+        source_revision: node.cache_revision(),
         upstream_hash,
         project_format_hash: pf_hash,
         preview_scale_q: (preview_scale * 1024.0).round() as u16,
@@ -1046,10 +1100,6 @@ fn eval_node_output_at(
                 .map(|entry| entry.value.clone())
         },
     );
-
-    let node = node_instances
-        .get(&node_id)
-        .ok_or(CascadeError::NodeNotFound(node_id))?;
 
     let mut extra_inputs = HashMap::new();
     for (input_name, alt_frame_time) in node.requested_frames(frame_time, &merged_params) {
@@ -1137,16 +1187,26 @@ mod tests {
     use crate::types::{Image, PortSpec, ValueType};
     use pollster::block_on;
     use std::any::Any;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
 
     struct MockNode {
         spec: crate::types::NodeSpec,
         output: Value,
+        cache_revision: AtomicU64,
     }
 
     impl MockNode {
         fn new(spec: crate::types::NodeSpec, output: Value) -> Self {
-            Self { spec, output }
+            Self {
+                spec,
+                output,
+                cache_revision: AtomicU64::new(0),
+            }
+        }
+
+        fn set_cache_revision(&self, revision: u64) {
+            self.cache_revision.store(revision, Ordering::Relaxed);
         }
     }
 
@@ -1161,6 +1221,10 @@ mod tests {
                 outputs.insert("output".to_string(), self.output.clone());
                 Ok(outputs)
             })
+        }
+
+        fn cache_revision(&self) -> u64 {
+            self.cache_revision.load(Ordering::Relaxed)
         }
 
         fn as_any(&self) -> &dyn Any {
@@ -2297,6 +2361,52 @@ mod tests {
             key_before.param_revision, key_after.param_revision,
             "param_revision should differ"
         );
+    }
+
+    #[test]
+    fn test_compute_node_cache_key_changes_on_source_revision_change() {
+        let mut graph = Graph::new();
+        let registry = create_simple_registry();
+        let evaluator = Evaluator::new();
+        let source_id = graph.add_node("source");
+        let frame_time = FrameTime { frame: 0 };
+        let format = Format::hd();
+
+        let source_node = Arc::new(MockNode::new(
+            registry.get_spec("source").unwrap().clone(),
+            Value::Image(create_simple_image()),
+        ));
+        let mut node_instances: HashMap<NodeId, Arc<dyn crate::node::Node>> = HashMap::new();
+        node_instances.insert(source_id, source_node.clone());
+
+        let key_before = evaluator
+            .compute_node_cache_key_with_instances(
+                &graph,
+                &registry,
+                &node_instances,
+                source_id,
+                frame_time,
+                &format,
+                1.0,
+            )
+            .expect("cache key before source revision change");
+
+        source_node.set_cache_revision(1);
+
+        let key_after = evaluator
+            .compute_node_cache_key_with_instances(
+                &graph,
+                &registry,
+                &node_instances,
+                source_id,
+                frame_time,
+                &format,
+                1.0,
+            )
+            .expect("cache key after source revision change");
+
+        assert_ne!(key_before, key_after);
+        assert_ne!(key_before.source_revision, key_after.source_revision);
     }
 
     #[test]

@@ -2,7 +2,14 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExtern
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 import { useGraphStore } from '../store/graphStore';
-import { isCompareResult, isPixelResult } from '../store/types';
+import {
+  getViewerBufferHeight,
+  getViewerBufferWidth,
+  getViewerDisplayHeight,
+  getViewerDisplayWidth,
+  isCompareResult,
+  isPixelResult,
+} from '../store/types';
 import type { ViewerResult } from '../store/types';
 import type { MediaIteratorInfo } from '../store/graphStore/slices/mediaIteratorSlice';
 import { MediaVirtualStrip } from './MediaVirtualStrip';
@@ -108,31 +115,33 @@ const sampleViewerPixels = (
 ): Uint8ClampedArray | null => {
   if (!isPixelResult(result) && !isCompareResult(result)) return null;
   const pixels = isCompareResult(result) ? result.afterPixels : result.pixels;
-  if (result.width <= 0 || result.height <= 0 || pixels.length === 0) return null;
+  const sourceWidth = getViewerBufferWidth(result);
+  const sourceHeight = getViewerBufferHeight(result);
+  if (sourceWidth <= 0 || sourceHeight <= 0 || pixels.length === 0) return null;
 
   const output = new Uint8ClampedArray(width * height * 4);
-  const sourceAspect = result.width / result.height;
+  const sourceAspect = sourceWidth / sourceHeight;
   const targetAspect = width / height;
   const sampleWidth = sourceAspect > targetAspect
-    ? Math.round(result.height * targetAspect)
-    : result.width;
+    ? Math.round(sourceHeight * targetAspect)
+    : sourceWidth;
   const sampleHeight = sourceAspect > targetAspect
-    ? result.height
-    : Math.round(result.width / targetAspect);
-  const startX = Math.max(0, Math.floor((result.width - sampleWidth) / 2));
-  const startY = Math.max(0, Math.floor((result.height - sampleHeight) / 2));
+    ? sourceHeight
+    : Math.round(sourceWidth / targetAspect);
+  const startX = Math.max(0, Math.floor((sourceWidth - sampleWidth) / 2));
+  const startY = Math.max(0, Math.floor((sourceHeight - sampleHeight) / 2));
 
   for (let y = 0; y < height; y += 1) {
     const sy = Math.min(
-      result.height - 1,
+      sourceHeight - 1,
       startY + Math.floor((y / height) * sampleHeight),
     );
     for (let x = 0; x < width; x += 1) {
       const sx = Math.min(
-        result.width - 1,
+        sourceWidth - 1,
         startX + Math.floor((x / width) * sampleWidth),
       );
-      const sourceIndex = (sy * result.width + sx) * 4;
+      const sourceIndex = (sy * sourceWidth + sx) * 4;
       const targetIndex = (y * width + x) * 4;
       output[targetIndex] = pixels[sourceIndex];
       output[targetIndex + 1] = pixels[sourceIndex + 1];
@@ -407,7 +416,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     suggestActiveTransportSourceForViewer(activeViewerId);
   }, [activeViewerId, connections, suggestActiveTransportSourceForViewer]);
 
-  const activeResult = useMemo(() => {
+  const rawActiveResult = useMemo(() => {
     return activeViewerId ? renderResults.get(activeViewerId) : undefined;
   }, [renderResults, activeViewerId]);
   const currentFrameRef = useRef(currentFrame);
@@ -423,14 +432,14 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const timer = window.setTimeout(() => {
       setActiveResultFrame({
         viewerId: activeViewerId,
-        result: activeResult,
-        frame: currentFrameRef.current,
+        result: rawActiveResult,
+        frame: rawActiveResult?.frame ?? currentFrameRef.current,
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [activeViewerId, activeResult]);
+  }, [activeViewerId, rawActiveResult]);
   const activeResultMatchesFrame = activeResultFrame.viewerId === activeViewerId
-    && activeResultFrame.result === activeResult
+    && activeResultFrame.result === rawActiveResult
     && activeResultFrame.frame === currentFrame;
 
   const activeIterator: MediaIteratorInfo | null = useMemo(() => {
@@ -443,14 +452,26 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     ? Math.max(0, Math.min(activeIterator.count - 1, currentFrame - activeIterator.startFrame))
     : 0;
 
+  const activeResult = useMemo(() => {
+    if (
+      activeIterator
+      && rawActiveResult
+      && rawActiveResult.frame !== undefined
+      && rawActiveResult.frame !== currentFrame
+    ) {
+      return undefined;
+    }
+    return rawActiveResult;
+  }, [activeIterator, currentFrame, rawActiveResult]);
+
   const hasResult = !!activeResult;
   const hasPixels = activeResult ? isPixelResult(activeResult) || isCompareResult(activeResult) : false;
 
   const dimensions = useMemo(() => {
     if (!activeResult || (!isPixelResult(activeResult) && !isCompareResult(activeResult))) return null;
     return {
-      w: activeResult.originalWidth ?? activeResult.width,
-      h: activeResult.originalHeight ?? activeResult.height,
+      w: getViewerDisplayWidth(activeResult),
+      h: getViewerDisplayHeight(activeResult),
     };
   }, [activeResult]);
 
@@ -466,10 +487,10 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     previewScaleRef.current = previewScale;
     // Use original (pre-downscale) dimensions so the canvas size and
     // dimsChanged check are immune to preview-scale rounding errors.
-    const logicalWidth = activeResult.originalWidth ?? activeResult.width;
-    const logicalHeight = activeResult.originalHeight ?? activeResult.height;
-    const backingWidth = activeResult.width;
-    const backingHeight = activeResult.height;
+    const logicalWidth = getViewerDisplayWidth(activeResult);
+    const logicalHeight = getViewerDisplayHeight(activeResult);
+    const backingWidth = getViewerBufferWidth(activeResult);
+    const backingHeight = getViewerBufferHeight(activeResult);
     const prevDimensions = dimensionsRef.current;
 
     // Keep CSS/layout dimensions logical, but keep the backing store at the
@@ -602,8 +623,8 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
       // Get canvas bounding rect to convert screen coords to logical image pixels.
       const rect = canvas.getBoundingClientRect();
-      const logicalWidth = activeResult.originalWidth ?? activeResult.width;
-      const logicalHeight = activeResult.originalHeight ?? activeResult.height;
+      const logicalWidth = getViewerDisplayWidth(activeResult);
+      const logicalHeight = getViewerDisplayHeight(activeResult);
       const scaleX = logicalWidth / rect.width;
       const scaleY = logicalHeight / rect.height;
       const px = Math.floor((e.clientX - rect.left) * scaleX);
@@ -617,9 +638,11 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
       // Map logical coords to the actual pixel buffer coords
       const previewScale = activeResult.previewScale ?? 1;
-      const bufX = Math.min(Math.floor(px * previewScale), activeResult.width - 1);
-      const bufY = Math.min(Math.floor(py * previewScale), activeResult.height - 1);
-      const idx = (bufY * activeResult.width + bufX) * 4;
+      const bufferWidth = getViewerBufferWidth(activeResult);
+      const bufferHeight = getViewerBufferHeight(activeResult);
+      const bufX = Math.min(Math.floor(px * previewScale), bufferWidth - 1);
+      const bufY = Math.min(Math.floor(py * previewScale), bufferHeight - 1);
+      const idx = (bufY * bufferWidth + bufX) * 4;
       const source = isCompareResult(activeResult) && px / logicalWidth <= compareSplit ? 'before' : 'after';
       const pixels = isCompareResult(activeResult)
         ? source === 'before' ? activeResult.beforePixels : activeResult.afterPixels

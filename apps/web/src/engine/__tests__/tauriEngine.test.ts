@@ -56,6 +56,10 @@ describe('TauriEngine AI bridge', () => {
     });
 
     await expect(engine.renderViewer('viewer-1', 12, 0.25)).resolves.toMatchObject({
+      bufferWidth: 1,
+      bufferHeight: 1,
+      displayWidth: 2,
+      displayHeight: 3,
       originalWidth: 2,
       originalHeight: 3,
     });

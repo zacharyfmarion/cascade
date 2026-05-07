@@ -23,6 +23,16 @@ import {
 const VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer', 'export_image', 'export_image_sequence', 'export_video']);
 const PANEL_VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer']);
 
+const tagRenderResult = (
+  result: ViewerResult,
+  frame: number,
+  generation?: number,
+): ViewerResult => ({
+  ...result,
+  frame,
+  generation,
+});
+
 // ---------------------------------------------------------------------------
 // Slice interface
 // ---------------------------------------------------------------------------
@@ -200,7 +210,10 @@ export const createRenderSlice: StateCreator<
           const renderScale = getEffectivePreviewScaleForResult(scale, previous);
           const result = await renderViewerForCurrentContext(viewerId, frame, renderScale);
           if (result) {
-            newResults.set(viewerId, annotateEnginePreviewResult(result, renderScale, previous));
+            newResults.set(
+              viewerId,
+              tagRenderResult(annotateEnginePreviewResult(result, renderScale, previous), frame),
+            );
             changed = true;
           }
         } catch (e) { const error = parseEngineError(e); if (error.nodeId) { const errs = new Map(get().nodeErrors); errs.set(error.nodeId, error); set({ nodeErrors: errs, lastError: error }); } else { set({ lastError: error }); } }
@@ -237,7 +250,13 @@ export const createRenderSlice: StateCreator<
             previewScaleOverride !== undefined,
           );
           const result = await renderViewerForCurrentContext(viewerNodeId, frame, renderScale);
-          const scaled = result ? annotateEnginePreviewResult(result, renderScale, previous) : null;
+          const scaled = result
+            ? tagRenderResult(
+                annotateEnginePreviewResult(result, renderScale, previous),
+                frame,
+                generation,
+              )
+            : null;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
             const newResults = new Map(get().renderResults);
             newResults.set(viewerNodeId, scaled);
@@ -269,7 +288,8 @@ export const createRenderSlice: StateCreator<
       let rendered: ViewerResult | null = null;
       const renderJob = kernel.renderLock.then(async () => {
         await pushSequenceFrames(frame);
-        rendered = await renderViewerForCurrentContext(viewerNodeId, frame, previewScale);
+        const result = await renderViewerForCurrentContext(viewerNodeId, frame, previewScale);
+        rendered = result ? tagRenderResult(result, frame) : null;
       });
       kernel.renderLock = renderJob.catch(() => undefined);
       await renderJob;
