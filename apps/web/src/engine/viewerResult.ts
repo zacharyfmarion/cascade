@@ -56,6 +56,8 @@ export function decodeViewerResult(
         nodeId,
         width: raw.width as number,
         height: raw.height as number,
+        originalWidth: typeof raw.originalWidth === 'number' ? raw.originalWidth : undefined,
+        originalHeight: typeof raw.originalHeight === 'number' ? raw.originalHeight : undefined,
         pixels,
       };
     }
@@ -70,6 +72,8 @@ export function decodeViewerResult(
         nodeId,
         width: raw.width as number,
         height: raw.height as number,
+        originalWidth: typeof raw.originalWidth === 'number' ? raw.originalWidth : undefined,
+        originalHeight: typeof raw.originalHeight === 'number' ? raw.originalHeight : undefined,
         beforePixels,
         afterPixels,
       };

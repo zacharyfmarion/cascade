@@ -1150,6 +1150,8 @@ impl Engine {
         Ok(ViewerResultWasm::Compare {
             width: after.width,
             height: after.height,
+            original_width: after.format.width(),
+            original_height: after.format.height(),
             before_pixels: Viewer::image_to_rgba8_with_display(
                 &before,
                 &self.color_management,
@@ -1239,6 +1241,8 @@ impl Engine {
                     value_type: "image".to_string(),
                     width: image.width,
                     height: image.height,
+                    original_width: image.format.width(),
+                    original_height: image.format.height(),
                     pixels,
                 }
             }
@@ -1301,6 +1305,8 @@ impl Engine {
                     value_type: "field".to_string(),
                     width: w,
                     height: h,
+                    original_width: w,
+                    original_height: h,
                     pixels: rgba8,
                 }
             }
@@ -1451,6 +1457,8 @@ impl Engine {
             return ViewerResultWasm::Compare {
                 width: after.width,
                 height: after.height,
+                original_width: after.format.width(),
+                original_height: after.format.height(),
                 before_pixels: Viewer::image_to_rgba8_with_display(
                     &before,
                     &self.color_management,
@@ -1495,6 +1503,8 @@ impl Engine {
                     value_type: "image".to_string(),
                     width: image.width,
                     height: image.height,
+                    original_width: image.format.width(),
+                    original_height: image.format.height(),
                     pixels,
                 }
             }
@@ -3636,11 +3646,15 @@ enum ViewerResultWasm {
         value_type: String,
         width: u32,
         height: u32,
+        original_width: u32,
+        original_height: u32,
         pixels: Vec<u8>,
     },
     Compare {
         width: u32,
         height: u32,
+        original_width: u32,
+        original_height: u32,
         before_pixels: Vec<u8>,
         after_pixels: Vec<u8>,
     },
@@ -3684,12 +3698,16 @@ impl ViewerResultWasm {
                 value_type,
                 width,
                 height,
+                original_width,
+                original_height,
                 pixels,
             } => {
                 let obj = js_sys::Object::new();
                 js_sys::Reflect::set(&obj, &"type".into(), &value_type.into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
                 js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
                 // Use Uint8ClampedArray for zero-copy pixel transfer
                 let arr = js_sys::Uint8ClampedArray::from(pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"pixels".into(), &arr)?;
@@ -3698,6 +3716,8 @@ impl ViewerResultWasm {
             ViewerResultWasm::Compare {
                 width,
                 height,
+                original_width,
+                original_height,
                 before_pixels,
                 after_pixels,
             } => {
@@ -3705,6 +3725,8 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"type".into(), &"compare".into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
                 js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
                 let before = js_sys::Uint8ClampedArray::from(before_pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"beforePixels".into(), &before)?;
                 let after = js_sys::Uint8ClampedArray::from(after_pixels.as_slice());

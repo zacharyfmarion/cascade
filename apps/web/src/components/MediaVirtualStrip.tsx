@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 interface MediaVirtualStripProps {
@@ -46,6 +46,18 @@ export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
 
   const virtualItems = virtualizer.getVirtualItems();
 
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const el = parentRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    const delta = Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.deltaY;
+    if (delta === 0) return;
+    el.scrollLeft += delta;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
   useEffect(() => {
     if (!onVisibleIndexesChange) return;
     const indexes = virtualItems.map(item => item.index);
@@ -61,6 +73,7 @@ export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
       className={`media-virtual-strip ${className}`.trim()}
       role="listbox"
       aria-label={ariaLabel}
+      onWheel={handleWheel}
       style={{
         ...style,
         height,

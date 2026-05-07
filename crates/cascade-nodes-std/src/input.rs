@@ -39,7 +39,13 @@ fn preview_downscale(image: Image, scale: f32) -> Result<Image, CascadeError> {
     let Some((new_w, new_h)) = preview_downscale_size(image.width, image.height, scale) else {
         return Ok(image);
     };
-    resize_nearest(&image, new_w, new_h)
+    let scaled = resize_nearest(&image, new_w, new_h)?;
+    Image::new_with_domain(
+        image.format.clone(),
+        RectI::from_dimensions(new_w, new_h),
+        (*scaled.data).clone(),
+        image.color_space.clone(),
+    )
 }
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -408,10 +414,13 @@ fn decode_dynamic_image(
     } else {
         decoded.to_rgba8()
     };
-    rgba8_to_linear_image(&rgba)
+    rgba8_to_linear_image(&rgba, Format::from_dimensions(width, height))
 }
 
-fn rgba8_to_linear_image(rgba: &image::RgbaImage) -> Result<Image, CascadeError> {
+fn rgba8_to_linear_image(
+    rgba: &image::RgbaImage,
+    logical_format: Format,
+) -> Result<Image, CascadeError> {
     let (width, height) = rgba.dimensions();
     if width > MAX_IMAGE_DIM || height > MAX_IMAGE_DIM {
         return Err(CascadeError::ImageTooLarge {
@@ -433,7 +442,12 @@ fn rgba8_to_linear_image(rgba: &image::RgbaImage) -> Result<Image, CascadeError>
             out[2] = lut[raw[idx + 2] as usize];
             out[3] = raw[idx + 3] as f32 / 255.0;
         });
-    Image::from_f32_data(width, height, data)
+    Image::new_with_domain(
+        logical_format,
+        RectI::from_dimensions(width, height),
+        data,
+        ColorSpaceId::default_working(),
+    )
 }
 
 const FRAME_CACHE_SIZE: usize = 32;
@@ -1817,6 +1831,7 @@ mod tests {
             .expect("preview frame should decode");
 
         assert_eq!((image.width, image.height), (800, 600));
+        assert_eq!((image.format.width(), image.format.height()), (1200, 900));
     }
 
     #[test]

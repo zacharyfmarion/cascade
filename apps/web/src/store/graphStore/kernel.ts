@@ -185,6 +185,21 @@ export const annotateEnginePreviewResult = (
   if (result.previewScale !== undefined) {
     return result;
   }
+  const resultOriginalWidth = result.originalWidth;
+  const resultOriginalHeight = result.originalHeight;
+  if (
+    typeof resultOriginalWidth === 'number'
+    && typeof resultOriginalHeight === 'number'
+    && (resultOriginalWidth !== result.width || resultOriginalHeight !== result.height)
+  ) {
+    const previewScale = getPreviewScaleFromDimensions(
+      result.width,
+      result.height,
+      resultOriginalWidth,
+      resultOriginalHeight,
+    );
+    return previewScale < 1 ? { ...result, previewScale } : result;
+  }
   if (!previous || (!isPixelResult(previous) && !isCompareResult(previous))) {
     return result;
   }

@@ -52,12 +52,16 @@ fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
             buf.push(0);
             buf.extend_from_slice(&render.width.to_le_bytes());
             buf.extend_from_slice(&render.height.to_le_bytes());
+            buf.extend_from_slice(&render.original_width.to_le_bytes());
+            buf.extend_from_slice(&render.original_height.to_le_bytes());
             buf.extend_from_slice(&render.pixels);
         }
         ViewerRenderResult::Compare(render) => {
             buf.push(1);
             buf.extend_from_slice(&render.width.to_le_bytes());
             buf.extend_from_slice(&render.height.to_le_bytes());
+            buf.extend_from_slice(&render.original_width.to_le_bytes());
+            buf.extend_from_slice(&render.original_height.to_le_bytes());
             buf.extend_from_slice(&render.before_pixels);
             buf.extend_from_slice(&render.after_pixels);
         }
@@ -66,9 +70,9 @@ fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
 
 fn viewer_render_result_size(result: &ViewerRenderResult) -> usize {
     match result {
-        ViewerRenderResult::Image(render) => 1 + 8 + render.pixels.len(),
+        ViewerRenderResult::Image(render) => 1 + 16 + render.pixels.len(),
         ViewerRenderResult::Compare(render) => {
-            1 + 8 + render.before_pixels.len() + render.after_pixels.len()
+            1 + 16 + render.before_pixels.len() + render.after_pixels.len()
         }
     }
 }
@@ -661,8 +665,8 @@ async fn get_batch_thumbnail(
     Ok(bytes)
 }
 
-/// Returns raw RGBA8 pixels prefixed with [width_le32][height_le32].
-/// Frontend receives an ArrayBuffer: first 8 bytes are dimensions, rest is pixel data.
+/// Returns raw RGBA8 pixels prefixed with
+/// [width_le32][height_le32][original_width_le32][original_height_le32].
 #[tauri::command]
 fn render_viewer(
     state: State<'_, EngineState>,
@@ -715,8 +719,8 @@ fn render_internal_viewer(
 /// Response binary format:
 /// [u32 viewer_count LE]
 /// For each viewer: [u32 id_len LE][utf8 id bytes][u8 kind][payload]
-/// kind 0 payload: [u32 width LE][u32 height LE][RGBA8 pixels]
-/// kind 1 payload: [u32 width LE][u32 height LE][before RGBA8 pixels][after RGBA8 pixels]
+/// kind 0 payload: [u32 width LE][u32 height LE][u32 original_width LE][u32 original_height LE][RGBA8 pixels]
+/// kind 1 payload: [u32 width LE][u32 height LE][u32 original_width LE][u32 original_height LE][before RGBA8 pixels][after RGBA8 pixels]
 #[tauri::command]
 fn set_param_and_render(
     state: State<'_, EngineState>,

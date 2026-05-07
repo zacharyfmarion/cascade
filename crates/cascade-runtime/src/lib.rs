@@ -290,6 +290,8 @@ pub struct InternalGraphConnection {
 pub struct RenderResult {
     pub width: u32,
     pub height: u32,
+    pub original_width: u32,
+    pub original_height: u32,
     pub pixels: Vec<u8>,
 }
 
@@ -297,6 +299,8 @@ pub struct RenderResult {
 pub struct CompareRenderResult {
     pub width: u32,
     pub height: u32,
+    pub original_width: u32,
+    pub original_height: u32,
     pub before_pixels: Vec<u8>,
     pub after_pixels: Vec<u8>,
 }
@@ -2749,6 +2753,8 @@ impl Engine {
         RenderResult {
             width: image.width,
             height: image.height,
+            original_width: image.format.width(),
+            original_height: image.format.height(),
             pixels,
         }
     }
@@ -2767,6 +2773,8 @@ impl Engine {
         Ok(CompareRenderResult {
             width: after.width,
             height: after.height,
+            original_width: after.format.width(),
+            original_height: after.format.height(),
             before_pixels: Viewer::image_to_rgba8_with_display(
                 before,
                 self.color_management.as_ref(),

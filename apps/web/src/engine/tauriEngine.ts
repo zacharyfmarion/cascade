@@ -69,7 +69,7 @@ const decodeBinaryViewerResult = (
   nodeId: string,
   initialOffset = 0,
 ): { result: ViewerResult | null; offset: number } => {
-  if (buf.byteLength < initialOffset + 9) return { result: null, offset: initialOffset };
+  if (buf.byteLength < initialOffset + 17) return { result: null, offset: initialOffset };
   const view = new DataView(buf);
   let offset = initialOffset;
   const kind = view.getUint8(offset);
@@ -78,13 +78,17 @@ const decodeBinaryViewerResult = (
   offset += 4;
   const height = view.getUint32(offset, true);
   offset += 4;
+  const originalWidth = view.getUint32(offset, true);
+  offset += 4;
+  const originalHeight = view.getUint32(offset, true);
+  offset += 4;
   const pixelLen = width * height * 4;
 
   if (kind === 0) {
     if (buf.byteLength < offset + pixelLen) return { result: null, offset };
     const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
     offset += pixelLen;
-    return { result: { type: 'image', nodeId, width, height, pixels }, offset };
+    return { result: { type: 'image', nodeId, width, height, originalWidth, originalHeight, pixels }, offset };
   }
 
   if (kind === 1) {
@@ -93,7 +97,7 @@ const decodeBinaryViewerResult = (
     offset += pixelLen;
     const afterPixels = new Uint8ClampedArray(buf, offset, pixelLen);
     offset += pixelLen;
-    return { result: { type: 'compare', nodeId, width, height, beforePixels, afterPixels }, offset };
+    return { result: { type: 'compare', nodeId, width, height, originalWidth, originalHeight, beforePixels, afterPixels }, offset };
   }
 
   return { result: null, offset };
@@ -308,7 +312,7 @@ export class TauriEngine implements EngineBridge {
   async renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame, previewScale });
-      if (!buf || buf.byteLength < 9) return null;
+      if (!buf || buf.byteLength < 17) return null;
 
       await this.fetchTimings();
       return decodeBinaryViewerResult(buf, viewerNodeId).result;
@@ -320,7 +324,7 @@ export class TauriEngine implements EngineBridge {
   async renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
       const buf = await invoke<ArrayBuffer>('render_internal_viewer', { groupNodeId, internalViewerId, frame, previewScale });
-      if (!buf || buf.byteLength < 9) return null;
+      if (!buf || buf.byteLength < 17) return null;
 
       await this.fetchTimings();
       return decodeBinaryViewerResult(buf, internalViewerId).result;
