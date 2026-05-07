@@ -31,6 +31,8 @@ const FILMSTRIP_THUMB_WIDTH = 68;
 const FILMSTRIP_THUMB_HEIGHT = 46;
 const FILMSTRIP_OVERSCAN = 5;
 const FILMSTRIP_THUMBNAIL_SCALE = 0.12;
+const FILMSTRIP_BOTTOM_OFFSET = 50;
+const FILMSTRIP_ERROR_BOTTOM_OFFSET = 84;
 
 const viewerResultToDataUrl = (result: ViewerResult | null): string | null => {
   if (!result || (!isPixelResult(result) && !isCompareResult(result))) return null;
@@ -876,7 +878,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
             position: 'absolute',
             left: 10,
             right: 10,
-            bottom: lastError ? 36 : 8,
+            bottom: lastError ? FILMSTRIP_ERROR_BOTTOM_OFFSET : FILMSTRIP_BOTTOM_OFFSET,
             height: 72,
             zIndex: 12,
             display: 'flex',
