@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cascade PR Review"
+  short_description: "Review Cascade PRs with project-specific checks"
+  default_prompt: "Use $cascade-pr-review to review this Cascade pull request for correctness, architecture, tests, analytics, error handling, and DSL parity."
