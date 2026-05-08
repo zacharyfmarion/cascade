@@ -179,6 +179,30 @@ export const getPreviewScaleFromDimensions = (
   return Math.min(width / originalWidth, height / originalHeight);
 };
 
+const isLikelyPreviewOfDimensions = (
+  width: number,
+  height: number,
+  originalWidth: number,
+  originalHeight: number,
+): boolean => {
+  if (
+    width <= 0
+    || height <= 0
+    || originalWidth <= 0
+    || originalHeight <= 0
+    || width >= originalWidth
+    || height >= originalHeight
+  ) {
+    return false;
+  }
+
+  const scaleX = width / originalWidth;
+  const scaleY = height / originalHeight;
+  return Math.abs(width - Math.round(originalWidth * scaleY)) <= 2
+    && Math.abs(height - Math.round(originalHeight * scaleX)) <= 2
+    && Math.abs(scaleX - scaleY) <= 0.01;
+};
+
 export const annotateEnginePreviewResult = (
   result: ViewerResult,
   scale: number,
@@ -194,6 +218,12 @@ export const annotateEnginePreviewResult = (
   const resultOriginalHeight = result.originalHeight;
   const resultDisplayWidth = getViewerDisplayWidth(result);
   const resultDisplayHeight = getViewerDisplayHeight(result);
+  const hasExplicitResultDomain = resultOriginalWidth !== undefined
+    || resultOriginalHeight !== undefined
+    || result.displayWidth !== undefined
+    || result.displayHeight !== undefined
+    || result.bufferWidth !== undefined
+    || result.bufferHeight !== undefined;
   if (
     resultDisplayWidth > 0
     && resultDisplayHeight > 0
@@ -219,9 +249,15 @@ export const annotateEnginePreviewResult = (
   if (!previous || (!isPixelResult(previous) && !isCompareResult(previous))) {
     return result;
   }
+  if (hasExplicitResultDomain) {
+    return result;
+  }
 
   const originalWidth = previous.originalWidth ?? previous.width;
   const originalHeight = previous.originalHeight ?? previous.height;
+  if (!isLikelyPreviewOfDimensions(result.width, result.height, originalWidth, originalHeight)) {
+    return result;
+  }
   const previewScale = getPreviewScaleFromDimensions(
     result.width,
     result.height,

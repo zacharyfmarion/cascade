@@ -22,13 +22,12 @@
  */
 
 import type { ParamValue, ViewerResult } from '../types';
-import { isCompareResult, isPixelResult } from '../types';
 import { useSettingsStore } from '../settingsStore';
 import type { GraphState } from './store';
 import {
+  annotateEnginePreviewResult,
   kernel,
   cloneEditingStack,
-  getPreviewScaleFromDimensions,
   getEffectivePreviewScaleForResults,
   getEngine,
   markGraphMutation,
@@ -202,36 +201,9 @@ function dispatchLiveRender(
         const prevResults = get().renderResults;
         const newResults = new Map(prevResults);
         for (const [vid, r] of results) {
-          // Annotate downscaled live-preview pixel results with original logical
-          // dimensions so the Viewer's dimsChanged check stays false and zoom/pan
-          // is preserved while dragging sliders.
-          if (liveScale < 1 && (isPixelResult(r) || isCompareResult(r)) && r.originalWidth === undefined) {
-            const prev = prevResults.get(vid);
-            if (prev && (isPixelResult(prev) || isCompareResult(prev))) {
-              const originalWidth = prev.originalWidth ?? prev.width;
-              const originalHeight = prev.originalHeight ?? prev.height;
-              const previewScale = getPreviewScaleFromDimensions(
-                r.width,
-                r.height,
-                originalWidth,
-                originalHeight,
-              );
-              newResults.set(vid, {
-                ...r,
-                previewScale,
-                originalWidth,
-                originalHeight,
-                displayWidth: originalWidth,
-                displayHeight: originalHeight,
-                bufferWidth: r.width,
-                bufferHeight: r.height,
-                frame,
-                generation,
-              });
-              continue;
-            }
-          }
-          newResults.set(vid, tagRenderResult(r, frame, generation));
+          const prev = prevResults.get(vid);
+          const annotated = annotateEnginePreviewResult(r, liveScale, prev);
+          newResults.set(vid, tagRenderResult(annotated, frame, generation));
         }
         set({ renderResults: newResults, lastError: null });
         updateNodeTimings(get, set);

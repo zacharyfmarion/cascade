@@ -69,6 +69,46 @@ describe('preview downscale sizing', () => {
     });
   });
 
+  it('does not treat a smaller mixed-size frame as a preview of the previous frame', () => {
+    const previous = imageResult(2048, 2048);
+    const landscape = imageResult(746, 442);
+
+    const annotated = annotateEnginePreviewResult(landscape, 0.25, previous);
+
+    expect(annotated).toBe(landscape);
+    expect(annotated).not.toHaveProperty('displayWidth');
+    expect(annotated).not.toHaveProperty('previewScale');
+  });
+
+  it('trusts explicit current-frame dimensions even when they match the previous aspect ratio', () => {
+    const previous = imageResult(2048, 2048);
+    const smallerSquare: ImageViewerResult = {
+      ...imageResult(1024, 1024),
+      bufferWidth: 1024,
+      bufferHeight: 1024,
+      displayWidth: 1024,
+      displayHeight: 1024,
+      originalWidth: 1024,
+      originalHeight: 1024,
+    };
+
+    const annotated = annotateEnginePreviewResult(smallerSquare, 0.25, previous);
+    if (annotated.type !== 'image') {
+      throw new Error('expected image result');
+    }
+
+    expect(annotated).toBe(smallerSquare);
+    expect(annotated).toMatchObject({
+      width: 1024,
+      height: 1024,
+      displayWidth: 1024,
+      displayHeight: 1024,
+      originalWidth: 1024,
+      originalHeight: 1024,
+    });
+    expect(annotated.previewScale).toBeUndefined();
+  });
+
   it('uses explicit display dimensions from engine preview results', () => {
     const enginePreview: ViewerResult = {
       ...imageResult(903, 600),
