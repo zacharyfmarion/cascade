@@ -1367,8 +1367,10 @@ pub fn encode_batch_thumbnail_png(
     source: &BatchThumbnailSource,
     max_edge: u32,
 ) -> Result<Vec<u8>, CascadeError> {
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let total_start = std::time::Instant::now();
     let max_edge = max_edge.clamp(1, BATCH_THUMBNAIL_MAX_EDGE_LIMIT);
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let decode_start = std::time::Instant::now();
     let decoded = match source {
         BatchThumbnailSource::Bytes(bytes) => image::load_from_memory(bytes.as_slice())
@@ -1376,17 +1378,22 @@ pub fn encode_batch_thumbnail_png(
         BatchThumbnailSource::Path(path) => image::open(path)
             .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
     };
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let decode_time = decode_start.elapsed();
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let resize_start = std::time::Instant::now();
     let thumbnail = decoded.thumbnail(max_edge, max_edge).to_rgba8();
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let resize_time = resize_start.elapsed();
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let encode_start = std::time::Instant::now();
     let mut bytes = Vec::new();
     image::DynamicImage::ImageRgba8(thumbnail)
         .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
         .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     let encode_time = encode_start.elapsed();
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
     eprintln!(
         "[perf] batch_thumbnail.encode total={:.1}ms decode={:.1}ms resize={:.1}ms encode={:.1}ms max_edge={max_edge} bytes={}",
         total_start.elapsed().as_secs_f64() * 1000.0,
@@ -1628,6 +1635,7 @@ impl LoadImageBatch {
     }
 
     pub fn thumbnail_png(&self, index: usize, max_edge: u32) -> Result<Vec<u8>, CascadeError> {
+        #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
         let total_start = std::time::Instant::now();
         let max_edge = max_edge.clamp(1, BATCH_THUMBNAIL_MAX_EDGE_LIMIT);
         let key = BatchThumbnailCacheKey { index, max_edge };
@@ -1636,7 +1644,7 @@ impl LoadImageBatch {
                 CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string())
             })?;
             if let Some(bytes) = cache.get(key) {
-                #[cfg(debug_assertions)]
+                #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
                 eprintln!(
                     "[perf] load_image_batch.thumbnail_png total={:.1}ms cache_hit=true index={index} max_edge={max_edge} bytes={}",
                     total_start.elapsed().as_secs_f64() * 1000.0,
@@ -1654,7 +1662,7 @@ impl LoadImageBatch {
             .lock()
             .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
         cache.insert(key, bytes.clone());
-        #[cfg(debug_assertions)]
+        #[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
         eprintln!(
             "[perf] load_image_batch.thumbnail_png total={:.1}ms cache_hit=false index={index} max_edge={max_edge} bytes={}",
             total_start.elapsed().as_secs_f64() * 1000.0,
