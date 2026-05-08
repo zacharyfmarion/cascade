@@ -16,6 +16,7 @@ import { MediaVirtualStrip } from './MediaVirtualStrip';
 import { aspectThumbnailSize, containRect } from './mediaThumbnailSizing';
 import { useBatchSourceThumbnails } from './useBatchSourceThumbnails';
 import { ViewerToolbar } from './ViewerToolbar';
+import { perfLog, perfLogDuration, perfNow } from '../utils/perf';
 
 /* ── Types ──────────────────────────────────────────────────── */
 export type ChannelMode = 'r' | 'g' | 'b' | 'a' | null;
@@ -659,6 +660,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     if (!activeResult || (!isPixelResult(activeResult) && !isCompareResult(activeResult)) || !canvas) {
       return;
     }
+    const drawStart = perfNow();
     const beforeCanvas = isCompareResult(activeResult) ? beforeCanvasRef.current : null;
     if (isCompareResult(activeResult) && !beforeCanvas) return;
 
@@ -682,6 +684,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
     const dimsChanged = !prevDimensions || prevDimensions.w !== logicalWidth || prevDimensions.h !== logicalHeight;
     dimensionsRef.current = { w: logicalWidth, h: logicalHeight };
+    let transformMs = 0;
+    let putImageDataMs = 0;
+    let canvasesDrawn = 0;
 
     const drawPixels = (targetCanvas: HTMLCanvasElement, pixels: Uint8ClampedArray) => {
       const ctx = targetCanvas.getContext('2d');
@@ -692,13 +697,16 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
         if (targetCanvas === canvas) imageDataRef.current = null;
       }
 
+      const transformStart = perfNow();
       const transformed = applyViewerTransforms(pixels, {
         channel: activeChannel,
         gain,
         gamma,
       });
+      transformMs += perfNow() - transformStart;
 
       ctx.imageSmoothingEnabled = previewScale >= 1;
+      const putStart = perfNow();
       if (targetCanvas === canvas) {
         let imgData = imageDataRef.current;
         if (!imgData || imgData.width !== backingWidth || imgData.height !== backingHeight) {
@@ -712,6 +720,8 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
         imgData.data.set(transformed);
         ctx.putImageData(imgData, 0, 0);
       }
+      putImageDataMs += perfNow() - putStart;
+      canvasesDrawn++;
 
       targetCanvas.style.width = `${logicalWidth}px`;
       targetCanvas.style.height = `${logicalHeight}px`;
@@ -736,7 +746,21 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
         transformRef.current?.setTransform(positionX, positionY, scale, 0);
       });
     }
-  }, [activeResult, computeFitScale, activeChannel, gain, gamma]);
+    perfLogDuration('viewer.canvasDraw', drawStart, {
+      viewerId: activeViewerId,
+      frame: activeResult.frame ?? currentFrame,
+      type: activeResult.type,
+      backingWidth,
+      backingHeight,
+      logicalWidth,
+      logicalHeight,
+      previewScale,
+      dimsChanged,
+      canvasesDrawn,
+      transformMs: Number(transformMs.toFixed(1)),
+      putImageDataMs: Number(putImageDataMs.toFixed(1)),
+    });
+  }, [activeResult, activeViewerId, computeFitScale, activeChannel, gain, gamma, currentFrame]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -1121,7 +1145,17 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                 <button
                   key={index}
                   type="button"
-                  onClick={() => setCurrentFrame(frame)}
+                  onClick={() => {
+                    perfLog('viewer.filmstripClick', {
+                      viewerId: activeViewerId,
+                      frame,
+                      index,
+                      currentFrame,
+                      hasProcessedThumbnail: Boolean(processedThumbnail),
+                      hasSourceThumbnail: Boolean(sourceThumbnail),
+                    });
+                    setCurrentFrame(frame);
+                  }}
                   title={label}
                   style={{
                     position: 'absolute',

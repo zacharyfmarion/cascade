@@ -2843,6 +2843,8 @@ impl Engine {
         frame: u64,
         preview_scale: f32,
     ) -> Result<ViewerRenderResult, CascadeError> {
+        let total_start = std::time::Instant::now();
+        let viewer_id_label = format_node_id(&self.graph, viewer_id);
         let type_id = self
             .graph
             .nodes
@@ -2855,7 +2857,10 @@ impl Engine {
             ));
         }
 
+        let eval_start = std::time::Instant::now();
         let eval_result = self.evaluate_viewer_scaled(viewer_id, frame, preview_scale)?;
+        let eval_time = eval_start.elapsed();
+        let timing_map_start = std::time::Instant::now();
         self.last_timings = eval_result
             .node_timings
             .into_iter()
@@ -2866,10 +2871,32 @@ impl Engine {
                 )
             })
             .collect();
+        let timing_map_time = timing_map_start.elapsed();
         match eval_result.value {
-            Value::Image(image) => Ok(ViewerRenderResult::Image(
-                self.image_to_render_result(&image),
-            )),
+            Value::Image(image) => {
+                let buffer_width = image.width;
+                let buffer_height = image.height;
+                let display_width = image.format.width();
+                let display_height = image.format.height();
+                let convert_start = std::time::Instant::now();
+                let render_result = self.image_to_render_result(&image);
+                let convert_time = convert_start.elapsed();
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "[perf] runtime.render_viewer_result total={:.1}ms eval={:.1}ms timings={:.1}ms display_convert={:.1}ms viewer={viewer_id_label} frame={frame} scale={:.3} buffer={}x{} display={}x{} bytes={}",
+                    total_start.elapsed().as_secs_f64() * 1000.0,
+                    eval_time.as_secs_f64() * 1000.0,
+                    timing_map_time.as_secs_f64() * 1000.0,
+                    convert_time.as_secs_f64() * 1000.0,
+                    preview_scale,
+                    buffer_width,
+                    buffer_height,
+                    display_width,
+                    display_height,
+                    render_result.pixels.len(),
+                );
+                Ok(ViewerRenderResult::Image(render_result))
+            }
             _ => Err(CascadeError::Other(
                 "Viewer output is not an image".to_string(),
             )),

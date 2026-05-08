@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { readPngDimensions } from './mediaThumbnailSizing';
+import { perfLog, perfLogDuration, perfNow } from '../utils/perf';
 
 export type BatchThumbnailLoader = (
   sourceNodeId: string,
@@ -125,6 +126,13 @@ export const useBatchSourceThumbnails = ({
 
     let cancelled = false;
     const workerCount = Math.max(1, Math.min(concurrency, queue.length));
+    perfLog('thumbnail.queue', {
+      sourceNodeId,
+      visibleIndexes: normalizedVisibleIndexes,
+      queuedIndexes: queue,
+      workerCount,
+      maxEdge,
+    });
 
     const worker = async () => {
       while (queue.length > 0) {
@@ -134,9 +142,24 @@ export const useBatchSourceThumbnails = ({
         if (thumbnailsRef.current.has(index) || pendingRef.current.has(index)) continue;
         pendingRef.current.add(index);
         try {
+          const requestStart = perfNow();
           const bytes = await getThumbnail(sourceNodeId, index, maxEdge);
+          perfLogDuration('thumbnail.sourceRequest', requestStart, {
+            sourceNodeId,
+            index,
+            maxEdge,
+            bytes: bytes?.byteLength ?? 0,
+          });
           if (generationRef.current !== generation || !bytes) continue;
+          const decodeStart = perfNow();
           const thumbnail = await bytesToThumbnail(bytes);
+          perfLogDuration('thumbnail.frontendDecode', decodeStart, {
+            sourceNodeId,
+            index,
+            bytes: bytes.byteLength,
+            width: thumbnail.width,
+            height: thumbnail.height,
+          });
           if (generationRef.current !== generation) {
             revokeThumbnail(thumbnail);
             continue;

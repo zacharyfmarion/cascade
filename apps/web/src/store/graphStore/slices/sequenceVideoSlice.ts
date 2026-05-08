@@ -4,6 +4,7 @@ import type { ParamValue } from '../../types';
 import type { SequenceInfo, VideoInfo } from '../../../engine/bridge';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { makeEngineError } from '../../../engine/engineError';
+import { perfLog, perfLogDuration, perfNow } from '../../../utils/perf';
 import {
   MEDIA_NAV_PREVIEW_SCALE,
   getEngine,
@@ -103,17 +104,32 @@ export const createSequenceVideoSlice: StateCreator<
     recomputeSequenceState,
 
     setCurrentFrame: (frame) => {
+      const startTime = perfNow();
       const { start, end } = transportRange();
       const nextFrame = Math.max(start, Math.min(frame, end));
       set({ currentFrame: nextFrame });
 
       const previewScale = get().activeTransportSourceId ? MEDIA_NAV_PREVIEW_SCALE : undefined;
       const { nodes } = get();
+      let triggeredViewers = 0;
+      perfLog('media.setCurrentFrame', {
+        requestedFrame: frame,
+        nextFrame,
+        start,
+        end,
+        previewScale,
+        activeTransportSourceId: get().activeTransportSourceId,
+      });
       for (const [viewerId, node] of nodes) {
         if (PANEL_VIEWER_NODE_TYPES.has(node.typeId)) {
+          triggeredViewers++;
           get().triggerRender(viewerId, previewScale);
         }
       }
+      perfLogDuration('media.setCurrentFrame.dispatch', startTime, {
+        nextFrame,
+        triggeredViewers,
+      });
     },
 
     setSequenceDirectory: async (nodeId, directory) => {

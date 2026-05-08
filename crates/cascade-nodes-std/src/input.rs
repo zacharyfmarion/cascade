@@ -1544,6 +1544,7 @@ impl LoadImageBatch {
     }
 
     pub fn thumbnail_png(&self, index: usize, max_edge: u32) -> Result<Vec<u8>, CascadeError> {
+        let total_start = std::time::Instant::now();
         let max_edge = max_edge.clamp(1, BATCH_THUMBNAIL_MAX_EDGE_LIMIT);
         let key = BatchThumbnailCacheKey { index, max_edge };
         {
@@ -1551,6 +1552,12 @@ impl LoadImageBatch {
                 CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string())
             })?;
             if let Some(bytes) = cache.get(key) {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "[perf] load_image_batch.thumbnail_png total={:.1}ms cache_hit=true index={index} max_edge={max_edge} bytes={}",
+                    total_start.elapsed().as_secs_f64() * 1000.0,
+                    bytes.len(),
+                );
                 return Ok(bytes);
             }
         }
@@ -1567,23 +1574,38 @@ impl LoadImageBatch {
                 .clone()
         };
 
+        let decode_start = std::time::Instant::now();
         let decoded = match source {
             BatchEntrySource::Bytes(bytes) => image::load_from_memory(&bytes)
                 .map_err(|e| CascadeError::ImageDecode(e.to_string()))?,
             BatchEntrySource::Path(path) => image::open(&path)
                 .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
         };
+        let decode_time = decode_start.elapsed();
+        let resize_start = std::time::Instant::now();
         let thumbnail = decoded.thumbnail(max_edge, max_edge).to_rgba8();
+        let resize_time = resize_start.elapsed();
+        let encode_start = std::time::Instant::now();
         let mut bytes = Vec::new();
         image::DynamicImage::ImageRgba8(thumbnail)
             .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
             .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+        let encode_time = encode_start.elapsed();
 
         let mut cache = self
             .thumbnail_cache
             .lock()
             .map_err(|_| CascadeError::Other("Batch thumbnail cache mutex poisoned".to_string()))?;
         cache.insert(key, bytes.clone());
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[perf] load_image_batch.thumbnail_png total={:.1}ms cache_hit=false decode={:.1}ms resize={:.1}ms encode={:.1}ms index={index} max_edge={max_edge} bytes={}",
+            total_start.elapsed().as_secs_f64() * 1000.0,
+            decode_time.as_secs_f64() * 1000.0,
+            resize_time.as_secs_f64() * 1000.0,
+            encode_time.as_secs_f64() * 1000.0,
+            bytes.len(),
+        );
         Ok(bytes)
     }
 

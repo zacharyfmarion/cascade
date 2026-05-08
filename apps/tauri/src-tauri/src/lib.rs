@@ -26,6 +26,11 @@ const BATCH_ASSET_PREFIX: &str = "batch";
 const SUPPORTED_IMAGE_EXTENSIONS: &[&str] =
     &["png", "jpg", "jpeg", "exr", "tif", "tiff", "bmp", "webp"];
 
+#[cfg(debug_assertions)]
+fn ms(duration: std::time::Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
+}
+
 #[derive(serde::Deserialize)]
 struct BatchManifest {
     #[serde(default)]
@@ -646,21 +651,28 @@ async fn get_batch_thumbnail(
     index: usize,
     max_edge: u32,
 ) -> Result<Vec<u8>, String> {
-    let start = Instant::now();
+    let command_start = Instant::now();
     let state = state.inner().clone();
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
+    let (bytes, lock_wait, engine_time) = tauri::async_runtime::spawn_blocking(move || {
+        let lock_start = Instant::now();
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.engine
+        let lock_wait = lock_start.elapsed();
+        let engine_start = Instant::now();
+        let bytes = s
+            .engine
             .get_batch_thumbnail(&node_id, index, max_edge)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        Ok::<_, String>((bytes, lock_wait, engine_start.elapsed()))
     })
     .await
     .map_err(|e| e.to_string())??;
     #[cfg(debug_assertions)]
     eprintln!(
-        "[perf] get_batch_thumbnail: {:.1}ms (index {index}, {} bytes)",
-        start.elapsed().as_secs_f64() * 1000.0,
-        bytes.len()
+        "[perf] tauri.get_batch_thumbnail total={:.1}ms lock_wait={:.1}ms engine={:.1}ms index={index} max_edge={max_edge} bytes={}",
+        ms(command_start.elapsed()),
+        ms(lock_wait),
+        ms(engine_time),
+        bytes.len(),
     );
     Ok(bytes)
 }
@@ -674,19 +686,30 @@ fn render_viewer(
     frame: u64,
     preview_scale: Option<f32>,
 ) -> Result<Response, String> {
-    let start = Instant::now();
+    let command_start = Instant::now();
+    let lock_start = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let lock_wait = lock_start.elapsed();
+    let engine_start = Instant::now();
     let result = s
         .engine
         .render_viewer_result_scaled(&viewer_node_id, frame, preview_scale.unwrap_or(1.0))
         .map_err(|e| e.to_string())?;
+    let engine_time = engine_start.elapsed();
 
+    let serialize_start = Instant::now();
     let mut buf = Vec::with_capacity(viewer_render_result_size(&result));
     write_viewer_render_result(&mut buf, &result);
+    let serialize_time = serialize_start.elapsed();
     #[cfg(debug_assertions)]
     eprintln!(
-        "[perf] render_viewer: {:.1}ms ({viewer_node_id}, frame {frame})",
-        start.elapsed().as_secs_f64() * 1000.0
+        "[perf] tauri.render_viewer total={:.1}ms lock_wait={:.1}ms engine={:.1}ms serialize={:.1}ms viewer={viewer_node_id} frame={frame} scale={:.3} bytes={}",
+        ms(command_start.elapsed()),
+        ms(lock_wait),
+        ms(engine_time),
+        ms(serialize_time),
+        preview_scale.unwrap_or(1.0),
+        buf.len(),
     );
     Ok(Response::new(buf))
 }
@@ -699,7 +722,11 @@ fn render_internal_viewer(
     frame: u64,
     preview_scale: Option<f32>,
 ) -> Result<Response, String> {
+    let command_start = Instant::now();
+    let lock_start = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let lock_wait = lock_start.elapsed();
+    let engine_start = Instant::now();
     let result = s
         .engine
         .render_internal_viewer_result_scaled(
@@ -709,9 +736,22 @@ fn render_internal_viewer(
             preview_scale.unwrap_or(1.0),
         )
         .map_err(|e| e.to_string())?;
+    let engine_time = engine_start.elapsed();
 
+    let serialize_start = Instant::now();
     let mut buf = Vec::with_capacity(viewer_render_result_size(&result));
     write_viewer_render_result(&mut buf, &result);
+    let serialize_time = serialize_start.elapsed();
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] tauri.render_internal_viewer total={:.1}ms lock_wait={:.1}ms engine={:.1}ms serialize={:.1}ms group={group_node_id} viewer={internal_viewer_id} frame={frame} scale={:.3} bytes={}",
+        ms(command_start.elapsed()),
+        ms(lock_wait),
+        ms(engine_time),
+        ms(serialize_time),
+        preview_scale.unwrap_or(1.0),
+        buf.len(),
+    );
     Ok(Response::new(buf))
 }
 
@@ -730,10 +770,15 @@ fn set_param_and_render(
     frame: u64,
     preview_scale: Option<f32>,
 ) -> Result<Response, String> {
-    let t0 = Instant::now();
+    let command_start = Instant::now();
+    let lock_start = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let lock_wait = lock_start.elapsed();
+    let parse_start = Instant::now();
     let param_value: cascade_runtime::ParamValue =
         serde_json::from_value(value).map_err(|e| e.to_string())?;
+    let parse_time = parse_start.elapsed();
+    let engine_start = Instant::now();
     let results = s
         .engine
         .set_param_and_render_viewer_results_scaled(
@@ -744,13 +789,9 @@ fn set_param_and_render(
             preview_scale.unwrap_or(1.0),
         )
         .map_err(|e| e.to_string())?;
-    let elapsed = t0.elapsed();
-    eprintln!(
-        "[perf] set_param_and_render: {:.1}ms ({} viewers)",
-        elapsed.as_secs_f64() * 1000.0,
-        results.len()
-    );
+    let engine_time = engine_start.elapsed();
 
+    let serialize_start = Instant::now();
     let total_size: usize = 4 + results
         .iter()
         .map(|(id, r)| 4 + id.len() + viewer_render_result_size(r))
@@ -762,6 +803,19 @@ fn set_param_and_render(
         buf.extend_from_slice(id.as_bytes());
         write_viewer_render_result(&mut buf, r);
     }
+    let serialize_time = serialize_start.elapsed();
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] tauri.set_param_and_render total={:.1}ms lock_wait={:.1}ms parse={:.1}ms engine={:.1}ms serialize={:.1}ms node={node_id} key={key} frame={frame} scale={:.3} viewers={} bytes={}",
+        ms(command_start.elapsed()),
+        ms(lock_wait),
+        ms(parse_time),
+        ms(engine_time),
+        ms(serialize_time),
+        preview_scale.unwrap_or(1.0),
+        results.len(),
+        buf.len(),
+    );
     Ok(Response::new(buf))
 }
 
@@ -774,10 +828,15 @@ fn set_input_default_and_render(
     frame: u64,
     preview_scale: Option<f32>,
 ) -> Result<Response, String> {
-    let t0 = Instant::now();
+    let command_start = Instant::now();
+    let lock_start = Instant::now();
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let lock_wait = lock_start.elapsed();
+    let parse_start = Instant::now();
     let param_value: cascade_runtime::ParamValue =
         serde_json::from_value(value).map_err(|e| e.to_string())?;
+    let parse_time = parse_start.elapsed();
+    let engine_start = Instant::now();
     let results = s
         .engine
         .set_input_default_and_render_viewer_results_scaled(
@@ -788,13 +847,9 @@ fn set_input_default_and_render(
             preview_scale.unwrap_or(1.0),
         )
         .map_err(|e| e.to_string())?;
-    let elapsed = t0.elapsed();
-    eprintln!(
-        "[perf] set_input_default_and_render: {:.1}ms ({} viewers)",
-        elapsed.as_secs_f64() * 1000.0,
-        results.len()
-    );
+    let engine_time = engine_start.elapsed();
 
+    let serialize_start = Instant::now();
     let total_size: usize = 4 + results
         .iter()
         .map(|(id, r)| 4 + id.len() + viewer_render_result_size(r))
@@ -806,6 +861,19 @@ fn set_input_default_and_render(
         buf.extend_from_slice(id.as_bytes());
         write_viewer_render_result(&mut buf, r);
     }
+    let serialize_time = serialize_start.elapsed();
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] tauri.set_input_default_and_render total={:.1}ms lock_wait={:.1}ms parse={:.1}ms engine={:.1}ms serialize={:.1}ms node={node_id} port={port_name} frame={frame} scale={:.3} viewers={} bytes={}",
+        ms(command_start.elapsed()),
+        ms(lock_wait),
+        ms(parse_time),
+        ms(engine_time),
+        ms(serialize_time),
+        preview_scale.unwrap_or(1.0),
+        results.len(),
+        buf.len(),
+    );
     Ok(Response::new(buf))
 }
 

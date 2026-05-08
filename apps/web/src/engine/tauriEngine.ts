@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, BatchInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo, InternalGraphNode } from '../store/types';
+import { perfLogDuration, perfNow } from '../utils/perf';
 
 type DocumentEnvelope = {
   cascade: unknown;
@@ -193,7 +194,10 @@ export class TauriEngine implements EngineBridge {
     const args = mutation.type === 'param'
       ? { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame, previewScale }
       : { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value, frame, previewScale };
+    const totalStart = perfNow();
+    const invokeStart = perfNow();
     const buf = await invoke<ArrayBuffer>(cmd, args);
+    const invokeMs = perfNow() - invokeStart;
     const results: Array<[string, ViewerResult]> = [];
     if (!buf || buf.byteLength < 4) return results;
 
@@ -214,7 +218,19 @@ export class TauriEngine implements EngineBridge {
         results.push([id, decoded.result]);
       }
     }
+    const timingsStart = perfNow();
     await this.fetchTimings();
+    const timingsMs = perfNow() - timingsStart;
+    perfLogDuration(`tauri.${cmd}.total`, totalStart, {
+      nodeId: mutation.nodeId,
+      key: mutation.key,
+      frame,
+      previewScale,
+      bytes: buf.byteLength,
+      viewers: results.length,
+      invokeMs: Number(invokeMs.toFixed(1)),
+      timingsMs: Number(timingsMs.toFixed(1)),
+    });
     return results;
   }
 
@@ -276,22 +292,18 @@ export class TauriEngine implements EngineBridge {
   }
 
   async batchLoadDirectory(nodeId: string, directory: string): Promise<BatchInfo> {
-    const start = performance.now();
+    const start = perfNow();
     const json = await invoke<string>('batch_load_directory', { nodeId, directory });
     const info = JSON.parse(json) as BatchInfo;
-    if (import.meta.env.DEV) {
-      console.debug(`[perf] batchLoadDirectory ${(performance.now() - start).toFixed(1)}ms`, info);
-    }
+    perfLogDuration('tauri.batchLoadDirectory', start, { ...info });
     return info;
   }
 
   async batchLoadPaths(nodeId: string, paths: string[]): Promise<BatchInfo> {
-    const start = performance.now();
+    const start = perfNow();
     const json = await invoke<string>('batch_load_paths', { nodeId, paths });
     const info = JSON.parse(json) as BatchInfo;
-    if (import.meta.env.DEV) {
-      console.debug(`[perf] batchLoadPaths ${(performance.now() - start).toFixed(1)}ms`, info);
-    }
+    perfLogDuration('tauri.batchLoadPaths', start, { ...info });
     return info;
   }
 
@@ -312,12 +324,15 @@ export class TauriEngine implements EngineBridge {
 
   async getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null> {
     try {
-      const start = performance.now();
+      const start = perfNow();
       const buf = await invoke<ArrayBuffer>('get_batch_thumbnail', { nodeId, index, maxEdge });
       if (!buf || buf.byteLength === 0) return null;
-      if (import.meta.env.DEV) {
-        console.debug(`[perf] getBatchThumbnail ${(performance.now() - start).toFixed(1)}ms`, { nodeId, index, bytes: buf.byteLength });
-      }
+      perfLogDuration('tauri.getBatchThumbnail', start, {
+        nodeId,
+        index,
+        maxEdge,
+        bytes: buf.byteLength,
+      });
       return new Uint8Array(buf);
     } catch {
       return null;
@@ -342,11 +357,34 @@ export class TauriEngine implements EngineBridge {
 
   async renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
+      const totalStart = perfNow();
+      const invokeStart = perfNow();
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame, previewScale });
       if (!buf || buf.byteLength < 17) return null;
 
+      const invokeMs = perfNow() - invokeStart;
+      const timingsStart = perfNow();
       await this.fetchTimings();
-      return decodeBinaryViewerResult(buf, viewerNodeId).result;
+      const timingsMs = perfNow() - timingsStart;
+      const decodeStart = perfNow();
+      const result = decodeBinaryViewerResult(buf, viewerNodeId).result;
+      const decodeMs = perfNow() - decodeStart;
+      perfLogDuration('tauri.renderViewer.total', totalStart, {
+        viewerNodeId,
+        frame,
+        previewScale,
+        bytes: buf.byteLength,
+        invokeMs: Number(invokeMs.toFixed(1)),
+        timingsMs: Number(timingsMs.toFixed(1)),
+        decodeMs: Number(decodeMs.toFixed(1)),
+        result: result && 'width' in result ? {
+          width: result.width,
+          height: result.height,
+          displayWidth: result.displayWidth,
+          displayHeight: result.displayHeight,
+        } : result?.type ?? null,
+      });
+      return result;
     } catch {
       return null;
     }
@@ -354,11 +392,29 @@ export class TauriEngine implements EngineBridge {
 
   async renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
+      const totalStart = perfNow();
+      const invokeStart = perfNow();
       const buf = await invoke<ArrayBuffer>('render_internal_viewer', { groupNodeId, internalViewerId, frame, previewScale });
       if (!buf || buf.byteLength < 17) return null;
 
+      const invokeMs = perfNow() - invokeStart;
+      const timingsStart = perfNow();
       await this.fetchTimings();
-      return decodeBinaryViewerResult(buf, internalViewerId).result;
+      const timingsMs = perfNow() - timingsStart;
+      const decodeStart = perfNow();
+      const result = decodeBinaryViewerResult(buf, internalViewerId).result;
+      const decodeMs = perfNow() - decodeStart;
+      perfLogDuration('tauri.renderInternalViewer.total', totalStart, {
+        groupNodeId,
+        internalViewerId,
+        frame,
+        previewScale,
+        bytes: buf.byteLength,
+        invokeMs: Number(invokeMs.toFixed(1)),
+        timingsMs: Number(timingsMs.toFixed(1)),
+        decodeMs: Number(decodeMs.toFixed(1)),
+      });
+      return result;
     } catch {
       return null;
     }

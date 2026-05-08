@@ -12,6 +12,7 @@ import type { EngineError } from '../../../engine/engineError';
 import { parseEngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { useSettingsStore } from '../../settingsStore';
+import { perfLog, perfLogDuration, perfNow } from '../../../utils/perf';
 import {
   kernel,
   annotateEnginePreviewResult,
@@ -238,9 +239,19 @@ export const createRenderSlice: StateCreator<
       const frame = get().currentFrame;
       const scale = previewScaleOverride ?? get().previewScale;
       const generation = nextRenderGeneration(viewerNodeId);
+      const queuedAt = perfNow();
+      perfLog('render.triggerRender.queued', {
+        viewerNodeId,
+        frame,
+        scale,
+        previewScaleOverride,
+        generation,
+      });
       kernel.renderLock = kernel.renderLock.then(async () => {
+        const lockWaitMs = perfNow() - queuedAt;
         if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
         try {
+          const totalStart = perfNow();
           await pushSequenceFrames(frame);
           if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
           const previous = get().renderResults.get(viewerNodeId);
@@ -249,7 +260,10 @@ export const createRenderSlice: StateCreator<
             previous,
             previewScaleOverride !== undefined,
           );
+          const invokeStart = perfNow();
           const result = await renderViewerForCurrentContext(viewerNodeId, frame, renderScale);
+          const invokeMs = perfNow() - invokeStart;
+          const annotateStart = perfNow();
           const scaled = result
             ? tagRenderResult(
                 annotateEnginePreviewResult(result, renderScale, previous),
@@ -257,12 +271,34 @@ export const createRenderSlice: StateCreator<
                 generation,
               )
             : null;
+          const annotateMs = perfNow() - annotateStart;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
+            const commitStart = perfNow();
             const newResults = new Map(get().renderResults);
             newResults.set(viewerNodeId, scaled);
             set({ renderResults: newResults, lastError: null, nodeErrors: new Map() });
             updateNodeTimings();
+            perfLogDuration('render.triggerRender.storeCommit', commitStart, {
+              viewerNodeId,
+              frame,
+              generation,
+            });
           }
+          perfLogDuration('render.triggerRender.total', totalStart, {
+            viewerNodeId,
+            frame,
+            generation,
+            renderScale,
+            lockWaitMs: Number(lockWaitMs.toFixed(1)),
+            invokeMs: Number(invokeMs.toFixed(1)),
+            annotateMs: Number(annotateMs.toFixed(1)),
+            result: scaled && 'width' in scaled ? {
+              width: scaled.width,
+              height: scaled.height,
+              displayWidth: scaled.displayWidth,
+              displayHeight: scaled.displayHeight,
+            } : scaled?.type ?? null,
+          });
         } catch (e) {
           const error = parseEngineError(e);
           if (error.code !== 'MISSING_INPUT') {
