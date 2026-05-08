@@ -123,19 +123,21 @@ export const useBatchSourceThumbnails = ({
     ));
     if (queue.length === 0) return;
 
-    for (const index of queue) pendingRef.current.add(index);
     let cancelled = false;
     const workerCount = Math.max(1, Math.min(concurrency, queue.length));
 
     const worker = async () => {
-      while (!cancelled && queue.length > 0) {
+      while (queue.length > 0) {
+        if (cancelled) break;
         const index = queue.shift();
         if (index === undefined) break;
+        if (thumbnailsRef.current.has(index) || pendingRef.current.has(index)) continue;
+        pendingRef.current.add(index);
         try {
           const bytes = await getThumbnail(sourceNodeId, index, maxEdge);
-          if (cancelled || generationRef.current !== generation || !bytes) continue;
+          if (generationRef.current !== generation || !bytes) continue;
           const thumbnail = await bytesToThumbnail(bytes);
-          if (cancelled || generationRef.current !== generation) {
+          if (generationRef.current !== generation) {
             revokeThumbnail(thumbnail);
             continue;
           }

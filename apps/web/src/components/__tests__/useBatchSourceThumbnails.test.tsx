@@ -187,6 +187,33 @@ describe('useBatchSourceThumbnails', () => {
     expect(revokeObjectURL).toHaveBeenCalledTimes(0);
   });
 
+  it('retries queued indexes after a visible range change cancels an old worker', async () => {
+    const requests = new Map<number, ReturnType<typeof createDeferred<Uint8Array>>>();
+    const loader = vi.fn((_source: string, index: number) => {
+      const request = createDeferred<Uint8Array>();
+      requests.set(index, request);
+      return request.promise;
+    });
+
+    const { rerender } = render(
+      <Probe visibleIndexes={[0, 1, 2]} loader={loader} concurrency={1} />,
+    );
+
+    await waitFor(() => expect(loader).toHaveBeenCalledWith('batch1', 0, 96));
+    rerender(<Probe visibleIndexes={[0, 1, 2, 3]} loader={loader} concurrency={1} />);
+
+    requests.get(0)?.resolve(bytesFor(0));
+    await waitFor(() => expect(screen.getByTestId('thumb-0')).toBeTruthy());
+    await waitFor(() => expect(loader).toHaveBeenCalledWith('batch1', 1, 96));
+
+    requests.get(1)?.resolve(bytesFor(1));
+    await waitFor(() => expect(screen.getByTestId('thumb-1')).toBeTruthy());
+    await waitFor(() => expect(loader).toHaveBeenCalledWith('batch1', 2, 96));
+
+    requests.get(2)?.resolve(bytesFor(2));
+    await waitFor(() => expect(screen.getByTestId('thumb-2')).toBeTruthy());
+  });
+
   it('revokes object URLs on eviction and unmount', async () => {
     const loader = vi.fn(async (_source: string, index: number) => bytesFor(index));
     const { unmount } = render(
