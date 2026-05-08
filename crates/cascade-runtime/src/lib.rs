@@ -28,7 +28,8 @@ use cascade_gpu::{
     gpu_script_passthrough_manifest, register_gpu_nodes, GpuContext, KernelManifest,
 };
 use cascade_nodes_std::group::InternalOutputEvalRequest;
-use cascade_nodes_std::input::LoadImage as InputLoadImage;
+use cascade_nodes_std::input::{encode_batch_thumbnail_png, LoadImage as InputLoadImage};
+pub use cascade_nodes_std::input::{BatchThumbnailSource, BatchThumbnailSourceSnapshot};
 pub use cascade_nodes_std::SequenceInfo;
 use cascade_nodes_std::{
     decode_response_image, encode_image_png, register_standard_nodes, ColorPaletteNode,
@@ -47,6 +48,13 @@ use uuid::Uuid;
 pub use document::*;
 
 const GPU_SCRIPT_MANIFEST_PARAM_KEY: &str = "__script_manifest";
+
+pub fn encode_batch_thumbnail_png_from_snapshot(
+    snapshot: &BatchThumbnailSourceSnapshot,
+    max_edge: u32,
+) -> Result<Vec<u8>, CascadeError> {
+    encode_batch_thumbnail_png(&snapshot.source, max_edge)
+}
 
 fn serialize_gpu_script_manifest(manifest: &KernelManifest) -> Result<String, String> {
     serde_json::to_string(manifest).map_err(|e| e.to_string())
@@ -2607,6 +2615,16 @@ impl Engine {
         let id = self.parse_node_id(node_id)?;
         let batch = self.batch_node(id)?;
         batch.thumbnail_png(index, max_edge)
+    }
+
+    pub fn get_batch_thumbnail_source_snapshot(
+        &self,
+        node_id: &str,
+        index: usize,
+    ) -> Result<BatchThumbnailSourceSnapshot, CascadeError> {
+        let id = self.parse_node_id(node_id)?;
+        let batch = self.batch_node(id)?;
+        batch.thumbnail_source_snapshot(index)
     }
 
     pub fn load_palette_data(
@@ -5576,6 +5594,51 @@ return pixelated;
 
         assert!(image.width() <= 32);
         assert!(image.height() <= 32);
+    }
+
+    #[test]
+    fn test_batch_thumbnail_source_snapshot_returns_source_revision() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(&batch_id, "thumb.png", &tiny_png())
+            .expect("batch image should register");
+
+        let snapshot = engine
+            .get_batch_thumbnail_source_snapshot(&batch_id, 0)
+            .expect("snapshot should exist");
+        assert_eq!(snapshot.index, 0);
+        assert_eq!(snapshot.stem, "thumb");
+        assert!(snapshot.source_revision > 0);
+
+        let bytes = encode_batch_thumbnail_png_from_snapshot(&snapshot, 32)
+            .expect("thumbnail should encode from snapshot");
+        let image = image::load_from_memory(&bytes).expect("thumbnail should decode");
+        assert!(image.width() <= 32);
+        assert!(image.height() <= 32);
+    }
+
+    #[test]
+    fn test_batch_thumbnail_source_snapshot_updates_after_source_change() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(&batch_id, "first.png", &tiny_png())
+            .expect("first image should register");
+        let first = engine
+            .get_batch_thumbnail_source_snapshot(&batch_id, 0)
+            .expect("first snapshot should exist");
+
+        engine.batch_clear(&batch_id).expect("batch should clear");
+        engine
+            .batch_add_image(&batch_id, "second.png", &tiny_png())
+            .expect("second image should register");
+        let second = engine
+            .get_batch_thumbnail_source_snapshot(&batch_id, 0)
+            .expect("second snapshot should exist");
+
+        assert!(second.source_revision > first.source_revision);
+        assert_ne!(first.source_identity, second.source_identity);
     }
 
     fn mixed_batch_sizes() -> Vec<(u32, u32)> {

@@ -44,8 +44,9 @@ const FILMSTRIP_FALLBACK_ITEM_WIDTH = FILMSTRIP_FALLBACK_THUMB_WIDTH + FILMSTRIP
 const FILMSTRIP_OVERSCAN = 3;
 const FILMSTRIP_BOTTOM_OFFSET = 50;
 const FILMSTRIP_ERROR_BOTTOM_OFFSET = 84;
-const FILMSTRIP_SOURCE_THUMBNAIL_MAX_EDGE = 96;
+const FILMSTRIP_SOURCE_THUMBNAIL_MAX_EDGE = 128;
 const FILMSTRIP_SOURCE_THUMB_CACHE_LIMIT = 120;
+const FILMSTRIP_SOURCE_THUMB_CONCURRENCY = 1;
 const PROCESSED_THUMB_CACHE_LIMIT = 120;
 
 interface ProcessedThumbnail {
@@ -533,6 +534,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     maxEdge: FILMSTRIP_SOURCE_THUMBNAIL_MAX_EDGE,
     getThumbnail: getBatchThumbnail,
     cacheLimit: FILMSTRIP_SOURCE_THUMB_CACHE_LIMIT,
+    concurrency: FILMSTRIP_SOURCE_THUMB_CONCURRENCY,
     generationKey: batchThumbnailGenerationKey,
     enabled: activeIterator?.kind === 'batch',
   });

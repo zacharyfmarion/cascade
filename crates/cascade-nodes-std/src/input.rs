@@ -1216,8 +1216,23 @@ struct BatchEntry {
 
 #[derive(Clone)]
 enum BatchEntrySource {
-    Bytes(Vec<u8>),
+    Bytes(Arc<Vec<u8>>),
     Path(PathBuf),
+}
+
+#[derive(Clone)]
+pub enum BatchThumbnailSource {
+    Bytes(Arc<Vec<u8>>),
+    Path(PathBuf),
+}
+
+#[derive(Clone)]
+pub struct BatchThumbnailSourceSnapshot {
+    pub index: usize,
+    pub stem: String,
+    pub source_revision: u64,
+    pub source_identity: String,
+    pub source: BatchThumbnailSource,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1348,6 +1363,41 @@ fn preview_scale_bucket(preview_scale: f32) -> u16 {
     }
 }
 
+pub fn encode_batch_thumbnail_png(
+    source: &BatchThumbnailSource,
+    max_edge: u32,
+) -> Result<Vec<u8>, CascadeError> {
+    let total_start = std::time::Instant::now();
+    let max_edge = max_edge.clamp(1, BATCH_THUMBNAIL_MAX_EDGE_LIMIT);
+    let decode_start = std::time::Instant::now();
+    let decoded = match source {
+        BatchThumbnailSource::Bytes(bytes) => image::load_from_memory(bytes.as_slice())
+            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?,
+        BatchThumbnailSource::Path(path) => image::open(path)
+            .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
+    };
+    let decode_time = decode_start.elapsed();
+    let resize_start = std::time::Instant::now();
+    let thumbnail = decoded.thumbnail(max_edge, max_edge).to_rgba8();
+    let resize_time = resize_start.elapsed();
+    let encode_start = std::time::Instant::now();
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(thumbnail)
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
+    let encode_time = encode_start.elapsed();
+    #[cfg(debug_assertions)]
+    eprintln!(
+        "[perf] batch_thumbnail.encode total={:.1}ms decode={:.1}ms resize={:.1}ms encode={:.1}ms max_edge={max_edge} bytes={}",
+        total_start.elapsed().as_secs_f64() * 1000.0,
+        decode_time.as_secs_f64() * 1000.0,
+        resize_time.as_secs_f64() * 1000.0,
+        encode_time.as_secs_f64() * 1000.0,
+        bytes.len(),
+    );
+    Ok(bytes)
+}
+
 pub struct LoadImageBatch {
     entries: Mutex<Vec<BatchEntry>>,
     frame_cache: Mutex<BatchFrameCache>,
@@ -1415,7 +1465,7 @@ impl LoadImageBatch {
             .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
         entries.push(BatchEntry {
             stem,
-            source: BatchEntrySource::Bytes(bytes.to_vec()),
+            source: BatchEntrySource::Bytes(Arc::new(bytes.to_vec())),
         });
         drop(entries);
         let mut cache = self
@@ -1537,10 +1587,44 @@ impl LoadImageBatch {
                 .clone()
         };
         match source {
-            BatchEntrySource::Bytes(bytes) => Ok(bytes),
+            BatchEntrySource::Bytes(bytes) => Ok((*bytes).clone()),
             BatchEntrySource::Path(path) => std::fs::read(&path)
                 .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display()))),
         }
+    }
+
+    pub fn thumbnail_source_snapshot(
+        &self,
+        index: usize,
+    ) -> Result<BatchThumbnailSourceSnapshot, CascadeError> {
+        let entry = {
+            let entries = self
+                .entries
+                .lock()
+                .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
+            entries
+                .get(index)
+                .ok_or_else(|| CascadeError::MissingInput("Batch index out of range".to_string()))?
+                .clone()
+        };
+        let source_revision = self.source_revision.load(Ordering::Relaxed);
+        let (source_identity, source) = match entry.source {
+            BatchEntrySource::Bytes(bytes) => (
+                format!("bytes:{}:{}:{}", index, entry.stem, bytes.len()),
+                BatchThumbnailSource::Bytes(bytes),
+            ),
+            BatchEntrySource::Path(path) => (
+                path.to_string_lossy().to_string(),
+                BatchThumbnailSource::Path(path),
+            ),
+        };
+        Ok(BatchThumbnailSourceSnapshot {
+            index,
+            stem: entry.stem,
+            source_revision,
+            source_identity,
+            source,
+        })
     }
 
     pub fn thumbnail_png(&self, index: usize, max_edge: u32) -> Result<Vec<u8>, CascadeError> {
@@ -1562,35 +1646,8 @@ impl LoadImageBatch {
             }
         }
 
-        let source = {
-            let entries = self
-                .entries
-                .lock()
-                .map_err(|_| CascadeError::Other("Batch entries mutex poisoned".to_string()))?;
-            entries
-                .get(index)
-                .ok_or_else(|| CascadeError::MissingInput("Batch index out of range".to_string()))?
-                .source
-                .clone()
-        };
-
-        let decode_start = std::time::Instant::now();
-        let decoded = match source {
-            BatchEntrySource::Bytes(bytes) => image::load_from_memory(&bytes)
-                .map_err(|e| CascadeError::ImageDecode(e.to_string()))?,
-            BatchEntrySource::Path(path) => image::open(&path)
-                .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
-        };
-        let decode_time = decode_start.elapsed();
-        let resize_start = std::time::Instant::now();
-        let thumbnail = decoded.thumbnail(max_edge, max_edge).to_rgba8();
-        let resize_time = resize_start.elapsed();
-        let encode_start = std::time::Instant::now();
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(thumbnail)
-            .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
-            .map_err(|e| CascadeError::ImageDecode(e.to_string()))?;
-        let encode_time = encode_start.elapsed();
+        let snapshot = self.thumbnail_source_snapshot(index)?;
+        let bytes = encode_batch_thumbnail_png(&snapshot.source, max_edge)?;
 
         let mut cache = self
             .thumbnail_cache
@@ -1599,11 +1656,8 @@ impl LoadImageBatch {
         cache.insert(key, bytes.clone());
         #[cfg(debug_assertions)]
         eprintln!(
-            "[perf] load_image_batch.thumbnail_png total={:.1}ms cache_hit=false decode={:.1}ms resize={:.1}ms encode={:.1}ms index={index} max_edge={max_edge} bytes={}",
+            "[perf] load_image_batch.thumbnail_png total={:.1}ms cache_hit=false index={index} max_edge={max_edge} bytes={}",
             total_start.elapsed().as_secs_f64() * 1000.0,
-            decode_time.as_secs_f64() * 1000.0,
-            resize_time.as_secs_f64() * 1000.0,
-            encode_time.as_secs_f64() * 1000.0,
             bytes.len(),
         );
         Ok(bytes)
@@ -1637,7 +1691,7 @@ impl LoadImageBatch {
         };
 
         let decoded = match source {
-            BatchEntrySource::Bytes(bytes) => image::load_from_memory(&bytes)
+            BatchEntrySource::Bytes(bytes) => image::load_from_memory(bytes.as_slice())
                 .map_err(|e| CascadeError::ImageDecode(e.to_string()))?,
             BatchEntrySource::Path(path) => image::open(&path)
                 .map_err(|e| CascadeError::ImageDecode(format!("{}: {e}", path.display())))?,
@@ -1988,6 +2042,96 @@ mod tests {
 
         assert!(decoded.width() <= 2);
         assert!(decoded.height() <= 2);
+    }
+
+    #[test]
+    fn load_image_batch_thumbnail_snapshot_returns_embedded_bytes_without_copying() {
+        let node = LoadImageBatch::new();
+        let bytes = png_bytes([90, 80, 70, 255]);
+        node.add_image("embedded.png", &bytes)
+            .expect("batch image should register");
+
+        let first = node
+            .thumbnail_source_snapshot(0)
+            .expect("snapshot should exist");
+        let second = node
+            .thumbnail_source_snapshot(0)
+            .expect("snapshot should exist");
+
+        assert_eq!(first.index, 0);
+        assert_eq!(first.stem, "embedded");
+        assert_eq!(first.source_revision, node.cache_revision());
+        assert!(first.source_identity.contains("embedded"));
+        match (first.source, second.source) {
+            (
+                BatchThumbnailSource::Bytes(first_bytes),
+                BatchThumbnailSource::Bytes(second_bytes),
+            ) => {
+                assert_eq!(first_bytes.as_slice(), bytes.as_slice());
+                assert!(Arc::ptr_eq(&first_bytes, &second_bytes));
+            }
+            _ => panic!("expected embedded bytes snapshots"),
+        }
+    }
+
+    #[test]
+    fn load_image_batch_thumbnail_snapshot_returns_path_source() {
+        let path = temp_png_path("snapshot.png");
+        fs::write(&path, png_bytes([255, 0, 0, 255])).expect("test PNG should write");
+
+        let node = LoadImageBatch::new();
+        node.add_image_path("snapshot.png", &path)
+            .expect("path entry should register");
+
+        let snapshot = node
+            .thumbnail_source_snapshot(0)
+            .expect("snapshot should exist");
+        assert_eq!(snapshot.index, 0);
+        assert_eq!(snapshot.stem, "snapshot");
+        assert_eq!(snapshot.source_identity, path.to_string_lossy().to_string());
+        match snapshot.source {
+            BatchThumbnailSource::Path(source_path) => assert_eq!(source_path, path),
+            BatchThumbnailSource::Bytes(_) => panic!("expected path snapshot"),
+        }
+
+        fs::remove_file(path).expect("test PNG should clean up");
+    }
+
+    #[test]
+    fn load_image_batch_source_revision_changes_when_sources_change() {
+        let node = LoadImageBatch::new();
+        let initial_revision = node.cache_revision();
+        node.add_image("first.png", &png_bytes([1, 2, 3, 255]))
+            .expect("first image should register");
+        let first_revision = node.cache_revision();
+        assert!(first_revision > initial_revision);
+
+        node.clear().expect("batch should clear");
+        let cleared_revision = node.cache_revision();
+        assert!(cleared_revision > first_revision);
+    }
+
+    #[test]
+    fn encode_batch_thumbnail_png_handles_path_and_bytes_sources() {
+        let path = temp_png_path("encode-source.png");
+        fs::write(&path, png_bytes_with_size(8, 4, [255, 0, 0, 255]))
+            .expect("test PNG should write");
+        let bytes = Arc::new(png_bytes_with_size(4, 8, [0, 255, 0, 255]));
+
+        for source in [
+            BatchThumbnailSource::Path(path.clone()),
+            BatchThumbnailSource::Bytes(bytes),
+        ] {
+            let thumbnail =
+                encode_batch_thumbnail_png(&source, 2).expect("thumbnail should encode");
+            let decoded = ::image::load_from_memory(&thumbnail)
+                .expect("thumbnail should decode")
+                .to_rgba8();
+            assert!(decoded.width() <= 2);
+            assert!(decoded.height() <= 2);
+        }
+
+        fs::remove_file(path).expect("test PNG should clean up");
     }
 
     #[test]

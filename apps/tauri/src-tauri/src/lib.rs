@@ -3,7 +3,8 @@ mod project_package;
 
 use base64::{engine::general_purpose, Engine as _};
 use cascade_runtime::{
-    migrations, AssetReference, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
+    encode_batch_thumbnail_png_from_snapshot, migrations, AssetReference,
+    BatchThumbnailSourceSnapshot, CascadeDocument, Engine, NodeSpec, ParamValue, PortSpec,
     SerializableGraph, UiNodeSpec, ViewerRenderResult,
 };
 use project_package::{read_asset_blob, AssetBlob};
@@ -18,6 +19,7 @@ struct AppState {
     engine: Engine,
     project_assets: HashMap<String, AssetReference>,
     packed_asset_bytes: HashMap<String, Vec<u8>>,
+    batch_thumbnail_cache: Arc<Mutex<DesktopBatchThumbnailCache>>,
 }
 
 type EngineState = Arc<Mutex<AppState>>;
@@ -25,6 +27,98 @@ type EngineState = Arc<Mutex<AppState>>;
 const BATCH_ASSET_PREFIX: &str = "batch";
 const SUPPORTED_IMAGE_EXTENSIONS: &[&str] =
     &["png", "jpg", "jpeg", "exr", "tif", "tiff", "bmp", "webp"];
+const DESKTOP_BATCH_THUMBNAIL_CACHE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Clone, PartialEq, Eq)]
+struct DesktopBatchThumbnailCacheKey {
+    node_id: String,
+    source_revision: u64,
+    source_identity: String,
+    index: usize,
+    max_edge: u32,
+}
+
+struct DesktopBatchThumbnailCache {
+    entries: Vec<(DesktopBatchThumbnailCacheKey, Vec<u8>, usize)>,
+    max_bytes: usize,
+    current_bytes: usize,
+}
+
+impl DesktopBatchThumbnailCache {
+    fn new(max_bytes: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_bytes,
+            current_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, key: &DesktopBatchThumbnailCacheKey) -> Option<Vec<u8>> {
+        let index = self
+            .entries
+            .iter()
+            .position(|(entry_key, _, _)| entry_key == key)?;
+        let (entry_key, bytes, byte_count) = self.entries.remove(index);
+        let cloned = bytes.clone();
+        self.entries.push((entry_key, bytes, byte_count));
+        Some(cloned)
+    }
+
+    fn insert(&mut self, key: DesktopBatchThumbnailCacheKey, bytes: Vec<u8>) {
+        if self
+            .entries
+            .iter()
+            .any(|(entry_key, _, _)| *entry_key == key)
+        {
+            return;
+        }
+        let byte_count = bytes.len();
+        self.current_bytes = self.current_bytes.saturating_add(byte_count);
+        self.entries.push((key, bytes, byte_count));
+        while self.entries.len() > 1 && self.current_bytes > self.max_bytes {
+            let (_, _, evicted_bytes) = self.entries.remove(0);
+            self.current_bytes = self.current_bytes.saturating_sub(evicted_bytes);
+        }
+    }
+
+    fn clear_node(&mut self, node_id: &str) {
+        let mut kept = Vec::with_capacity(self.entries.len());
+        let mut current_bytes = 0usize;
+        for (key, bytes, byte_count) in self.entries.drain(..) {
+            if key.node_id == node_id {
+                continue;
+            }
+            current_bytes = current_bytes.saturating_add(byte_count);
+            kept.push((key, bytes, byte_count));
+        }
+        self.entries = kept;
+        self.current_bytes = current_bytes;
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.current_bytes = 0;
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+fn desktop_batch_thumbnail_cache_key(
+    node_id: &str,
+    snapshot: &BatchThumbnailSourceSnapshot,
+    max_edge: u32,
+) -> DesktopBatchThumbnailCacheKey {
+    DesktopBatchThumbnailCacheKey {
+        node_id: node_id.to_string(),
+        source_revision: snapshot.source_revision,
+        source_identity: snapshot.source_identity.clone(),
+        index: snapshot.index,
+        max_edge,
+    }
+}
 
 #[cfg(debug_assertions)]
 fn ms(duration: std::time::Duration) -> f64 {
@@ -507,6 +601,10 @@ fn batch_clear(state: State<'_, EngineState>, node_id: String) -> Result<(), Str
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.engine.batch_clear(&node_id).map_err(|e| e.to_string())?;
     remove_batch_assets(&node_id, &mut s.project_assets);
+    s.batch_thumbnail_cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clear_node(&node_id);
     Ok(())
 }
 
@@ -550,6 +648,10 @@ fn batch_add_image(
         embedded_asset_ref("image_batch_frame", &blob, filename),
     );
     refresh_batch_manifest(&node_id, &mut s.project_assets)?;
+    s.batch_thumbnail_cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clear_node(&node_id);
     Ok(())
 }
 
@@ -579,6 +681,10 @@ async fn batch_load_directory(
         .batch_set_image_paths(&node_id, runtime_batch_path_entries(&entries))
         .map_err(|e| e.to_string())?;
     set_batch_path_assets(&node_id, &entries, &mut s.project_assets)?;
+    s.batch_thumbnail_cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clear_node(&node_id);
     let info = s
         .engine
         .get_batch_info(&node_id)
@@ -609,6 +715,10 @@ async fn batch_load_paths(
         .batch_set_image_paths(&node_id, runtime_batch_path_entries(&entries))
         .map_err(|e| e.to_string())?;
     set_batch_path_assets(&node_id, &entries, &mut s.project_assets)?;
+    s.batch_thumbnail_cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clear_node(&node_id);
     let info = s
         .engine
         .get_batch_info(&node_id)
@@ -653,25 +763,56 @@ async fn get_batch_thumbnail(
 ) -> Result<Vec<u8>, String> {
     let command_start = Instant::now();
     let state = state.inner().clone();
-    let (bytes, lock_wait, engine_time) = tauri::async_runtime::spawn_blocking(move || {
-        let lock_start = Instant::now();
-        let s = state.lock().map_err(|e| e.to_string())?;
-        let lock_wait = lock_start.elapsed();
-        let engine_start = Instant::now();
-        let bytes = s
-            .engine
-            .get_batch_thumbnail(&node_id, index, max_edge)
-            .map_err(|e| e.to_string())?;
-        Ok::<_, String>((bytes, lock_wait, engine_start.elapsed()))
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let snapshot_node_id = node_id.clone();
+    let (snapshot, cache, lock_wait, snapshot_time) =
+        tauri::async_runtime::spawn_blocking(move || {
+            let lock_start = Instant::now();
+            let s = state.lock().map_err(|e| e.to_string())?;
+            let lock_wait = lock_start.elapsed();
+            let snapshot_start = Instant::now();
+            let snapshot = s
+                .engine
+                .get_batch_thumbnail_source_snapshot(&snapshot_node_id, index)
+                .map_err(|e| e.to_string())?;
+            let cache = s.batch_thumbnail_cache.clone();
+            Ok::<_, String>((snapshot, cache, lock_wait, snapshot_start.elapsed()))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+    let key = desktop_batch_thumbnail_cache_key(&node_id, &snapshot, max_edge);
+    let cache_lookup_start = Instant::now();
+    let cached = cache.lock().map_err(|e| e.to_string())?.get(&key);
+    let cache_lookup_time = cache_lookup_start.elapsed();
+    if let Some(bytes) = cached {
+        #[cfg(debug_assertions)]
+        eprintln!(
+            "[perf] tauri.get_batch_thumbnail total={:.1}ms lock_wait={:.1}ms snapshot={:.1}ms cache_lookup={:.1}ms engine=0.0ms cache_insert=0.0ms cache_hit=true index={index} max_edge={max_edge} bytes={}",
+            ms(command_start.elapsed()),
+            ms(lock_wait),
+            ms(snapshot_time),
+            ms(cache_lookup_time),
+            bytes.len(),
+        );
+        return Ok(bytes);
+    }
+    let engine_start = Instant::now();
+    let bytes =
+        encode_batch_thumbnail_png_from_snapshot(&snapshot, max_edge).map_err(|e| e.to_string())?;
+    let engine_time = engine_start.elapsed();
+    let cache_insert_start = Instant::now();
+    cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .insert(key, bytes.clone());
     #[cfg(debug_assertions)]
     eprintln!(
-        "[perf] tauri.get_batch_thumbnail total={:.1}ms lock_wait={:.1}ms engine={:.1}ms index={index} max_edge={max_edge} bytes={}",
+        "[perf] tauri.get_batch_thumbnail total={:.1}ms lock_wait={:.1}ms snapshot={:.1}ms cache_lookup={:.1}ms engine={:.1}ms cache_insert={:.1}ms cache_hit=false index={index} max_edge={max_edge} bytes={}",
         ms(command_start.elapsed()),
         ms(lock_wait),
+        ms(snapshot_time),
+        ms(cache_lookup_time),
         ms(engine_time),
+        ms(cache_insert_start.elapsed()),
         bytes.len(),
     );
     Ok(bytes)
@@ -891,6 +1032,10 @@ fn import_graph(state: State<'_, EngineState>, data: String) -> Result<(), Strin
     s.engine.import_graph(graph).map_err(|e| e.to_string())?;
     s.project_assets.clear();
     s.packed_asset_bytes.clear();
+    s.batch_thumbnail_cache
+        .lock()
+        .map_err(|e| e.to_string())?
+        .clear();
     Ok(())
 }
 
@@ -1625,6 +1770,10 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
             .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
             .collect();
         s.packed_asset_bytes = packed_asset_bytes;
+        s.batch_thumbnail_cache
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clear();
         return Ok(json);
     }
 
@@ -1645,6 +1794,10 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
             .map(|(key, asset_ref)| (key.clone(), clone_asset_reference(asset_ref)))
             .collect();
         s.packed_asset_bytes.clear();
+        s.batch_thumbnail_cache
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clear();
         Ok(json)
     } else {
         // Fallback: try to load as SerializableGraph (without migration)
@@ -1652,6 +1805,10 @@ fn load_project(state: State<'_, EngineState>, path: String) -> Result<String, S
         s.engine.import_graph(graph).map_err(|e| e.to_string())?;
         s.project_assets.clear();
         s.packed_asset_bytes.clear();
+        s.batch_thumbnail_cache
+            .lock()
+            .map_err(|e| e.to_string())?
+            .clear();
         let exported = s.engine.export_graph();
         serde_json::to_string(&exported).map_err(|e| e.to_string())
     }
@@ -2541,6 +2698,9 @@ pub fn run() {
             engine,
             project_assets: HashMap::new(),
             packed_asset_bytes: HashMap::new(),
+            batch_thumbnail_cache: Arc::new(Mutex::new(DesktopBatchThumbnailCache::new(
+                DESKTOP_BATCH_THUMBNAIL_CACHE_BYTES,
+            ))),
         })))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -2641,6 +2801,45 @@ mod tests {
         general_purpose::STANDARD
             .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC")
             .expect("tiny PNG decodes")
+    }
+
+    fn thumbnail_cache_key(node_id: &str, source_revision: u64) -> DesktopBatchThumbnailCacheKey {
+        DesktopBatchThumbnailCacheKey {
+            node_id: node_id.to_string(),
+            source_revision,
+            source_identity: "source".to_string(),
+            index: 0,
+            max_edge: 128,
+        }
+    }
+
+    #[test]
+    fn desktop_batch_thumbnail_cache_is_bounded() {
+        let mut cache = DesktopBatchThumbnailCache::new(4);
+        cache.insert(thumbnail_cache_key("batch", 1), vec![1, 2, 3]);
+        cache.insert(
+            DesktopBatchThumbnailCacheKey {
+                index: 1,
+                ..thumbnail_cache_key("batch", 1)
+            },
+            vec![4, 5, 6],
+        );
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(&thumbnail_cache_key("batch", 1)).is_none());
+    }
+
+    #[test]
+    fn desktop_batch_thumbnail_cache_clears_by_node() {
+        let mut cache = DesktopBatchThumbnailCache::new(1024);
+        cache.insert(thumbnail_cache_key("batch-a", 1), vec![1, 2, 3]);
+        cache.insert(thumbnail_cache_key("batch-b", 1), vec![4, 5, 6]);
+
+        cache.clear_node("batch-a");
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(&thumbnail_cache_key("batch-a", 1)).is_none());
+        assert!(cache.get(&thumbnail_cache_key("batch-b", 1)).is_some());
     }
 
     fn engine_with_cached_ai_result() -> (Engine, String) {

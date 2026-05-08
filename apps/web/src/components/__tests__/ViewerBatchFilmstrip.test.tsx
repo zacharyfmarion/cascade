@@ -115,7 +115,7 @@ const connections: Connection[] = [{
 }];
 
 const setupViewerState = () => {
-  const getBatchThumbnail = vi.fn(async (_nodeId: string, index: number) => (
+  const getBatchThumbnail = vi.fn(async (_nodeId: string, index: number, _maxEdge: number) => (
     index === 0 ? pngBytes(120, 80) : index === 1 ? pngBytes(40, 120) : pngBytes(90, 90)
   ));
   const triggerRender = vi.fn();
@@ -206,6 +206,7 @@ describe('Viewer batch filmstrip thumbnails', () => {
 
     await waitFor(() => expect(screen.getAllByTestId('viewer-filmstrip-source-thumbnail').length).toBeGreaterThan(0));
     expect(getBatchThumbnail.mock.calls.map(call => call[1])).toEqual([0, 1, 2]);
+    expect(getBatchThumbnail.mock.calls.map(call => call[2])).toEqual([128, 128, 128]);
     expect(triggerRender).not.toHaveBeenCalled();
     expect(screen.getByTestId('mock-media-strip').querySelectorAll('button')).toHaveLength(3);
     await waitFor(() => expect(mediaStripState.estimateItemSize?.(0)).not.toBe(mediaStripState.estimateItemSize?.(1)));
