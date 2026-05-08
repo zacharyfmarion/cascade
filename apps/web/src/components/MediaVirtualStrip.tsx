@@ -53,6 +53,7 @@ export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
   }, [activeIndex, count, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
+  const visibleIndexesKey = virtualItems.map(item => item.index).join(',');
 
   const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const el = parentRef.current;
@@ -68,12 +69,13 @@ export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
 
   useEffect(() => {
     if (!onVisibleIndexesChange) return;
-    const indexes = virtualItems.map(item => item.index);
-    const key = indexes.join(',');
-    if (key === lastVisibleKeyRef.current) return;
-    lastVisibleKeyRef.current = key;
+    if (visibleIndexesKey === lastVisibleKeyRef.current) return;
+    lastVisibleKeyRef.current = visibleIndexesKey;
+    const indexes = visibleIndexesKey
+      ? visibleIndexesKey.split(',').map(index => Number(index))
+      : [];
     onVisibleIndexesChange(indexes);
-  }, [onVisibleIndexesChange, virtualItems]);
+  }, [onVisibleIndexesChange, visibleIndexesKey]);
 
   return (
     <div

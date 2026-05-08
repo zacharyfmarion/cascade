@@ -135,6 +135,10 @@ export const useBatchSourceThumbnails = ({
           const bytes = await getThumbnail(sourceNodeId, index, maxEdge);
           if (cancelled || generationRef.current !== generation || !bytes) continue;
           const thumbnail = await bytesToThumbnail(bytes);
+          if (cancelled || generationRef.current !== generation) {
+            revokeThumbnail(thumbnail);
+            continue;
+          }
           setThumbnails(prev => {
             if (generationRef.current !== generation) {
               revokeThumbnail(thumbnail);
@@ -158,6 +162,10 @@ export const useBatchSourceThumbnails = ({
             }
             return next;
           });
+        } catch (err) {
+          if (import.meta.env.DEV && import.meta.env.MODE !== 'test') {
+            console.warn('Failed to load batch thumbnail', { sourceNodeId, index, err });
+          }
         } finally {
           pendingRef.current.delete(index);
         }

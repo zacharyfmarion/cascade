@@ -155,6 +155,38 @@ describe('useBatchSourceThumbnails', () => {
     expect(createObjectURL).toHaveBeenCalledTimes(1);
   });
 
+  it('continues loading queued thumbnails after one request fails', async () => {
+    const loader = vi.fn(async (_source: string, index: number) => {
+      if (index === 1) throw new Error('bad thumbnail');
+      return bytesFor(index);
+    });
+
+    render(
+      <Probe visibleIndexes={[0, 1, 2]} loader={loader} concurrency={1} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('thumb-0')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('thumb-2')).toBeTruthy());
+    expect(screen.queryByTestId('thumb-1')).toBeNull();
+    expect(loader.mock.calls.map(call => call[1])).toEqual([0, 1, 2]);
+  });
+
+  it('does not publish thumbnails that finish after the visible generation is cancelled', async () => {
+    const oldRequest = createDeferred<Uint8Array>();
+    const loader = vi.fn(() => oldRequest.promise);
+    const { rerender } = render(
+      <Probe visibleIndexes={[0]} loader={loader} generationKey="old" />,
+    );
+
+    await waitFor(() => expect(loader).toHaveBeenCalledWith('batch1', 0, 96));
+    rerender(<Probe visibleIndexes={[]} loader={loader} generationKey="new" />);
+
+    oldRequest.resolve(bytesFor(0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(screen.queryByTestId('thumb-0')).toBeNull();
+    expect(revokeObjectURL).toHaveBeenCalledTimes(0);
+  });
+
   it('revokes object URLs on eviction and unmount', async () => {
     const loader = vi.fn(async (_source: string, index: number) => bytesFor(index));
     const { unmount } = render(
