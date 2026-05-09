@@ -11,7 +11,7 @@ OUT_DIR="${WEB_DIR}/src/wasm-pkg-threads"
 rm -rf "${OUT_DIR}"
 
 THREAD_WASM_FLAGS="-C target-feature=+atomics,+bulk-memory,+mutable-globals"
-THREAD_LINK_FLAGS="-C link-arg=--shared-memory -C link-arg=--max-memory=1073741824 -C link-arg=--import-memory -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base"
+THREAD_LINK_FLAGS="-C link-arg=--shared-memory -C link-arg=--max-memory=1073741824 -C link-arg=--import-memory -C link-arg=--export=__heap_base -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base"
 THREAD_BUILD_FLAGS="${THREAD_WASM_FLAGS} ${THREAD_LINK_FLAGS}"
 
 # Preserve any caller-provided flags such as CI's RUSTFLAGS=-Dwarnings.

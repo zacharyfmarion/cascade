@@ -8,9 +8,18 @@ if (!('window' in globalThis)) {
 const dialogMocks = vi.hoisted(() => ({
   save: vi.fn(),
 }));
+const runtimeMocks = vi.hoisted(() => ({
+  isDesktop: false,
+}));
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: dialogMocks.save,
+}));
+
+vi.mock('../platform/runtime', () => ({
+  getRuntimeSurface: () => runtimeMocks.isDesktop ? 'desktop' : 'web',
+  isDesktopRuntime: () => runtimeMocks.isDesktop,
+  isWebRuntime: () => !runtimeMocks.isDesktop,
 }));
 
 let mockEngine = createMockEngine();
@@ -31,6 +40,7 @@ const flushPromises = async (ticks = 3) => {
 };
 
 const setTauriMode = (enabled: boolean) => {
+  runtimeMocks.isDesktop = enabled;
   if (enabled) {
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
   } else {
