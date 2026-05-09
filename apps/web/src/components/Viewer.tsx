@@ -11,7 +11,10 @@ import {
   isPixelResult,
 } from '../store/types';
 import type { ViewerResult } from '../store/types';
-import type { MediaIteratorInfo } from '../store/graphStore/slices/mediaIteratorSlice';
+import {
+  resolveMediaIteratorForViewer,
+  type MediaIteratorInfo,
+} from '../store/graphStore/slices/mediaIteratorSlice';
 import { MediaVirtualStrip } from './MediaVirtualStrip';
 import { aspectThumbnailSize, containRect } from './mediaThumbnailSizing';
 import { useBatchSourceThumbnails } from './useBatchSourceThumbnails';
@@ -468,9 +471,15 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   }, [activeViewerId, firstViewerId, nodes, selectedViewerId]);
 
   useEffect(() => {
-    if (!activeViewerId) return;
     suggestActiveTransportSourceForViewer(activeViewerId);
-  }, [activeViewerId, connections, suggestActiveTransportSourceForViewer]);
+  }, [
+    activeTransportSourceId,
+    activeViewerId,
+    connections,
+    mediaIteratorInfoMap,
+    nodes,
+    suggestActiveTransportSourceForViewer,
+  ]);
 
   const rawActiveResult = useMemo(() => {
     return activeViewerId ? renderResults.get(activeViewerId) : undefined;
@@ -499,10 +508,14 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     && activeResultFrame.frame === currentFrame;
 
   const activeIterator: MediaIteratorInfo | null = useMemo(() => {
-    return activeTransportSourceId
-      ? mediaIteratorInfoMap.get(activeTransportSourceId) ?? null
-      : null;
-  }, [activeTransportSourceId, mediaIteratorInfoMap]);
+    if (!activeViewerId) return null;
+    return resolveMediaIteratorForViewer(
+      nodes,
+      connections,
+      mediaIteratorInfoMap,
+      activeViewerId,
+    );
+  }, [activeViewerId, connections, mediaIteratorInfoMap, nodes]);
 
   const activeItemIndex = activeIterator
     ? Math.max(0, Math.min(activeIterator.count - 1, currentFrame - activeIterator.startFrame))
@@ -558,7 +571,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
   useEffect(() => {
     dispatchProcessedThumbnailCache({ type: 'clear' });
-  }, [activeViewerId, activeTransportSourceId, graphRevision]);
+  }, [activeViewerId, activeIterator?.sourceNodeId, graphRevision]);
 
   useEffect(() => {
     if (

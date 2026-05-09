@@ -68,12 +68,19 @@ const sourceLabel = (
   return filePath ? pathBasename(filePath) : nodeId;
 };
 
-const findNearestMediaSource = (
+export const resolveMediaIteratorForViewer = (
   nodes: GraphState['nodes'],
   connections: GraphState['connections'],
+  mediaIteratorInfoMap: Map<string, MediaIteratorInfo>,
   startNodeId: string,
-): string | null => {
+): MediaIteratorInfo | null => {
+  const startNode = nodes.get(startNodeId);
+  if (!startNode || (startNode.typeId !== 'viewer' && startNode.typeId !== 'compare_viewer')) {
+    return null;
+  }
+
   const visited = new Set<string>();
+  const found = new Map<string, MediaIteratorInfo>();
   const queue = [startNodeId];
 
   while (queue.length > 0) {
@@ -81,9 +88,11 @@ const findNearestMediaSource = (
     if (visited.has(nodeId)) continue;
     visited.add(nodeId);
 
-    const node = nodes.get(nodeId);
-    if (node && MEDIA_NODE_TYPES[node.typeId]) {
-      return nodeId;
+    const iterator = mediaIteratorInfoMap.get(nodeId);
+    if (iterator) {
+      found.set(nodeId, iterator);
+      if (found.size > 1) return null;
+      continue;
     }
 
     for (const connection of connections) {
@@ -93,7 +102,7 @@ const findNearestMediaSource = (
     }
   }
 
-  return null;
+  return found.size === 1 ? found.values().next().value ?? null : null;
 };
 
 export const createMediaIteratorSlice: StateCreator<
@@ -147,7 +156,7 @@ export const createMediaIteratorSlice: StateCreator<
     const previousActive = get().activeTransportSourceId;
     const activeTransportSourceId = previousActive && iterators.has(previousActive)
       ? previousActive
-      : iterators.keys().next().value ?? null;
+      : null;
     const active = activeTransportSourceId
       ? iterators.get(activeTransportSourceId) ?? null
       : null;
@@ -199,10 +208,21 @@ export const createMediaIteratorSlice: StateCreator<
     },
 
     suggestActiveTransportSourceForViewer: (viewerNodeId) => {
-      if (!viewerNodeId) return;
-      const sourceId = findNearestMediaSource(get().nodes, get().connections, viewerNodeId);
-      if (sourceId && get().mediaIteratorInfoMap.has(sourceId)) {
-        get().setActiveTransportSource(sourceId);
+      if (!viewerNodeId) {
+        if (get().activeTransportSourceId !== null) {
+          get().setActiveTransportSource(null);
+        }
+        return;
+      }
+      const iterator = resolveMediaIteratorForViewer(
+        get().nodes,
+        get().connections,
+        get().mediaIteratorInfoMap,
+        viewerNodeId,
+      );
+      const nextSourceId = iterator?.sourceNodeId ?? null;
+      if (get().activeTransportSourceId !== nextSourceId) {
+        get().setActiveTransportSource(nextSourceId);
       }
     },
 

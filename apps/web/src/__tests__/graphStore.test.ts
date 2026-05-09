@@ -649,7 +649,7 @@ describe('graphStore frame and playback controls', () => {
     expect(useGraphStore.getState().currentFrame).toBe(999);
   });
 
-  it('setBatchInfo registers a batch media iterator and active transport range', async () => {
+  it('setBatchInfo registers a batch media iterator without selecting unrelated transport', async () => {
     const batchId = await useGraphStore.getState().addNode('load_image_batch', { x: 0, y: 0 });
     useGraphStore.getState().setBatchInfo(batchId, {
       count: 3,
@@ -657,7 +657,7 @@ describe('graphStore frame and playback controls', () => {
     });
 
     const state = useGraphStore.getState();
-    expect(state.activeTransportSourceId).toBe(batchId);
+    expect(state.activeTransportSourceId).toBeNull();
     expect(state.mediaIteratorInfoMap.get(batchId)).toMatchObject({
       kind: 'batch',
       startFrame: 0,
@@ -665,7 +665,7 @@ describe('graphStore frame and playback controls', () => {
       count: 3,
       itemLabels: ['a', 'b', 'c'],
     });
-    expect(state.sequenceLength).toBe(2);
+    expect(state.sequenceLength).toBe(0);
   });
 
   it('setCurrentFrame clamps to the active media iterator', async () => {
@@ -674,6 +674,7 @@ describe('graphStore frame and playback controls', () => {
       count: 2,
       filenames: ['a', 'b'],
     });
+    useGraphStore.getState().setActiveTransportSource(batchId);
 
     useGraphStore.getState().setCurrentFrame(42);
     expect(useGraphStore.getState().currentFrame).toBe(1);
@@ -1680,9 +1681,22 @@ describe('graphStore project hydration', () => {
       first_frame: 1001,
       last_frame: 1003,
     });
-    expect(state.sequenceStart).toBe(1001);
-    expect(state.sequenceLength).toBe(1003);
-    expect(state.currentFrame).toBe(1001);
+    expect(state.activeTransportSourceId).toBeNull();
+    expect(state.sequenceStart).toBe(0);
+    expect(state.sequenceLength).toBe(0);
+    expect(state.mediaIteratorInfoMap.get('seq-node')).toMatchObject({
+      kind: 'sequence',
+      startFrame: 1001,
+      endFrame: 1003,
+      count: 3,
+    });
+
+    state.suggestActiveTransportSourceForViewer('viewer-node');
+    const viewerScopedState = useGraphStore.getState();
+    expect(viewerScopedState.activeTransportSourceId).toBe('seq-node');
+    expect(viewerScopedState.sequenceStart).toBe(1001);
+    expect(viewerScopedState.sequenceLength).toBe(1003);
+    expect(viewerScopedState.currentFrame).toBe(1001);
   });
 
   it('loadProject hydrates optional DSL shadow metadata without blocking graph load', async () => {

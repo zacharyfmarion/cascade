@@ -212,6 +212,182 @@ describe('Viewer batch filmstrip thumbnails', () => {
     await waitFor(() => expect(mediaStripState.estimateItemSize?.(0)).not.toBe(mediaStripState.estimateItemSize?.(1)));
   });
 
+  it('does not show a loaded batch filmstrip for an unconnected viewer', async () => {
+    setupViewerState();
+    act(() => {
+      useGraphStore.setState({
+        connections: [],
+        activeTransportSourceId: batchNode.id,
+      });
+    });
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(screen.queryByTestId('mock-media-strip')).toBeNull());
+    await waitFor(() => expect(useGraphStore.getState().activeTransportSourceId).toBeNull());
+  });
+
+  it('clears the filmstrip when the upstream batch is disconnected', async () => {
+    setupViewerState();
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(screen.getByTestId('mock-media-strip')).toBeTruthy());
+
+    act(() => {
+      useGraphStore.setState({
+        connections: [],
+      });
+    });
+
+    await waitFor(() => expect(screen.queryByTestId('mock-media-strip')).toBeNull());
+    await waitFor(() => expect(useGraphStore.getState().activeTransportSourceId).toBeNull());
+  });
+
+  it('uses the loaded media source upstream of the active viewer instead of another loaded batch', async () => {
+    setupViewerState();
+    const secondBatchNode: NodeInstance = {
+      ...batchNode,
+      id: 'batch2',
+    };
+
+    act(() => {
+      useGraphStore.setState({
+        nodes: new Map([
+          [batchNode.id, batchNode],
+          [secondBatchNode.id, secondBatchNode],
+          [viewerNode.id, viewerNode],
+        ]),
+        connections: [{
+          id: 'c2',
+          fromNode: secondBatchNode.id,
+          fromPort: 'image',
+          toNode: viewerNode.id,
+          toPort: 'value',
+        }],
+        activeTransportSourceId: batchNode.id,
+        mediaIteratorInfoMap: new Map([
+          [
+            batchNode.id,
+            {
+              sourceNodeId: batchNode.id,
+              kind: 'batch',
+              label: 'first',
+              startFrame: 0,
+              endFrame: 2,
+              count: 3,
+              itemLabels: ['dog', 'mona_lisa', 'portrait'],
+              supportsRandomAccess: true,
+            },
+          ],
+          [
+            secondBatchNode.id,
+            {
+              sourceNodeId: secondBatchNode.id,
+              kind: 'batch',
+              label: 'second',
+              startFrame: 0,
+              endFrame: 1,
+              count: 2,
+              itemLabels: ['cedar', 'ocean'],
+              supportsRandomAccess: true,
+            },
+          ],
+        ]),
+      });
+    });
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(screen.getByTitle('cedar')).toBeTruthy());
+    expect(screen.queryByTitle('dog')).toBeNull();
+    await waitFor(() => expect(useGraphStore.getState().activeTransportSourceId).toBe(secondBatchNode.id));
+  });
+
+  it('hides the filmstrip when multiple loaded media sources are upstream', async () => {
+    setupViewerState();
+    const secondBatchNode: NodeInstance = {
+      ...batchNode,
+      id: 'batch2',
+    };
+    const blendNode: NodeInstance = {
+      id: 'blend1',
+      typeId: 'blend',
+      position: { x: 50, y: 0 },
+      params: {},
+      inputDefaults: {},
+      muted: false,
+    };
+
+    act(() => {
+      useGraphStore.setState({
+        nodes: new Map([
+          [batchNode.id, batchNode],
+          [secondBatchNode.id, secondBatchNode],
+          [blendNode.id, blendNode],
+          [viewerNode.id, viewerNode],
+        ]),
+        connections: [
+          {
+            id: 'c1',
+            fromNode: batchNode.id,
+            fromPort: 'image',
+            toNode: blendNode.id,
+            toPort: 'a',
+          },
+          {
+            id: 'c2',
+            fromNode: secondBatchNode.id,
+            fromPort: 'image',
+            toNode: blendNode.id,
+            toPort: 'b',
+          },
+          {
+            id: 'c3',
+            fromNode: blendNode.id,
+            fromPort: 'image',
+            toNode: viewerNode.id,
+            toPort: 'value',
+          },
+        ],
+        activeTransportSourceId: batchNode.id,
+        mediaIteratorInfoMap: new Map([
+          [
+            batchNode.id,
+            {
+              sourceNodeId: batchNode.id,
+              kind: 'batch',
+              label: 'first',
+              startFrame: 0,
+              endFrame: 2,
+              count: 3,
+              itemLabels: ['dog', 'mona_lisa', 'portrait'],
+              supportsRandomAccess: true,
+            },
+          ],
+          [
+            secondBatchNode.id,
+            {
+              sourceNodeId: secondBatchNode.id,
+              kind: 'batch',
+              label: 'second',
+              startFrame: 0,
+              endFrame: 1,
+              count: 2,
+              itemLabels: ['cedar', 'ocean'],
+              supportsRandomAccess: true,
+            },
+          ],
+        ]),
+      });
+    });
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(screen.queryByTestId('mock-media-strip')).toBeNull());
+    await waitFor(() => expect(useGraphStore.getState().activeTransportSourceId).toBeNull());
+  });
+
   it('keeps filmstrip thumbnail clicks wired to the active frame', async () => {
     setupViewerState();
 

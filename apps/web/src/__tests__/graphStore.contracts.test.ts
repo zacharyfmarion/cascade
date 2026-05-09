@@ -636,7 +636,7 @@ describe('Playback rendering contracts', () => {
 });
 
 describe('Sequence state contracts', () => {
-  it('setSequenceFiles recomputes sequence range and presence', async () => {
+  it('setSequenceFiles registers sequence range without selecting unrelated transport', async () => {
     const s = useGraphStore.getState();
     const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
     const files = [
@@ -650,8 +650,15 @@ describe('Sequence state contracts', () => {
 
     const state = useGraphStore.getState();
     expect(state.hasSequenceNodes).toBe(true);
-    expect(state.sequenceStart).toBe(1);
-    expect(state.sequenceLength).toBe(10);
+    expect(state.activeTransportSourceId).toBeNull();
+    expect(state.sequenceStart).toBe(0);
+    expect(state.sequenceLength).toBe(0);
+    expect(state.mediaIteratorInfoMap.get(seqNode)).toMatchObject({
+      kind: 'sequence',
+      startFrame: 1,
+      endFrame: 10,
+      count: 3,
+    });
   });
 
   it('uploads browser sequence frame data before timeline-triggered viewer renders', async () => {
@@ -664,6 +671,7 @@ describe('Sequence state contracts', () => {
       new File([new Uint8Array([2])], 'frame_0002.png'),
     ]);
     await flushPromises(5);
+    s.suggestActiveTransportSourceForViewer(viewer);
 
     mockEngine._sequenceFrameLoads.length = 0;
     mockEngine._clearRenderCalls();
@@ -703,6 +711,8 @@ describe('Sequence state contracts', () => {
   it('setSequenceFiles uses worker-owned sequence registration when available', async () => {
     const s = useGraphStore.getState();
     const seqNode = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+    const viewer = await s.addNode('viewer', { x: 200, y: 0 });
+    await s.connect(seqNode, 'image', viewer, 'image');
     const registerSequenceFiles = vi.fn(async () => ({
       info: { frame_count: 3, first_frame: 1, last_frame: 10 },
       pattern: 'frame_{frame:4}.png',
@@ -724,6 +734,7 @@ describe('Sequence state contracts', () => {
 
     expect(registerSequenceFiles).toHaveBeenCalledWith(seqNode, files);
     expect(prepareSequenceFrame).toHaveBeenCalledWith(seqNode, 1);
+    s.suggestActiveTransportSourceForViewer(viewer);
     expect(useGraphStore.getState().sequenceStart).toBe(1);
     expect(useGraphStore.getState().sequenceLength).toBe(10);
   });
