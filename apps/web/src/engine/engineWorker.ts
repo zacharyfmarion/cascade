@@ -736,15 +736,15 @@ const engineAPI = {
 
   getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null> {
     return scheduler.enqueue(() => {
-      const fn = getEngineWithBindings().get_batch_image_data;
-      return fn ? fn(nodeId, index) : null;
+      const eng = getEngineWithBindings();
+      return eng.get_batch_image_data?.(nodeId, index) ?? null;
     });
   },
 
   getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null> {
     return scheduler.enqueue(() => {
-      const fn = getEngineWithBindings().get_batch_thumbnail;
-      return fn ? fn(nodeId, index, maxEdge) : null;
+      const eng = getEngineWithBindings();
+      return eng.get_batch_thumbnail?.(nodeId, index, maxEdge) ?? null;
     });
   },
 
