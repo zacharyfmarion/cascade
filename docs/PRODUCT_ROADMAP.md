@@ -40,17 +40,15 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 
 ## Current State (What Works Today)
 
-### Node Library (~50 nodes across 9 categories)
+### Node Library (60 built-in nodes)
 
-- **Color** (21 nodes) — Grade, ColorCorrect, HueShift, Curves, CDL, Clamp, Saturation, Posterize, Threshold, Exposure, WhiteBalance, LUT, sRGB conversion, etc.
-- **Filter** (9) — GaussianBlur, Sharpen, Median, EdgeDetect, Emboss, DirectionalBlur, RadialBlur, Bloom, Defocus
-- **Composite** (3) — Merge (14 Porter-Duff blend modes), AlphaOver, Premult/Unpremult
-- **Transform** (8) — Translate, Scale, Rotate, Flip, Crop, Reformat, CornerPin, STMap
-- **Generator** (9) — Solid, Checkerboard, Gradient, Noise, Ramp, Text, Grid, ColorWheel, etc.
-- **Matte** (11) — ChromaKey, LuminanceKey, DifferenceMatte, EdgeBlur, MatteExpand, MatteShrink, etc.
-- **Channel** (5) — Shuffle, SeparateRGBA, CombineRGBA, CopyChannels, etc.
-- **Utility** (6) — Dot, Switch, Blend, etc.
-- **Input/Output** (6) — LoadImage, SaveImage, Viewer, etc.
+- **Input/output** — images, image sequences, batches, video, viewers, compare viewer, image/sequence/video export, and EXR export
+- **AI** — depth estimation, image generation, inpainting, background removal, and upscaling via user-supplied API keys
+- **Color and utility** — color conversion, curves, palette tools, HSVA split/combine, color ramp, math, dot, project info, and image info
+- **Filter and matte** — Gaussian blur, sharpen, dilate, erode, median, directional/radial blur, glow, edge blur, matte expand, matte shrink, and shape masks
+- **Transform and time** — resize, crop, flip, translate, corner pin, ST map, time offset, frame hold, and frame blend
+- **Generators** — solid color, noise, gradient, checkerboard, rasterize field, constants, text, text area, and UV map
+- **Programmable/group nodes** — GPU Script plus custom group input/output and group definitions
 
 ### Platform & Architecture
 
@@ -59,7 +57,7 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 - ✅ Pull-based evaluator with dirty propagation and LRU cache
 - ✅ GPU compute pipeline (GLSL → naga → wgpu)
 - ✅ Self-describing NodeSpec system (add Rust node → UI auto-generates)
-- ✅ React + xyflow + Zustand frontend with 12-slice store architecture
+- ✅ React + xyflow + Zustand frontend with 14-slice store architecture
 - ✅ Undo/redo (50 deep), cut/copy/paste, context menus
 - ✅ Blender-style inline parameter sliders
 - ✅ Full-stack error handling with per-node error attribution
@@ -72,7 +70,7 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 - ✅ **AI Node Creation** — AI writes DSL to create and wire new nodes, working end-to-end
 - ✅ **GPU Script Node** — user-authored GLSL `process()` functions compiled to real-time GPU shaders via wgpu
 - ✅ **AI-assisted GLSL generation** — AI writes GPU shader code for the Script node
-- ✅ **AI Processing Nodes** — Depth estimation, inpainting via Replicate API
+- ✅ **AI Processing Nodes** — Depth estimation, image generation, inpainting, background removal, and upscaling via Replicate API
 
 ### Node Groups (Working, Needs Investment)
 
@@ -119,7 +117,7 @@ The AI features are already BYOK — users supply their own Replicate and Anthro
 - [x] ~~Document the Cloudflare Worker~~ — comprehensive JSDoc added to `workers/proxy/worker.js` explaining why it exists, security model, and architecture
 - [ ] For Tauri desktop builds: call Replicate directly from the Rust backend (no CORS restriction), bypassing the proxy
 - [x] ~~Verify Anthropic API production path~~ — FIXED: AI chat was routing through `/api/anthropic/v1` (Vite dev proxy only, broken in production). Updated `transport.ts` to use Anthropic's `anthropic-dangerous-direct-browser-access` header for direct browser access (same pattern as ScriptNodeEditor). GPU Script GLSL generation was already working in production.
-- [ ] Add clear user-facing docs: "You need your own API keys for AI features"
+- [x] Add clear user-facing docs: "You need your own API keys for AI features"
 
 #### 1.4 I/O Maturity 📁 (Partially Complete)
 Getting images in and out reliably is table-stakes.
@@ -246,7 +244,8 @@ Roto and bezier masks. Only build when users are asking.
 
 - [ ] Roto node — bezier spline masks with feathering
 - [ ] Paint node — basic brush-based masking
-- [ ] Shape generators (rectangle, ellipse, polygon masks)
+- [x] Shape generators for ellipse, rectangle, and rounded rectangle masks
+- [ ] Polygon masks
 - [ ] Per-point animation (requires 4.1)
 
 #### 4.3 Motion & Tracking 🎯

@@ -15,7 +15,7 @@ crates/
   cascade-gpu/        # wgpu compute shader pipeline (GLSL → WGSL via naga)
   cascade-ocio/       # OpenColorIO integration (display/view transforms)
   cascade-ocio-sys/   # OpenColorIO C FFI bindings (auto-stubs if not installed)
-  cascade-video/      # Video I/O support
+  cascade-video/      # Video I/O support (kept outside workspace membership)
   cascade-wasm/       # wasm-bindgen bridge exposing Engine to JS
   cascade-runtime/    # Native runtime engine + CLI bench tool
 apps/
@@ -72,8 +72,8 @@ yarn lint:css                    # Stylelint
 yarn test                        # Vitest
 npx tsc -b --noEmit              # Typecheck
 
-# WASM bridge
-wasm-pack build crates/cascade-wasm --target web --out-dir ../../apps/web/src/wasm-pkg
+# WASM bridge (from apps/web/)
+yarn build:wasm
 ```
 
 ## Testing
@@ -97,7 +97,7 @@ GitHub Actions workflow at `.github/workflows/ci.yml` runs on push to `main` and
   - `./scripts/release.sh prepare <version>`
   - `./scripts/release.sh publish <version>`
 - The script defaults to `RELEASE_GITHUB_REPO=zacharyfmarion/cascade` and `RELEASE_REMOTE=cascade` so release work does not depend on `origin`.
-- `publish` must run on a local Mac. It builds, signs, notarizes, staples, verifies, uploads, and Homebrew-publishes the DMG locally using `.env.release.local` when present. GitHub Actions validates release tags only and must not be used for DMG building.
+- `publish` must run on a local Mac. It builds, signs, notarizes, staples, verifies, and uploads the DMG locally using `.env.release.local` when present. Homebrew cask publishing is optional and should be skipped with `--skip-homebrew` while public install docs remain DMG-only. GitHub Actions validates release tags only and must not be used for DMG building.
 - Release notes should use `### Added`, `### Changed`, and `### Fixed` sections unless the user explicitly wants a different format.
 
 ### Adding a new node

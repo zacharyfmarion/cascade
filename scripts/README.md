@@ -51,9 +51,11 @@ After that PR is merged to `main`, publish the release from a local Mac:
 ./scripts/release.sh publish 0.10.0
 ```
 
-`publish` now builds, signs, notarizes, staples, and verifies the macOS DMG
-locally before pushing the tag. After the tag is pushed, it creates or updates
-the GitHub Release and updates the Homebrew cask from the same local artifacts.
+`publish` builds, signs, notarizes, staples, and verifies the macOS DMG locally
+before pushing the tag. After the tag is pushed, it creates or updates the
+GitHub Release from the same local artifacts. Homebrew cask publishing remains
+available in the scripts, but the current public install path is DMG-only, so
+use `--skip-homebrew` until the cask distribution is re-enabled.
 
 For automation, `prepare` also supports non-interactive changelog input:
 
@@ -98,7 +100,8 @@ The `publish` command will:
 8. Create and push the annotated tag `vX.Y.Z`.
 9. Create or update the GitHub Release using the matching `CHANGELOG.md` entry
    as the release body.
-10. Update the Homebrew cask in `zacharyfmarion/homebrew-cascade`.
+10. Optionally update the Homebrew cask in `zacharyfmarion/homebrew-cascade`
+    when `--skip-homebrew` is not passed.
 
 GitHub Actions now validates release tags only. It intentionally does not build
 DMGs or use Apple-hosted runners.
@@ -111,6 +114,8 @@ Useful `publish` options:
 ./scripts/release.sh publish 0.10.0 --skip-homebrew
 ./scripts/release.sh publish 0.10.0 --skip-local-build
 ```
+
+Use `--skip-homebrew` for the current DMG-only public release flow.
 
 Use `--skip-local-build` only for recovery. It pushes the verified tag without
 creating release artifacts, then prints the local command needed to finish.
@@ -168,7 +173,7 @@ Required values:
 - `APPLE_ID`
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
-- `HOMEBREW_TAP_TOKEN`
+- `HOMEBREW_TAP_TOKEN` (only when publishing the Homebrew cask)
 
 Optional values, only needed when the Developer ID certificate is not already
 installed in the local login keychain:

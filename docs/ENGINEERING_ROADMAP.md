@@ -4,7 +4,7 @@ Prioritized plan for strengthening Cascade's engineering foundations. Runs along
 
 Based on the [architecture review of Feb 22 2026](../reviews/architecture-review-2-22-26.md).
 
-**Last updated:** 2026-03-06
+**Last updated:** 2026-05-10
 
 ---
 
@@ -97,7 +97,7 @@ Cache-key-chaining design already handles this efficiently — O(inputs) per nod
 ## Phase 3: Frontend Architecture ✅ (Complete)
 
 ### 3.1 Split the monolithic store ✅
-Broke `graphStore.ts` (~2,900 lines) into 12 focused Zustand slices composed via `StateCreator` spread. ESLint `max-lines` rule (300 lines) on `store.ts` to prevent regression. 365 tests passing, zero consumer file changes across all 44 importing files.
+Broke `graphStore.ts` into 14 focused Zustand slices composed via `StateCreator` spread. ESLint `max-lines` on `store.ts` prevents regression, and the surface is guarded by store contract/surface tests.
 
 ### 3.2 Fix live parameter race conditions ✅
 - [x] Await `exportGraph()` in `setParamLive()` before storing the snapshot
@@ -158,10 +158,11 @@ Items that can be done incrementally alongside any other phase.
 - [ ] Add evaluator tests that exercise cache invalidation, dirty propagation, and muted node pass-through
 - [ ] Target: every `CascadeError` variant has at least one test that triggers it
 
-### 5.2 Frontend component tests
-- [ ] Set up vitest + React Testing Library for component tests
-- [ ] Add tests for critical components: `NodeCanvas` (node creation, connection, deletion), `BaseNode` (param rendering), `CurvesNode` (curve editing)
-- [ ] Add tests for store interactions: undo/redo round-trips, live parameter gestures, node deletion cleanup
+### 5.2 Frontend component tests ✅ (Partially complete)
+- [x] Set up Vitest + React Testing Library for component tests
+- [x] Add component coverage for critical surfaces including AI Assistant, DSL Editor, settings, unsaved changes, curves, and NodeCanvas example CTA behavior
+- [x] Add store contract coverage for undo/redo, live parameter gestures, sequence cleanup, project packages, and graph-store surface shape
+- [ ] Add broader interaction coverage for `NodeCanvas` creation/connection/deletion flows and `BaseNode` param rendering
 
 ### 5.3 CI pipeline improvements ✅ (Partially complete)
 - [x] Add frontend typecheck + lint as blocking CI steps
@@ -273,7 +274,7 @@ Based on the state of the codebase as of 2026-03-06, here's the recommended prio
 4. **EngineBridge abstraction split** (Phase 3.4) — Prerequisite for clean batch/headless rendering (Product Roadmap Phase 2.4).
 5. **EvalSession introduction** (Phase 4.1) — Evaluator's parameter signature is already unwieldy and will get worse with new features.
 6. **Rust error path testing** (Phase 5.1) — Good coverage of happy paths, but error paths are under-tested.
-7. **Frontend component tests** (Phase 5.2) — No component tests exist yet; store contract tests help but aren't sufficient.
+7. **Frontend component tests** (Phase 5.2) — Component and store contract tests exist; broaden coverage around NodeCanvas and BaseNode interactions.
 8. **CI coverage + benchmark regression** (Phase 5.3 remainder) — Important for preventing regressions as the codebase grows.
 
 ### Lower Priority (when needed)
