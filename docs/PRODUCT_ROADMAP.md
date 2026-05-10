@@ -40,17 +40,17 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 
 ## Current State (What Works Today)
 
-### Node Library (~50 nodes across 9 categories)
+### Node Library
 
-- **Color** (21 nodes) — Grade, ColorCorrect, HueShift, Curves, CDL, Clamp, Saturation, Posterize, Threshold, Exposure, WhiteBalance, LUT, sRGB conversion, etc.
-- **Filter** (9) — GaussianBlur, Sharpen, Median, EdgeDetect, Emboss, DirectionalBlur, RadialBlur, Bloom, Defocus
-- **Composite** (3) — Merge (14 Porter-Duff blend modes), AlphaOver, Premult/Unpremult
-- **Transform** (8) — Translate, Scale, Rotate, Flip, Crop, Reformat, CornerPin, STMap
-- **Generator** (9) — Solid, Checkerboard, Gradient, Noise, Ramp, Text, Grid, ColorWheel, etc.
-- **Matte** (11) — ChromaKey, LuminanceKey, DifferenceMatte, EdgeBlur, MatteExpand, MatteShrink, etc.
-- **Channel** (5) — Shuffle, SeparateRGBA, CombineRGBA, CopyChannels, etc.
-- **Utility** (6) — Dot, Switch, Blend, etc.
-- **Input/Output** (6) — LoadImage, SaveImage, Viewer, etc.
+`cascade-nodes-std` registers 60 built-in standard nodes today, and `cascade-gpu` adds GPU kernel nodes when a GPU context is available.
+
+- **Input/Output** — Image, sequence, batch, video, viewer, compare viewer, image/sequence/video export, EXR export
+- **AI** — Inpaint, depth estimate, remove background, upscale, generate image
+- **Color and Utility** — Color convert, curves, palette, HSVA split/combine, color ramp, math, dot, project/image info
+- **Filter and Matte** — Blur, sharpen, dilate, erode, median, directional/radial blur, edge blur, matte expand/shrink, shape, glow
+- **Transform and Time** — Resize, crop, flip, translate, corner pin, ST map, time offset, frame hold, frame blend
+- **Generator** — Solid color, noise, gradient, checkerboard, rasterize field, constants, text, UV map
+- **Programmable/Group** — GPU Script nodes and custom group definitions
 
 ### Platform & Architecture
 
@@ -59,7 +59,7 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 - ✅ Pull-based evaluator with dirty propagation and LRU cache
 - ✅ GPU compute pipeline (GLSL → naga → wgpu)
 - ✅ Self-describing NodeSpec system (add Rust node → UI auto-generates)
-- ✅ React + xyflow + Zustand frontend with 12-slice store architecture
+- ✅ React + xyflow + Zustand frontend with 14-slice store architecture
 - ✅ Undo/redo (50 deep), cut/copy/paste, context menus
 - ✅ Blender-style inline parameter sliders
 - ✅ Full-stack error handling with per-node error attribution
