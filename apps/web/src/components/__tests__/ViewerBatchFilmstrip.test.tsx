@@ -97,6 +97,15 @@ const batchNode: NodeInstance = {
   muted: false,
 };
 
+const sequenceNode: NodeInstance = {
+  id: 'sequence1',
+  typeId: 'load_image_sequence',
+  position: { x: 0, y: 0 },
+  params: {},
+  inputDefaults: {},
+  muted: false,
+};
+
 const viewerNode: NodeInstance = {
   id: 'viewer1',
   typeId: 'viewer',
@@ -436,5 +445,82 @@ describe('Viewer batch filmstrip thumbnails', () => {
     await waitFor(() => expect(within(screen.getByTitle('mona_lisa')).getByTestId('viewer-filmstrip-processed-thumbnail')).toBeTruthy());
     await waitFor(() => expect(within(screen.getByTitle('dog')).queryByTestId('viewer-filmstrip-processed-thumbnail')).toBeNull());
     expect(within(screen.getByTitle('dog')).getByTestId('viewer-filmstrip-source-thumbnail')).toBeTruthy();
+  });
+});
+
+describe('Viewer sequence playback compatibility', () => {
+  beforeEach(() => {
+    Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+      configurable: true,
+      value: vi.fn(() => ({
+        imageSmoothingEnabled: true,
+        putImageData: vi.fn(),
+      })),
+    });
+    if (!globalThis.ImageData) {
+      Object.defineProperty(globalThis, 'ImageData', {
+        configurable: true,
+        value: class ImageData {
+          width: number;
+          height: number;
+          data: Uint8ClampedArray;
+
+          constructor(width: number, height: number) {
+            this.width = width;
+            this.height = height;
+            this.data = new Uint8ClampedArray(width * height * 4);
+          }
+        },
+      });
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('does not show the batch filmstrip for image sequences and keeps the last rendered frame visible during playback', async () => {
+    useGraphStore.setState({
+      nodes: new Map([
+        [sequenceNode.id, sequenceNode],
+        [viewerNode.id, viewerNode],
+      ]),
+      connections: [{
+        id: 'sequence-to-viewer',
+        fromNode: sequenceNode.id,
+        fromPort: 'image',
+        toNode: viewerNode.id,
+        toPort: 'value',
+      }],
+      selectedNodeIds: new Set([viewerNode.id]),
+      renderResults: new Map([[viewerNode.id, imageResult(viewerNode.id, 97, 12, 8)]]),
+      currentFrame: 98,
+      graphRevision: 0,
+      activeTransportSourceId: sequenceNode.id,
+      mediaIteratorInfoMap: new Map([[
+        sequenceNode.id,
+        {
+          sourceNodeId: sequenceNode.id,
+          kind: 'sequence',
+          label: 'cloudy_evening_1',
+          startFrame: 1,
+          endFrame: 192,
+          count: 192,
+          itemLabels: [],
+          supportsRandomAccess: true,
+        },
+      ]]),
+      lastError: null,
+      playbackFps: 23.8,
+      fps: 24,
+    });
+
+    render(<Viewer />);
+
+    await waitFor(() => expect(screen.getByText('12×8')).toBeTruthy());
+    expect(screen.queryByText('No output')).toBeNull();
+    expect(screen.queryByTestId('mock-media-strip')).toBeNull();
+    expect(screen.getByText('24 fps')).toBeTruthy();
   });
 });

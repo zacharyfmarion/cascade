@@ -554,7 +554,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
   const activeResult = useMemo(() => {
     if (
-      activeIterator
+      activeIterator?.kind === 'batch'
       && rawActiveResult
       && rawActiveResult.frame !== undefined
       && rawActiveResult.frame !== currentFrame
@@ -563,6 +563,10 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     }
     return rawActiveResult;
   }, [activeIterator, currentFrame, rawActiveResult]);
+
+  const showBatchFilmstrip = activeIterator?.kind === 'batch'
+    && activeIterator.count > 1
+    && !!activeViewerId;
 
   const activeProcessedThumbnail = useMemo(
     () => createProcessedThumbnail(activeResultMatchesFrame ? activeResult : undefined),
@@ -1082,7 +1086,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
         </div>
       )}
 
-      {activeIterator && activeIterator.count > 1 && activeViewerId && (
+      {showBatchFilmstrip && activeIterator && activeViewerId && (
         <div
           style={{
             position: 'absolute',
