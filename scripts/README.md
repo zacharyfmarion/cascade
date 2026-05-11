@@ -138,6 +138,10 @@ The script:
    `target/release-artifacts/vX.Y.Z/`.
 8. Uploads artifacts to GitHub Releases and updates Homebrew when requested.
 
+The Homebrew update verifies that the versioned DMG URL is publicly accessible
+before pushing the tap change. A public tap cannot install a cask whose DMG lives
+behind private GitHub release permissions.
+
 ### Example Release Notes Format
 
 When prompted for release notes, use Markdown in this shape:
@@ -210,6 +214,13 @@ release notes, PRs, or CI logs.
 
 - Verify the merged release PR updated all tracked version sources before
   running `publish`
+
+**"Release asset is not publicly accessible"**
+
+- Make sure the release DMG is available to unauthenticated users before
+  publishing the public Homebrew cask.
+- If the source repository must remain private, upload the DMG to public hosting
+  and update the cask URL strategy before running the Homebrew update.
 
 ### Manual Fallback
 
