@@ -626,22 +626,6 @@ const engineAPI = {
     });
   },
 
-  renderSequence(_nodeId: string): Promise<string> {
-    return Promise.reject(new Error('Sequence rendering is not supported in WASM engine'));
-  },
-
-  renderVideo(_nodeId: string): Promise<string> {
-    return Promise.reject(new Error('Video rendering is not supported in WASM engine'));
-  },
-
-  cancelJob(): Promise<void> {
-    return Promise.reject(new Error('Job control is not supported in WASM engine'));
-  },
-
-  getJobProgress(): Promise<null> {
-    return Promise.resolve(null);
-  },
-
   setSequenceDirectory(_nodeId: string, _directory: string): Promise<never> {
     return Promise.reject(new Error('Sequence directory assignment is not supported in WASM engine'));
   },
