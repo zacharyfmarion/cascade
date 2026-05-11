@@ -97,7 +97,7 @@ Cache-key-chaining design already handles this efficiently — O(inputs) per nod
 ## Phase 3: Frontend Architecture ✅ (Complete)
 
 ### 3.1 Split the monolithic store ✅
-Broke `graphStore.ts` (~2,900 lines) into 12 focused Zustand slices composed via `StateCreator` spread. ESLint `max-lines` rule (300 lines) on `store.ts` to prevent regression. 365 tests passing, zero consumer file changes across all 44 importing files.
+Broke `graphStore.ts` into 14 focused Zustand slices composed via `StateCreator` spread. ESLint `max-lines` rule (300 lines) on `store.ts` prevents regression, while `kernel.ts` owns shared runtime state.
 
 ### 3.2 Fix live parameter race conditions ✅
 - [x] Await `exportGraph()` in `setParamLive()` before storing the snapshot

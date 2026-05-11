@@ -1,6 +1,10 @@
 # Design: Format & Resolution Awareness
 
-## Problem
+## Status
+
+Implemented. The notes below describe the design that is now reflected in `cascade-core`; code snippets have been kept aligned with the current `Image` and `EvalContext` shapes.
+
+## Original Problem
 
 Every image in the processor is a bare `(width, height, Vec<f32>)` buffer. There's no concept of where that image lives in a shared coordinate space, what the intended output resolution is, or how to composite two images of different sizes. This blocks all real compositing workflows.
 
@@ -98,6 +102,12 @@ impl Format {
 ```rust
 #[derive(Clone, Debug)]
 pub struct Image {
+    /// Backward-compatible data width. Always equals `data_window.width_u32()`.
+    pub width: u32,
+
+    /// Backward-compatible data height. Always equals `data_window.height_u32()`.
+    pub height: u32,
+
     /// The display format this image belongs to (the "canvas").
     pub format: Format,
 
@@ -122,7 +132,7 @@ pub struct Image {
 ```rust
 impl Image {
     /// Backward-compatible constructor: data_window == display_window == (0,0)→(w,h).
-    pub fn from_f32_data(width: u32, height: u32, data: Vec<f32>) -> Self { ... }
+    pub fn from_f32_data(width: u32, height: u32, data: Vec<f32>) -> Result<Self, CascadeError> { ... }
 
     /// Full constructor with explicit format and data window.
     pub fn new_with_domain(
@@ -130,7 +140,7 @@ impl Image {
         data_window: RectI,
         data: Vec<f32>,
         color_space: ColorSpaceId,
-    ) -> Self { ... }
+    ) -> Result<Self, CascadeError> { ... }
 
     /// Data dimensions (NOT format dimensions).
     pub fn data_width(&self) -> u32 { self.data_window.width().max(0) as u32 }
@@ -163,11 +173,14 @@ Add a `project_format` to `EvalContext` so generators and field rasterization kn
 ```rust
 pub struct EvalContext<'a> {
     pub inputs: HashMap<String, Value>,
+    pub extra_inputs: HashMap<String, HashMap<FrameTime, Value>>,
     pub params: &'a HashMap<String, ParamValue>,
     pub frame_time: FrameTime,
     pub color_management: &'a dyn ColorManagement,
     pub ai_provider: Option<&'a dyn crate::ai::AiProvider>,
-    pub project_format: &'a Format,  // NEW
+    pub project_format: &'a Format,
+    pub ai_cached_outputs: Option<&'a HashMap<String, Image>>,
+    pub preview_scale: f32,
 }
 ```
 
@@ -215,10 +228,15 @@ Every node that produces an Image output has an implicit "format policy." Here a
 
 ```rust
 // Before:
-let output = Image::from_f32_data(image.width, image.height, data);
+let output = Image::from_f32_data(image.width, image.height, data)?;
 
 // After:
-let output = Image::new_with_domain(image.format.clone(), image.data_window, data, image.color_space.clone());
+let output = Image::new_with_domain(
+    image.format.clone(),
+    image.data_window,
+    data,
+    image.color_space.clone(),
+)?;
 ```
 
 ### Spatial filters (GaussianBlur, Sharpen, Dilate, Erode, Median)
