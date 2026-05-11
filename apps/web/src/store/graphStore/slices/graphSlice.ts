@@ -245,8 +245,8 @@ export const createGraphSlice: StateCreator<
         pendingImageFiles.set(result.id, initialFile);
       }
       set({ nodes: newNodes });
-      if (actualTypeId === 'load_image_sequence') {
-        get().recomputeSequenceState();
+      if (actualTypeId === 'load_image_batch' || actualTypeId === 'load_image_sequence' || actualTypeId === 'load_video') {
+        get().recomputeMediaIteratorState();
       }
 
       trackAnalyticsEvent('node added', {
@@ -327,10 +327,16 @@ export const createGraphSlice: StateCreator<
       // Clean up renderGenerations entry to prevent memory leak
       kernel.renderGenerations.delete(id);
 
+      if (removedNode?.typeId === 'load_image_batch') {
+        get().setBatchInfo(id, null);
+      }
+
       if (removedNode?.typeId === 'load_image_sequence') {
         await Promise.resolve(getEngine().clearSequenceFiles?.(id));
         sequenceFrameManager.clear(id);
         get().recomputeSequenceState();
+      } else if (removedNode?.typeId === 'load_video') {
+        get().recomputeMediaIteratorState();
       }
 
       get().triggerAffectedViewers(Array.from(affectedNodeIds));

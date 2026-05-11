@@ -147,7 +147,7 @@ mod tests {
     use crate::transpile::glsl_to_wgsl;
     use cascade_core::node::{EvalContext, Node};
     use cascade_core::types::{
-        Format, FrameTime, Image, ParamDefault, ParamValue, UiHint, Value, ValueType,
+        Format, FrameTime, Image, ParamDefault, ParamValue, RectI, UiHint, Value, ValueType,
     };
     use std::collections::HashMap;
 
@@ -591,6 +591,61 @@ mod tests {
             }
             _ => panic!("Expected image output"),
         }
+    }
+
+    #[test]
+    fn test_pixelate_preserves_preview_image_domain() {
+        let ctx = match GpuContext::new() {
+            Ok(ctx) => Arc::new(ctx),
+            Err(e) => {
+                println!("GPU not available, skipping: {e}");
+                return;
+            }
+        };
+
+        let manifest = builtin_pixelate_manifest();
+        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
+            .expect("Should create pixelate node");
+        let data = vec![0.5f32; 8 * 5 * 4];
+        let image = Image::new_with_domain(
+            Format::from_dimensions(16, 10),
+            RectI::from_dimensions(8, 5),
+            data,
+            cascade_core::types::ColorSpaceId::default_working(),
+        )
+        .expect("preview-domain image should build");
+
+        let mut inputs = HashMap::new();
+        inputs.insert("image".to_string(), Value::Image(image));
+        let mut params = HashMap::new();
+        params.insert("pixel_size".to_string(), ParamValue::Int(2));
+        let cm = cascade_core::color::BuiltinColorManagement::new();
+        let project_format = Format::hd();
+        let eval_ctx = EvalContext {
+            inputs,
+            extra_inputs: HashMap::new(),
+            params: &params,
+            frame_time: FrameTime { frame: 0 },
+            color_management: &cm,
+            ai_provider: None,
+            project_format: &project_format,
+            ai_cached_outputs: None,
+            preview_scale: 0.5,
+        };
+
+        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
+        let Some(Value::Image(output)) = result.get("image") else {
+            panic!("Expected image output");
+        };
+        assert_eq!((output.width, output.height), (8, 5));
+        assert_eq!((output.format.width(), output.format.height()), (16, 10));
+        assert_eq!(
+            (
+                output.data_window.width_u32(),
+                output.data_window.height_u32()
+            ),
+            (8, 5)
+        );
     }
 
     #[test]

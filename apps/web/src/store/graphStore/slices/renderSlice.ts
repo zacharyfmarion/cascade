@@ -12,6 +12,7 @@ import type { EngineError } from '../../../engine/engineError';
 import { parseEngineError } from '../../../engine/engineError';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { useSettingsStore } from '../../settingsStore';
+import { perfLog, perfLogDuration, perfNow } from '../../../utils/perf';
 import {
   kernel,
   annotateEnginePreviewResult,
@@ -22,6 +23,16 @@ import {
 
 const VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer', 'export_image', 'export_image_sequence', 'export_video']);
 const PANEL_VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer']);
+
+const tagRenderResult = (
+  result: ViewerResult,
+  frame: number,
+  generation?: number,
+): ViewerResult => ({
+  ...result,
+  frame,
+  generation,
+});
 
 // ---------------------------------------------------------------------------
 // Slice interface
@@ -36,10 +47,11 @@ export interface RenderSliceState {
 }
 
 export interface RenderSliceActions {
-  triggerRender: (viewerNodeId: string) => void;
-  triggerAllViewers: () => void;
-  triggerAffectedViewers: (changedNodeIds: string[]) => void | Promise<void>;
+  triggerRender: (viewerNodeId: string, previewScaleOverride?: number) => void;
+  triggerAllViewers: (previewScaleOverride?: number) => void;
+  triggerAffectedViewers: (changedNodeIds: string[], previewScaleOverride?: number) => void | Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
+  renderViewerFrame: (viewerNodeId: string, frame: number, previewScale?: number) => Promise<ViewerResult | null>;
   pushSequenceFrames: (frame: number) => Promise<void>;
   prefetchSequenceFrames: (startFrame: number, count: number) => void;
   flushRender: () => Promise<Map<string, EngineError>>;
@@ -102,7 +114,7 @@ export const createRenderSlice: StateCreator<
 
   // -- public slice ---------------------------------------------------------
 
-  const triggerAllViewers = () => {
+  const triggerAllViewers = (previewScaleOverride?: number) => {
     if (kernel.renderSuspendCount > 0) {
       kernel.renderNeededWhileSuspended = true;
       return;
@@ -110,23 +122,23 @@ export const createRenderSlice: StateCreator<
     const { nodes } = get();
     for (const [viewerId, node] of nodes) {
       if (VIEWER_NODE_TYPES.has(node.typeId)) {
-        get().triggerRender(viewerId);
+        get().triggerRender(viewerId, previewScaleOverride);
       }
     }
   };
 
-  const triggerAffectedViewers = async (changedNodeIds: string[]) => {
+  const triggerAffectedViewers = async (changedNodeIds: string[], previewScaleOverride?: number) => {
     if (kernel.renderSuspendCount > 0) {
       kernel.renderNeededWhileSuspended = true;
       return;
     }
     if (get().editingStack.length > 1) {
-      triggerAllViewers();
+      triggerAllViewers(previewScaleOverride);
       return;
     }
     const eng = getEngine();
     if (!eng.getAffectedViewers) {
-      triggerAllViewers();
+      triggerAllViewers(previewScaleOverride);
       return;
     }
     try {
@@ -139,11 +151,11 @@ export const createRenderSlice: StateCreator<
         for (const v of viewers) affectedSet.add(v);
       }
       for (const viewerId of affectedSet) {
-        get().triggerRender(viewerId);
+        get().triggerRender(viewerId, previewScaleOverride);
       }
     } catch (e) {
       console.warn('Selective viewer invalidation failed, falling back to all viewers:', e);
-      triggerAllViewers();
+      triggerAllViewers(previewScaleOverride);
     }
   };
 
@@ -199,7 +211,10 @@ export const createRenderSlice: StateCreator<
           const renderScale = getEffectivePreviewScaleForResult(scale, previous);
           const result = await renderViewerForCurrentContext(viewerId, frame, renderScale);
           if (result) {
-            newResults.set(viewerId, annotateEnginePreviewResult(result, renderScale, previous));
+            newResults.set(
+              viewerId,
+              tagRenderResult(annotateEnginePreviewResult(result, renderScale, previous), frame),
+            );
             changed = true;
           }
         } catch (e) { const error = parseEngineError(e); if (error.nodeId) { const errs = new Map(get().nodeErrors); errs.set(error.nodeId, error); set({ nodeErrors: errs, lastError: error }); } else { set({ lastError: error }); } }
@@ -220,25 +235,70 @@ export const createRenderSlice: StateCreator<
     graphRevision: 0,
     lastTransactionOrigin: null,
 
-    triggerRender: (viewerNodeId) => {
+    triggerRender: (viewerNodeId, previewScaleOverride) => {
       const frame = get().currentFrame;
-      const scale = get().previewScale;
+      const scale = previewScaleOverride ?? get().previewScale;
       const generation = nextRenderGeneration(viewerNodeId);
+      const queuedAt = perfNow();
+      perfLog('render.triggerRender.queued', {
+        viewerNodeId,
+        frame,
+        scale,
+        previewScaleOverride,
+        generation,
+      });
       kernel.renderLock = kernel.renderLock.then(async () => {
+        const lockWaitMs = perfNow() - queuedAt;
         if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
         try {
+          const totalStart = perfNow();
           await pushSequenceFrames(frame);
           if (kernel.renderGenerations.get(viewerNodeId) !== generation) return;
           const previous = get().renderResults.get(viewerNodeId);
-          const renderScale = getEffectivePreviewScaleForResult(scale, previous);
+          const renderScale = getEffectivePreviewScaleForResult(
+            scale,
+            previous,
+            previewScaleOverride !== undefined,
+          );
+          const invokeStart = perfNow();
           const result = await renderViewerForCurrentContext(viewerNodeId, frame, renderScale);
-          const scaled = result ? annotateEnginePreviewResult(result, renderScale, previous) : null;
+          const invokeMs = perfNow() - invokeStart;
+          const annotateStart = perfNow();
+          const scaled = result
+            ? tagRenderResult(
+                annotateEnginePreviewResult(result, renderScale, previous),
+                frame,
+                generation,
+              )
+            : null;
+          const annotateMs = perfNow() - annotateStart;
           if (scaled && kernel.renderGenerations.get(viewerNodeId) === generation) {
+            const commitStart = perfNow();
             const newResults = new Map(get().renderResults);
             newResults.set(viewerNodeId, scaled);
             set({ renderResults: newResults, lastError: null, nodeErrors: new Map() });
             updateNodeTimings();
+            perfLogDuration('render.triggerRender.storeCommit', commitStart, {
+              viewerNodeId,
+              frame,
+              generation,
+            });
           }
+          perfLogDuration('render.triggerRender.total', totalStart, {
+            viewerNodeId,
+            frame,
+            generation,
+            renderScale,
+            lockWaitMs: Number(lockWaitMs.toFixed(1)),
+            invokeMs: Number(invokeMs.toFixed(1)),
+            annotateMs: Number(annotateMs.toFixed(1)),
+            result: scaled && 'width' in scaled ? {
+              width: scaled.width,
+              height: scaled.height,
+              displayWidth: scaled.displayWidth,
+              displayHeight: scaled.displayHeight,
+            } : scaled?.type ?? null,
+          });
         } catch (e) {
           const error = parseEngineError(e);
           if (error.code !== 'MISSING_INPUT') {
@@ -259,6 +319,18 @@ export const createRenderSlice: StateCreator<
     pushSequenceFrames,
     prefetchSequenceFrames,
     renderAllViewersAsync,
+
+    renderViewerFrame: async (viewerNodeId, frame, previewScale = 1) => {
+      let rendered: ViewerResult | null = null;
+      const renderJob = kernel.renderLock.then(async () => {
+        await pushSequenceFrames(frame);
+        const result = await renderViewerForCurrentContext(viewerNodeId, frame, previewScale);
+        rendered = result ? tagRenderResult(result, frame) : null;
+      });
+      kernel.renderLock = renderJob.catch(() => undefined);
+      await renderJob;
+      return rendered;
+    },
 
     flushRender: async () => {
       if (kernel.renderNeededWhileSuspended) {

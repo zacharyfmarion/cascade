@@ -5,15 +5,18 @@ import {
   NodeCanvas,
   NodeDropdown,
   NodeButton,
+  NodeInfoRow,
   NodeProgress,
   NodeStatus,
   NodeSection,
+  NodeTextInput,
   NodeDisabledOverlay,
 } from './NodePrimitives';
 import { getNodeIcon } from './nodeIcons';
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeSpec, ParamValue } from '../../store/types';
 import { extractParamValue, createParamValue } from '../../store/types';
+import { isDesktopRuntime } from '../../platform/runtime';
 
 type NodeData = {
   label: string;
@@ -34,6 +37,11 @@ export const ExportImageBatchNode: React.FC<NodeProps> = (props) => {
 
   const formatParam = params['format'];
   const formatIdx = formatParam ? Number(extractParamValue(formatParam)) : 0;
+  const filenameTemplate = params['filename_template']
+    ? String(extractParamValue(params['filename_template']))
+    : '{name}';
+  const outputDir = params['output_dir'] ? String(extractParamValue(params['output_dir'])) : '';
+  const isDesktop = isDesktopRuntime();
 
   const formatSpec = spec.params.find(p => p.key === 'format');
 
@@ -59,6 +67,20 @@ export const ExportImageBatchNode: React.FC<NodeProps> = (props) => {
     renderBatch(props.id);
   }, [renderBatch, props.id]);
 
+  const handleSelectOutputFolder = useCallback(async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: 'Select Batch Output Folder',
+    });
+    if (typeof selected === 'string') {
+      setParam(props.id, 'output_dir', createParamValue('String', selected));
+    }
+  }, [props.id, setParam]);
+
+  const outputBasename = outputDir ? outputDir.split('/').filter(Boolean).pop() || outputDir : '';
+
   return (
     <BaseNode {...props} data={data} headerIcon={getNodeIcon('export_image_batch', 'Output')}>
       <NodeCanvas canvasRef={canvasRef} hasResult={!!result} />
@@ -73,6 +95,31 @@ export const ExportImageBatchNode: React.FC<NodeProps> = (props) => {
               onChange={(v) => setParam(props.id, 'format', createParamValue('Int', v))}
               disabled={isRendering}
             />
+          </NodeSection>
+        )}
+        <NodeSection>
+          <NodeTextInput
+            label="Filename Template"
+            value={filenameTemplate}
+            onChange={(v) => setParam(props.id, 'filename_template', createParamValue('String', v))}
+            placeholder="{name}"
+            disabled={isRendering}
+          />
+        </NodeSection>
+        {isDesktop && (
+          <NodeSection spaced>
+            <NodeButton
+              onClick={handleSelectOutputFolder}
+              disabled={isRendering}
+              fullWidth
+            >
+              Select Output Folder
+            </NodeButton>
+            {outputDir ? (
+              <NodeInfoRow label="Folder" value={outputBasename} mono />
+            ) : (
+              <NodeStatus variant="info">No output folder selected</NodeStatus>
+            )}
           </NodeSection>
         )}
       </NodeDisabledOverlay>
@@ -92,8 +139,8 @@ export const ExportImageBatchNode: React.FC<NodeProps> = (props) => {
         </NodeSection>
       ) : (
         <NodeSection spaced>
-          <NodeButton onClick={handleRender} fullWidth>
-            Render & Download Zip
+          <NodeButton onClick={handleRender} disabled={isDesktop && !outputDir} fullWidth>
+            {isDesktop ? 'Render Batch' : 'Render & Download Zip'}
           </NodeButton>
         </NodeSection>
       )}

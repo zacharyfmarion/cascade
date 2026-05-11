@@ -11,7 +11,12 @@ import type {
   SerializableGroupDefinition,
   TransactionOrigin,
 } from '../types';
-import { isCompareResult, isPixelResult } from '../types';
+import {
+  getViewerDisplayHeight,
+  getViewerDisplayWidth,
+  isCompareResult,
+  isPixelResult,
+} from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { isDesktopRuntime } from '../../platform/runtime';
 import { useSettingsStore } from '../settingsStore';
@@ -115,6 +120,7 @@ const createScalingCanvas = (width: number, height: number): OffscreenCanvas | H
 };
 
 export const MIN_PREVIEW_DOWNSCALE_EDGE = 600;
+export const MEDIA_NAV_PREVIEW_SCALE = 0.2;
 
 export type PreviewDownscaleSize = {
   width: number;
@@ -173,6 +179,30 @@ export const getPreviewScaleFromDimensions = (
   return Math.min(width / originalWidth, height / originalHeight);
 };
 
+const isLikelyPreviewOfDimensions = (
+  width: number,
+  height: number,
+  originalWidth: number,
+  originalHeight: number,
+): boolean => {
+  if (
+    width <= 0
+    || height <= 0
+    || originalWidth <= 0
+    || originalHeight <= 0
+    || width >= originalWidth
+    || height >= originalHeight
+  ) {
+    return false;
+  }
+
+  const scaleX = width / originalWidth;
+  const scaleY = height / originalHeight;
+  return Math.abs(width - Math.round(originalWidth * scaleY)) <= 2
+    && Math.abs(height - Math.round(originalHeight * scaleX)) <= 2
+    && Math.abs(scaleX - scaleY) <= 0.01;
+};
+
 export const annotateEnginePreviewResult = (
   result: ViewerResult,
   scale: number,
@@ -184,12 +214,50 @@ export const annotateEnginePreviewResult = (
   if (result.previewScale !== undefined) {
     return result;
   }
+  const resultOriginalWidth = result.originalWidth;
+  const resultOriginalHeight = result.originalHeight;
+  const resultDisplayWidth = getViewerDisplayWidth(result);
+  const resultDisplayHeight = getViewerDisplayHeight(result);
+  const hasExplicitResultDomain = resultOriginalWidth !== undefined
+    || resultOriginalHeight !== undefined
+    || result.displayWidth !== undefined
+    || result.displayHeight !== undefined
+    || result.bufferWidth !== undefined
+    || result.bufferHeight !== undefined;
+  if (
+    resultDisplayWidth > 0
+    && resultDisplayHeight > 0
+    && (resultDisplayWidth !== result.width || resultDisplayHeight !== result.height)
+  ) {
+    const previewScale = getPreviewScaleFromDimensions(
+      result.width,
+      result.height,
+      resultDisplayWidth,
+      resultDisplayHeight,
+    );
+    return previewScale < 1 ? {
+      ...result,
+      previewScale,
+      originalWidth: resultOriginalWidth ?? resultDisplayWidth,
+      originalHeight: resultOriginalHeight ?? resultDisplayHeight,
+      displayWidth: resultDisplayWidth,
+      displayHeight: resultDisplayHeight,
+      bufferWidth: result.width,
+      bufferHeight: result.height,
+    } : result;
+  }
   if (!previous || (!isPixelResult(previous) && !isCompareResult(previous))) {
+    return result;
+  }
+  if (hasExplicitResultDomain) {
     return result;
   }
 
   const originalWidth = previous.originalWidth ?? previous.width;
   const originalHeight = previous.originalHeight ?? previous.height;
+  if (!isLikelyPreviewOfDimensions(result.width, result.height, originalWidth, originalHeight)) {
+    return result;
+  }
   const previewScale = getPreviewScaleFromDimensions(
     result.width,
     result.height,
@@ -205,12 +273,17 @@ export const annotateEnginePreviewResult = (
     previewScale,
     originalWidth,
     originalHeight,
+    displayWidth: originalWidth,
+    displayHeight: originalHeight,
+    bufferWidth: result.width,
+    bufferHeight: result.height,
   };
 };
 
 export const getEffectivePreviewScaleForResult = (
   requestedScale: number,
   result?: ViewerResult,
+  allowUnknownDimensions = false,
 ): number => {
   if (
     !Number.isFinite(requestedScale)
@@ -220,11 +293,11 @@ export const getEffectivePreviewScaleForResult = (
     return requestedScale;
   }
   if (!result || (!isPixelResult(result) && !isCompareResult(result))) {
-    return 1;
+    return allowUnknownDimensions ? requestedScale : 1;
   }
 
-  const originalWidth = result.originalWidth ?? result.width;
-  const originalHeight = result.originalHeight ?? result.height;
+  const originalWidth = getViewerDisplayWidth(result);
+  const originalHeight = getViewerDisplayHeight(result);
   const targetSize = getPreviewDownscaleSize(originalWidth, originalHeight, requestedScale);
   return targetSize?.scale ?? 1;
 };
@@ -232,13 +305,14 @@ export const getEffectivePreviewScaleForResult = (
 export const getEffectivePreviewScaleForResults = (
   requestedScale: number,
   results: Iterable<ViewerResult>,
+  allowUnknownDimensions = false,
 ): number => {
   let scale: number | null = null;
   for (const result of results) {
     const resultScale = getEffectivePreviewScaleForResult(requestedScale, result);
     scale = scale === null ? resultScale : Math.max(scale, resultScale);
   }
-  return scale ?? getEffectivePreviewScaleForResult(requestedScale);
+  return scale ?? getEffectivePreviewScaleForResult(requestedScale, undefined, allowUnknownDimensions);
 };
 
 export const downscaleRenderResult = async (result: ViewerResult, scale: number): Promise<ViewerResult> => {
@@ -285,6 +359,10 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
       previewScale: targetSize.scale,
       originalWidth: result.originalWidth ?? result.width,
       originalHeight: result.originalHeight ?? result.height,
+      displayWidth: getViewerDisplayWidth(result),
+      displayHeight: getViewerDisplayHeight(result),
+      bufferWidth: targetSize.width,
+      bufferHeight: targetSize.height,
     };
   }
 
@@ -296,6 +374,10 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
     previewScale: targetSize.scale,
     originalWidth: result.originalWidth ?? result.width,
     originalHeight: result.originalHeight ?? result.height,
+    displayWidth: getViewerDisplayWidth(result),
+    displayHeight: getViewerDisplayHeight(result),
+    bufferWidth: targetSize.width,
+    bufferHeight: targetSize.height,
   };
 };
 

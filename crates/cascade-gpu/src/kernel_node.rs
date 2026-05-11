@@ -366,6 +366,12 @@ impl Node for GpuKernelNode {
                 height,
             )
             .await?;
+            let output_image = Image::new_with_domain(
+                primary.format.clone(),
+                primary.data_window,
+                (*output_image.data).clone(),
+                primary.color_space.clone(),
+            )?;
 
             let mut outputs = HashMap::new();
             if let Some(port) = self.spec.outputs.first() {

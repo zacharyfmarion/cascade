@@ -160,6 +160,10 @@ pub trait Node: Send + Sync + Any {
 
     fn evaluate<'a>(&'a self, ctx: &'a EvalContext<'a>) -> NodeFuture<'a>;
 
+    fn cache_revision(&self) -> u64 {
+        0
+    }
+
     fn requested_frames(
         &self,
         _current_frame: FrameTime,

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
+import type { EngineBridge, AddNodeResult, JobProgress, SequenceInfo, BatchInfo, VideoInfo, ColorManagementInfo, NodeInterfaceChange } from './bridge';
 import type { NodeSpec, ParamValue, PortSpec, ViewerResult, CreateGroupResult, UngroupResult, GroupInternalGraph, CustomNodeInfo, InternalGraphNode } from '../store/types';
+import { perfLogDuration, perfNow } from '../utils/perf';
 
 type DocumentEnvelope = {
   cascade: unknown;
@@ -12,6 +13,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
 const asParamValueRecord = (value: unknown): Record<string, ParamValue> => (isRecord(value) ? value as Record<string, ParamValue> : {});
+
+const bytesToBase64 = (bytes: Uint8Array): string => {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+};
 
 const parsePosition = (value: unknown): { x: number; y: number } => {
   if (Array.isArray(value)) {
@@ -61,7 +70,7 @@ const decodeBinaryViewerResult = (
   nodeId: string,
   initialOffset = 0,
 ): { result: ViewerResult | null; offset: number } => {
-  if (buf.byteLength < initialOffset + 9) return { result: null, offset: initialOffset };
+  if (buf.byteLength < initialOffset + 17) return { result: null, offset: initialOffset };
   const view = new DataView(buf);
   let offset = initialOffset;
   const kind = view.getUint8(offset);
@@ -70,13 +79,32 @@ const decodeBinaryViewerResult = (
   offset += 4;
   const height = view.getUint32(offset, true);
   offset += 4;
+  const displayWidth = view.getUint32(offset, true);
+  offset += 4;
+  const displayHeight = view.getUint32(offset, true);
+  offset += 4;
   const pixelLen = width * height * 4;
 
   if (kind === 0) {
     if (buf.byteLength < offset + pixelLen) return { result: null, offset };
     const pixels = new Uint8ClampedArray(buf, offset, pixelLen);
     offset += pixelLen;
-    return { result: { type: 'image', nodeId, width, height, pixels }, offset };
+    return {
+      result: {
+        type: 'image',
+        nodeId,
+        width,
+        height,
+        bufferWidth: width,
+        bufferHeight: height,
+        displayWidth,
+        displayHeight,
+        originalWidth: displayWidth,
+        originalHeight: displayHeight,
+        pixels,
+      },
+      offset,
+    };
   }
 
   if (kind === 1) {
@@ -85,7 +113,23 @@ const decodeBinaryViewerResult = (
     offset += pixelLen;
     const afterPixels = new Uint8ClampedArray(buf, offset, pixelLen);
     offset += pixelLen;
-    return { result: { type: 'compare', nodeId, width, height, beforePixels, afterPixels }, offset };
+    return {
+      result: {
+        type: 'compare',
+        nodeId,
+        width,
+        height,
+        bufferWidth: width,
+        bufferHeight: height,
+        displayWidth,
+        displayHeight,
+        originalWidth: displayWidth,
+        originalHeight: displayHeight,
+        beforePixels,
+        afterPixels,
+      },
+      offset,
+    };
   }
 
   return { result: null, offset };
@@ -150,7 +194,10 @@ export class TauriEngine implements EngineBridge {
     const args = mutation.type === 'param'
       ? { nodeId: mutation.nodeId, key: mutation.key, value: mutation.value, frame, previewScale }
       : { nodeId: mutation.nodeId, portName: mutation.key, value: mutation.value, frame, previewScale };
+    const totalStart = perfNow();
+    const invokeStart = perfNow();
     const buf = await invoke<ArrayBuffer>(cmd, args);
+    const invokeMs = perfNow() - invokeStart;
     const results: Array<[string, ViewerResult]> = [];
     if (!buf || buf.byteLength < 4) return results;
 
@@ -171,7 +218,19 @@ export class TauriEngine implements EngineBridge {
         results.push([id, decoded.result]);
       }
     }
+    const timingsStart = perfNow();
     await this.fetchTimings();
+    const timingsMs = perfNow() - timingsStart;
+    perfLogDuration(`tauri.${cmd}.total`, totalStart, {
+      nodeId: mutation.nodeId,
+      key: mutation.key,
+      frame,
+      previewScale,
+      bytes: buf.byteLength,
+      viewers: results.length,
+      invokeMs: Number(invokeMs.toFixed(1)),
+      timingsMs: Number(timingsMs.toFixed(1)),
+    });
     return results;
   }
 
@@ -219,6 +278,67 @@ export class TauriEngine implements EngineBridge {
     }
   }
 
+  async batchClear(nodeId: string): Promise<void> {
+    await invoke('batch_clear', { nodeId });
+  }
+
+  async batchAddImage(nodeId: string, filename: string, data: Uint8Array): Promise<void> {
+    await invoke('batch_add_image', data, {
+      headers: {
+        'x-node-id': nodeId,
+        'x-filename-b64': bytesToBase64(new TextEncoder().encode(filename)),
+      },
+    });
+  }
+
+  async batchLoadDirectory(nodeId: string, directory: string): Promise<BatchInfo> {
+    const start = perfNow();
+    const json = await invoke<string>('batch_load_directory', { nodeId, directory });
+    const info = JSON.parse(json) as BatchInfo;
+    perfLogDuration('tauri.batchLoadDirectory', start, { ...info });
+    return info;
+  }
+
+  async batchLoadPaths(nodeId: string, paths: string[]): Promise<BatchInfo> {
+    const start = perfNow();
+    const json = await invoke<string>('batch_load_paths', { nodeId, paths });
+    const info = JSON.parse(json) as BatchInfo;
+    perfLogDuration('tauri.batchLoadPaths', start, { ...info });
+    return info;
+  }
+
+  async getBatchInfo(nodeId: string): Promise<BatchInfo> {
+    const json = await invoke<string>('get_batch_info', { nodeId });
+    return JSON.parse(json) as BatchInfo;
+  }
+
+  async getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null> {
+    try {
+      const buf = await invoke<ArrayBuffer>('get_batch_image_data', { nodeId, index });
+      if (!buf || buf.byteLength === 0) return null;
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
+  }
+
+  async getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null> {
+    try {
+      const start = perfNow();
+      const buf = await invoke<ArrayBuffer>('get_batch_thumbnail', { nodeId, index, maxEdge });
+      if (!buf || buf.byteLength === 0) return null;
+      perfLogDuration('tauri.getBatchThumbnail', start, {
+        nodeId,
+        index,
+        maxEdge,
+        bytes: buf.byteLength,
+      });
+      return new Uint8Array(buf);
+    } catch {
+      return null;
+    }
+  }
+
   async getAiNodeImageData(nodeId: string): Promise<Uint8Array | null> {
     try {
       const buf = await invoke<ArrayBuffer>('get_ai_node_image_data', { nodeId });
@@ -237,11 +357,34 @@ export class TauriEngine implements EngineBridge {
 
   async renderViewer(viewerNodeId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
+      const totalStart = perfNow();
+      const invokeStart = perfNow();
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame, previewScale });
-      if (!buf || buf.byteLength < 9) return null;
+      if (!buf || buf.byteLength < 17) return null;
 
+      const invokeMs = perfNow() - invokeStart;
+      const timingsStart = perfNow();
       await this.fetchTimings();
-      return decodeBinaryViewerResult(buf, viewerNodeId).result;
+      const timingsMs = perfNow() - timingsStart;
+      const decodeStart = perfNow();
+      const result = decodeBinaryViewerResult(buf, viewerNodeId).result;
+      const decodeMs = perfNow() - decodeStart;
+      perfLogDuration('tauri.renderViewer.total', totalStart, {
+        viewerNodeId,
+        frame,
+        previewScale,
+        bytes: buf.byteLength,
+        invokeMs: Number(invokeMs.toFixed(1)),
+        timingsMs: Number(timingsMs.toFixed(1)),
+        decodeMs: Number(decodeMs.toFixed(1)),
+        result: result && 'width' in result ? {
+          width: result.width,
+          height: result.height,
+          displayWidth: result.displayWidth,
+          displayHeight: result.displayHeight,
+        } : result?.type ?? null,
+      });
+      return result;
     } catch {
       return null;
     }
@@ -249,11 +392,29 @@ export class TauriEngine implements EngineBridge {
 
   async renderInternalViewer(groupNodeId: string, internalViewerId: string, frame: number, previewScale = 1): Promise<ViewerResult | null> {
     try {
+      const totalStart = perfNow();
+      const invokeStart = perfNow();
       const buf = await invoke<ArrayBuffer>('render_internal_viewer', { groupNodeId, internalViewerId, frame, previewScale });
-      if (!buf || buf.byteLength < 9) return null;
+      if (!buf || buf.byteLength < 17) return null;
 
+      const invokeMs = perfNow() - invokeStart;
+      const timingsStart = perfNow();
       await this.fetchTimings();
-      return decodeBinaryViewerResult(buf, internalViewerId).result;
+      const timingsMs = perfNow() - timingsStart;
+      const decodeStart = perfNow();
+      const result = decodeBinaryViewerResult(buf, internalViewerId).result;
+      const decodeMs = perfNow() - decodeStart;
+      perfLogDuration('tauri.renderInternalViewer.total', totalStart, {
+        groupNodeId,
+        internalViewerId,
+        frame,
+        previewScale,
+        bytes: buf.byteLength,
+        invokeMs: Number(invokeMs.toFixed(1)),
+        timingsMs: Number(timingsMs.toFixed(1)),
+        decodeMs: Number(decodeMs.toFixed(1)),
+      });
+      return result;
     } catch {
       return null;
     }
@@ -345,6 +506,10 @@ export class TauriEngine implements EngineBridge {
 
   async renderSequence(nodeId: string): Promise<string> {
     return invoke<string>('render_sequence', { nodeId });
+  }
+
+  async renderBatch(nodeId: string): Promise<string> {
+    return invoke<string>('render_batch', { nodeId });
   }
 
   async renderVideo(nodeId: string): Promise<string> {

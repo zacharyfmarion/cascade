@@ -238,6 +238,14 @@ body {
   background: var(--accent-primary);
 }
 
+.media-virtual-strip {
+  scrollbar-width: none;
+}
+
+.media-virtual-strip::-webkit-scrollbar {
+  display: none;
+}
+
 .panel {
   background-color: var(--bg-secondary);
   border-right: 1px solid var(--border-default);

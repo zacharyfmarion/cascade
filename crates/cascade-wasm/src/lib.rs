@@ -1032,6 +1032,39 @@ impl Engine {
         Ok(obj.into())
     }
 
+    pub fn get_batch_image_data(&self, node_id: &str, index: usize) -> Result<Vec<u8>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageBatch"))?;
+        batch_node.image_bytes(index).map_err(to_js_error)
+    }
+
+    pub fn get_batch_thumbnail(
+        &self,
+        node_id: &str,
+        index: usize,
+        max_edge: u32,
+    ) -> Result<Vec<u8>, JsValue> {
+        let id = parse_node_id(&self.uuid_map, node_id).map_err(to_js_error)?;
+        let node = self
+            .nodes
+            .get(&id)
+            .ok_or_else(|| JsValue::from_str("Node not found"))?;
+        let batch_node = node
+            .as_any()
+            .downcast_ref::<LoadImageBatch>()
+            .ok_or_else(|| JsValue::from_str("Node is not LoadImageBatch"))?;
+        batch_node
+            .thumbnail_png(index, max_edge)
+            .map_err(to_js_error)
+    }
+
     pub fn set_sequence_info(
         &mut self,
         node_id: &str,
@@ -1137,6 +1170,8 @@ impl Engine {
         Ok(ViewerResultWasm::Compare {
             width: after.width,
             height: after.height,
+            original_width: after.format.width(),
+            original_height: after.format.height(),
             before_pixels: Viewer::image_to_rgba8_with_display(
                 &before,
                 &self.color_management,
@@ -1226,6 +1261,8 @@ impl Engine {
                     value_type: "image".to_string(),
                     width: image.width,
                     height: image.height,
+                    original_width: image.format.width(),
+                    original_height: image.format.height(),
                     pixels,
                 }
             }
@@ -1288,6 +1325,8 @@ impl Engine {
                     value_type: "field".to_string(),
                     width: w,
                     height: h,
+                    original_width: w,
+                    original_height: h,
                     pixels: rgba8,
                 }
             }
@@ -1438,6 +1477,8 @@ impl Engine {
             return ViewerResultWasm::Compare {
                 width: after.width,
                 height: after.height,
+                original_width: after.format.width(),
+                original_height: after.format.height(),
                 before_pixels: Viewer::image_to_rgba8_with_display(
                     &before,
                     &self.color_management,
@@ -1482,6 +1523,8 @@ impl Engine {
                     value_type: "image".to_string(),
                     width: image.width,
                     height: image.height,
+                    original_width: image.format.width(),
+                    original_height: image.format.height(),
                     pixels,
                 }
             }
@@ -1975,9 +2018,10 @@ impl Engine {
                 self.ai_node_cache.insert(nid, outputs);
                 let cache_key = self
                     .evaluator
-                    .compute_node_cache_key(
+                    .compute_node_cache_key_with_instances(
                         &self.graph,
                         &self.registry,
+                        &self.nodes,
                         nid,
                         FrameTime { frame: 0 },
                         &self.project_format,
@@ -2019,9 +2063,10 @@ impl Engine {
                         if s.last_run_cache_key.is_none() {
                             false
                         } else {
-                            match self.evaluator.compute_node_cache_key(
+                            match self.evaluator.compute_node_cache_key_with_instances(
                                 &self.graph,
                                 &self.registry,
+                                &self.nodes,
                                 nid,
                                 FrameTime { frame: 0 },
                                 &self.project_format,
@@ -3623,11 +3668,15 @@ enum ViewerResultWasm {
         value_type: String,
         width: u32,
         height: u32,
+        original_width: u32,
+        original_height: u32,
         pixels: Vec<u8>,
     },
     Compare {
         width: u32,
         height: u32,
+        original_width: u32,
+        original_height: u32,
         before_pixels: Vec<u8>,
         after_pixels: Vec<u8>,
     },
@@ -3671,12 +3720,20 @@ impl ViewerResultWasm {
                 value_type,
                 width,
                 height,
+                original_width,
+                original_height,
                 pixels,
             } => {
                 let obj = js_sys::Object::new();
                 js_sys::Reflect::set(&obj, &"type".into(), &value_type.into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
                 js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"bufferWidth".into(), &(width).into())?;
+                js_sys::Reflect::set(&obj, &"bufferHeight".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"displayWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"displayHeight".into(), &(original_height).into())?;
+                js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
                 // Use Uint8ClampedArray for zero-copy pixel transfer
                 let arr = js_sys::Uint8ClampedArray::from(pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"pixels".into(), &arr)?;
@@ -3685,6 +3742,8 @@ impl ViewerResultWasm {
             ViewerResultWasm::Compare {
                 width,
                 height,
+                original_width,
+                original_height,
                 before_pixels,
                 after_pixels,
             } => {
@@ -3692,6 +3751,12 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"type".into(), &"compare".into())?;
                 js_sys::Reflect::set(&obj, &"width".into(), &(width).into())?;
                 js_sys::Reflect::set(&obj, &"height".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"bufferWidth".into(), &(width).into())?;
+                js_sys::Reflect::set(&obj, &"bufferHeight".into(), &(height).into())?;
+                js_sys::Reflect::set(&obj, &"displayWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"displayHeight".into(), &(original_height).into())?;
+                js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
+                js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
                 let before = js_sys::Uint8ClampedArray::from(before_pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"beforePixels".into(), &before)?;
                 let after = js_sys::Uint8ClampedArray::from(after_pixels.as_slice());

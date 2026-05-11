@@ -39,6 +39,7 @@ const extensionFromAsset = (asset: Record<string, unknown>): string => {
   }
   if (asset.type === 'image' || asset.asset_type === 'image') return 'image';
   if (asset.type === 'ai_result' || asset.asset_type === 'ai_result') return 'png';
+  if (asset.type === 'image_batch' || asset.asset_type === 'image_batch') return 'batch.json';
   return 'bin';
 };
 
@@ -148,6 +149,46 @@ export const createBundledProjectBlob = async (projectDoc: Record<string, unknow
     }
     packedAssets[nodeId] = {
       type: 'image_sequence',
+      source: 'packed',
+      path: packagePath,
+      original_filename: '',
+      hash,
+      uri: assetUriFromHash(hash),
+    };
+  }
+
+  const batchFramesByNode = new Map<string, Array<Record<string, unknown>>>();
+  for (const [key, rawAsset] of Object.entries(packedAssets)) {
+    if (
+      !isRecord(rawAsset)
+      || (rawAsset.type !== 'image_batch_frame' && rawAsset.asset_type !== 'image_batch_frame')
+    ) continue;
+    const nodeId = key.split(':', 1)[0] ?? key;
+    const frames = batchFramesByNode.get(nodeId) ?? [];
+    frames.push({
+      key,
+      filename: rawAsset.original_filename,
+      path: rawAsset.path,
+      hash: rawAsset.hash,
+      uri: rawAsset.uri,
+    });
+    batchFramesByNode.set(nodeId, frames);
+  }
+  for (const [nodeId, frames] of batchFramesByNode) {
+    if (
+      isRecord(packedAssets[nodeId])
+      && (packedAssets[nodeId].type === 'image_batch' || packedAssets[nodeId].asset_type === 'image_batch')
+    ) continue;
+    frames.sort((a, b) => String(a.key ?? '').localeCompare(String(b.key ?? '')));
+    const manifestBytes = new TextEncoder().encode(JSON.stringify({ frames }));
+    const hash = await hashBytes(manifestBytes);
+    const packagePath = `assets/${hash}.batch.json`;
+    if (!writtenPaths.has(packagePath)) {
+      zip.file(packagePath, manifestBytes);
+      writtenPaths.add(packagePath);
+    }
+    packedAssets[nodeId] = {
+      type: 'image_batch',
       source: 'packed',
       path: packagePath,
       original_filename: '',

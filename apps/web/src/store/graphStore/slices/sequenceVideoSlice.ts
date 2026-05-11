@@ -4,8 +4,17 @@ import type { ParamValue } from '../../types';
 import type { SequenceInfo, VideoInfo } from '../../../engine/bridge';
 import { sequenceFrameManager } from '../../../engine/sequenceFrameManager';
 import { makeEngineError } from '../../../engine/engineError';
-import { getEngine, isSequenceInfo, kernel, markGraphMutation } from '../kernel';
+import { perfLog, perfLogDuration, perfNow } from '../../../utils/perf';
+import {
+  MEDIA_NAV_PREVIEW_SCALE,
+  getEngine,
+  isSequenceInfo,
+  kernel,
+  markGraphMutation,
+} from '../kernel';
 import { useSettingsStore } from '../../settingsStore';
+
+const PANEL_VIEWER_NODE_TYPES = new Set(['viewer', 'compare_viewer']);
 
 export interface SequenceVideoSliceState {
   currentFrame: number;
@@ -44,6 +53,13 @@ export const createSequenceVideoSlice: StateCreator<
   [],
   SequenceVideoSlice
 > = (set, get) => {
+  const transportRange = () => {
+    const activeId = get().activeTransportSourceId;
+    const active = activeId ? get().mediaIteratorInfoMap.get(activeId) : null;
+    return active
+      ? { start: active.startFrame, end: active.endFrame }
+      : { start: get().sequenceStart, end: get().sequenceLength || 999 };
+  };
 
   const recomputeSequenceState = () => {
     const { nodes, sequenceInfoMap } = get();
@@ -71,6 +87,7 @@ export const createSequenceVideoSlice: StateCreator<
       sequenceLength: maxEnd,
       sequenceStart: minStart,
     });
+    get().recomputeMediaIteratorState();
   };
 
   return {
@@ -87,8 +104,32 @@ export const createSequenceVideoSlice: StateCreator<
     recomputeSequenceState,
 
     setCurrentFrame: (frame) => {
-      set({ currentFrame: frame });
-      void get().renderAllViewersAsync();
+      const startTime = perfNow();
+      const { start, end } = transportRange();
+      const nextFrame = Math.max(start, Math.min(frame, end));
+      set({ currentFrame: nextFrame });
+
+      const previewScale = get().activeTransportSourceId ? MEDIA_NAV_PREVIEW_SCALE : undefined;
+      const { nodes } = get();
+      let triggeredViewers = 0;
+      perfLog('media.setCurrentFrame', {
+        requestedFrame: frame,
+        nextFrame,
+        start,
+        end,
+        previewScale,
+        activeTransportSourceId: get().activeTransportSourceId,
+      });
+      for (const [viewerId, node] of nodes) {
+        if (PANEL_VIEWER_NODE_TYPES.has(node.typeId)) {
+          triggeredViewers++;
+          get().triggerRender(viewerId, previewScale);
+        }
+      }
+      perfLogDuration('media.setCurrentFrame.dispatch', startTime, {
+        nextFrame,
+        triggeredViewers,
+      });
     },
 
     setSequenceDirectory: async (nodeId, directory) => {
@@ -193,9 +234,9 @@ export const createSequenceVideoSlice: StateCreator<
 
     play: () => {
       if (get().isPlaying) return;
-      const { currentFrame, sequenceLength, sequenceStart } = get();
-      const end = sequenceLength || 999;
-      const startFrame = currentFrame >= end ? sequenceStart : currentFrame;
+      const { currentFrame } = get();
+      const { start, end } = transportRange();
+      const startFrame = currentFrame >= end ? start : currentFrame;
       set({ isPlaying: true, currentFrame: startFrame, playbackFps: null });
       kernel.playbackAborted = false;
 
@@ -206,8 +247,8 @@ export const createSequenceVideoSlice: StateCreator<
 
         while (!kernel.playbackAborted) {
           const frameStart = performance.now();
-          const { fps, sequenceLength: seqLen, loopPlayback, sequenceStart: seqStart } = get();
-          const endFrame = seqLen || 999;
+          const { fps, loopPlayback } = get();
+          const { start: seqStart, end: endFrame } = transportRange();
           const interval = 1000 / fps;
 
           if (prevFrameStart !== null) {
@@ -279,8 +320,8 @@ export const createSequenceVideoSlice: StateCreator<
 
     stepForward: () => {
       if (get().isPlaying) get().pause();
-      const { currentFrame, sequenceLength } = get();
-      const end = sequenceLength || 999;
+      const { currentFrame } = get();
+      const { end } = transportRange();
       if (currentFrame < end) {
         set({ currentFrame: currentFrame + 1 });
         get().triggerAllViewers();
@@ -289,8 +330,9 @@ export const createSequenceVideoSlice: StateCreator<
 
     stepBackward: () => {
       if (get().isPlaying) get().pause();
-      const { currentFrame, sequenceStart } = get();
-      if (currentFrame > sequenceStart) {
+      const { currentFrame } = get();
+      const { start } = transportRange();
+      if (currentFrame > start) {
         set({ currentFrame: currentFrame - 1 });
         get().triggerAllViewers();
       }
@@ -298,14 +340,13 @@ export const createSequenceVideoSlice: StateCreator<
 
     goToStart: () => {
       if (get().isPlaying) get().pause();
-      set({ currentFrame: get().sequenceStart });
+      set({ currentFrame: transportRange().start });
       get().triggerAllViewers();
     },
 
     goToEnd: () => {
       if (get().isPlaying) get().pause();
-      const end = get().sequenceLength || 999;
-      set({ currentFrame: end });
+      set({ currentFrame: transportRange().end });
       get().triggerAllViewers();
     },
 

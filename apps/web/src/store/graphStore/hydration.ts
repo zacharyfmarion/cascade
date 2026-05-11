@@ -1,8 +1,14 @@
 import type { NodeInstance, NodeSpec, ParamValue } from '../types';
 import type { GraphState } from './store';
-import type { SequenceInfo, VideoInfo } from '../../engine/bridge';
+import type { BatchInfo, SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { makeEngineError } from '../../engine/engineError';
-import { extractCustomGroupDefinitions, extractGraphData, getEngine, normalizeParamValue } from './kernel';
+import {
+  MEDIA_NAV_PREVIEW_SCALE,
+  extractCustomGroupDefinitions,
+  extractGraphData,
+  getEngine,
+  normalizeParamValue,
+} from './kernel';
 import type { SerializableGraphData } from './kernel';
 import { syncAllCommitted } from './nodeDraftStore';
 
@@ -41,8 +47,20 @@ async function hydratePersistedMediaSources(
 ): Promise<void> {
   const eng = getEngine();
   const sequenceInfoMap = new Map<string, SequenceInfo | VideoInfo>();
+  const batchInfoMap = new Map<string, BatchInfo>();
 
   for (const [nodeId, node] of nodes) {
+    if (node.typeId === 'load_image_batch') {
+      if (!eng.getBatchInfo) continue;
+      try {
+        const info = await Promise.resolve(eng.getBatchInfo(nodeId));
+        if (info.count > 0) batchInfoMap.set(nodeId, info);
+      } catch {
+        // Keep project load non-fatal if a saved batch source is unavailable.
+      }
+      continue;
+    }
+
     if (node.typeId === 'load_image_sequence') {
       const directory = stringParam(node, 'directory');
       if (!directory || !eng.setSequenceDirectory) continue;
@@ -94,6 +112,7 @@ async function hydratePersistedMediaSources(
   const currentFrame = get().currentFrame;
   set({
     sequenceInfoMap,
+    batchInfoMap,
     hasSequenceNodes,
     sequenceStart: minStart,
     sequenceLength: maxEnd,
@@ -101,6 +120,7 @@ async function hydratePersistedMediaSources(
       ? minStart
       : currentFrame,
   });
+  get().recomputeMediaIteratorState();
 }
 
 async function buildRootGraphState(
@@ -224,7 +244,7 @@ export async function hydrateRootGraphFromEngine(
   syncAllCommitted(nodes);
 
   if (options.triggerViewers ?? true) {
-    get().triggerAllViewers();
+    get().triggerAllViewers(get().activeTransportSourceId ? MEDIA_NAV_PREVIEW_SCALE : undefined);
   }
 
   return { graphData, nodeSpecs };

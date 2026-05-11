@@ -189,16 +189,16 @@ export interface SerializableGroupDefinition {
 
 // Render result from engine — discriminated union over all value types
 export type ViewerResult =
-  | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
-  | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
-  | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
-  | { type: 'compare'; nodeId: string; width: number; height: number; beforePixels: Uint8ClampedArray; afterPixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number }
-  | { type: 'float'; nodeId: string; value: number }
-  | { type: 'int'; nodeId: string; value: number }
-  | { type: 'bool'; nodeId: string; value: boolean }
-  | { type: 'color'; nodeId: string; value: [number, number, number, number] }
-  | { type: 'string'; nodeId: string; value: string }
-  | { type: 'none'; nodeId: string };
+  | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
+  | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
+  | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
+  | { type: 'compare'; nodeId: string; width: number; height: number; beforePixels: Uint8ClampedArray; afterPixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
+  | { type: 'float'; nodeId: string; value: number; frame?: number; generation?: number }
+  | { type: 'int'; nodeId: string; value: number; frame?: number; generation?: number }
+  | { type: 'bool'; nodeId: string; value: boolean; frame?: number; generation?: number }
+  | { type: 'color'; nodeId: string; value: [number, number, number, number]; frame?: number; generation?: number }
+  | { type: 'string'; nodeId: string; value: string; frame?: number; generation?: number }
+  | { type: 'none'; nodeId: string; frame?: number; generation?: number };
 
 /** Type guard: does the result carry pixel data? */
 export const isPixelResult = (r: ViewerResult): r is Extract<ViewerResult, { pixels: Uint8ClampedArray }> =>
@@ -206,6 +206,22 @@ export const isPixelResult = (r: ViewerResult): r is Extract<ViewerResult, { pix
 
 export const isCompareResult = (r: ViewerResult): r is Extract<ViewerResult, { type: 'compare' }> =>
   r.type === 'compare';
+
+export const getViewerBufferWidth = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.bufferWidth ?? r.width : 0
+);
+
+export const getViewerBufferHeight = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.bufferHeight ?? r.height : 0
+);
+
+export const getViewerDisplayWidth = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.displayWidth ?? r.originalWidth ?? r.width : 0
+);
+
+export const getViewerDisplayHeight = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.displayHeight ?? r.originalHeight ?? r.height : 0
+);
 
 /** @deprecated Use ViewerResult instead */
 export type RenderResult = Extract<ViewerResult, { type: 'image' }>;

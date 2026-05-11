@@ -21,14 +21,13 @@
  *     always works on the freshest value.
  */
 
-import type { ParamValue } from '../types';
-import { isCompareResult, isPixelResult } from '../types';
+import type { ParamValue, ViewerResult } from '../types';
 import { useSettingsStore } from '../settingsStore';
 import type { GraphState } from './store';
 import {
+  annotateEnginePreviewResult,
   kernel,
   cloneEditingStack,
-  getPreviewScaleFromDimensions,
   getEffectivePreviewScaleForResults,
   getEngine,
   markGraphMutation,
@@ -71,6 +70,16 @@ let pendingMutation: {
   get: StoreGet;
   set: StoreSet;
 } | null = null;
+
+const tagRenderResult = (
+  result: ViewerResult,
+  frame: number,
+  generation: number,
+): ViewerResult => ({
+  ...result,
+  frame,
+  generation,
+});
 
 // ---------------------------------------------------------------------------
 // Internal helpers — Param-delta undo (FULLY SYNCHRONOUS)
@@ -181,7 +190,9 @@ function dispatchLiveRender(
   const eng = getEngine();
 
   if (eng.setAndRender) {
-    eng.setAndRender(mutation, get().currentFrame, liveScale).then(async results => {
+    const frame = get().currentFrame;
+    const generation = kernel.liveRenderGeneration;
+    eng.setAndRender(mutation, frame, liveScale).then(async results => {
       // ALWAYS display whatever the Worker produced — even if a newer
       // mutation is pending. Showing a slightly-stale frame is far better
       // than showing nothing during a drag. The next render (dispatched
@@ -190,30 +201,9 @@ function dispatchLiveRender(
         const prevResults = get().renderResults;
         const newResults = new Map(prevResults);
         for (const [vid, r] of results) {
-          // Annotate downscaled live-preview pixel results with original logical
-          // dimensions so the Viewer's dimsChanged check stays false and zoom/pan
-          // is preserved while dragging sliders.
-          if (liveScale < 1 && (isPixelResult(r) || isCompareResult(r)) && r.originalWidth === undefined) {
-            const prev = prevResults.get(vid);
-            if (prev && (isPixelResult(prev) || isCompareResult(prev))) {
-              const originalWidth = prev.originalWidth ?? prev.width;
-              const originalHeight = prev.originalHeight ?? prev.height;
-              const previewScale = getPreviewScaleFromDimensions(
-                r.width,
-                r.height,
-                originalWidth,
-                originalHeight,
-              );
-              newResults.set(vid, {
-                ...r,
-                previewScale,
-                originalWidth,
-                originalHeight,
-              });
-              continue;
-            }
-          }
-          newResults.set(vid, r);
+          const prev = prevResults.get(vid);
+          const annotated = annotateEnginePreviewResult(r, liveScale, prev);
+          newResults.set(vid, tagRenderResult(annotated, frame, generation));
         }
         set({ renderResults: newResults, lastError: null });
         updateNodeTimings(get, set);
@@ -291,12 +281,13 @@ async function commitRender(
   if (eng.setAndRender) {
     const renderGeneration = ++kernel.liveRenderGeneration;
     try {
-      const results = await eng.setAndRender(mutation, get().currentFrame);
+      const frame = get().currentFrame;
+      const results = await eng.setAndRender(mutation, frame);
       if (renderGeneration !== kernel.liveRenderGeneration) return;
       if (results.length > 0) {
         const newResults = new Map(get().renderResults);
         for (const [vid, r] of results) {
-          newResults.set(vid, r);
+          newResults.set(vid, tagRenderResult(r, frame, renderGeneration));
         }
         if (renderGeneration !== kernel.liveRenderGeneration) return;
         set({ renderResults: newResults, lastError: null });

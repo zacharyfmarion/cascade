@@ -130,4 +130,46 @@ describe('Cascade AI tools', () => {
     expect(result.success).toBe(false);
     expect(errors.some(error => error.message.includes('Custom node "Invert" conflicts with a built-in node type'))).toBe(true);
   });
+
+  it('reports ExportImageBatch output_dir as a string in get_node_schema', async () => {
+    const result = await executeCascadeTool('get_node_schema', { node_type: 'ExportImageBatch' }) as Record<string, unknown>;
+    const params = result.params as Array<{ key: string; type: string }>;
+
+    expect(result.type).toBe('ExportImageBatch');
+    expect(params.find(param => param.key === 'output_dir')?.type).toBe('String');
+    expect(params.find(param => param.key === 'filename_template')?.type).toBe('String');
+  });
+
+  it('edits a graph containing ExportImageBatch without changing export params', async () => {
+    const dsl = [
+      'graph {',
+      '  load1 = LoadImage()',
+      '  export1 = ExportImageBatch(output_dir: "/tmp/out", filename_template: "{index1}_{name}")',
+      '',
+      '  load1.image -> export1.image',
+      '}',
+    ].join('\n');
+
+    const writeResult = await executeCascadeTool('write_graph', { dsl }) as Record<string, unknown>;
+    expect(writeResult.success).toBe(true);
+
+    const editResult = await executeCascadeTool('edit_graph', {
+      old_text: '  load1.image -> export1.image',
+      new_text: [
+        '  blur1 = GaussianBlur(amount: 2.0)',
+        '',
+        '  load1.image -> blur1.image',
+        '  blur1.image -> export1.image',
+      ].join('\n'),
+    }) as Record<string, unknown>;
+
+    expect(editResult.success).toBe(true);
+    expect(editResult.graph).toContain('ExportImageBatch(output_dir: "/tmp/out", filename_template: "{index1}_{name}")');
+    expect(editResult.graph).toContain('blur1 = GaussianBlur(amount: 2.0)');
+
+    const exportNode = Array.from(useGraphStore.getState().nodes.values())
+      .find(node => node.typeId === 'export_image_batch');
+    expect(exportNode?.params.output_dir).toEqual({ String: '/tmp/out' });
+    expect(exportNode?.params.filename_template).toEqual({ String: '{index1}_{name}' });
+  });
 });

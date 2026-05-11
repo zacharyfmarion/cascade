@@ -365,7 +365,7 @@ impl Node for AiUpscale {
                     key: "scale".to_string(),
                     label: "Scale".to_string(),
                     ty: ValueType::Float,
-                    default: ParamDefault::Int(4),
+                    default: ParamDefault::Float(4.0),
                     min: Some(2.0),
                     max: Some(10.0),
                     step: Some(1.0),

@@ -91,6 +91,9 @@ const createInitialState = () => ({
   sequenceLength: 0,
   sequenceStart: 0,
   sequenceInfoMap: new Map(),
+  batchInfoMap: new Map(),
+  mediaIteratorInfoMap: new Map(),
+  activeTransportSourceId: null,
   isPlaying: false,
   fps: useSettingsStore.getState().defaultFps,
   loopPlayback: useSettingsStore.getState().loopPlayback,
@@ -226,6 +229,7 @@ describe('graphStore node CRUD', () => {
         [id, { frame_count: 10, first_frame: 1, last_frame: 10 }],
       ]),
     });
+    useGraphStore.getState().recomputeMediaIteratorState();
     expect(useGraphStore.getState().hasSequenceNodes).toBe(true);
     await useGraphStore.getState().removeNode(id);
     const state = useGraphStore.getState();
@@ -432,6 +436,7 @@ describe('graphStore preview rendering', () => {
       type: 'image',
       width: 1024,
       height: 768,
+      frame: 0,
       previewScale: 0.25,
       originalWidth: 4096,
       originalHeight: 3072,
@@ -460,6 +465,7 @@ describe('graphStore preview rendering', () => {
       type: 'image',
       width: 800,
       height: 600,
+      frame: 0,
       previewScale: 600 / 900,
       originalWidth: 1200,
       originalHeight: 900,
@@ -486,6 +492,63 @@ describe('graphStore preview rendering', () => {
       type: 'image',
       width: 400,
       height: 300,
+    });
+  });
+
+  it('allows explicit preview render overrides before a full-size result exists', async () => {
+    const store = useGraphStore.getState();
+    const viewerId = 'viewer-preview';
+    const engineResult = imageResult(viewerId, 120, 90);
+
+    mockEngine._setRenderResult(engineResult);
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      previewScale: 1,
+      renderResults: new Map(),
+    });
+
+    store.triggerRender(viewerId, 0.2);
+    await flushPromises(3);
+
+    expect(mockEngine._renderScales).toEqual([0.2]);
+    expect(useGraphStore.getState().renderResults.get(viewerId)).toMatchObject({
+      type: 'image',
+      width: 120,
+      height: 90,
+      frame: 0,
+    });
+  });
+
+  it('uses the coalesced preview render path when navigating an active media iterator', async () => {
+    const viewerId = await useGraphStore.getState().addNode('viewer', { x: 0, y: 0 });
+    mockEngine._setRenderResult(imageResult(viewerId, 120, 90));
+    mockEngine._clearRenderCalls();
+    useGraphStore.setState({
+      activeTransportSourceId: 'batch1',
+      mediaIteratorInfoMap: new Map([[
+        'batch1',
+        {
+          sourceNodeId: 'batch1',
+          kind: 'batch',
+          label: 'Batch',
+          startFrame: 0,
+          endFrame: 2,
+          count: 3,
+          itemLabels: ['dog', 'mona_lisa', 'portrait'],
+          supportsRandomAccess: true,
+        },
+      ]]),
+      renderResults: new Map(),
+    });
+
+    useGraphStore.getState().setCurrentFrame(1);
+    await flushPromises(3);
+
+    expect(useGraphStore.getState().currentFrame).toBe(1);
+    expect(mockEngine._renderCalls).toEqual([viewerId]);
+    expect(mockEngine._renderScales).toEqual([0.2]);
+    expect(useGraphStore.getState().renderResults.get(viewerId)).toMatchObject({
+      frame: 1,
     });
   });
 });
@@ -584,6 +647,48 @@ describe('graphStore frame and playback controls', () => {
     useGraphStore.setState({ sequenceLength: 0, currentFrame: 1 });
     useGraphStore.getState().goToEnd();
     expect(useGraphStore.getState().currentFrame).toBe(999);
+  });
+
+  it('setBatchInfo registers a batch media iterator without selecting unrelated transport', async () => {
+    const batchId = await useGraphStore.getState().addNode('load_image_batch', { x: 0, y: 0 });
+    useGraphStore.getState().setBatchInfo(batchId, {
+      count: 3,
+      filenames: ['a', 'b', 'c'],
+    });
+
+    const state = useGraphStore.getState();
+    expect(state.activeTransportSourceId).toBeNull();
+    expect(state.mediaIteratorInfoMap.get(batchId)).toMatchObject({
+      kind: 'batch',
+      startFrame: 0,
+      endFrame: 2,
+      count: 3,
+      itemLabels: ['a', 'b', 'c'],
+    });
+    expect(state.sequenceLength).toBe(0);
+  });
+
+  it('setCurrentFrame clamps to the active media iterator', async () => {
+    const batchId = await useGraphStore.getState().addNode('load_image_batch', { x: 0, y: 0 });
+    useGraphStore.getState().setBatchInfo(batchId, {
+      count: 2,
+      filenames: ['a', 'b'],
+    });
+    useGraphStore.getState().setActiveTransportSource(batchId);
+
+    useGraphStore.getState().setCurrentFrame(42);
+    expect(useGraphStore.getState().currentFrame).toBe(1);
+  });
+
+  it('getBatchThumbnail does not fall back to full image data', async () => {
+    const fullImageFallback = vi.fn(() => new Uint8Array([1, 2, 3, 4]));
+    (mockEngine as unknown as { getBatchThumbnail?: unknown }).getBatchThumbnail = undefined;
+    mockEngine.getBatchImageData = fullImageFallback;
+
+    const result = await useGraphStore.getState().getBatchThumbnail('batch1', 0, 96);
+
+    expect(result).toBeNull();
+    expect(fullImageFallback).not.toHaveBeenCalled();
   });
 
   it('setFps updates fps', () => {
@@ -1576,9 +1681,22 @@ describe('graphStore project hydration', () => {
       first_frame: 1001,
       last_frame: 1003,
     });
-    expect(state.sequenceStart).toBe(1001);
-    expect(state.sequenceLength).toBe(1003);
-    expect(state.currentFrame).toBe(1001);
+    expect(state.activeTransportSourceId).toBeNull();
+    expect(state.sequenceStart).toBe(0);
+    expect(state.sequenceLength).toBe(0);
+    expect(state.mediaIteratorInfoMap.get('seq-node')).toMatchObject({
+      kind: 'sequence',
+      startFrame: 1001,
+      endFrame: 1003,
+      count: 3,
+    });
+
+    state.suggestActiveTransportSourceForViewer('viewer-node');
+    const viewerScopedState = useGraphStore.getState();
+    expect(viewerScopedState.activeTransportSourceId).toBe('seq-node');
+    expect(viewerScopedState.sequenceStart).toBe(1001);
+    expect(viewerScopedState.sequenceLength).toBe(1003);
+    expect(viewerScopedState.currentFrame).toBe(1001);
   });
 
   it('loadProject hydrates optional DSL shadow metadata without blocking graph load', async () => {

@@ -160,6 +160,35 @@ const NODE_SPECS: NodeSpec[] = [
     ],
   },
   {
+    id: 'load_image_batch',
+    display_name: 'Load Image Batch',
+    category: 'Input',
+    description: 'Load a batch of images for processing',
+    inputs: [],
+    outputs: [
+      { name: 'image', label: 'Image', ty: 'Image' },
+      { name: 'filename', label: 'Filename', ty: 'String' },
+    ],
+    params: [
+      {
+        key: 'directory',
+        label: 'Directory',
+        ty: 'String',
+        default: { String: '' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+      {
+        key: 'files',
+        label: 'Files',
+        ty: 'String',
+        default: { String: '' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+    ],
+  },
+  {
     id: 'load_video',
     display_name: 'Load Video',
     category: 'Input',
@@ -207,6 +236,57 @@ const NODE_SPECS: NodeSpec[] = [
     supported_surfaces: ['desktop'],
   },
   {
+    id: 'export_image_batch',
+    display_name: 'Export Image Batch',
+    category: 'Output',
+    description: 'Export a batch of processed images',
+    inputs: [
+      { name: 'image', label: 'Image', ty: 'Image' },
+      { name: 'filename', label: 'Filename', ty: 'String' },
+    ],
+    outputs: [{ name: 'display', label: 'Display', ty: 'Image' }],
+    params: [
+      {
+        key: 'output_dir',
+        label: 'Output Directory',
+        ty: 'String',
+        default: { String: '' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+      {
+        key: 'format',
+        label: 'Format',
+        ty: 'Int',
+        default: { Int: 0 },
+        min: 0,
+        max: 1,
+        step: 1,
+        ui_hint: { type: 'Dropdown', data: ['PNG', 'JPEG'] },
+        promotable: true,
+      },
+      {
+        key: 'quality',
+        label: 'Quality',
+        ty: 'Int',
+        default: { Int: 90 },
+        min: 1,
+        max: 100,
+        step: 1,
+        ui_hint: { type: 'NumberInput' },
+        promotable: true,
+      },
+      {
+        key: 'filename_template',
+        label: 'Filename Template',
+        ty: 'String',
+        default: { String: '{name}' },
+        ui_hint: { type: 'Hidden' },
+        promotable: true,
+      },
+    ],
+  },
+  {
     id: 'ai_depth_estimate',
     display_name: 'AI Depth Estimate',
     category: 'AI',
@@ -234,6 +314,7 @@ export function createMockEngine(): EngineBridge & {
   const nodes = new Map<string, { typeId: string; params: Record<string, ParamValue> }>();
   const connections: Array<{ fromNode: string; fromPort: string; toNode: string; toPort: string }> = [];
   const imageDataStore = new Map<string, Uint8Array>();
+  const batchDataStore = new Map<string, Array<{ filename: string; data: Uint8Array }>>();
   const groupGraphs = new Map<string, GroupInternalGraph>();
   const groupDefinitions: SerializableGroupDefinition[] = [];
   const extraSpecs: NodeSpec[] = [];
@@ -590,6 +671,32 @@ export function createMockEngine(): EngineBridge & {
 
     getImageData: (nodeId: string): Uint8Array | null => {
       return imageDataStore.get(nodeId) ?? null;
+    },
+
+    batchClear: (nodeId: string): void => {
+      batchDataStore.delete(nodeId);
+    },
+
+    batchAddImage: (nodeId: string, filename: string, data: Uint8Array): void => {
+      const entries = batchDataStore.get(nodeId) ?? [];
+      entries.push({ filename, data });
+      batchDataStore.set(nodeId, entries);
+    },
+
+    getBatchInfo: (nodeId: string) => {
+      const entries = batchDataStore.get(nodeId) ?? [];
+      return {
+        count: entries.length,
+        filenames: entries.map(entry => entry.filename.replace(/\.[^.]+$/, '')),
+      };
+    },
+
+    getBatchImageData: (nodeId: string, index: number): Uint8Array | null => {
+      return batchDataStore.get(nodeId)?.[index]?.data ?? null;
+    },
+
+    getBatchThumbnail: (nodeId: string, index: number): Uint8Array | null => {
+      return batchDataStore.get(nodeId)?.[index]?.data ?? null;
     },
 
     renderViewer: (viewerNodeId: string, _frame: number, previewScale = 1): ViewerResult | null => {

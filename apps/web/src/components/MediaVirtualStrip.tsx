@@ -1,0 +1,123 @@
+import React, { useCallback, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+
+interface MediaVirtualStripProps {
+  count: number;
+  itemSize: number;
+  estimateItemSize?: (index: number) => number;
+  itemSizeVersion?: string | number;
+  height: number;
+  overscan?: number;
+  activeIndex?: number;
+  ariaLabel: string;
+  className?: string;
+  style?: React.CSSProperties;
+  onVisibleIndexesChange?: (indexes: number[]) => void;
+  renderItem: (index: number) => React.ReactNode;
+}
+
+export const MediaVirtualStrip: React.FC<MediaVirtualStripProps> = ({
+  count,
+  itemSize,
+  estimateItemSize,
+  itemSizeVersion = '',
+  height,
+  overscan = 3,
+  activeIndex,
+  ariaLabel,
+  className = '',
+  style,
+  onVisibleIndexesChange,
+  renderItem,
+}) => {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const lastVisibleKeyRef = useRef('');
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count,
+    getScrollElement: () => parentRef.current,
+    estimateSize: estimateItemSize ?? (() => itemSize),
+    horizontal: true,
+    overscan,
+    getItemKey: index => index,
+    useFlushSync: false,
+  });
+
+  useEffect(() => {
+    virtualizer.measure();
+  }, [estimateItemSize, itemSize, itemSizeVersion, virtualizer]);
+
+  useEffect(() => {
+    if (activeIndex === undefined || activeIndex < 0 || activeIndex >= count) return;
+    virtualizer.scrollToIndex(activeIndex, { align: 'center' });
+  }, [activeIndex, count, virtualizer]);
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const visibleIndexesKey = virtualItems.map(item => item.index).join(',');
+
+  const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const el = parentRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    const delta = Math.abs(event.deltaX) >= Math.abs(event.deltaY)
+      ? event.deltaX
+      : event.deltaY;
+    if (delta === 0) return;
+    el.scrollLeft += delta;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  useEffect(() => {
+    if (!onVisibleIndexesChange) return;
+    if (visibleIndexesKey === lastVisibleKeyRef.current) return;
+    lastVisibleKeyRef.current = visibleIndexesKey;
+    const indexes = visibleIndexesKey
+      ? visibleIndexesKey.split(',').map(index => Number(index))
+      : [];
+    onVisibleIndexesChange(indexes);
+  }, [onVisibleIndexesChange, visibleIndexesKey]);
+
+  return (
+    <div
+      ref={parentRef}
+      className={`media-virtual-strip ${className}`.trim()}
+      role="listbox"
+      aria-label={ariaLabel}
+      onWheel={handleWheel}
+      style={{
+        ...style,
+        height,
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        position: 'relative',
+      }}
+    >
+      <div
+        style={{
+          height: '100%',
+          position: 'relative',
+          width: virtualizer.getTotalSize(),
+        }}
+      >
+        {virtualItems.map(item => (
+          <div
+            key={item.key}
+            data-index={item.index}
+            role="option"
+            aria-selected={item.index === activeIndex}
+            style={{
+              height: '100%',
+              left: 0,
+              position: 'absolute',
+              top: 0,
+              transform: `translateX(${item.start}px)`,
+              width: item.size,
+            }}
+          >
+            {renderItem(item.index)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};

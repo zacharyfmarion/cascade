@@ -5,7 +5,7 @@ import type {
   Connection, DslShadowDocument, EditingContext, Frame, NodeInstance, NodeSpec, ParamValue, PortSpec,
   SerializableGroupDefinition, TransactionOptions, TransactionOrigin, TransactionResult, ViewerResult,
 } from '../types';
-import type { JobProgress, SequenceInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
+import type { JobProgress, SequenceInfo, BatchInfo, VideoInfo, ColorManagementInfo, EditValidationError } from '../../engine/bridge';
 import type { NodeInterfaceChange } from '../../engine/bridge';
 import type { EngineError } from '../../engine/engineError';
 import { useSettingsStore } from '../settingsStore';
@@ -16,6 +16,7 @@ import { createFramesSlice, type FramesSlice } from './slices/framesSlice';
 import { createSelectionSlice, type SelectionSlice } from './slices/selectionSlice';
 import { createBatchExportSlice, type BatchExportSlice } from './slices/batchExportSlice';
 import { createSequenceVideoSlice, type SequenceVideoSlice } from './slices/sequenceVideoSlice';
+import { createMediaIteratorSlice, type MediaIteratorInfo, type MediaIteratorSlice } from './slices/mediaIteratorSlice';
 import { createProjectSlice, type AssetStoragePromptAction, type PendingProjectAction, type ProjectSlice, type UnsavedChangesChoice } from './slices/projectSlice';
 import type { ProjectAssetRecord, ProjectAssetStorage } from './assetReferences';
 import { createAssetsSlice, type AssetsSlice } from './slices/assetsSlice';
@@ -61,6 +62,9 @@ export interface GraphState {
   sequenceLength: number;
   sequenceStart: number;
   sequenceInfoMap: Map<string, SequenceInfo | VideoInfo>;
+  batchInfoMap: Map<string, BatchInfo>;
+  mediaIteratorInfoMap: Map<string, MediaIteratorInfo>;
+  activeTransportSourceId: string | null;
   isPlaying: boolean;
   fps: number;
   loopPlayback: boolean;
@@ -103,7 +107,7 @@ export interface GraphState {
   loadVideoFile: (nodeId: string, path: string) => Promise<VideoInfo | null>;
   getImageData: (nodeId: string) => Promise<Uint8Array | null>;
   loadPaletteFile: (nodeId: string, file: File) => void;
-  triggerRender: (viewerNodeId: string) => void;
+  triggerRender: (viewerNodeId: string, previewScaleOverride?: number) => void;
   newProject: () => Promise<void>;
   saveProject: () => Promise<boolean>;
   saveProjectAs: () => Promise<boolean>;
@@ -130,6 +134,10 @@ export interface GraphState {
   setSequenceFiles: (nodeId: string, files: File[]) => Promise<void>;
   prefetchSequenceFrames: (startFrame: number, count: number) => void;
   loadBatchFiles: (nodeId: string, files: File[]) => Promise<void>;
+  loadBatchPaths: (nodeId: string, paths: string[]) => Promise<void>;
+  loadBatchDirectory: (nodeId: string, directory: string) => Promise<BatchInfo>;
+  getBatchImageData: (nodeId: string, index: number) => Promise<Uint8Array | null>;
+  getBatchThumbnail: (nodeId: string, index: number, maxEdge: number) => Promise<Uint8Array | null>;
   renderSequence: (nodeId: string) => Promise<void>;
   renderBatch: (nodeId: string) => Promise<void>;
   renderVideo: (nodeId: string) => Promise<void>;
@@ -151,10 +159,15 @@ export interface GraphState {
   setFps: (fps: number) => void;
   setLoopPlayback: (loop: boolean) => void;
   recomputeSequenceState: () => void;
+  setBatchInfo: (nodeId: string, info: BatchInfo | null) => void;
+  setActiveTransportSource: (nodeId: string | null) => void;
+  suggestActiveTransportSourceForViewer: (viewerNodeId: string | null) => void;
+  recomputeMediaIteratorState: () => void;
   pushSequenceFrames: (frame: number) => Promise<void>;
   renderAllViewersAsync: () => Promise<void>;
-  triggerAllViewers: () => void;
-  triggerAffectedViewers: (changedNodeIds: string[]) => void;
+  renderViewerFrame: (viewerNodeId: string, frame: number, previewScale?: number) => Promise<ViewerResult | null>;
+  triggerAllViewers: (previewScaleOverride?: number) => void;
+  triggerAffectedViewers: (changedNodeIds: string[], previewScaleOverride?: number) => void;
 
   editingStack: EditingContext[];
   enterGroup: (groupNodeId: string) => Promise<void>;
@@ -211,6 +224,7 @@ type CoreSlice = Omit<
   | keyof SelectionSlice
   | keyof BatchExportSlice
   | keyof SequenceVideoSlice
+  | keyof MediaIteratorSlice
   | keyof ProjectSlice
   | keyof AssetsSlice
   | keyof ColorSlice
@@ -280,6 +294,7 @@ export const useGraphStore = create<GraphState>()(
     ...createSelectionSlice(...args),
     ...createBatchExportSlice(...args),
     ...createSequenceVideoSlice(...args),
+    ...createMediaIteratorSlice(...args),
     ...createAssetsSlice(...args),
     ...createColorSlice(...args),
     ...createAiSlice(...args),
