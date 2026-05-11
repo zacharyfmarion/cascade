@@ -7,6 +7,7 @@ if (!('window' in globalThis)) {
 
 const dialogMocks = vi.hoisted(() => ({
   save: vi.fn(),
+  open: vi.fn(),
 }));
 const runtimeMocks = vi.hoisted(() => ({
   isDesktop: false,
@@ -14,6 +15,7 @@ const runtimeMocks = vi.hoisted(() => ({
 
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: dialogMocks.save,
+  open: dialogMocks.open,
 }));
 
 vi.mock('../platform/runtime', () => ({
@@ -52,6 +54,7 @@ beforeEach(async () => {
   vi.resetModules();
   setTauriMode(false);
   dialogMocks.save.mockReset();
+  dialogMocks.open.mockReset();
 
   mockExportImageToPath = vi.fn().mockResolvedValue(undefined);
   mockEngine = createMockEngine();
@@ -64,9 +67,12 @@ beforeEach(async () => {
   await useGraphStore.getState().initEngine();
 });
 
-const addExportImageNode = async (formatIdx = 0) => {
+const addExportImageNode = async (formatIdx = 0, outputPath = '') => {
   const id = await useGraphStore.getState().addNode('export_image', { x: 0, y: 0 });
   useGraphStore.getState().setParam(id, 'format', { Int: formatIdx });
+  if (outputPath) {
+    useGraphStore.getState().setParam(id, 'output_path', { String: outputPath });
+  }
   return id;
 };
 
@@ -217,5 +223,80 @@ describe('exportImage — Tauri path (isTauri = true)', () => {
     await flushPromises(5);
 
     expect(useGraphStore.getState().lastError).not.toBeNull();
+  });
+});
+
+describe('exportAllImages — web path (isTauri = false)', () => {
+  it('exports every Export Image node into exports.zip', async () => {
+    const createObjectURL = vi.fn().mockReturnValue('blob:exports-url');
+    const revokeObjectURL = vi.fn();
+    const clickMock = vi.fn();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+
+    const origCreate = document.createElement.bind(document);
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+      const el = origCreate(tag);
+      if (tag === 'a') {
+        Object.defineProperty(el, 'click', { value: clickMock, writable: true });
+      }
+      return el;
+    });
+
+    const exportImage = vi.fn()
+      .mockResolvedValueOnce(new Uint8Array([1, 2, 3]))
+      .mockResolvedValueOnce(new Uint8Array([4, 5, 6]));
+    mockEngine.exportImage = exportImage;
+
+    const first = await addExportImageNode(0, 'square.png');
+    const second = await addExportImageNode(1, 'portrait.jpg');
+
+    await useGraphStore.getState().exportAllImages();
+
+    expect(exportImage).toHaveBeenCalledWith(first, 0);
+    expect(exportImage).toHaveBeenCalledWith(second, 0);
+    expect(createObjectURL).toHaveBeenCalledOnce();
+    expect(clickMock).toHaveBeenCalledOnce();
+    expect(revokeObjectURL).toHaveBeenCalledOnce();
+    expect(useGraphStore.getState().renderProgress?.completed).toBe(true);
+
+    vi.restoreAllMocks();
+  });
+});
+
+describe('exportAllImages — Tauri path (isTauri = true)', () => {
+  beforeEach(() => {
+    setTauriMode(true);
+  });
+
+  afterEach(() => {
+    setTauriMode(false);
+  });
+
+  it('prompts for an output directory and writes every export node', async () => {
+    dialogMocks.open.mockResolvedValue('/tmp/exports');
+
+    const first = await addExportImageNode(0, 'square.png');
+    const second = await addExportImageNode(1);
+
+    await useGraphStore.getState().exportAllImages();
+
+    expect(dialogMocks.open).toHaveBeenCalledWith(expect.objectContaining({
+      directory: true,
+      multiple: false,
+    }));
+    expect(mockExportImageToPath).toHaveBeenCalledWith(first, 0, '/tmp/exports/square.png');
+    expect(mockExportImageToPath).toHaveBeenCalledWith(second, 0, '/tmp/exports/export_2.jpg');
+    expect(useGraphStore.getState().renderProgress?.completed).toBe(true);
+  });
+
+  it('does not export when directory selection is cancelled', async () => {
+    dialogMocks.open.mockResolvedValue(null);
+
+    await addExportImageNode(0, 'square.png');
+    await useGraphStore.getState().exportAllImages();
+
+    expect(mockExportImageToPath).not.toHaveBeenCalled();
+    expect(useGraphStore.getState().lastError).toBeNull();
   });
 });

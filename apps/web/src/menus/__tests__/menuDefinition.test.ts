@@ -48,6 +48,7 @@ describe('menuDefinition', () => {
       expect.objectContaining({ id: 'file.open', label: 'Open Project' }),
       expect.objectContaining({ id: 'file.save', label: 'Save' }),
       expect.objectContaining({ id: 'file.saveAs', label: 'Save As...' }),
+      expect.objectContaining({ id: 'file.exportAllImages', label: 'Export All Images...' }),
     ]));
   });
 
@@ -57,12 +58,14 @@ describe('menuDefinition', () => {
     const requestSaveProject = vi.fn();
     const requestSaveProjectAs = vi.fn();
     const requestCloseProject = vi.fn();
+    const exportAllImages = vi.fn();
     useGraphStore.setState({
       requestNewProject,
       requestOpenProject,
       requestSaveProject,
       requestSaveProjectAs,
       requestCloseProject,
+      exportAllImages,
     });
 
     handleMenuAction('app.quit');
@@ -70,11 +73,13 @@ describe('menuDefinition', () => {
     handleMenuAction('file.open');
     handleMenuAction('file.save');
     handleMenuAction('file.saveAs');
+    handleMenuAction('file.exportAllImages');
 
     expect(requestCloseProject).toHaveBeenCalledTimes(1);
     expect(requestNewProject).toHaveBeenCalledTimes(1);
     expect(requestOpenProject).toHaveBeenCalledTimes(1);
     expect(requestSaveProject).toHaveBeenCalledTimes(1);
     expect(requestSaveProjectAs).toHaveBeenCalledTimes(1);
+    expect(exportAllImages).toHaveBeenCalledTimes(1);
   });
 });

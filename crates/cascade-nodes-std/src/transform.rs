@@ -19,6 +19,25 @@ impl Resize {
     }
 }
 
+fn fit_within_dimensions(
+    in_w: u32,
+    in_h: u32,
+    max_w: u32,
+    max_h: u32,
+    allow_upscale: bool,
+) -> (u32, u32) {
+    let scale_x = max_w as f64 / in_w as f64;
+    let scale_y = max_h as f64 / in_h as f64;
+    let mut scale = scale_x.min(scale_y);
+    if !allow_upscale {
+        scale = scale.min(1.0);
+    }
+
+    let out_w = ((in_w as f64 * scale).round() as u32).clamp(1, max_w.max(1));
+    let out_h = ((in_h as f64 * scale).round() as u32).clamp(1, max_h.max(1));
+    (out_w, out_h)
+}
+
 impl Node for Resize {
     fn spec(&self) -> NodeSpec {
         NodeSpec {
@@ -40,6 +59,17 @@ impl Node for Resize {
             }],
             params: vec![
                 ParamSpec {
+                    key: "mode".to_string(),
+                    label: "Mode".to_string(),
+                    ty: ValueType::Int,
+                    default: ParamDefault::Int(0),
+                    min: Some(0.0),
+                    max: Some(1.0),
+                    step: Some(1.0),
+                    ui_hint: UiHint::Dropdown(vec!["Exact".to_string(), "Fit Within".to_string()]),
+                    promotable: true,
+                },
+                ParamSpec {
                     key: "width".to_string(),
                     label: "Width".to_string(),
                     ty: ValueType::Int,
@@ -59,6 +89,17 @@ impl Node for Resize {
                     max: Some(8192.0),
                     step: Some(1.0),
                     ui_hint: UiHint::NumberInput,
+                    promotable: true,
+                },
+                ParamSpec {
+                    key: "allow_upscale".to_string(),
+                    label: "Allow Upscale".to_string(),
+                    ty: ValueType::Bool,
+                    default: ParamDefault::Bool(false),
+                    min: None,
+                    max: None,
+                    step: None,
+                    ui_hint: UiHint::Checkbox,
                     promotable: true,
                 },
                 ParamSpec {
@@ -85,7 +126,14 @@ impl Node for Resize {
             let image = ctx.get_input_image("image")?;
             let width = ctx.get_param_int("width")?.clamp(1, 8192) as u32;
             let height = ctx.get_param_int("height")?.clamp(1, 8192) as u32;
+            let mode = ctx.get_param_int("mode").unwrap_or(0).clamp(0, 1);
+            let allow_upscale = ctx.get_param_bool("allow_upscale").unwrap_or(false);
             let filter = ctx.get_param_int("filter")?.clamp(0, 2) as i32;
+            let (width, height) = if mode == 1 {
+                fit_within_dimensions(image.width, image.height, width, height, allow_upscale)
+            } else {
+                (width, height)
+            };
 
             let output = match filter {
                 0 => resize_nearest(image, width, height)?,

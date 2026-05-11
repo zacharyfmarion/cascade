@@ -799,6 +799,82 @@ mod tests {
     }
 
     #[test]
+    fn test_resize_fit_within_preserves_wide_aspect_ratio() {
+        let input = make_test_image(400, 200, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 100);
+        assert_eq!(output.height, 50);
+        assert_eq!(output.data_window, RectI::from_dimensions(100, 50));
+    }
+
+    #[test]
+    fn test_resize_fit_within_preserves_tall_aspect_ratio() {
+        let input = make_test_image(200, 400, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 50);
+        assert_eq!(output.height, 100);
+        assert_eq!(output.data_window, RectI::from_dimensions(50, 100));
+    }
+
+    #[test]
+    fn test_resize_fit_within_does_not_upscale_by_default() {
+        let input = make_test_image(40, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 40);
+        assert_eq!(output.height, 20);
+        assert_eq!(output.data_window, RectI::from_dimensions(40, 20));
+    }
+
+    #[test]
+    fn test_resize_fit_within_can_upscale() {
+        let input = make_test_image(40, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(true));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 100);
+        assert_eq!(output.height, 50);
+        assert_eq!(output.data_window, RectI::from_dimensions(100, 50));
+    }
+
+    #[test]
     fn test_flip_preserves_format_and_data_window() {
         let input = make_offset_image([1.0, 0.0, 1.0, 1.0]);
 
