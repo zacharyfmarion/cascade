@@ -38,6 +38,54 @@ fn fit_within_dimensions(
     (out_w, out_h)
 }
 
+fn cover_crop_rect(in_w: u32, in_h: u32, out_w: u32, out_h: u32) -> (u32, u32, u32, u32) {
+    let source_ratio = in_w as f64 / in_h as f64;
+    let target_ratio = out_w as f64 / out_h as f64;
+    if source_ratio > target_ratio {
+        let crop_h = in_h;
+        let crop_w = ((crop_h as f64 * target_ratio).round() as u32).clamp(1, in_w);
+        let crop_x = (in_w - crop_w) / 2;
+        (crop_x, 0, crop_w, crop_h)
+    } else {
+        let crop_w = in_w;
+        let crop_h = ((crop_w as f64 / target_ratio).round() as u32).clamp(1, in_h);
+        let crop_y = (in_h - crop_h) / 2;
+        (0, crop_y, crop_w, crop_h)
+    }
+}
+
+fn crop_image_pixels(
+    image: &Image,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<Image, CascadeError> {
+    let image_w = image.width as usize;
+    let x = x as usize;
+    let y = y as usize;
+    let out_w = width as usize;
+    let mut data = vec![0.0f32; out_w * height as usize * 4];
+    data.par_chunks_exact_mut(4)
+        .enumerate()
+        .for_each(|(i, out)| {
+            let px = i % out_w;
+            let py = i / out_w;
+            let idx = ((y + py) * image_w + x + px) * 4;
+            out[0] = image.data[idx];
+            out[1] = image.data[idx + 1];
+            out[2] = image.data[idx + 2];
+            out[3] = image.data[idx + 3];
+        });
+
+    Image::new_with_domain(
+        Format::from_dimensions(width, height),
+        RectI::from_dimensions(width, height),
+        data,
+        image.color_space.clone(),
+    )
+}
+
 impl Node for Resize {
     fn spec(&self) -> NodeSpec {
         NodeSpec {
@@ -64,9 +112,13 @@ impl Node for Resize {
                     ty: ValueType::Int,
                     default: ParamDefault::Int(0),
                     min: Some(0.0),
-                    max: Some(1.0),
+                    max: Some(2.0),
                     step: Some(1.0),
-                    ui_hint: UiHint::Dropdown(vec!["Exact".to_string(), "Fit Within".to_string()]),
+                    ui_hint: UiHint::Dropdown(vec![
+                        "Exact".to_string(),
+                        "Fit Within".to_string(),
+                        "Cover".to_string(),
+                    ]),
                     promotable: true,
                 },
                 ParamSpec {
@@ -126,19 +178,41 @@ impl Node for Resize {
             let image = ctx.get_input_image("image")?;
             let width = ctx.get_param_int("width")?.clamp(1, 8192) as u32;
             let height = ctx.get_param_int("height")?.clamp(1, 8192) as u32;
-            let mode = ctx.get_param_int("mode").unwrap_or(0).clamp(0, 1);
+            let mode = ctx.get_param_int("mode").unwrap_or(0).clamp(0, 2);
             let allow_upscale = ctx.get_param_bool("allow_upscale").unwrap_or(false);
             let filter = ctx.get_param_int("filter")?.clamp(0, 2) as i32;
-            let (width, height) = if mode == 1 {
-                fit_within_dimensions(image.width, image.height, width, height, allow_upscale)
-            } else {
-                (width, height)
+
+            let mut cover_source = None;
+            let (width, height) = match mode {
+                1 => {
+                    let (width, height) = fit_within_dimensions(
+                        image.width,
+                        image.height,
+                        width,
+                        height,
+                        allow_upscale,
+                    );
+                    (width, height)
+                }
+                2 => {
+                    let (x, y, crop_w, crop_h) =
+                        cover_crop_rect(image.width, image.height, width, height);
+                    let (width, height) = if allow_upscale {
+                        (width, height)
+                    } else {
+                        fit_within_dimensions(crop_w, crop_h, width, height, false)
+                    };
+                    cover_source = Some(crop_image_pixels(image, x, y, crop_w, crop_h)?);
+                    (width, height)
+                }
+                _ => (width, height),
             };
+            let source = cover_source.as_ref().unwrap_or(image);
 
             let output = match filter {
-                0 => resize_nearest(image, width, height)?,
-                1 => resize_bilinear(image, width, height)?,
-                _ => resize_bicubic(image, width, height)?,
+                0 => resize_nearest(source, width, height)?,
+                1 => resize_bilinear(source, width, height)?,
+                _ => resize_bicubic(source, width, height)?,
             };
 
             let mut outputs = HashMap::new();

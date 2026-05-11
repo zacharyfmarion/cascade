@@ -875,6 +875,124 @@ mod tests {
     }
 
     #[test]
+    fn test_resize_cover_crops_wide_image_to_exact_aspect() {
+        let colors = [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        ];
+        let mut data = Vec::new();
+        for _ in 0..2 {
+            for color in colors {
+                data.extend_from_slice(&color);
+            }
+        }
+        let input = Image::from_f32_data(4, 2, data).unwrap();
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(2));
+        params.insert("height".to_string(), ParamValue::Int(2));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 2);
+        assert_eq!(output.height, 2);
+        assert_eq!(output.data_window, RectI::from_dimensions(2, 2));
+        assert_color_approx(
+            output.get_rgba(0, 0),
+            [0.0, 1.0, 0.0, 1.0],
+            "left crop pixel",
+        );
+        assert_color_approx(
+            output.get_rgba(1, 0),
+            [0.0, 0.0, 1.0, 1.0],
+            "right crop pixel",
+        );
+    }
+
+    #[test]
+    fn test_resize_cover_crops_tall_image_to_exact_aspect() {
+        let row_colors = [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        ];
+        let mut data = Vec::new();
+        for color in row_colors {
+            data.extend_from_slice(&color);
+            data.extend_from_slice(&color);
+        }
+        let input = Image::from_f32_data(2, 4, data).unwrap();
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(2));
+        params.insert("height".to_string(), ParamValue::Int(2));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 2);
+        assert_eq!(output.height, 2);
+        assert_color_approx(
+            output.get_rgba(0, 0),
+            [0.0, 1.0, 0.0, 1.0],
+            "top crop pixel",
+        );
+        assert_color_approx(
+            output.get_rgba(0, 1),
+            [0.0, 0.0, 1.0, 1.0],
+            "bottom crop pixel",
+        );
+    }
+
+    #[test]
+    fn test_resize_cover_does_not_upscale_by_default() {
+        let input = make_test_image(20, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 20);
+        assert_eq!(output.height, 20);
+        assert_eq!(output.data_window, RectI::from_dimensions(20, 20));
+    }
+
+    #[test]
+    fn test_resize_cover_can_upscale() {
+        let input = make_test_image(20, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(true));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 100);
+        assert_eq!(output.height, 100);
+        assert_eq!(output.data_window, RectI::from_dimensions(100, 100));
+    }
+
+    #[test]
     fn test_flip_preserves_format_and_data_window() {
         let input = make_offset_image([1.0, 0.0, 1.0, 1.0]);
 

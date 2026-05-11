@@ -55,6 +55,36 @@ describe('resize in Cascade DSL', () => {
     expect(serialize(nodes)).toBe(graph('  resize1 = Resize(width: 1600, height: 900)'));
   });
 
+  it('round-trips cover resize mode', () => {
+    const parsed = parseDsl(
+      graph('  resize1 = Resize(mode: "cover", width: 1080, height: 1350, allow_upscale: true)'),
+      mockSpecs,
+    );
+
+    expect(parsed.errors).toHaveLength(0);
+    expect(parsed.ast?.nodes.get('resize1')?.params.get('mode')).toEqual({
+      type: 'dropdown',
+      value: 'cover',
+      index: 2,
+    });
+    expect(validateAst(parsed.ast!, mockSpecs).valid).toBe(true);
+
+    const nodes = new Map<string, NodeInstance>();
+    nodes.set('resize-node', makeNodeInstance({
+      id: 'resize-node',
+      typeId: 'resize',
+      params: {
+        mode: { Int: 2 },
+        width: { Int: 1080 },
+        height: { Int: 1350 },
+        allow_upscale: { Bool: true },
+      },
+    }));
+    expect(serialize(nodes)).toBe(
+      graph('  resize1 = Resize(mode: "cover", width: 1080, height: 1350, allow_upscale: true)'),
+    );
+  });
+
   it('round-trips legacy exact-mode resize DSL unchanged', () => {
     const source = graph('  resize1 = Resize(width: 1600, height: 900)');
     const parsed = parseDsl(source, mockSpecs);

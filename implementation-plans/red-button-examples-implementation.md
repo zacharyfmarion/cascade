@@ -21,8 +21,10 @@ Ship three bundled, DSL-backed examples that validate common image editing workf
 ## Checklist
 
 - [x] Add native resize fit mode and Rust tests.
+- [x] Add native resize cover mode and tests.
 - [x] Add export-all store/menu behavior and frontend tests.
 - [x] Add DSL tests for resize and example graph shapes.
 - [x] Generate bundled example `.casc` files with DSL shadows and assets.
+- [x] Simplify watermark example to a rasterized text overlay.
 - [x] Register examples in the catalog and credits.
 - [x] Run targeted frontend and Rust validation.

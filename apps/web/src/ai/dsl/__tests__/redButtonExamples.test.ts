@@ -6,7 +6,6 @@ import { mockSpecs } from './helpers';
 const imageA = 'asset://sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const imageB = 'asset://sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const imageC = 'asset://sha256/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-const logo = 'asset://sha256/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
 
 const parseAndValidate = (source: string) => {
   const parsed = parseDsl(source, mockSpecs);
@@ -37,57 +36,35 @@ describe('red button example DSL fixtures', () => {
     expect(ast.nodes.get('export')?.nodeTypeId).toBe('export_image_batch');
   });
 
-  it('validates the watermark root graph with math-driven param connections', () => {
+  it('validates the watermark root graph with rasterized text overlay', () => {
     const ast = parseAndValidate([
       'graph {',
       `  background = LoadImage(path: image("${imageA}"))`,
-      `  logo = LoadImage(path: image("${logo}"))`,
-      '  background_info = ImageInfo()',
-      '  logo_target_width = Math(operation: "multiply", b: 0.16)',
-      '  logo_resize = Resize(mode: "fit_within", height: 8192, allow_upscale: true)',
-      '  logo_info = ImageInfo()',
-      '  x_without_margin = Math(operation: "subtract")',
-      '  x = Math(operation: "subtract", b: 48.0)',
-      '  y_without_margin = Math(operation: "subtract")',
-      '  y = Math(operation: "subtract", b: 48.0)',
-      '  logo_position = Translate()',
-      '  over = AlphaOver(opacity: 0.82)',
+      '  watermark = Text(text: "CASCADE", font_size: 96.0, width: 640, height: 160)',
+      '  position = Translate(x: 48, y: 48)',
+      '  over = AlphaOver(opacity: 0.5)',
       '  view = Viewer()',
       '  export = ExportImage(output_path: "watermarked.png")',
       '',
-      '  background.image -> background_info.image',
-      '  background_info.width -> logo_target_width.a',
-      '  logo.image -> logo_resize.image',
-      '  logo_target_width.value -> logo_resize.width',
-      '  logo_resize.image -> logo_info.image',
-      '  background_info.width -> x_without_margin.a',
-      '  logo_info.width -> x_without_margin.b',
-      '  x_without_margin.value -> x.a',
-      '  background_info.height -> y_without_margin.a',
-      '  logo_info.height -> y_without_margin.b',
-      '  y_without_margin.value -> y.a',
-      '  logo_resize.image -> logo_position.image',
-      '  x.value -> logo_position.x',
-      '  y.value -> logo_position.y',
+      '  watermark.image -> position.image',
       '  background.image -> over.background',
-      '  logo_position.image -> over.foreground',
+      '  position.image -> over.foreground',
       '  over.image -> view.value',
       '  over.image -> export.image',
       '}',
     ].join('\n'));
 
     expect(ast.nodes.get('over')?.nodeTypeId).toBe('gpu_kernel::alpha_over');
+    expect(ast.nodes.get('watermark')?.nodeTypeId).toBe('text');
+    expect(ast.nodes.get('over')?.params.get('opacity')).toEqual({
+      type: 'float',
+      value: 0.5,
+    });
     expect(ast.connections).toContainEqual(expect.objectContaining({
-      fromHandle: 'logo_target_width',
-      fromPort: 'value',
-      toHandle: 'logo_resize',
-      toPort: 'width',
-    }));
-    expect(ast.connections).toContainEqual(expect.objectContaining({
-      fromHandle: 'x',
-      fromPort: 'value',
-      toHandle: 'logo_position',
-      toPort: 'x',
+      fromHandle: 'watermark',
+      fromPort: 'image',
+      toHandle: 'position',
+      toPort: 'image',
     }));
   });
 
