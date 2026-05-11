@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface NodeSliderProps {
   label: string;
@@ -25,6 +25,7 @@ export const NodeSlider: React.FC<NodeSliderProps> = ({
   const [editText, setEditText] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const dragStartRef = useRef<{ x: number; value: number } | null>(null);
   const hasDraggedRef = useRef(false);
   const lastEmittedRef = useRef<number>(value);
@@ -50,6 +51,12 @@ export const NodeSlider: React.FC<NodeSliderProps> = ({
     },
     [step]
   );
+
+  useEffect(() => {
+    if (!isEditing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [isEditing]);
 
   // Use onPointerDown — React Flow listens to pointer events for drag,
   // so we must capture at the pointer level to prevent node dragging.
@@ -162,6 +169,7 @@ export const NodeSlider: React.FC<NodeSliderProps> = ({
     >
       {isEditing ? (
         <input
+          ref={inputRef}
           type="text"
           className="node-slider__input nopan nodrag"
           value={editText}
@@ -169,7 +177,6 @@ export const NodeSlider: React.FC<NodeSliderProps> = ({
           onKeyDown={handleEditKeyDown}
           onBlur={handleEditBlur}
           onPointerDown={(e) => e.stopPropagation()}
-          ref={(el) => el?.focus()}
         />
       ) : (
         <>
