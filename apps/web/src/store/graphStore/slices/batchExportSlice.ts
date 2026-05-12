@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { GraphState } from '../store';
 import type { JobProgress } from '../../../engine/bridge';
-import { getEngine, isTauri, kernel } from '../kernel';
+import { getEngine, isSequenceInfo, isTauri, kernel } from '../kernel';
 import { makeEngineError, parseEngineError } from '../../../engine/engineError';
 
 export interface BatchExportSliceState {
@@ -71,6 +71,53 @@ const dedupeFilename = (filename: string, used: Set<string>): string => {
     }
     suffix += 1;
   }
+};
+
+const DEFAULT_SEQUENCE_START_FRAME = 0;
+const DEFAULT_SEQUENCE_END_FRAME = 100;
+
+const upstreamSequenceRange = (
+  exportNodeId: string,
+  nodes: GraphState['nodes'],
+  connections: GraphState['connections'],
+  sequenceInfoMap: GraphState['sequenceInfoMap'],
+): { start: number; end: number } | null => {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const visited = new Set<string>();
+  const queue = [exportNodeId];
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift()!;
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+
+    for (const connection of connections) {
+      if (connection.toNode !== nodeId) continue;
+
+      const sourceNode = nodes.get(connection.fromNode);
+      if (!sourceNode) continue;
+
+      const info = sequenceInfoMap.get(connection.fromNode);
+      if (
+        info
+        && info.frame_count > 0
+        && (sourceNode.typeId === 'load_image_sequence' || sourceNode.typeId === 'load_video')
+      ) {
+        ranges.push(isSequenceInfo(info)
+          ? { start: info.first_frame, end: info.last_frame }
+          : { start: 0, end: info.frame_count - 1 });
+        continue;
+      }
+
+      queue.push(connection.fromNode);
+    }
+  }
+
+  if (ranges.length === 0) return null;
+  return {
+    start: Math.min(...ranges.map(range => range.start)),
+    end: Math.max(...ranges.map(range => range.end)),
+  };
 };
 
 export const createBatchExportSlice: StateCreator<
@@ -331,7 +378,7 @@ export const createBatchExportSlice: StateCreator<
   renderSequence: async (nodeId) => {
     const eng = getEngine();
 
-    if (eng.renderSequence) {
+    if (isTauri() && eng.renderSequence) {
       set({ isRendering: true, renderProgress: null, lastError: null });
       try {
         await eng.renderSequence(nodeId);
@@ -384,11 +431,25 @@ export const createBatchExportSlice: StateCreator<
     let endFrame = node.params['end_frame'] && 'Int' in node.params['end_frame']
       ? node.params['end_frame'].Int : 100;
 
-    // Use detected sequence range when available — the node params may not
-    // have been synced yet due to the async useEffect in the component.
-    if (hasSequenceNodes && sequenceLength > 0) {
-      startFrame = sequenceStart;
-      endFrame = sequenceLength;
+    // Use detected sequence range for default export nodes. User-edited frame
+    // ranges still win over sequence metadata.
+    if (
+      startFrame === DEFAULT_SEQUENCE_START_FRAME
+      && endFrame === DEFAULT_SEQUENCE_END_FRAME
+    ) {
+      const detectedRange = upstreamSequenceRange(
+        nodeId,
+        get().nodes,
+        get().connections,
+        get().sequenceInfoMap,
+      );
+      if (detectedRange) {
+        startFrame = detectedRange.start;
+        endFrame = detectedRange.end;
+      } else if (hasSequenceNodes && sequenceLength > 0) {
+        startFrame = sequenceStart;
+        endFrame = sequenceLength;
+      }
     }
 
     const step = node.params['step'] && 'Int' in node.params['step']

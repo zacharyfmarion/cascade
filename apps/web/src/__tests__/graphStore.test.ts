@@ -2129,6 +2129,60 @@ describe('graphStore error states', () => {
     await expect(store.getState().addNode('curves', { x: 0, y: 0 })).rejects.toThrow('Engine not initialized');
   });
 
+  it('renderSequence uses the web ZIP path when a WASM engine exposes an unsupported native job stub', async () => {
+    const s = useGraphStore.getState();
+    const sequence = await s.addNode('load_image_sequence', { x: 0, y: 0 });
+    const exportNode = await s.addNode('export_image_sequence', { x: 200, y: 0 });
+    await s.connect(sequence, 'image', exportNode, 'image');
+    await s.setSequenceFiles(sequence, [
+      new File([new Uint8Array([11])], 'frame_0001.png'),
+      new File([new Uint8Array([22])], 'frame_0002.png'),
+    ]);
+
+    const nativeRenderSequence = vi.fn(async () => {
+      throw new Error('Sequence rendering is not supported in WASM engine');
+    });
+    const exportedFrames: number[] = [];
+    const exportImage = vi.fn(async (_nodeId: string, frame: number) => {
+      exportedFrames.push(frame);
+      return new Uint8Array([frame]);
+    });
+    Object.assign(mockEngine, {
+      renderSequence: nativeRenderSequence,
+      exportImage,
+    });
+
+    const blobs: Blob[] = [];
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      blobs.push(blob as Blob);
+      return 'blob:sequence-export';
+    });
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.fn();
+    const link = { href: '', download: '', click };
+    const createElement = vi.spyOn(document, 'createElement').mockReturnValue(link as unknown as HTMLAnchorElement);
+
+    try {
+      await s.renderSequence(exportNode);
+
+      expect(nativeRenderSequence).not.toHaveBeenCalled();
+      expect(exportImage).toHaveBeenCalledTimes(2);
+      expect(exportedFrames).toEqual([1, 2]);
+      expect(mockEngine._sequenceFrameLoads.map(load => load.frame)).toEqual(expect.arrayContaining([1, 2]));
+      expect(useGraphStore.getState().lastError).toBeNull();
+      expect(link.download).toBe('sequence.zip');
+      expect(blobs).toHaveLength(1);
+
+      const zip = await JSZip.loadAsync(await blobs[0].arrayBuffer());
+      expect(await zip.file('0001.png')!.async('uint8array')).toEqual(new Uint8Array([1]));
+      expect(await zip.file('0002.png')!.async('uint8array')).toEqual(new Uint8Array([2]));
+    } finally {
+      createElement.mockRestore();
+      createObjectURL.mockRestore();
+      revokeObjectURL.mockRestore();
+    }
+  });
+
   it('renderVideo sets error when engine does not support it', async () => {
     const id = await useGraphStore.getState().addNode('export_image', { x: 0, y: 0 });
     await useGraphStore.getState().renderVideo(id);

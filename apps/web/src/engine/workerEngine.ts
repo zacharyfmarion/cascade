@@ -18,7 +18,6 @@ import type {
   EngineBridge,
   AddNodeResult,
   NodeInterfaceChange,
-  JobProgress,
   SequenceInfo,
   VideoInfo,
   ColorManagementInfo,
@@ -95,11 +94,6 @@ interface WorkerAPI {
   getBatchInfo(exportNodeId: string): Promise<{ count: number; filenames: string[] }>;
   getBatchImageData(nodeId: string, index: number): Promise<Uint8Array | null>;
   getBatchThumbnail(nodeId: string, index: number, maxEdge: number): Promise<Uint8Array | null>;
-
-  renderSequence(nodeId: string): Promise<string>;
-  renderVideo(nodeId: string): Promise<string>;
-  cancelJob(): Promise<void>;
-  getJobProgress(): Promise<JobProgress | null>;
 
   createGroupFromNodes(nodeIds: string[], name: string): Promise<CreateGroupResult>;
   ungroupNode(groupNodeId: string): Promise<UngroupResult>;
@@ -412,27 +406,6 @@ export class WorkerEngine implements EngineBridge {
     return this.getAPI().getBatchThumbnail(nodeId, index, maxEdge);
   }
 
-  // -----------------------------------------------------------------------
-  // Jobs
-  // -----------------------------------------------------------------------
-
-  renderSequence(nodeId: string): Promise<string> {
-    return this.getAPI().renderSequence(nodeId);
-  }
-
-  renderVideo(nodeId: string): Promise<string> {
-    return this.getAPI().renderVideo(nodeId);
-  }
-
-  cancelJob(): Promise<void> {
-    return this.getAPI().cancelJob();
-  }
-
-  getJobProgress(): Promise<JobProgress | null> {
-    return this.getAPI().getJobProgress();
-  }
-
-  // -----------------------------------------------------------------------
   // Groups
   // -----------------------------------------------------------------------
 
