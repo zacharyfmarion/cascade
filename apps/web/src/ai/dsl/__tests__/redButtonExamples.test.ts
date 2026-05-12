@@ -72,31 +72,27 @@ describe('red button example DSL fixtures', () => {
     const ast = parseAndValidate([
       'graph {',
       `  source = LoadImage(path: image("${imageB}"))`,
-      '  square_crop = Crop(width: 1080, height: 1080)',
-      '  square = Resize(width: 1080, height: 1080)',
-      '  portrait_crop = Crop(x: 240, width: 960, height: 1200)',
-      '  portrait = Resize(width: 1080, height: 1350)',
-      '  landscape_crop = Crop(width: 1600, height: 900)',
-      '  landscape = Resize(width: 1200, height: 675)',
+      '  square = Resize(mode: "cover", width: 1080, allow_upscale: true)',
+      '  portrait = Resize(mode: "cover", width: 1080, height: 1350, allow_upscale: true)',
+      '  landscape = Resize(mode: "cover", width: 1200, height: 675, allow_upscale: true)',
       '  view = Viewer()',
       '  square_export = ExportImage(output_path: "square.png")',
       '  portrait_export = ExportImage(output_path: "portrait.png")',
       '  landscape_export = ExportImage(output_path: "landscape.png")',
       '',
-      '  source.image -> square_crop.image',
-      '  square_crop.image -> square.image',
+      '  source.image -> square.image',
       '  square.image -> view.value',
       '  square.image -> square_export.image',
-      '  source.image -> portrait_crop.image',
-      '  portrait_crop.image -> portrait.image',
+      '  source.image -> portrait.image',
       '  portrait.image -> portrait_export.image',
-      '  source.image -> landscape_crop.image',
-      '  landscape_crop.image -> landscape.image',
+      '  source.image -> landscape.image',
       '  landscape.image -> landscape_export.image',
       '}',
     ].join('\n'));
 
     const exportNodes = Array.from(ast.nodes.values()).filter(node => node.nodeTypeId === 'export_image');
     expect(exportNodes).toHaveLength(3);
+    expect(Array.from(ast.nodes.values()).filter(node => node.nodeTypeId === 'crop')).toHaveLength(0);
+    expect(ast.nodes.get('square')?.params.get('mode')).toMatchObject({ type: 'dropdown', value: 'cover' });
   });
 });

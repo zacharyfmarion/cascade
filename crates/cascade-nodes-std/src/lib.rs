@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(output.data_window, expected_dw);
         assert_eq!(output.width, 10);
         assert_eq!(output.height, 10);
-        assert_eq!(output.format, input.format);
+        assert_eq!(output.format, Format::from_dimensions(10, 10));
         // Pixel at output (0,0) maps to source global (102,101) which is inside the input
         let px = output.get_rgba(0, 0);
         assert_color_approx(px, [0.0, 1.0, 0.0, 1.0], "pixel inside crop");
@@ -718,11 +718,36 @@ mod tests {
         // Output is always exactly width×height, even with no overlap
         assert_eq!(output.width, 10);
         assert_eq!(output.height, 10);
+        assert_eq!(output.format, Format::from_dimensions(10, 10));
         let px = output.get_rgba(0, 0);
         assert_color_approx(
             px,
             [0.0, 0.0, 0.0, 0.0],
             "non-overlapping crop is transparent",
+        );
+    }
+
+    #[test]
+    fn test_crop_resets_display_format_to_crop_dimensions() {
+        let input = make_test_image(512, 512, [0.0, 0.0, 1.0, 1.0]);
+
+        let node = Crop::new();
+        let mut params = HashMap::new();
+        params.insert("x".to_string(), ParamValue::Int(0));
+        params.insert("y".to_string(), ParamValue::Int(0));
+        params.insert("width".to_string(), ParamValue::Int(512));
+        params.insert("height".to_string(), ParamValue::Int(10));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 512);
+        assert_eq!(output.height, 10);
+        assert_eq!(output.data_window, RectI::from_dimensions(512, 10));
+        assert_eq!(output.format, Format::from_dimensions(512, 10));
+        assert_color_approx(
+            output.get_rgba(0, 9),
+            [0.0, 0.0, 1.0, 1.0],
+            "crop output keeps the requested pixels opaque through the full crop height",
         );
     }
 

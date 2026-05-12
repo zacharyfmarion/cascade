@@ -422,7 +422,7 @@ impl Node for Crop {
                     });
 
                 let output = Image::new_with_domain(
-                    image.format.clone(),
+                    Format::from_dimensions(width, height),
                     out_dw,
                     data,
                     image.color_space.clone(),
