@@ -15,8 +15,8 @@ use cascade_core::group::{
 };
 use cascade_core::node::{Node, NodeRegistry};
 use cascade_core::types::{
-    ColorStop, Format, FrameTime, NodeSpec, ParamDefault, ParamValue, PortSpec, UiNodeSpec, Value,
-    ValueType,
+    ColorStop, Format, FrameTime, Image, NodeSpec, ParamDefault, ParamValue, PortSpec, UiNodeSpec,
+    Value, ValueType,
 };
 use cascade_gpu::kernel_node::GpuKernelNode;
 use cascade_gpu::{gpu_script_passthrough_manifest, GpuContext, KernelManifest};
@@ -39,6 +39,31 @@ use wasm_bindgen::prelude::*;
 pub use wasm_bindgen_rayon::init_thread_pool;
 
 const GPU_SCRIPT_MANIFEST_PARAM_KEY: &str = "__script_manifest";
+
+#[derive(Clone, Copy)]
+struct ViewerDomainMetadata {
+    display_window_x: i32,
+    display_window_y: i32,
+    data_window_x: i32,
+    data_window_y: i32,
+    data_window_width: u32,
+    data_window_height: u32,
+}
+
+impl ViewerDomainMetadata {
+    fn from_image(image: &Image) -> Self {
+        let display_window = image.format.display_window;
+        let data_window = image.data_window;
+        Self {
+            display_window_x: display_window.min.x,
+            display_window_y: display_window.min.y,
+            data_window_x: data_window.min.x,
+            data_window_y: data_window.min.y,
+            data_window_width: data_window.width().max(0) as u32,
+            data_window_height: data_window.height().max(0) as u32,
+        }
+    }
+}
 
 fn serialize_gpu_script_manifest(manifest: &KernelManifest) -> Result<String, JsValue> {
     serde_json::to_string(manifest).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -1166,12 +1191,30 @@ impl Engine {
                 before.width, before.height, after.width, after.height
             )));
         }
+        if before.format.display_window != after.format.display_window
+            || before.data_window != after.data_window
+        {
+            return Err(JsValue::from_str(&format!(
+                "Compare Viewer requires matching image domains, got before display {:?} data {:?} and after display {:?} data {:?}",
+                before.format.display_window,
+                before.data_window,
+                after.format.display_window,
+                after.data_window
+            )));
+        }
+        let domain = ViewerDomainMetadata::from_image(&after);
 
         Ok(ViewerResultWasm::Compare {
             width: after.width,
             height: after.height,
             original_width: after.format.width(),
             original_height: after.format.height(),
+            display_window_x: domain.display_window_x,
+            display_window_y: domain.display_window_y,
+            data_window_x: domain.data_window_x,
+            data_window_y: domain.data_window_y,
+            data_window_width: domain.data_window_width,
+            data_window_height: domain.data_window_height,
             before_pixels: Viewer::image_to_rgba8_with_display(
                 &before,
                 &self.color_management,
@@ -1257,12 +1300,19 @@ impl Engine {
                     &self.active_display,
                     &self.active_view,
                 );
+                let domain = ViewerDomainMetadata::from_image(image);
                 ViewerResultWasm::Pixels {
                     value_type: "image".to_string(),
                     width: image.width,
                     height: image.height,
                     original_width: image.format.width(),
                     original_height: image.format.height(),
+                    display_window_x: domain.display_window_x,
+                    display_window_y: domain.display_window_y,
+                    data_window_x: domain.data_window_x,
+                    data_window_y: domain.data_window_y,
+                    data_window_width: domain.data_window_width,
+                    data_window_height: domain.data_window_height,
                     pixels,
                 }
             }
@@ -1321,12 +1371,19 @@ impl Engine {
                     &self.active_display,
                     &self.active_view,
                 );
+                let domain = ViewerDomainMetadata::from_image(&img);
                 ViewerResultWasm::Pixels {
                     value_type: "field".to_string(),
                     width: w,
                     height: h,
                     original_width: w,
                     original_height: h,
+                    display_window_x: domain.display_window_x,
+                    display_window_y: domain.display_window_y,
+                    data_window_x: domain.data_window_x,
+                    data_window_y: domain.data_window_y,
+                    data_window_width: domain.data_window_width,
+                    data_window_height: domain.data_window_height,
                     pixels: rgba8,
                 }
             }
@@ -1473,12 +1530,30 @@ impl Engine {
                     before.width, before.height, after.width, after.height
                 )));
             }
+            if before.format.display_window != after.format.display_window
+                || before.data_window != after.data_window
+            {
+                return Err(JsValue::from_str(&format!(
+                    "Compare Viewer requires matching image domains, got before display {:?} data {:?} and after display {:?} data {:?}",
+                    before.format.display_window,
+                    before.data_window,
+                    after.format.display_window,
+                    after.data_window
+                )));
+            }
+            let domain = ViewerDomainMetadata::from_image(&after);
 
             return ViewerResultWasm::Compare {
                 width: after.width,
                 height: after.height,
                 original_width: after.format.width(),
                 original_height: after.format.height(),
+                display_window_x: domain.display_window_x,
+                display_window_y: domain.display_window_y,
+                data_window_x: domain.data_window_x,
+                data_window_y: domain.data_window_y,
+                data_window_width: domain.data_window_width,
+                data_window_height: domain.data_window_height,
                 before_pixels: Viewer::image_to_rgba8_with_display(
                     &before,
                     &self.color_management,
@@ -1519,12 +1594,19 @@ impl Engine {
                     &self.active_display,
                     &self.active_view,
                 );
+                let domain = ViewerDomainMetadata::from_image(image);
                 ViewerResultWasm::Pixels {
                     value_type: "image".to_string(),
                     width: image.width,
                     height: image.height,
                     original_width: image.format.width(),
                     original_height: image.format.height(),
+                    display_window_x: domain.display_window_x,
+                    display_window_y: domain.display_window_y,
+                    data_window_x: domain.data_window_x,
+                    data_window_y: domain.data_window_y,
+                    data_window_width: domain.data_window_width,
+                    data_window_height: domain.data_window_height,
                     pixels,
                 }
             }
@@ -3670,6 +3752,12 @@ enum ViewerResultWasm {
         height: u32,
         original_width: u32,
         original_height: u32,
+        display_window_x: i32,
+        display_window_y: i32,
+        data_window_x: i32,
+        data_window_y: i32,
+        data_window_width: u32,
+        data_window_height: u32,
         pixels: Vec<u8>,
     },
     Compare {
@@ -3677,6 +3765,12 @@ enum ViewerResultWasm {
         height: u32,
         original_width: u32,
         original_height: u32,
+        display_window_x: i32,
+        display_window_y: i32,
+        data_window_x: i32,
+        data_window_y: i32,
+        data_window_width: u32,
+        data_window_height: u32,
         before_pixels: Vec<u8>,
         after_pixels: Vec<u8>,
     },
@@ -3722,6 +3816,12 @@ impl ViewerResultWasm {
                 height,
                 original_width,
                 original_height,
+                display_window_x,
+                display_window_y,
+                data_window_x,
+                data_window_y,
+                data_window_width,
+                data_window_height,
                 pixels,
             } => {
                 let obj = js_sys::Object::new();
@@ -3734,6 +3834,16 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"displayHeight".into(), &(original_height).into())?;
                 js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
                 js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
+                js_sys::Reflect::set(&obj, &"displayWindowX".into(), &(display_window_x).into())?;
+                js_sys::Reflect::set(&obj, &"displayWindowY".into(), &(display_window_y).into())?;
+                js_sys::Reflect::set(&obj, &"dataWindowX".into(), &(data_window_x).into())?;
+                js_sys::Reflect::set(&obj, &"dataWindowY".into(), &(data_window_y).into())?;
+                js_sys::Reflect::set(&obj, &"dataWindowWidth".into(), &(data_window_width).into())?;
+                js_sys::Reflect::set(
+                    &obj,
+                    &"dataWindowHeight".into(),
+                    &(data_window_height).into(),
+                )?;
                 // Use Uint8ClampedArray for zero-copy pixel transfer
                 let arr = js_sys::Uint8ClampedArray::from(pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"pixels".into(), &arr)?;
@@ -3744,6 +3854,12 @@ impl ViewerResultWasm {
                 height,
                 original_width,
                 original_height,
+                display_window_x,
+                display_window_y,
+                data_window_x,
+                data_window_y,
+                data_window_width,
+                data_window_height,
                 before_pixels,
                 after_pixels,
             } => {
@@ -3757,6 +3873,16 @@ impl ViewerResultWasm {
                 js_sys::Reflect::set(&obj, &"displayHeight".into(), &(original_height).into())?;
                 js_sys::Reflect::set(&obj, &"originalWidth".into(), &(original_width).into())?;
                 js_sys::Reflect::set(&obj, &"originalHeight".into(), &(original_height).into())?;
+                js_sys::Reflect::set(&obj, &"displayWindowX".into(), &(display_window_x).into())?;
+                js_sys::Reflect::set(&obj, &"displayWindowY".into(), &(display_window_y).into())?;
+                js_sys::Reflect::set(&obj, &"dataWindowX".into(), &(data_window_x).into())?;
+                js_sys::Reflect::set(&obj, &"dataWindowY".into(), &(data_window_y).into())?;
+                js_sys::Reflect::set(&obj, &"dataWindowWidth".into(), &(data_window_width).into())?;
+                js_sys::Reflect::set(
+                    &obj,
+                    &"dataWindowHeight".into(),
+                    &(data_window_height).into(),
+                )?;
                 let before = js_sys::Uint8ClampedArray::from(before_pixels.as_slice());
                 js_sys::Reflect::set(&obj, &"beforePixels".into(), &before)?;
                 let after = js_sys::Uint8ClampedArray::from(after_pixels.as_slice());

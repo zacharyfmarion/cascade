@@ -187,12 +187,56 @@ export interface SerializableGroupDefinition {
   explicit_outputs?: PortSpec[] | null;
 }
 
+export type ViewerDomainFields = {
+  displayWindowX?: number;
+  displayWindowY?: number;
+  dataWindowX?: number;
+  dataWindowY?: number;
+  dataWindowWidth?: number;
+  dataWindowHeight?: number;
+};
+
+type PixelViewerResult<T extends 'image' | 'mask' | 'field'> = ViewerDomainFields & {
+  type: T;
+  nodeId: string;
+  width: number;
+  height: number;
+  pixels: Uint8ClampedArray;
+  previewScale?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  bufferWidth?: number;
+  bufferHeight?: number;
+  displayWidth?: number;
+  displayHeight?: number;
+  frame?: number;
+  generation?: number;
+};
+
+type CompareViewerResult = ViewerDomainFields & {
+  type: 'compare';
+  nodeId: string;
+  width: number;
+  height: number;
+  beforePixels: Uint8ClampedArray;
+  afterPixels: Uint8ClampedArray;
+  previewScale?: number;
+  originalWidth?: number;
+  originalHeight?: number;
+  bufferWidth?: number;
+  bufferHeight?: number;
+  displayWidth?: number;
+  displayHeight?: number;
+  frame?: number;
+  generation?: number;
+};
+
 // Render result from engine — discriminated union over all value types
 export type ViewerResult =
-  | { type: 'image'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
-  | { type: 'mask'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
-  | { type: 'field'; nodeId: string; width: number; height: number; pixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
-  | { type: 'compare'; nodeId: string; width: number; height: number; beforePixels: Uint8ClampedArray; afterPixels: Uint8ClampedArray; previewScale?: number; originalWidth?: number; originalHeight?: number; bufferWidth?: number; bufferHeight?: number; displayWidth?: number; displayHeight?: number; frame?: number; generation?: number }
+  | PixelViewerResult<'image'>
+  | PixelViewerResult<'mask'>
+  | PixelViewerResult<'field'>
+  | CompareViewerResult
   | { type: 'float'; nodeId: string; value: number; frame?: number; generation?: number }
   | { type: 'int'; nodeId: string; value: number; frame?: number; generation?: number }
   | { type: 'bool'; nodeId: string; value: boolean; frame?: number; generation?: number }
@@ -222,6 +266,51 @@ export const getViewerDisplayWidth = (r: ViewerResult): number => (
 export const getViewerDisplayHeight = (r: ViewerResult): number => (
   (isPixelResult(r) || isCompareResult(r)) ? r.displayHeight ?? r.originalHeight ?? r.height : 0
 );
+
+export const getViewerDisplayWindowX = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.displayWindowX ?? 0 : 0
+);
+
+export const getViewerDisplayWindowY = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.displayWindowY ?? 0 : 0
+);
+
+export const getViewerDataWindowX = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.dataWindowX ?? getViewerDisplayWindowX(r) : 0
+);
+
+export const getViewerDataWindowY = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.dataWindowY ?? getViewerDisplayWindowY(r) : 0
+);
+
+export const getViewerDataWindowWidth = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.dataWindowWidth ?? getViewerBufferWidth(r) : 0
+);
+
+export const getViewerDataWindowHeight = (r: ViewerResult): number => (
+  (isPixelResult(r) || isCompareResult(r)) ? r.dataWindowHeight ?? getViewerBufferHeight(r) : 0
+);
+
+export type ViewerDataWindowRect = { x: number; y: number; width: number; height: number };
+
+export const getViewerLogicalDataWindowRect = (r: ViewerResult): ViewerDataWindowRect => {
+  if (!isPixelResult(r) && !isCompareResult(r)) {
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+  const previewScale = typeof r.previewScale === 'number' && Number.isFinite(r.previewScale) && r.previewScale > 0
+    ? r.previewScale
+    : 1;
+  const displayWindowX = getViewerDisplayWindowX(r);
+  const displayWindowY = getViewerDisplayWindowY(r);
+  const dataWindowX = r.dataWindowX ?? displayWindowX * previewScale;
+  const dataWindowY = r.dataWindowY ?? displayWindowY * previewScale;
+  return {
+    x: (dataWindowX - displayWindowX * previewScale) / previewScale,
+    y: (dataWindowY - displayWindowY * previewScale) / previewScale,
+    width: getViewerDataWindowWidth(r) / previewScale,
+    height: getViewerDataWindowHeight(r) / previewScale,
+  };
+};
 
 /** @deprecated Use ViewerResult instead */
 export type RenderResult = Extract<ViewerResult, { type: 'image' }>;

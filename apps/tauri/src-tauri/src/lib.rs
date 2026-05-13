@@ -153,6 +153,12 @@ fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
             buf.extend_from_slice(&render.height.to_le_bytes());
             buf.extend_from_slice(&render.original_width.to_le_bytes());
             buf.extend_from_slice(&render.original_height.to_le_bytes());
+            buf.extend_from_slice(&render.display_window_x.to_le_bytes());
+            buf.extend_from_slice(&render.display_window_y.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_x.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_y.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_width.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_height.to_le_bytes());
             buf.extend_from_slice(&render.pixels);
         }
         ViewerRenderResult::Compare(render) => {
@@ -161,6 +167,12 @@ fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
             buf.extend_from_slice(&render.height.to_le_bytes());
             buf.extend_from_slice(&render.original_width.to_le_bytes());
             buf.extend_from_slice(&render.original_height.to_le_bytes());
+            buf.extend_from_slice(&render.display_window_x.to_le_bytes());
+            buf.extend_from_slice(&render.display_window_y.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_x.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_y.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_width.to_le_bytes());
+            buf.extend_from_slice(&render.data_window_height.to_le_bytes());
             buf.extend_from_slice(&render.before_pixels);
             buf.extend_from_slice(&render.after_pixels);
         }
@@ -169,9 +181,9 @@ fn write_viewer_render_result(buf: &mut Vec<u8>, result: &ViewerRenderResult) {
 
 fn viewer_render_result_size(result: &ViewerRenderResult) -> usize {
     match result {
-        ViewerRenderResult::Image(render) => 1 + 16 + render.pixels.len(),
+        ViewerRenderResult::Image(render) => 1 + 40 + render.pixels.len(),
         ViewerRenderResult::Compare(render) => {
-            1 + 16 + render.before_pixels.len() + render.after_pixels.len()
+            1 + 40 + render.before_pixels.len() + render.after_pixels.len()
         }
     }
 }

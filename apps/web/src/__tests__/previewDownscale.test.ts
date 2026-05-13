@@ -7,7 +7,10 @@ import {
   getPreviewDownscaleSize,
   getPreviewScaleFromDimensions,
 } from '../store/graphStore/kernel';
-import type { ViewerResult } from '../store/types';
+import {
+  getViewerLogicalDataWindowRect,
+  type ViewerResult,
+} from '../store/types';
 
 type ImageViewerResult = Extract<ViewerResult, { type: 'image' }>;
 
@@ -136,6 +139,61 @@ describe('preview downscale sizing', () => {
       originalHeight: 2126,
     });
     expect(annotated.previewScale).toBeCloseTo(600 / 2126);
+  });
+
+  it('keeps engine-provided preview data windows in display-window coordinates', () => {
+    const enginePreview: ViewerResult = {
+      ...imageResult(1024, 768),
+      bufferWidth: 1024,
+      bufferHeight: 768,
+      displayWidth: 4096,
+      displayHeight: 3072,
+      originalWidth: 4096,
+      originalHeight: 3072,
+      displayWindowX: 0,
+      displayWindowY: 0,
+      dataWindowX: 256,
+      dataWindowY: 128,
+      dataWindowWidth: 512,
+      dataWindowHeight: 256,
+    };
+
+    const annotated = annotateEnginePreviewResult(enginePreview, 0.25);
+
+    expect(annotated).toMatchObject({
+      previewScale: 0.25,
+      dataWindowX: 256,
+      dataWindowY: 128,
+      dataWindowWidth: 512,
+      dataWindowHeight: 256,
+    });
+    expect(getViewerLogicalDataWindowRect(annotated)).toEqual({
+      x: 1024,
+      y: 512,
+      width: 2048,
+      height: 1024,
+    });
+  });
+
+  it('places sparse full-resolution buffers without stretching them to display size', () => {
+    const cropResult: ViewerResult = {
+      ...imageResult(1080, 680),
+      bufferWidth: 1080,
+      bufferHeight: 680,
+      displayWidth: 1080,
+      displayHeight: 1080,
+      dataWindowX: 0,
+      dataWindowY: 0,
+      dataWindowWidth: 1080,
+      dataWindowHeight: 680,
+    };
+
+    expect(getViewerLogicalDataWindowRect(cropResult)).toEqual({
+      x: 0,
+      y: 0,
+      width: 1080,
+      height: 680,
+    });
   });
 
   it('does not invent preview metadata without a previous full-size result', () => {

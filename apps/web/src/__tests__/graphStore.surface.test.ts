@@ -94,6 +94,7 @@ const EXPECTED_KEYS: string[] = [
   'endAiAction',
   'enterGroup',
   'exitGroup',
+  'exportAllImages',
   'exportGroupAsPackage',
   'exportImage',
   'exportExr',

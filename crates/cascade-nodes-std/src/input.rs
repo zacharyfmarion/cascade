@@ -41,9 +41,17 @@ fn preview_downscale(image: Image, scale: f32) -> Result<Image, CascadeError> {
         return Ok(image);
     };
     let scaled = resize_nearest(&image, new_w, new_h)?;
+    let scale_x = new_w as f32 / image.width as f32;
+    let scale_y = new_h as f32 / image.height as f32;
+    let scaled_min_x = (image.data_window.min.x as f32 * scale_x).round() as i32;
+    let scaled_min_y = (image.data_window.min.y as f32 * scale_y).round() as i32;
+    let scaled_data_window = RectI {
+        min: IVec2::new(scaled_min_x, scaled_min_y),
+        max: IVec2::new(scaled_min_x + new_w as i32, scaled_min_y + new_h as i32),
+    };
     Image::new_with_domain(
         image.format.clone(),
-        RectI::from_dimensions(new_w, new_h),
+        scaled_data_window,
         (*scaled.data).clone(),
         image.color_space.clone(),
     )
@@ -1857,6 +1865,39 @@ mod tests {
     #[test]
     fn preview_downscale_preserves_aspect_for_narrow_images() {
         assert_eq!(preview_downscale_size(400, 100, 0.25), None);
+    }
+
+    #[test]
+    fn preview_downscale_scales_non_zero_data_window_origin() {
+        let width = 1200;
+        let height = 900;
+        let data = vec![0.25; width as usize * height as usize * 4];
+        let image = Image::new_with_domain(
+            Format::from_dimensions(2000, 1600),
+            RectI {
+                min: IVec2::new(100, 200),
+                max: IVec2::new(1300, 1100),
+            },
+            data,
+            ColorSpaceId::new(ColorSpaceId::LINEAR_SRGB),
+        )
+        .expect("test image should build");
+
+        let scaled = preview_downscale(image, 0.25).expect("preview downscale should succeed");
+
+        assert_eq!((scaled.width, scaled.height), (800, 600));
+        assert_eq!(scaled.format.width(), 2000);
+        assert_eq!(
+            (scaled.data_window.min.x, scaled.data_window.min.y),
+            (67, 133)
+        );
+        assert_eq!(
+            (
+                scaled.data_window.width_u32(),
+                scaled.data_window.height_u32()
+            ),
+            (800, 600)
+        );
     }
 
     #[test]

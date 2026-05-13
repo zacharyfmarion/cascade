@@ -40,7 +40,7 @@ export const CASCADE_EXAMPLES: CascadeExample[] = [
     id: 'watermark-overlay',
     title: 'Watermark Overlay',
     section: 'Getting Started',
-    description: 'Rasterize a text watermark and composite it over a photo at 50% opacity.',
+    description: 'Rasterize a text watermark and composite it over a photo at 15% opacity.',
     tags: ['Text', 'Watermark', 'Composite'],
     projectUrl: publicAsset('examples/watermark-overlay.casc'),
     thumbnailUrl: publicAsset('examples/thumbs/watermark-overlay.webp'),

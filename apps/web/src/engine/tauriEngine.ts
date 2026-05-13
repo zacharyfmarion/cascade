@@ -70,7 +70,7 @@ const decodeBinaryViewerResult = (
   nodeId: string,
   initialOffset = 0,
 ): { result: ViewerResult | null; offset: number } => {
-  if (buf.byteLength < initialOffset + 17) return { result: null, offset: initialOffset };
+  if (buf.byteLength < initialOffset + 41) return { result: null, offset: initialOffset };
   const view = new DataView(buf);
   let offset = initialOffset;
   const kind = view.getUint8(offset);
@@ -82,6 +82,18 @@ const decodeBinaryViewerResult = (
   const displayWidth = view.getUint32(offset, true);
   offset += 4;
   const displayHeight = view.getUint32(offset, true);
+  offset += 4;
+  const displayWindowX = view.getInt32(offset, true);
+  offset += 4;
+  const displayWindowY = view.getInt32(offset, true);
+  offset += 4;
+  const dataWindowX = view.getInt32(offset, true);
+  offset += 4;
+  const dataWindowY = view.getInt32(offset, true);
+  offset += 4;
+  const dataWindowWidth = view.getUint32(offset, true);
+  offset += 4;
+  const dataWindowHeight = view.getUint32(offset, true);
   offset += 4;
   const pixelLen = width * height * 4;
 
@@ -101,6 +113,12 @@ const decodeBinaryViewerResult = (
         displayHeight,
         originalWidth: displayWidth,
         originalHeight: displayHeight,
+        displayWindowX,
+        displayWindowY,
+        dataWindowX,
+        dataWindowY,
+        dataWindowWidth,
+        dataWindowHeight,
         pixels,
       },
       offset,
@@ -125,6 +143,12 @@ const decodeBinaryViewerResult = (
         displayHeight,
         originalWidth: displayWidth,
         originalHeight: displayHeight,
+        displayWindowX,
+        displayWindowY,
+        dataWindowX,
+        dataWindowY,
+        dataWindowWidth,
+        dataWindowHeight,
         beforePixels,
         afterPixels,
       },
@@ -360,7 +384,7 @@ export class TauriEngine implements EngineBridge {
       const totalStart = perfNow();
       const invokeStart = perfNow();
       const buf = await invoke<ArrayBuffer>('render_viewer', { viewerNodeId, frame, previewScale });
-      if (!buf || buf.byteLength < 17) return null;
+      if (!buf || buf.byteLength < 41) return null;
 
       const invokeMs = perfNow() - invokeStart;
       const timingsStart = perfNow();
@@ -395,7 +419,7 @@ export class TauriEngine implements EngineBridge {
       const totalStart = perfNow();
       const invokeStart = perfNow();
       const buf = await invoke<ArrayBuffer>('render_internal_viewer', { groupNodeId, internalViewerId, frame, previewScale });
-      if (!buf || buf.byteLength < 17) return null;
+      if (!buf || buf.byteLength < 41) return null;
 
       const invokeMs = perfNow() - invokeStart;
       const timingsStart = perfNow();

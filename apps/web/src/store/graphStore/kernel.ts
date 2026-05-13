@@ -16,6 +16,7 @@ import {
   getViewerDisplayWidth,
   isCompareResult,
   isPixelResult,
+  type ViewerDomainFields,
 } from '../types';
 import type { EngineBridge, SequenceInfo, VideoInfo } from '../../engine/bridge';
 import { isDesktopRuntime } from '../../platform/runtime';
@@ -348,10 +349,23 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
 
     return targetCtx.getImageData(0, 0, targetSize.width, targetSize.height).data;
   };
+  const scaleDomain = (): ViewerDomainFields => {
+    const scaleX = targetSize.width / result.width;
+    const scaleY = targetSize.height / result.height;
+    return {
+      displayWindowX: result.displayWindowX,
+      displayWindowY: result.displayWindowY,
+      dataWindowX: result.dataWindowX === undefined ? undefined : Math.round(result.dataWindowX * scaleX),
+      dataWindowY: result.dataWindowY === undefined ? undefined : Math.round(result.dataWindowY * scaleY),
+      dataWindowWidth: result.dataWindowWidth === undefined ? undefined : Math.round(result.dataWindowWidth * scaleX),
+      dataWindowHeight: result.dataWindowHeight === undefined ? undefined : Math.round(result.dataWindowHeight * scaleY),
+    };
+  };
 
   if (isCompareResult(result)) {
     return {
       ...result,
+      ...scaleDomain(),
       width: targetSize.width,
       height: targetSize.height,
       beforePixels: scalePixels(result.beforePixels),
@@ -368,6 +382,7 @@ export const downscaleRenderResult = async (result: ViewerResult, scale: number)
 
   return {
     ...result,
+    ...scaleDomain(),
     width: targetSize.width,
     height: targetSize.height,
     pixels: scalePixels(result.pixels),

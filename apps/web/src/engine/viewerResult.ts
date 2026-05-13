@@ -20,6 +20,10 @@ function decodePixels(rawPixels: unknown, copyPixels: boolean): Uint8ClampedArra
   return pixels.length > 0 ? pixels : null;
 }
 
+const decodeNumber = (value: unknown): number | undefined => (
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+);
+
 export function decodeViewerResult(
   raw: unknown,
   nodeId: string,
@@ -68,6 +72,12 @@ export function decodeViewerResult(
         displayHeight,
         originalWidth: typeof raw.originalWidth === 'number' ? raw.originalWidth : undefined,
         originalHeight: typeof raw.originalHeight === 'number' ? raw.originalHeight : undefined,
+        displayWindowX: decodeNumber(raw.displayWindowX),
+        displayWindowY: decodeNumber(raw.displayWindowY),
+        dataWindowX: decodeNumber(raw.dataWindowX),
+        dataWindowY: decodeNumber(raw.dataWindowY),
+        dataWindowWidth: decodeNumber(raw.dataWindowWidth),
+        dataWindowHeight: decodeNumber(raw.dataWindowHeight),
         pixels,
       };
     }
@@ -94,6 +104,12 @@ export function decodeViewerResult(
         displayHeight,
         originalWidth: typeof raw.originalWidth === 'number' ? raw.originalWidth : undefined,
         originalHeight: typeof raw.originalHeight === 'number' ? raw.originalHeight : undefined,
+        displayWindowX: decodeNumber(raw.displayWindowX),
+        displayWindowY: decodeNumber(raw.displayWindowY),
+        dataWindowX: decodeNumber(raw.dataWindowX),
+        dataWindowY: decodeNumber(raw.dataWindowY),
+        dataWindowWidth: decodeNumber(raw.dataWindowWidth),
+        dataWindowHeight: decodeNumber(raw.dataWindowHeight),
         beforePixels,
         afterPixels,
       };

@@ -17,7 +17,7 @@ describe('viewerResult', () => {
       afterPixels,
     }, 'compare-1');
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       type: 'compare',
       nodeId: 'compare-1',
       width: 1,
@@ -58,6 +58,40 @@ describe('viewerResult', () => {
       displayHeight: 2400,
       originalWidth: 3200,
       originalHeight: 2400,
+    });
+  });
+
+  it('decodes display and data window metadata for sparse image payloads', () => {
+    const pixels = new Uint8ClampedArray(10 * 4);
+
+    const result = decodeViewerResult({
+      type: 'image',
+      width: 10,
+      height: 1,
+      bufferWidth: 10,
+      bufferHeight: 1,
+      displayWidth: 512,
+      displayHeight: 512,
+      displayWindowX: 0,
+      displayWindowY: 0,
+      dataWindowX: 128,
+      dataWindowY: 256,
+      dataWindowWidth: 10,
+      dataWindowHeight: 1,
+      pixels,
+    }, 'viewer-1');
+
+    expect(result).toMatchObject({
+      type: 'image',
+      nodeId: 'viewer-1',
+      width: 10,
+      height: 1,
+      displayWidth: 512,
+      displayHeight: 512,
+      dataWindowX: 128,
+      dataWindowY: 256,
+      dataWindowWidth: 10,
+      dataWindowHeight: 1,
     });
   });
 

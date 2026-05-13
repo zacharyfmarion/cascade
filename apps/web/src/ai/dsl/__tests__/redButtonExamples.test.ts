@@ -42,7 +42,7 @@ describe('red button example DSL fixtures', () => {
       `  background = LoadImage(path: image("${imageA}"))`,
       '  watermark = Text(text: "CASCADE", font_size: 96.0, width: 640, height: 160)',
       '  position = Translate(x: 48, y: 48)',
-      '  over = AlphaOver(opacity: 0.5)',
+      '  over = AlphaOver(opacity: 0.15)',
       '  view = Viewer()',
       '  export = ExportImage(output_path: "watermarked.png")',
       '',
@@ -58,7 +58,7 @@ describe('red button example DSL fixtures', () => {
     expect(ast.nodes.get('watermark')?.nodeTypeId).toBe('text');
     expect(ast.nodes.get('over')?.params.get('opacity')).toEqual({
       type: 'float',
-      value: 0.5,
+      value: 0.15,
     });
     expect(ast.connections).toContainEqual(expect.objectContaining({
       fromHandle: 'watermark',
