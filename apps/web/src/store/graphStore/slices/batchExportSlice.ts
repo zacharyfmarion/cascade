@@ -11,6 +11,7 @@ export interface BatchExportSliceState {
 
 export interface BatchExportSliceActions {
   exportImage: (nodeId: string) => void;
+  exportAllImages: () => Promise<void>;
   exportExr: (nodeId: string) => void;
   renderBatch: (nodeId: string) => Promise<void>;
   renderSequence: (nodeId: string) => Promise<void>;
@@ -120,6 +121,42 @@ const upstreamSequenceRange = (
   };
 };
 
+const exportNodeExtension = (node: { params: Record<string, unknown> }): string => {
+  const formatParam = node.params['format'];
+  const formatIdx = formatParam && typeof formatParam === 'object' && 'Int' in formatParam
+    ? Number((formatParam as { Int: unknown }).Int)
+    : 0;
+  return formatIdx === 1 ? 'jpg' : 'png';
+};
+
+const pathBasename = (path: string): string => (
+  path.replace(/\\/g, '/').split('/').pop()?.trim() ?? ''
+);
+
+const sanitizeFilename = (value: string): string => {
+  const sanitized = Array.from(value)
+    .map((ch) => ('\\/:*?"<>|'.includes(ch) || ch.charCodeAt(0) < 32 ? '_' : ch))
+    .join('')
+    .trim()
+    .replace(/^\.+|\.+$/g, '');
+  return sanitized.length > 0 ? sanitized : 'export';
+};
+
+const exportFilename = (
+  outputPath: string,
+  fallbackStem: string,
+  extension: string,
+): string => {
+  const base = pathBasename(outputPath) || fallbackStem;
+  const withExtension = /\.[A-Za-z0-9]+$/.test(base) ? base : `${base}.${extension}`;
+  return sanitizeFilename(withExtension);
+};
+
+const joinNativePath = (directory: string, filename: string): string => {
+  const separator = directory.includes('\\') && !directory.includes('/') ? '\\' : '/';
+  return `${directory.replace(/[\\/]+$/, '')}${separator}${filename}`;
+};
+
 export const createBatchExportSlice: StateCreator<
   GraphState,
   [['zustand/devtools', never]],
@@ -173,6 +210,159 @@ export const createBatchExportSlice: StateCreator<
       console.error('exportImage failed:', e);
       set({ lastError: parseEngineError(e) });
     });
+  },
+
+  exportAllImages: async () => {
+    const state = get();
+    const activeContext = state.editingStack[state.editingStack.length - 1];
+    if (activeContext && activeContext.id !== 'root') {
+      const error = makeEngineError('Export All Images is only available from the root graph');
+      set({ lastError: error });
+      get().pushToast('error', 'Export All Failed', error.message);
+      return;
+    }
+
+    const exportNodes = Array.from(state.nodes.values())
+      .filter(node => node.typeId === 'export_image')
+      .sort((a, b) => (
+        a.position.y - b.position.y
+        || a.position.x - b.position.x
+        || a.id.localeCompare(b.id)
+      ));
+
+    if (exportNodes.length === 0) {
+      const error = makeEngineError('No Export Image nodes found');
+      set({ lastError: error });
+      get().pushToast('error', 'Export All Failed', error.message);
+      return;
+    }
+
+    const frame = state.currentFrame;
+    const usedNames = new Set<string>();
+    const exportItems = exportNodes.map((node, index) => {
+      const extension = exportNodeExtension(node);
+      const outputPath = stringParamValue(node.params['output_path'], '');
+      const filename = dedupeFilename(
+        exportFilename(outputPath, `export_${index + 1}`, extension),
+        usedNames,
+      );
+      return { nodeId: node.id, filename };
+    });
+
+    const eng = getEngine();
+    kernel.webRenderCancelled = false;
+    set({
+      isRendering: true,
+      lastError: null,
+      renderProgress: {
+        job_id: 'export-all',
+        current_frame: 0,
+        total_frames: exportItems.length,
+        completed: false,
+        error: null,
+      },
+    });
+
+    try {
+      if (isTauri()) {
+        if (!eng.exportImageToPath) {
+          throw makeEngineError('Export-to-folder is not supported by this engine');
+        }
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const selected = await open({
+          directory: true,
+          multiple: false,
+          title: 'Choose Export Folder',
+        });
+        const outputDir = Array.isArray(selected) ? selected[0] : selected;
+        if (!outputDir) {
+          set({ isRendering: false, renderProgress: null });
+          return;
+        }
+        let exportedCount = 0;
+        for (const item of exportItems) {
+          if (kernel.webRenderCancelled) break;
+          await eng.exportImageToPath(item.nodeId, frame, joinNativePath(outputDir, item.filename));
+          exportedCount += 1;
+          set({
+            renderProgress: {
+              job_id: 'export-all',
+              current_frame: exportedCount,
+              total_frames: exportItems.length,
+              completed: false,
+              error: null,
+            },
+          });
+        }
+        set({
+          isRendering: false,
+          renderProgress: {
+            job_id: 'export-all',
+            current_frame: exportedCount,
+            total_frames: exportItems.length,
+            completed: true,
+            error: kernel.webRenderCancelled ? 'Cancelled' : null,
+          },
+        });
+        if (!kernel.webRenderCancelled) {
+          get().pushToast('success', 'Images Exported', `${exportedCount} files saved`);
+        }
+        return;
+      }
+
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      let exportedCount = 0;
+      for (const item of exportItems) {
+        if (kernel.webRenderCancelled) break;
+        const bytes = await eng.exportImage(item.nodeId, frame);
+        zip.file(item.filename, bytes);
+        exportedCount += 1;
+        set({
+          renderProgress: {
+            job_id: 'export-all',
+            current_frame: exportedCount,
+            total_frames: exportItems.length,
+            completed: false,
+            error: null,
+          },
+        });
+      }
+      if (!kernel.webRenderCancelled) {
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'exports.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+        get().pushToast('success', 'Images Exported', `${exportedCount} files downloaded`);
+      }
+      set({
+        isRendering: false,
+        renderProgress: {
+          job_id: 'export-all',
+          current_frame: exportedCount,
+          total_frames: exportItems.length,
+          completed: true,
+          error: kernel.webRenderCancelled ? 'Cancelled' : null,
+        },
+      });
+    } catch (e) {
+      const error = parseEngineError(e);
+      set({
+        isRendering: false,
+        lastError: error,
+        renderProgress: {
+          job_id: 'export-all',
+          current_frame: 0,
+          total_frames: exportItems.length,
+          completed: true,
+          error: error.message,
+        },
+      });
+      get().pushToast('error', 'Export All Failed', error.message);
+    }
   },
 
   exportExr: async (nodeId) => {

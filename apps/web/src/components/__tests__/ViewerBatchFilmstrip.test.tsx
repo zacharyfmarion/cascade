@@ -221,6 +221,45 @@ describe('Viewer batch filmstrip thumbnails', () => {
     await waitFor(() => expect(mediaStripState.estimateItemSize?.(0)).not.toBe(mediaStripState.estimateItemSize?.(1)));
   });
 
+  it('positions sparse data-window buffers inside the full display surface', async () => {
+    setupViewerState();
+    act(() => {
+      useGraphStore.setState({
+        renderResults: new Map([[
+          viewerNode.id,
+          {
+            ...imageResult(
+              viewerNode.id,
+              0,
+              300,
+              10,
+              new Uint8ClampedArray(300 * 10 * 4),
+            ),
+            originalWidth: 512,
+            originalHeight: 512,
+            displayWidth: 512,
+            displayHeight: 512,
+            dataWindowX: 32,
+            dataWindowY: 96,
+            dataWindowWidth: 300,
+            dataWindowHeight: 10,
+          },
+        ]]),
+      });
+    });
+
+    render(<Viewer />);
+
+    const canvas = await screen.findByTestId('viewer-canvas') as HTMLCanvasElement;
+    const surface = canvas.closest('.viewer-checkerboard') as HTMLDivElement;
+    await waitFor(() => expect(canvas.style.left).toBe('32px'));
+    expect(canvas.style.top).toBe('96px');
+    expect(canvas.style.width).toBe('300px');
+    expect(canvas.style.height).toBe('10px');
+    expect(surface.style.width).toBe('512px');
+    expect(surface.style.height).toBe('512px');
+  });
+
   it('does not show a loaded batch filmstrip for an unconnected viewer', async () => {
     setupViewerState();
     act(() => {

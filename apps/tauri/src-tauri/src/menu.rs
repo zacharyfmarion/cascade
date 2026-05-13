@@ -20,6 +20,8 @@ pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
     let file_save_bundled =
         MenuItemBuilder::with_id("file.saveBundled", "Save Bundled Copy...").build(app)?;
+    let file_export_all =
+        MenuItemBuilder::with_id("file.exportAllImages", "Export All Images...").build(app)?;
     let file_new = MenuItemBuilder::with_id("file.new", "New Project")
         .accelerator("CmdOrCtrl+N")
         .build(app)?;
@@ -37,6 +39,7 @@ pub fn setup_menu(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .item(&file_save)
         .item(&file_save_as)
         .item(&file_save_bundled)
+        .item(&file_export_all)
         .separator()
         .item(&file_settings)
         .build()?;

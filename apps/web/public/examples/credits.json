@@ -10,7 +10,7 @@
       "photographer": "Jhan Castillon",
       "sourceUrl": "https://www.pexels.com/photo/landscape-with-mountains-and-a-lake-17955893/",
       "downloadUrl": "https://images.pexels.com/photos/17955893/pexels-photo-17955893.jpeg",
-      "usedBy": ["photo-grade"]
+      "usedBy": ["photo-grade", "watermark-overlay"]
     },
     {
       "filename": "colorful-houses.jpg",
@@ -18,7 +18,7 @@
       "photographer": "Mustafa Kalkan",
       "sourceUrl": "https://www.pexels.com/photo/colorful-houses-on-a-cobblestone-street-29542235/",
       "downloadUrl": "https://images.pexels.com/photos/29542235/pexels-photo-29542235.jpeg",
-      "usedBy": ["pixel-art-palette-grade", "duotone-grain"]
+      "usedBy": ["pixel-art-palette-grade", "duotone-grain", "batch-resize-export"]
     },
     {
       "filename": "neon-street.jpg",
@@ -26,7 +26,7 @@
       "photographer": "Well Naves",
       "sourceUrl": "https://www.pexels.com/photo/neon-city-street-at-night-4132321/",
       "downloadUrl": "https://images.pexels.com/photos/4132321/pexels-photo-4132321.jpeg",
-      "usedBy": ["cinematic-color-ramp", "crt-scanline-look", "glitch-datamosh-look"]
+      "usedBy": ["cinematic-color-ramp", "crt-scanline-look", "glitch-datamosh-look", "batch-resize-export"]
     },
     {
       "filename": "colorful-building.jpg",
@@ -34,7 +34,7 @@
       "photographer": "Jan van der Wolf",
       "sourceUrl": "https://www.pexels.com/photo/colorful-urban-building-19263015/",
       "downloadUrl": "https://images.pexels.com/photos/19263015/pexels-photo-19263015.jpeg",
-      "usedBy": ["halftone-shader", "abstract-cell-voronoi-poster"]
+      "usedBy": ["halftone-shader", "abstract-cell-voronoi-poster", "batch-resize-export", "social-media-variants"]
     }
   ]
 }

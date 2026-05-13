@@ -41,14 +41,20 @@ describe('TauriEngine AI bridge', () => {
   it('passes previewScale through root viewer renders', async () => {
     const { TauriEngine } = await import('../tauriEngine');
     const engine = new TauriEngine();
-    const buf = new ArrayBuffer(21);
+    const buf = new ArrayBuffer(45);
     const view = new DataView(buf);
     view.setUint8(0, 0);
     view.setUint32(1, 1, true);
     view.setUint32(5, 1, true);
     view.setUint32(9, 2, true);
     view.setUint32(13, 3, true);
-    new Uint8ClampedArray(buf, 17).set([1, 2, 3, 255]);
+    view.setInt32(17, 0, true);
+    view.setInt32(21, 0, true);
+    view.setInt32(25, 4, true);
+    view.setInt32(29, 5, true);
+    view.setUint32(33, 1, true);
+    view.setUint32(37, 1, true);
+    new Uint8ClampedArray(buf, 41).set([1, 2, 3, 255]);
     invokeMock.mockImplementation(async (command: string) => {
       if (command === 'render_viewer') return buf;
       if (command === 'get_last_render_timings') return '{}';
@@ -62,6 +68,12 @@ describe('TauriEngine AI bridge', () => {
       displayHeight: 3,
       originalWidth: 2,
       originalHeight: 3,
+      displayWindowX: 0,
+      displayWindowY: 0,
+      dataWindowX: 4,
+      dataWindowY: 5,
+      dataWindowWidth: 1,
+      dataWindowHeight: 1,
     });
 
     expect(invokeMock).toHaveBeenCalledWith('render_viewer', {

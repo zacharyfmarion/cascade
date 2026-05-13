@@ -128,6 +128,7 @@ export interface GraphState {
   dismissAssetStoragePrompt: () => void;
   hydrateProjectFromEngine: () => Promise<boolean>;
   exportImage: (nodeId: string) => void;
+  exportAllImages: () => Promise<void>;
   exportExr: (nodeId: string) => void;
   setCurrentFrame: (frame: number) => void;
   setSequenceDirectory: (nodeId: string, directory: string) => Promise<void>;

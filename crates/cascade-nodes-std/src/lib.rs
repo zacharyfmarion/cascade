@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(output.data_window, expected_dw);
         assert_eq!(output.width, 10);
         assert_eq!(output.height, 10);
-        assert_eq!(output.format, input.format);
+        assert_eq!(output.format, Format::from_dimensions(10, 10));
         // Pixel at output (0,0) maps to source global (102,101) which is inside the input
         let px = output.get_rgba(0, 0);
         assert_color_approx(px, [0.0, 1.0, 0.0, 1.0], "pixel inside crop");
@@ -718,11 +718,36 @@ mod tests {
         // Output is always exactly width×height, even with no overlap
         assert_eq!(output.width, 10);
         assert_eq!(output.height, 10);
+        assert_eq!(output.format, Format::from_dimensions(10, 10));
         let px = output.get_rgba(0, 0);
         assert_color_approx(
             px,
             [0.0, 0.0, 0.0, 0.0],
             "non-overlapping crop is transparent",
+        );
+    }
+
+    #[test]
+    fn test_crop_resets_display_format_to_crop_dimensions() {
+        let input = make_test_image(512, 512, [0.0, 0.0, 1.0, 1.0]);
+
+        let node = Crop::new();
+        let mut params = HashMap::new();
+        params.insert("x".to_string(), ParamValue::Int(0));
+        params.insert("y".to_string(), ParamValue::Int(0));
+        params.insert("width".to_string(), ParamValue::Int(512));
+        params.insert("height".to_string(), ParamValue::Int(10));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 512);
+        assert_eq!(output.height, 10);
+        assert_eq!(output.data_window, RectI::from_dimensions(512, 10));
+        assert_eq!(output.format, Format::from_dimensions(512, 10));
+        assert_color_approx(
+            output.get_rgba(0, 9),
+            [0.0, 0.0, 1.0, 1.0],
+            "crop output keeps the requested pixels opaque through the full crop height",
         );
     }
 
@@ -796,6 +821,200 @@ mod tests {
         assert_eq!(output.format, expected_format);
         let expected_dw = RectI::from_dimensions(8, 6);
         assert_eq!(output.data_window, expected_dw);
+    }
+
+    #[test]
+    fn test_resize_fit_within_preserves_wide_aspect_ratio() {
+        let input = make_test_image(400, 200, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 100);
+        assert_eq!(output.height, 50);
+        assert_eq!(output.data_window, RectI::from_dimensions(100, 50));
+    }
+
+    #[test]
+    fn test_resize_fit_within_preserves_tall_aspect_ratio() {
+        let input = make_test_image(200, 400, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 50);
+        assert_eq!(output.height, 100);
+        assert_eq!(output.data_window, RectI::from_dimensions(50, 100));
+    }
+
+    #[test]
+    fn test_resize_fit_within_does_not_upscale_by_default() {
+        let input = make_test_image(40, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 40);
+        assert_eq!(output.height, 20);
+        assert_eq!(output.data_window, RectI::from_dimensions(40, 20));
+    }
+
+    #[test]
+    fn test_resize_fit_within_can_upscale() {
+        let input = make_test_image(40, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(1));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(true));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 100);
+        assert_eq!(output.height, 50);
+        assert_eq!(output.data_window, RectI::from_dimensions(100, 50));
+    }
+
+    #[test]
+    fn test_resize_cover_crops_wide_image_to_exact_aspect() {
+        let colors = [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        ];
+        let mut data = Vec::new();
+        for _ in 0..2 {
+            for color in colors {
+                data.extend_from_slice(&color);
+            }
+        }
+        let input = Image::from_f32_data(4, 2, data).unwrap();
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(2));
+        params.insert("height".to_string(), ParamValue::Int(2));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 2);
+        assert_eq!(output.height, 2);
+        assert_eq!(output.data_window, RectI::from_dimensions(2, 2));
+        assert_color_approx(
+            output.get_rgba(0, 0),
+            [0.0, 1.0, 0.0, 1.0],
+            "left crop pixel",
+        );
+        assert_color_approx(
+            output.get_rgba(1, 0),
+            [0.0, 0.0, 1.0, 1.0],
+            "right crop pixel",
+        );
+    }
+
+    #[test]
+    fn test_resize_cover_crops_tall_image_to_exact_aspect() {
+        let row_colors = [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        ];
+        let mut data = Vec::new();
+        for color in row_colors {
+            data.extend_from_slice(&color);
+            data.extend_from_slice(&color);
+        }
+        let input = Image::from_f32_data(2, 4, data).unwrap();
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(2));
+        params.insert("height".to_string(), ParamValue::Int(2));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 2);
+        assert_eq!(output.height, 2);
+        assert_color_approx(
+            output.get_rgba(0, 0),
+            [0.0, 1.0, 0.0, 1.0],
+            "top crop pixel",
+        );
+        assert_color_approx(
+            output.get_rgba(0, 1),
+            [0.0, 0.0, 1.0, 1.0],
+            "bottom crop pixel",
+        );
+    }
+
+    #[test]
+    fn test_resize_cover_does_not_upscale_by_default() {
+        let input = make_test_image(20, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(false));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 20);
+        assert_eq!(output.height, 20);
+        assert_eq!(output.data_window, RectI::from_dimensions(20, 20));
+    }
+
+    #[test]
+    fn test_resize_cover_can_upscale() {
+        let input = make_test_image(20, 20, [0.5, 0.5, 0.5, 1.0]);
+
+        let node = Resize::new();
+        let mut params = HashMap::new();
+        params.insert("mode".to_string(), ParamValue::Int(2));
+        params.insert("width".to_string(), ParamValue::Int(100));
+        params.insert("height".to_string(), ParamValue::Int(100));
+        params.insert("allow_upscale".to_string(), ParamValue::Bool(true));
+        params.insert("filter".to_string(), ParamValue::Int(0));
+
+        let output = eval_image_node(&node, input, params);
+
+        assert_eq!(output.width, 100);
+        assert_eq!(output.height, 100);
+        assert_eq!(output.data_window, RectI::from_dimensions(100, 100));
     }
 
     #[test]

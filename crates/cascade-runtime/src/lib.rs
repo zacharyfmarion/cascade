@@ -300,6 +300,12 @@ pub struct RenderResult {
     pub height: u32,
     pub original_width: u32,
     pub original_height: u32,
+    pub display_window_x: i32,
+    pub display_window_y: i32,
+    pub data_window_x: i32,
+    pub data_window_y: i32,
+    pub data_window_width: u32,
+    pub data_window_height: u32,
     pub pixels: Vec<u8>,
 }
 
@@ -309,6 +315,12 @@ pub struct CompareRenderResult {
     pub height: u32,
     pub original_width: u32,
     pub original_height: u32,
+    pub display_window_x: i32,
+    pub display_window_y: i32,
+    pub data_window_x: i32,
+    pub data_window_y: i32,
+    pub data_window_width: u32,
+    pub data_window_height: u32,
     pub before_pixels: Vec<u8>,
     pub after_pixels: Vec<u8>,
 }
@@ -2771,11 +2783,19 @@ impl Engine {
             &self.active_display,
             &self.active_view,
         );
+        let display_window = image.format.display_window;
+        let data_window = image.data_window;
         RenderResult {
             width: image.width,
             height: image.height,
             original_width: image.format.width(),
             original_height: image.format.height(),
+            display_window_x: display_window.min.x,
+            display_window_y: display_window.min.y,
+            data_window_x: data_window.min.x,
+            data_window_y: data_window.min.y,
+            data_window_width: data_window.width().max(0) as u32,
+            data_window_height: data_window.height().max(0) as u32,
             pixels,
         }
     }
@@ -2791,11 +2811,30 @@ impl Engine {
                 before.width, before.height, after.width, after.height
             )));
         }
+        if before.format.display_window != after.format.display_window
+            || before.data_window != after.data_window
+        {
+            return Err(CascadeError::Other(format!(
+                "Compare Viewer requires matching image domains, got before display {:?} data {:?} and after display {:?} data {:?}",
+                before.format.display_window,
+                before.data_window,
+                after.format.display_window,
+                after.data_window
+            )));
+        }
+        let display_window = after.format.display_window;
+        let data_window = after.data_window;
         Ok(CompareRenderResult {
             width: after.width,
             height: after.height,
             original_width: after.format.width(),
             original_height: after.format.height(),
+            display_window_x: display_window.min.x,
+            display_window_y: display_window.min.y,
+            data_window_x: data_window.min.x,
+            data_window_y: data_window.min.y,
+            data_window_width: data_window.width().max(0) as u32,
+            data_window_height: data_window.height().max(0) as u32,
             before_pixels: Viewer::image_to_rgba8_with_display(
                 before,
                 self.color_management.as_ref(),
@@ -5015,6 +5054,13 @@ mod tests {
         };
         assert_eq!(compare.width, 2);
         assert_eq!(compare.height, 1);
+        assert_eq!((compare.original_width, compare.original_height), (2, 1));
+        assert_eq!((compare.display_window_x, compare.display_window_y), (0, 0));
+        assert_eq!((compare.data_window_x, compare.data_window_y), (0, 0));
+        assert_eq!(
+            (compare.data_window_width, compare.data_window_height),
+            (2, 1)
+        );
         assert_eq!(compare.before_pixels.len(), 2 * 4);
         assert_eq!(compare.after_pixels.len(), 2 * 4);
     }
@@ -5047,6 +5093,44 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("requires matching image dimensions"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_compare_viewer_errors_on_mismatched_domains() {
+        let mut engine = Engine::new();
+        let (before_id, _) = engine.add_node("load_image", 0.0, 0.0).unwrap();
+        let (after_id, _) = engine.add_node("load_image", 0.0, 100.0).unwrap();
+        let (translate_id, _) = engine.add_node("translate", 150.0, 100.0).unwrap();
+        let (compare_id, _) = engine.add_node("compare_viewer", 300.0, 0.0).unwrap();
+
+        let before_png = encode_test_png(2, 1, image::Rgba([255, 0, 0, 255]));
+        let after_png = encode_test_png(2, 1, image::Rgba([0, 255, 0, 255]));
+        engine
+            .load_image_data(&before_id, &before_png)
+            .expect("load before image");
+        engine
+            .load_image_data(&after_id, &after_png)
+            .expect("load after image");
+        engine
+            .set_param(&translate_id, "x", ParamValue::Int(1))
+            .expect("translate x should set");
+        engine
+            .connect(&before_id, "image", &compare_id, "before")
+            .expect("connect before");
+        engine
+            .connect(&after_id, "image", &translate_id, "image")
+            .expect("connect after to translate");
+        engine
+            .connect(&translate_id, "image", &compare_id, "after")
+            .expect("connect translated after");
+
+        let err = engine
+            .render_viewer_result(&compare_id, 0)
+            .expect_err("domain-mismatched compare inputs should error");
+        assert!(
+            err.to_string().contains("requires matching image domains"),
             "unexpected error: {err}"
         );
     }
@@ -5866,6 +5950,12 @@ return pixelated;
                 (result.original_width, result.original_height),
                 (width, height)
             );
+            assert_eq!((result.display_window_x, result.display_window_y), (0, 0));
+            assert_eq!((result.data_window_x, result.data_window_y), (0, 0));
+            assert_eq!(
+                (result.data_window_width, result.data_window_height),
+                (width, height)
+            );
         }
     }
 
@@ -5885,6 +5975,101 @@ return pixelated;
         assert_eq!(
             (result.original_width, result.original_height),
             (3200, 2126)
+        );
+        assert_eq!((result.display_window_x, result.display_window_y), (0, 0));
+        assert_eq!((result.data_window_x, result.data_window_y), (0, 0));
+        assert_eq!(
+            (result.data_window_width, result.data_window_height),
+            (result.width, result.height)
+        );
+    }
+
+    #[test]
+    fn test_crop_clip_viewer_render_preserves_sparse_domain_metadata() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (crop_id, _) = engine.add_node("crop", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(
+                &batch_id,
+                "source.png",
+                &png_with_size(512, 512, [80, 120, 160, 255]),
+            )
+            .expect("batch image should register");
+        engine
+            .set_param(&crop_id, "x", ParamValue::Int(32))
+            .unwrap();
+        engine
+            .set_param(&crop_id, "y", ParamValue::Int(96))
+            .unwrap();
+        engine
+            .set_param(&crop_id, "width", ParamValue::Int(300))
+            .unwrap();
+        engine
+            .set_param(&crop_id, "height", ParamValue::Int(10))
+            .unwrap();
+        engine
+            .set_param(&crop_id, "clip_to_source", ParamValue::Bool(true))
+            .unwrap();
+        engine
+            .connect(&batch_id, "image", &crop_id, "image")
+            .unwrap();
+        engine
+            .connect(&crop_id, "image", &viewer_id, "value")
+            .unwrap();
+
+        let result = engine
+            .render_viewer(&viewer_id, 0)
+            .expect("cropped sparse image should render");
+
+        assert_eq!((result.width, result.height), (300, 10));
+        assert_eq!((result.original_width, result.original_height), (512, 512));
+        assert_eq!((result.display_window_x, result.display_window_y), (0, 0));
+        assert_eq!((result.data_window_x, result.data_window_y), (32, 96));
+        assert_eq!(
+            (result.data_window_width, result.data_window_height),
+            (300, 10)
+        );
+    }
+
+    #[test]
+    fn test_translate_viewer_render_preserves_sparse_domain_metadata() {
+        let mut engine = Engine::new();
+        let (batch_id, _) = engine.add_node("load_image_batch", -300.0, 0.0).unwrap();
+        let (translate_id, _) = engine.add_node("translate", 0.0, 0.0).unwrap();
+        let (viewer_id, _) = engine.add_node("viewer", 300.0, 0.0).unwrap();
+        engine
+            .batch_add_image(
+                &batch_id,
+                "source.png",
+                &png_with_size(128, 64, [80, 120, 160, 255]),
+            )
+            .expect("batch image should register");
+        engine
+            .set_param(&translate_id, "x", ParamValue::Int(25))
+            .unwrap();
+        engine
+            .set_param(&translate_id, "y", ParamValue::Int(-7))
+            .unwrap();
+        engine
+            .connect(&batch_id, "image", &translate_id, "image")
+            .unwrap();
+        engine
+            .connect(&translate_id, "image", &viewer_id, "value")
+            .unwrap();
+
+        let result = engine
+            .render_viewer(&viewer_id, 0)
+            .expect("translated sparse image should render");
+
+        assert_eq!((result.width, result.height), (128, 64));
+        assert_eq!((result.original_width, result.original_height), (128, 64));
+        assert_eq!((result.display_window_x, result.display_window_y), (0, 0));
+        assert_eq!((result.data_window_x, result.data_window_y), (25, -7));
+        assert_eq!(
+            (result.data_window_width, result.data_window_height),
+            (128, 64)
         );
     }
 

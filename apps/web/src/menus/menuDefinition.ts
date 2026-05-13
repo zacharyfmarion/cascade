@@ -57,6 +57,7 @@ export function getMenuBarDef(): MenuDef[] {
         { type: 'action', id: 'file.open', label: 'Open Project', shortcut: `${mod}+O` },
         { type: 'separator' },
         ...saveItems,
+        { type: 'action', id: 'file.exportAllImages', label: 'Export All Images...' },
         { type: 'separator' },
         { type: 'action', id: 'file.settings', label: 'Settings', shortcut: `${mod}+,` },
       ],
@@ -121,6 +122,9 @@ export function handleMenuAction(id: string): void {
       break;
     case 'file.saveBundled':
       void graphStore.requestSaveBundledProject();
+      break;
+    case 'file.exportAllImages':
+      void graphStore.exportAllImages();
       break;
     case 'file.open':
       void graphStore.requestOpenProject();

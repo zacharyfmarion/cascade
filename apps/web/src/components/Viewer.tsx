@@ -7,6 +7,7 @@ import {
   getViewerBufferWidth,
   getViewerDisplayHeight,
   getViewerDisplayWidth,
+  getViewerLogicalDataWindowRect,
   isCompareResult,
   isPixelResult,
 } from '../store/types';
@@ -169,17 +170,23 @@ const sampleViewerPixelsContain = (
 
   const output = new Uint8ClampedArray(width * height * 4);
   const rect = containRect(displayWidth, displayHeight, width, height);
+  const dataRect = getViewerLogicalDataWindowRect(result);
+  if (dataRect.width <= 0 || dataRect.height <= 0) return output;
 
   for (let y = 0; y < rect.height; y += 1) {
-    const sy = Math.min(
+    const displayY = ((y + 0.5) / rect.height) * displayHeight;
+    if (displayY < dataRect.y || displayY >= dataRect.y + dataRect.height) continue;
+    const sy = Math.max(0, Math.min(
       bufferHeight - 1,
-      Math.floor(((y + 0.5) / rect.height) * bufferHeight),
-    );
+      Math.floor(((displayY - dataRect.y) / dataRect.height) * bufferHeight),
+    ));
     for (let x = 0; x < rect.width; x += 1) {
-      const sx = Math.min(
+      const displayX = ((x + 0.5) / rect.width) * displayWidth;
+      if (displayX < dataRect.x || displayX >= dataRect.x + dataRect.width) continue;
+      const sx = Math.max(0, Math.min(
         bufferWidth - 1,
-        Math.floor(((x + 0.5) / rect.width) * bufferWidth),
-      );
+        Math.floor(((displayX - dataRect.x) / dataRect.width) * bufferWidth),
+      ));
       const sourceIndex = (sy * bufferWidth + sx) * 4;
       const targetIndex = ((rect.y + y) * width + rect.x + x) * 4;
       output[targetIndex] = pixels[sourceIndex];
@@ -409,6 +416,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const beforeCanvasRef = useRef<HTMLCanvasElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageDataRef = useRef<ImageData | null>(null);
   const previewScaleRef = useRef(1);
@@ -691,6 +699,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     const logicalHeight = getViewerDisplayHeight(activeResult);
     const backingWidth = getViewerBufferWidth(activeResult);
     const backingHeight = getViewerBufferHeight(activeResult);
+    const dataRect = getViewerLogicalDataWindowRect(activeResult);
     const prevDimensions = dimensionsRef.current;
 
     // Keep CSS/layout dimensions logical, but keep the backing store at the
@@ -742,8 +751,11 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       putImageDataMs += perfNow() - putStart;
       canvasesDrawn++;
 
-      targetCanvas.style.width = `${logicalWidth}px`;
-      targetCanvas.style.height = `${logicalHeight}px`;
+      targetCanvas.style.position = 'absolute';
+      targetCanvas.style.left = `${dataRect.x}px`;
+      targetCanvas.style.top = `${dataRect.y}px`;
+      targetCanvas.style.width = `${dataRect.width}px`;
+      targetCanvas.style.height = `${dataRect.height}px`;
       targetCanvas.style.imageRendering = previewScale < 1 ? 'pixelated' : 'auto';
     };
 
@@ -773,6 +785,10 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
       backingHeight,
       logicalWidth,
       logicalHeight,
+      dataWindowX: dataRect.x,
+      dataWindowY: dataRect.y,
+      dataWindowWidth: dataRect.width,
+      dataWindowHeight: dataRect.height,
       previewScale,
       dimsChanged,
       canvasesDrawn,
@@ -840,11 +856,13 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!activeResult || (!isPixelResult(activeResult) && !isCompareResult(activeResult))) return;
 
-      const canvas = canvasRef.current;
-      if (!canvas) return;
+      const surface = surfaceRef.current;
+      if (!surface) return;
 
-      // Get canvas bounding rect to convert screen coords to logical image pixels.
-      const rect = canvas.getBoundingClientRect();
+      // Convert screen coords into display-window coordinates, then into the
+      // sparse data-window buffer only if the pointer is over stored pixels.
+      const rect = surface.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
       const logicalWidth = getViewerDisplayWidth(activeResult);
       const logicalHeight = getViewerDisplayHeight(activeResult);
       const scaleX = logicalWidth / rect.width;
@@ -858,14 +876,40 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
         return;
       }
 
-      // Map logical coords to the actual pixel buffer coords
-      const previewScale = activeResult.previewScale ?? 1;
+      const source = isCompareResult(activeResult) && px / logicalWidth <= compareSplit ? 'before' : 'after';
+      const dataRect = getViewerLogicalDataWindowRect(activeResult);
+      if (
+        dataRect.width <= 0
+        || dataRect.height <= 0
+        || px < dataRect.x
+        || py < dataRect.y
+        || px >= dataRect.x + dataRect.width
+        || py >= dataRect.y + dataRect.height
+      ) {
+        setPixelInfo({
+          x: px,
+          y: py,
+          r: 0,
+          g: 0,
+          b: 0,
+          a: 0,
+          source: isCompareResult(activeResult) ? source : undefined,
+        });
+        return;
+      }
+
+      // Map display-window coords inside the data window to actual buffer coords.
       const bufferWidth = getViewerBufferWidth(activeResult);
       const bufferHeight = getViewerBufferHeight(activeResult);
-      const bufX = Math.min(Math.floor(px * previewScale), bufferWidth - 1);
-      const bufY = Math.min(Math.floor(py * previewScale), bufferHeight - 1);
+      const bufX = Math.max(0, Math.min(
+        Math.floor(((px - dataRect.x) / dataRect.width) * bufferWidth),
+        bufferWidth - 1,
+      ));
+      const bufY = Math.max(0, Math.min(
+        Math.floor(((py - dataRect.y) / dataRect.height) * bufferHeight),
+        bufferHeight - 1,
+      ));
       const idx = (bufY * bufferWidth + bufX) * 4;
-      const source = isCompareResult(activeResult) && px / logicalWidth <= compareSplit ? 'before' : 'after';
       const pixels = isCompareResult(activeResult)
         ? source === 'before' ? activeResult.beforePixels : activeResult.afterPixels
         : activeResult.pixels;
@@ -892,9 +936,9 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
   }, []);
 
   const updateCompareSplitFromPointer = useCallback((clientX: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    const rect = surface.getBoundingClientRect();
     if (rect.width <= 0) return;
     const next = (clientX - rect.left) / rect.width;
     setCompareSplit(Math.max(0, Math.min(1, next)));
@@ -972,14 +1016,14 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
             >
               {/* Pixel viewer (image/mask/field) */}
               <div
+                ref={surfaceRef}
                 className="viewer-checkerboard"
                 style={{
-                    display: hasPixels ? 'flex' : 'none',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 'fit-content',
-                    height: 'fit-content',
+                    display: hasPixels ? 'block' : 'none',
+                    width: dimensions ? `${dimensions.w}px` : 0,
+                    height: dimensions ? `${dimensions.h}px` : 0,
                     position: 'relative',
+                    overflow: 'hidden',
                 }}
                 onMouseMove={handleCanvasMouseMove}
                 onMouseLeave={handleCanvasMouseLeave}
@@ -991,6 +1035,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                   style={{
                     display: 'block',
                     imageRendering: 'auto',
+                    position: 'absolute',
                   }}
                 />
                 {activeResult && isCompareResult(activeResult) && (
@@ -1010,6 +1055,7 @@ export const Viewer: React.FC<ViewerProps> = ({ panelApi }) => {
                         style={{
                           display: 'block',
                           imageRendering: 'auto',
+                          position: 'absolute',
                         }}
                       />
                     </div>
