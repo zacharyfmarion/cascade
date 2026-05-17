@@ -59,7 +59,7 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 - ✅ Pull-based evaluator with dirty propagation and LRU cache
 - ✅ GPU compute pipeline (GLSL → naga → wgpu)
 - ✅ Self-describing NodeSpec system (add Rust node → UI auto-generates)
-- ✅ React + xyflow + Zustand frontend with 14-slice store architecture
+- ✅ React + xyflow + Zustand frontend with 15-slice store architecture
 - ✅ Undo/redo (50 deep), cut/copy/paste, context menus
 - ✅ Blender-style inline parameter sliders
 - ✅ Full-stack error handling with per-node error attribution
@@ -127,7 +127,7 @@ Getting images in and out reliably is table-stakes.
 - [x] EXR multi-layer support — dynamic ports per layer, SaveExr node, full encode/decode pipeline
 - [x] EXR performance — single-pass decode for all layers
 - [x] Instance-aware specs for dynamic port connections (SpecProvider trait)
-- [x] Image sequence input/output (LoadImageSequence with EXR support)
+- [x] Image sequence input/output (LoadImageSequence with EXR support and browser ZIP sequence export)
 - [ ] Drag-and-drop improvements (multiple files, folder drop)
 - [ ] Metadata preservation through the pipeline
 - [ ] Common format support audit (WebP, AVIF, HDR)
@@ -297,7 +297,7 @@ These engineering investments from the [Engineering Roadmap](./ENGINEERING_ROADM
 |---|---|---|
 | Full-stack error handling | Phase 1 (reliability) | ✅ Done |
 | Cache eviction, selective invalidation | Phase 1 (performance) | ✅ Done |
-| Store split (14 slices) | Phase 1 (frontend) | ✅ Done |
+| Store split (15 slices) | Phase 1 (frontend) | ✅ Done |
 | GPU/CPU node unification | Phase 1 (node library) | ✅ Done |
 | System-level mask support | Phase 1 (GPU node usability) | ✅ Done |
 | WASM multi-threading | Phase 1 (performance) | ✅ Done |
@@ -346,6 +346,7 @@ These are features from the old roadmap that are intentionally deprioritized or 
 
 | Date | Decision | Rationale |
 |---|---|---|
+| 2026-05-17 | Refresh current-state docs after media iterator and web sequence export work | The graph store now has 15 slices, and web sequence export uses the browser ZIP path while desktop can keep native jobs. |
 | 2026-03-06 | Mark I/O Maturity (1.4) as partially complete | EXR multi-layer, image sequences, SaveExr all shipped. Remaining: drag-drop improvements, metadata preservation, format audit. |
 | 2026-03-06 | Move Time Nodes and EXR/AOV out of Phase 4.4 | Both completed ahead of schedule — time nodes don't require animation system, EXR support shipped with dynamic ports. |
 | 2026-03-06 | Elevate GPU texture pooling priority | With 35+ GPU nodes after unification, chained GPU pipelines are common. Texture pooling is now a real-world performance need, not theoretical. |

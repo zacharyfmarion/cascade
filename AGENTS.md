@@ -48,8 +48,8 @@ Performance and robust error handling are first-class concerns in this project �
 
 ### Frontend (TypeScript/React)
 
-- **State management**: Single Zustand store composed from 14 slice files in `store/graphStore/slices/`. `store.ts` is a thin composition shell — new actions go in slice files, not `store.ts` (enforced by ESLint `max-lines`). Shared mutable state (engine, render generations, undo stacks, runtime helpers) lives in `kernel.ts`. All mutations sync to the engine first, then update local state.
-- **Engine bridge**: `EngineBridge` interface abstracts over WASM and Tauri backends. `WasmEngine` is synchronous, `TauriEngine` is async IPC.
+- **State management**: Single Zustand store composed from 15 slice files in `store/graphStore/slices/`. `store.ts` is a thin composition shell — new actions go in slice files, not `store.ts` (enforced by ESLint `max-lines`). Shared mutable state (engine, render generations, undo stacks, runtime helpers) lives in `kernel.ts`. All mutations sync to the engine first, then update local state.
+- **Engine bridge**: `EngineBridge` abstracts over worker-backed WASM, direct WASM, and Tauri IPC backends. Treat bridge methods as potentially async at call sites.
 - **Theming**: All colors use CSS custom properties defined in `src/styles/theme.css`. An ESLint rule (`no-hardcoded-colors`) enforces this — never use raw hex/rgb values in components.
 - **Node components**: Custom React Flow nodes live in `src/components/nodes/`. `BaseNode` is the shared wrapper. UI controls are driven by `NodeSpec` metadata from Rust.
 - **Error handling**: Engine/render/eval errors must propagate as structured `EngineError` objects through the full stack (WASM bridge → EngineBridge → store → UI). Never swallow errors with empty catch blocks or by returning null. Only the Zustand store should catch engine exceptions — components and hooks must not swallow errors from engine calls. See the [error handling plan](./reviews/error-handling-plan.md) for the full strategy.
