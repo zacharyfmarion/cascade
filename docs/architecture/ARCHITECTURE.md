@@ -113,7 +113,7 @@ The web app is React 19, Vite, `@xyflow/react`, Zustand, and TypeScript. `Engine
 State lives in a single graph store:
 
 - `apps/web/src/store/graphStore/store.ts` defines the composed Zustand store surface.
-- `apps/web/src/store/graphStore/slices/` contains 14 focused slices for graph, render, undo, live params, frames, selection, project, batch export, sequence/video, assets, color, AI, DSL, and toasts.
+- `apps/web/src/store/graphStore/slices/` contains 15 focused slices for graph, render, undo, live params, frames, selection, project, batch export, sequence/video, media iterators, assets, color, AI, DSL, and toasts.
 - `apps/web/src/store/graphStore/kernel.ts` holds shared mutable runtime state such as the engine instance and render generations.
 
 All graph mutations sync to the engine first, then update local Zustand state. Components should use store actions rather than calling the engine directly.
