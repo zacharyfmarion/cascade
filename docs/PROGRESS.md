@@ -1,6 +1,6 @@
 # Progress
 
-Last validated: 2026-05-10
+Last validated: 2026-05-31
 
 This page is a maintained snapshot of the repository's current implementation state. For long-range priorities, see [PRODUCT_ROADMAP.md](./PRODUCT_ROADMAP.md) and [ENGINEERING_ROADMAP.md](./ENGINEERING_ROADMAP.md).
 
@@ -51,7 +51,7 @@ This page is a maintained snapshot of the repository's current implementation st
 
 ### Frontend
 - [x] React 19 + Vite + TypeScript app with `@xyflow/react`
-- [x] Zustand graph store split into 14 focused slices plus `kernel.ts` runtime state
+- [x] Zustand graph store split into 15 focused slices plus `kernel.ts` runtime state
 - [x] EngineBridge abstraction for worker-backed WASM, direct WASM, and Tauri IPC
 - [x] Node library, context menu, typed ports, inspector controls, viewer panes, and project save/load
 - [x] Undo/redo, cut/copy/paste, multi-select, edge reconnection, and drop-node-on-edge insertion
