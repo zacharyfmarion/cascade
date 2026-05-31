@@ -1,7 +1,16 @@
-# Tauri + Vanilla TS
+# Tauri IPC Bench
 
-This template should help get you started developing with Tauri in vanilla HTML, CSS and Typescript.
+`tauri-ipc-bench` is a standalone Tauri v2 sandbox kept outside the main Cascade workspace. It is useful for ad hoc IPC experiments without touching the production desktop shell under `apps/tauri`.
 
-## Recommended IDE Setup
+The current scaffold is intentionally minimal: a Vite + TypeScript frontend calls a single Rust `greet` command through Tauri IPC. Add benchmark-specific commands here when measuring IPC overhead, payload shape, or frontend/backend serialization behavior.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Commands
+
+```bash
+npm install
+npm run dev
+npm run build
+npm run tauri dev
+```
+
+This package uses `package-lock.json`, not the root Yarn workspace.

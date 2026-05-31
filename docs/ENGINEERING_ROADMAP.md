@@ -4,7 +4,7 @@ Prioritized plan for strengthening Cascade's engineering foundations. Runs along
 
 Based on the [architecture review of Feb 22 2026](../reviews/architecture-review-2-22-26.md).
 
-**Last updated:** 2026-03-06
+**Last updated:** 2026-05-31
 
 ---
 
@@ -97,7 +97,7 @@ Cache-key-chaining design already handles this efficiently — O(inputs) per nod
 ## Phase 3: Frontend Architecture ✅ (Complete)
 
 ### 3.1 Split the monolithic store ✅
-Broke `graphStore.ts` into 14 focused Zustand slices composed via `StateCreator` spread. ESLint `max-lines` rule (300 lines) on `store.ts` prevents regression, while `kernel.ts` owns shared runtime state.
+Broke `graphStore.ts` into 15 focused Zustand slices composed via `StateCreator` spread. ESLint `max-lines` rule (300 lines) on `store.ts` prevents regression, while `kernel.ts` owns shared runtime state.
 
 ### 3.2 Fix live parameter race conditions ✅
 - [x] Await `exportGraph()` in `setParamLive()` before storing the snapshot
@@ -262,7 +262,7 @@ Major engineering work completed that was either unplanned or cut across multipl
 
 ## Current Priority Stack
 
-Based on the state of the codebase as of 2026-03-06, here's the recommended priority order for remaining engineering work:
+Based on the state of the codebase as of 2026-05-31, here's the recommended priority order for remaining engineering work:
 
 ### High Priority (do next)
 1. **Node deletion state cleanup** (Phase 3.3) — Simple, prevents memory leaks and stale state. Low effort, high value.
