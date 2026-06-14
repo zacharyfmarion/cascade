@@ -59,7 +59,7 @@ Cascade is not "open-source Nuke." It is a **programmable image platform** that 
 - ✅ Pull-based evaluator with dirty propagation and LRU cache
 - ✅ GPU compute pipeline (GLSL → naga → wgpu)
 - ✅ Self-describing NodeSpec system (add Rust node → UI auto-generates)
-- ✅ React + xyflow + Zustand frontend with 14-slice store architecture
+- ✅ React + xyflow + Zustand frontend with 15-slice store architecture
 - ✅ Undo/redo (50 deep), cut/copy/paste, context menus
 - ✅ Blender-style inline parameter sliders
 - ✅ Full-stack error handling with per-node error attribution
@@ -297,7 +297,7 @@ These engineering investments from the [Engineering Roadmap](./ENGINEERING_ROADM
 |---|---|---|
 | Full-stack error handling | Phase 1 (reliability) | ✅ Done |
 | Cache eviction, selective invalidation | Phase 1 (performance) | ✅ Done |
-| Store split (14 slices) | Phase 1 (frontend) | ✅ Done |
+| Store split (15 slices) | Phase 1 (frontend) | ✅ Done |
 | GPU/CPU node unification | Phase 1 (node library) | ✅ Done |
 | System-level mask support | Phase 1 (GPU node usability) | ✅ Done |
 | WASM multi-threading | Phase 1 (performance) | ✅ Done |
