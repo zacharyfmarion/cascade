@@ -478,8 +478,8 @@ mod tests {
     /// and format set to HD 1920×1080. All pixels are set to `color`.
     fn make_test_image(w: u32, h: u32, color: [f32; 4]) -> Image {
         let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
-        for pixel in data.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&color);
+        for pixel in data.as_chunks_mut::<4>().0 {
+            *pixel = color;
         }
         Image::from_f32_data(w, h, data).unwrap()
     }
@@ -488,8 +488,8 @@ mod tests {
         let w = 4u32;
         let h = 4u32;
         let mut data = vec![0.0f32; (w as usize) * (h as usize) * 4];
-        for pixel in data.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&color);
+        for pixel in data.as_chunks_mut::<4>().0 {
+            *pixel = color;
         }
         let format = Format::hd(); // 1920×1080 display window
         let data_window = RectI {
@@ -1936,8 +1936,8 @@ mod tests {
     #[test]
     fn test_corner_pin_warps_pixels() {
         let mut data = vec![0.0f32; 4 * 4 * 4];
-        for pixel in data.chunks_exact_mut(4) {
-            pixel.copy_from_slice(&[1.0, 1.0, 1.0, 1.0]);
+        for pixel in data.as_chunks_mut::<4>().0 {
+            *pixel = [1.0; 4];
         }
         let input = Image::from_f32_data(4, 4, data).unwrap();
         let node = CornerPin::new();

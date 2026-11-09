@@ -651,15 +651,11 @@ fn extract_palette(image: &Image) -> Vec<[u8; 3]> {
     let encoding = ChannelEncoding::of(image);
     let mut seen = AHashSet::new();
     let mut unique = Vec::new();
-    for pixel in image.data.chunks_exact(4) {
-        if unit_to_code(pixel[3]) < PALETTE_ALPHA_THRESHOLD {
+    for &[r, g, b, a] in image.data.as_chunks::<4>().0 {
+        if unit_to_code(a) < PALETTE_ALPHA_THRESHOLD {
             continue;
         }
-        let color = [
-            encoding.encode(pixel[0]),
-            encoding.encode(pixel[1]),
-            encoding.encode(pixel[2]),
-        ];
+        let color = [encoding.encode(r), encoding.encode(g), encoding.encode(b)];
         if seen.insert(color) {
             unique.push(color);
         }
@@ -804,14 +800,15 @@ fn expand_blocks(
         return Ok(data);
     }
 
-    let colors: Vec<[f32; 4]> = block_codes
-        .chunks_exact(4)
-        .map(|code| {
+    let (codes, _) = block_codes.as_chunks::<4>();
+    let colors: Vec<[f32; 4]> = codes
+        .iter()
+        .map(|&[r, g, b, a]| {
             [
-                encoding.decode(code[0]),
-                encoding.decode(code[1]),
-                encoding.decode(code[2]),
-                f32::from(code[3]) / 255.0,
+                encoding.decode(r),
+                encoding.decode(g),
+                encoding.decode(b),
+                f32::from(a) / 255.0,
             ]
         })
         .collect();
@@ -820,8 +817,8 @@ fn expand_blocks(
         .for_each(|(y, row)| {
             let start = (y / block) * columns;
             let block_row = &colors[start..start + columns];
-            for (x, pixel) in row.chunks_exact_mut(4).enumerate() {
-                pixel.copy_from_slice(&block_row[x / block]);
+            for (x, pixel) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                *pixel = block_row[x / block];
             }
         });
     Ok(data)
@@ -1265,11 +1262,9 @@ mod tests {
             .collect();
         let spread = case.strength * 64.0;
         let mut out = vec![0u8; data.len()];
-        for (i, (src, dst)) in data
-            .chunks_exact(4)
-            .zip(out.chunks_exact_mut(4))
-            .enumerate()
-        {
+        let (src_pixels, _) = data.as_chunks::<4>();
+        let (dst_pixels, _) = out.as_chunks_mut::<4>();
+        for (i, (src, dst)) in src_pixels.iter().zip(dst_pixels).enumerate() {
             let (x, y) = (i % width, i / width);
             let (block_x, block_y) = (x / case.block, y / case.block);
             let offset = f64::from(matrix[(block_y % n) * n + (block_x % n)]) * spread;
@@ -1288,7 +1283,9 @@ mod tests {
 
     fn reference_quantize(data: &[u8], palette: &[[u8; 3]], lut: &[u8]) -> Vec<u8> {
         let mut out = vec![0u8; data.len()];
-        for (src, dst) in data.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
+        let (src_pixels, _) = data.as_chunks::<4>();
+        let (dst_pixels, _) = out.as_chunks_mut::<4>();
+        for (src, dst) in src_pixels.iter().zip(dst_pixels) {
             let [r, g, b] = [src[0], src[1], src[2]].map(|v| usize::from(v >> 3));
             dst[..3].copy_from_slice(&palette[usize::from(lut[(r << 10) + (g << 5) + b])]);
             dst[3] = src[3];
@@ -1299,14 +1296,15 @@ mod tests {
     // ── Image helpers ───────────────────────────────────────────────────────────────────────
 
     fn codes_to_image(codes: &[u8], width: u32, height: u32) -> Image {
-        let data = codes
-            .chunks_exact(4)
-            .flat_map(|c| {
+        let (pixels, _) = codes.as_chunks::<4>();
+        let data = pixels
+            .iter()
+            .flat_map(|&[r, g, b, a]| {
                 [
-                    srgb_code_to_linear(c[0]),
-                    srgb_code_to_linear(c[1]),
-                    srgb_code_to_linear(c[2]),
-                    f32::from(c[3]) / 255.0,
+                    srgb_code_to_linear(r),
+                    srgb_code_to_linear(g),
+                    srgb_code_to_linear(b),
+                    f32::from(a) / 255.0,
                 ]
             })
             .collect();
@@ -1315,15 +1313,15 @@ mod tests {
 
     fn image_to_codes(image: &Image) -> Vec<u8> {
         let encoding = ChannelEncoding::of(image);
-        image
-            .data
-            .chunks_exact(4)
-            .flat_map(|px| {
+        let (pixels, _) = image.data.as_chunks::<4>();
+        pixels
+            .iter()
+            .flat_map(|&[r, g, b, a]| {
                 [
-                    encoding.encode(px[0]),
-                    encoding.encode(px[1]),
-                    encoding.encode(px[2]),
-                    unit_to_code(px[3]),
+                    encoding.encode(r),
+                    encoding.encode(g),
+                    encoding.encode(b),
+                    unit_to_code(a),
                 ]
             })
             .collect()
@@ -1613,9 +1611,11 @@ mod tests {
         }
         for seed in 0..8 {
             // Clustered colors so many fall within the duplicate radius of each other.
-            let colors: Vec<[u8; 3]> = lcg_codes(400, 1, seed)
-                .chunks_exact(4)
-                .map(|c| [c[0] / 4 + 96, c[1] / 4 + 96, c[2] / 4 + 96])
+            let codes = lcg_codes(400, 1, seed);
+            let (pixels, _) = codes.as_chunks::<4>();
+            let colors: Vec<[u8; 3]> = pixels
+                .iter()
+                .map(|&[r, g, b, _]| [r / 4 + 96, g / 4 + 96, b / 4 + 96])
                 .collect();
             assert_eq!(deduplicate_colors(&colors), reference_dedupe(&colors));
         }
@@ -1692,10 +1692,9 @@ mod tests {
             } else {
                 1 + next(64) as usize
             };
-            let palette: Vec<[u8; 3]> = lcg_codes(palette_len, 1, iteration)
-                .chunks_exact(4)
-                .map(|c| [c[0], c[1], c[2]])
-                .collect();
+            let codes = lcg_codes(palette_len, 1, iteration);
+            let (pixels, _) = codes.as_chunks::<4>();
+            let palette: Vec<[u8; 3]> = pixels.iter().map(|&[r, g, b, _]| [r, g, b]).collect();
             // The reference processes the palette as extracted from its strip.
             let extracted = extract_palette(&palette_strip(&palette));
             let case = Case {
