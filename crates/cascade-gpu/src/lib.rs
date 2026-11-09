@@ -7,6 +7,7 @@ pub mod kernel_node;
 pub mod kuwahara;
 pub mod manifest;
 pub mod matte_kernels;
+pub mod pixelate;
 pub mod template;
 pub mod transform_kernels;
 pub mod transpile;
@@ -18,7 +19,7 @@ use cascade_core::node::NodeRegistry;
 
 use crate::kernel_node::GpuKernelNode;
 use crate::kuwahara::GpuKuwaharaNode;
-use crate::manifest::builtin_pixelate_manifest;
+use crate::pixelate::{GpuPixelateNode, PIXELATE_NODE_ID};
 
 use crate::adjustment_kernels::{
     builtin_contrast_manifest, builtin_exposure_manifest, builtin_luma_adjust_manifest,
@@ -74,13 +75,8 @@ fn register_kernel_node(
 
 pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>) {
     let ctx = context.clone();
-    registry.register("gpu_kernel::pixelate", move || {
-        let manifest = builtin_pixelate_manifest();
-        // SAFETY: builtin manifest is known-valid at compile time.
-        Arc::new(
-            GpuKernelNode::from_manifest(manifest, ctx.clone())
-                .expect("GPU node factory: builtin manifest"),
-        )
+    registry.register(PIXELATE_NODE_ID, move || {
+        Arc::new(GpuPixelateNode::new(ctx.clone()))
     });
 
     let ctx = context.clone();
@@ -143,11 +139,10 @@ pub fn register_gpu_nodes(registry: &mut NodeRegistry, context: Arc<GpuContext>)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::builtin_pixelate_manifest;
     use crate::transpile::glsl_to_wgsl;
     use cascade_core::node::{EvalContext, Node};
     use cascade_core::types::{
-        Format, FrameTime, Image, ParamDefault, ParamValue, RectI, UiHint, Value, ValueType,
+        Format, FrameTime, Image, ParamDefault, ParamValue, UiHint, Value, ValueType,
     };
     use std::collections::HashMap;
 
@@ -255,36 +250,6 @@ mod tests {
             Value::Image(image) => Some(image.clone()),
             other => panic!("Expected image output, got {:?}", other.value_type()),
         }
-    }
-
-    #[test]
-    fn test_pixelate_glsl_builds() {
-        let manifest = builtin_pixelate_manifest();
-        let glsl = manifest.build_glsl().expect("GLSL should build");
-        assert!(glsl.contains("#version 450"));
-        assert!(glsl.contains("process("));
-        assert!(glsl.contains("u_palette"));
-        assert!(glsl.contains("has_palette"));
-    }
-
-    #[test]
-    fn test_pixelate_transpile_to_wgsl() {
-        let manifest = builtin_pixelate_manifest();
-        let glsl = manifest.build_glsl().expect("GLSL should build");
-        let wgsl = glsl_to_wgsl(&glsl).expect("GLSL should transpile to WGSL");
-        assert!(wgsl.contains("fn main"));
-        assert!(!wgsl.is_empty());
-    }
-
-    #[test]
-    fn test_pixelate_node_spec() {
-        let manifest = builtin_pixelate_manifest();
-        let spec = manifest.to_node_spec().expect("Spec should build");
-        assert_eq!(spec.id, "gpu_kernel::pixelate");
-        assert_eq!(spec.inputs.len(), 2);
-        assert_eq!(spec.outputs.len(), 1);
-        assert_eq!(spec.params.len(), 4);
-        assert_eq!(spec.params[0].key, "pixel_size");
     }
 
     #[test]
@@ -530,181 +495,6 @@ mod tests {
                     "Green should be ~1.0, got {}",
                     px[1]
                 );
-            }
-            _ => panic!("Expected image output"),
-        }
-    }
-
-    #[test]
-    fn test_pixelate_kernel_e2e() {
-        let ctx = match GpuContext::new() {
-            Ok(ctx) => Arc::new(ctx),
-            Err(e) => {
-                println!("GPU not available, skipping: {e}");
-                return;
-            }
-        };
-
-        let manifest = builtin_pixelate_manifest();
-        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
-            .expect("Should create pixelate node");
-
-        let mut img_data = Vec::new();
-        for y in 0..8u32 {
-            for x in 0..8u32 {
-                let r = (x as f32) / 7.0;
-                let g = (y as f32) / 7.0;
-                let b = 0.3f32;
-                let a = 1.0f32;
-                img_data.extend_from_slice(&[r, g, b, a]);
-            }
-        }
-        let image = cascade_core::types::Image::from_f32_data(8, 8, img_data).unwrap();
-
-        let mut inputs = HashMap::new();
-        inputs.insert("image".to_string(), Value::Image(image));
-        let mut params = HashMap::new();
-        params.insert("pixel_size".to_string(), ParamValue::Int(4));
-
-        let cm = cascade_core::color::BuiltinColorManagement::new();
-        let format = Format::hd();
-        let eval_ctx = EvalContext {
-            inputs,
-            extra_inputs: HashMap::new(),
-            params: &params,
-            frame_time: FrameTime { frame: 0 },
-            color_management: &cm,
-            ai_provider: None,
-            project_format: &format,
-            ai_cached_outputs: None,
-            preview_scale: 1.0,
-        };
-
-        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
-        let output = result.get("image").expect("Should have image output");
-        match output {
-            Value::Image(out_img) => {
-                assert_eq!(out_img.width, 8);
-                assert_eq!(out_img.height, 8);
-                let px = out_img.get_pixel_f32(0, 0);
-                assert!(px[3] > 0.9, "Alpha should be preserved");
-            }
-            _ => panic!("Expected image output"),
-        }
-    }
-
-    #[test]
-    fn test_pixelate_preserves_preview_image_domain() {
-        let ctx = match GpuContext::new() {
-            Ok(ctx) => Arc::new(ctx),
-            Err(e) => {
-                println!("GPU not available, skipping: {e}");
-                return;
-            }
-        };
-
-        let manifest = builtin_pixelate_manifest();
-        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
-            .expect("Should create pixelate node");
-        let data = vec![0.5f32; 8 * 5 * 4];
-        let image = Image::new_with_domain(
-            Format::from_dimensions(16, 10),
-            RectI::from_dimensions(8, 5),
-            data,
-            cascade_core::types::ColorSpaceId::default_working(),
-        )
-        .expect("preview-domain image should build");
-
-        let mut inputs = HashMap::new();
-        inputs.insert("image".to_string(), Value::Image(image));
-        let mut params = HashMap::new();
-        params.insert("pixel_size".to_string(), ParamValue::Int(2));
-        let cm = cascade_core::color::BuiltinColorManagement::new();
-        let project_format = Format::hd();
-        let eval_ctx = EvalContext {
-            inputs,
-            extra_inputs: HashMap::new(),
-            params: &params,
-            frame_time: FrameTime { frame: 0 },
-            color_management: &cm,
-            ai_provider: None,
-            project_format: &project_format,
-            ai_cached_outputs: None,
-            preview_scale: 0.5,
-        };
-
-        let result = pollster::block_on(node.evaluate(&eval_ctx)).expect("Pixelate should succeed");
-        let Some(Value::Image(output)) = result.get("image") else {
-            panic!("Expected image output");
-        };
-        assert_eq!((output.width, output.height), (8, 5));
-        assert_eq!((output.format.width(), output.format.height()), (16, 10));
-        assert_eq!(
-            (
-                output.data_window.width_u32(),
-                output.data_window.height_u32()
-            ),
-            (8, 5)
-        );
-    }
-
-    #[test]
-    fn test_pixelate_with_optional_palette_missing() {
-        let ctx = match GpuContext::new() {
-            Ok(ctx) => Arc::new(ctx),
-            Err(e) => {
-                println!("GPU not available, skipping: {e}");
-                return;
-            }
-        };
-
-        let manifest = builtin_pixelate_manifest();
-        let node = kernel_node::GpuKernelNode::from_manifest(manifest, ctx)
-            .expect("Should create pixelate node");
-
-        let mut img_data = Vec::new();
-        for y in 0..8u32 {
-            for x in 0..8u32 {
-                let r = (x as f32) / 7.0;
-                let g = (y as f32) / 7.0;
-                let b = 0.3f32;
-                let a = 1.0f32;
-                img_data.extend_from_slice(&[r, g, b, a]);
-            }
-        }
-        let image = cascade_core::types::Image::from_f32_data(8, 8, img_data).unwrap();
-
-        let mut inputs = HashMap::new();
-        inputs.insert("image".to_string(), Value::Image(image));
-        let mut params = HashMap::new();
-        params.insert("pixel_size".to_string(), ParamValue::Int(2));
-
-        let cm = cascade_core::color::BuiltinColorManagement::new();
-        let format = Format::hd();
-        let eval_ctx = EvalContext {
-            inputs,
-            extra_inputs: HashMap::new(),
-            params: &params,
-            frame_time: FrameTime { frame: 0 },
-            color_management: &cm,
-            ai_provider: None,
-            project_format: &format,
-            ai_cached_outputs: None,
-            preview_scale: 1.0,
-        };
-
-        let result = pollster::block_on(node.evaluate(&eval_ctx))
-            .expect("Pixelate should succeed without palette");
-        let output = result.get("image").expect("Should have image output");
-        match output {
-            Value::Image(out_img) => {
-                assert_eq!(out_img.width, 8);
-                assert_eq!(out_img.height, 8);
-                let px00 = out_img.get_pixel_f32(0, 0);
-                let px10 = out_img.get_pixel_f32(1, 0);
-                assert!((px00[0] - px10[0]).abs() < 0.001, "Block should match");
-                assert!((px00[1] - px10[1]).abs() < 0.001, "Block should match");
-                assert!(px00[3] > 0.9, "Alpha should be preserved");
             }
             _ => panic!("Expected image output"),
         }

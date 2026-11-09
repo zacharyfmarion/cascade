@@ -533,8 +533,8 @@ pub(crate) async fn read_texture_to_image(
             max: MAX_IMAGE_DIM,
         })?;
     let mut out = Vec::with_capacity(pixel_cap);
-    for chunk in output_bytes.chunks_exact(2) {
-        out.push(f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
+    for &bytes in output_bytes.as_chunks::<2>().0 {
+        out.push(f16::from_le_bytes(bytes).to_f32());
     }
     Image::from_f32_data(width, height, out)
 }
