@@ -16,10 +16,11 @@
 //!    and B before the lookup. Alpha passes through unchanged.
 //!
 //! The reference's look depends on doing that averaging, dithering and color matching on 8-bit
-//! sRGB codes, so this node is an intentional, display-referred exception to "never process
-//! pixels in sRGB": it re-encodes its linear input to the same codes Load Image decoded, runs the
-//! reference math exactly (integers on the GPU, `f64` wherever JavaScript uses doubles), and
-//! decodes the resulting codes back to linear.
+//! sRGB codes. Palette matching and dither thresholds are perceptual, and the node deliberately
+//! reproduces an sRGB-based tool, so (per the "Linear vs. sRGB math" rule in AGENTS.md) it does
+//! its math in sRGB internally while still taking and returning linear images: it re-encodes its
+//! input to the same codes Load Image decoded, runs the reference math exactly (integers on the
+//! GPU, `f64` wherever JavaScript uses doubles), and decodes the resulting codes back to linear.
 //!
 //! The one deliberate deviation: the reference derives block coordinates with
 //! `(x * (1 / blockSize)) | 0`, which floating-point rounding pushes into the previous block for

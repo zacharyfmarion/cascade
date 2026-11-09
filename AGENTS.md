@@ -27,7 +27,8 @@ apps/
 
 ### Rust
 
-- **Image format**: All pixel processing uses `f32` RGBA in linear color space. sRGB conversion happens only at load (input) and display (output) boundaries. Never process pixels in sRGB space. `f16` is used only at I/O boundaries (GPU upload/readback via `to_f16_bytes()`/`from_f16_data()`).
+- **Image format**: Images pass between nodes as `f32` RGBA in linear color space. sRGB conversion happens at load (input) and display (output) boundaries. `f16` is used only at I/O boundaries (GPU upload/readback via `to_f16_bytes()`/`from_f16_data()`).
+- **Linear vs. sRGB math**: Anything that models light (blur, resize, compositing, exposure, physically averaging pixels) must run in linear. Choosing colors by how they look (palette matching, dither thresholds, sorting by hue or lightness) may happen in sRGB or another perceptual space inside a node, and so may a node that deliberately reproduces an sRGB-based tool. Either way the node must take and return linear images and say why in its docs. Examples: `GpuPixelateNode` (`crates/cascade-gpu/src/pixelate.rs`) and the Color Palette node's perceptual sort.
 - **Node trait**: Every node implements `cascade_core::node::Node`. The `spec()` method returns a `NodeSpec` declaring inputs, outputs, params, and UI hints. The async `evaluate()` method receives an `EvalContext` and returns `HashMap<String, Value>` through `NodeFuture`.
 - **Adding a new node**: Create the struct in `cascade-nodes-std`, implement `Node`, register it in `register_standard_nodes()` in `lib.rs`. The frontend auto-discovers it via `list_node_types()` — no frontend changes needed.
 - **Graph**: Uses `SlotMap` for stable node IDs. Connections are type-checked. Cycles are rejected via DFS. Dirty propagation flows downstream on param changes.

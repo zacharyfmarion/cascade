@@ -71,6 +71,8 @@ projects; the bundled example project is updated to the new keys.
 - `crates/cascade-gpu/testdata/pixelate-golden.mjs` (new): golden-vector generator
 - `apps/web/public/examples/pixel-art-palette-grade.casc`: migrate params
 - `apps/web/public/examples/thumbs/pixel-art-palette-grade.webp`: re-render with the new algorithm
+- `AGENTS.md`: replace "never process pixels in sRGB" with the linear vs. sRGB rule (light-mixing
+  math stays linear; perceptual math, or reproducing an sRGB tool, may run in sRGB inside a node)
 
 ## Checklist
 
@@ -84,3 +86,4 @@ projects; the bundled example project is updated to the new keys.
 - [x] Run Rust validation (check, test, clippy, fmt, `cargo check -p cascade-tauri`)
 - [x] Build WASM and verify in the web app (WebGPU output is bit-identical to the native render)
 - [x] Re-render the example thumbnail (same crop, lossless WebP)
+- [x] Clarify the linear vs. sRGB rule in AGENTS.md
